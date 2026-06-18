@@ -150,3 +150,49 @@ def test_archived_product_hidden_from_store(client):
     client.post(f'/inventory/{product_id}/archive', follow_redirects=True)
     store = client.get('/store')
     assert b'Hidden Trailer' not in store.data
+
+
+def test_customer_crud_search_and_detail(client):
+    login(client)
+    res = client.get('/customers')
+    assert res.status_code == 200
+    assert b'Add your first customer' in res.data
+
+    res = client.post('/customers/new', data={
+        'customer_type': 'company',
+        'name': 'Acme Rentals',
+        'email': 'bookings@acme.test',
+        'phone': '+27123456789',
+        'marketing_opt_in': '1',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Customer created' in res.data
+    assert b'Acme Rentals' in res.data
+    assert b'Subscribed' in res.data
+
+    res = client.get('/customers?query=acme&customer_type=company&marketing=subscribed')
+    assert b'Acme Rentals' in res.data
+    assert b'bookings@acme.test' in res.data
+    assert b'Company' in res.data
+
+    detail_url = '/customers/1/edit'
+    res = client.post(detail_url, data={
+        'customer_type': 'individual',
+        'name': 'Don Customer',
+        'email': 'don@example.com',
+        'phone': '+27999999999',
+    }, follow_redirects=True)
+    assert b'Customer saved' in res.data
+    assert b'Don Customer' in res.data
+    assert b'Not subscribed' in res.data
+
+
+def test_setup_marks_customer_complete(client):
+    login(client)
+    before = client.get('/setup')
+    assert b'Create an order' in before.data
+    client.post('/customers/new', data={'customer_type': 'individual', 'name': 'Setup Customer', 'email': '', 'phone': ''}, follow_redirects=True)
+    after = client.get('/setup')
+    assert b'Setup Customer' not in after.data
+    # Setup completion count should now include seeded tax profile and this customer.
+    assert b'2/14 completed' in after.data

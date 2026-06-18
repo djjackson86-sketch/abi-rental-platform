@@ -31,8 +31,11 @@ Milestone 1, part of Milestone 2, and the Inventory slice are implemented:
 - DB-backed inventory/product list
 - Add/edit/archive product flow
 - Product type, price, stock, deposit, active/public visibility fields
+- DB-backed customer list/detail
+- Add/edit customer flow
+- Individual/company type, email, phone and marketing opt-in fields
 - Public store product cards from DB
-- Placeholder shells for orders, customers, calendar, documents, online store, reports
+- Placeholder shells for orders, calendar, documents, online store, reports
 - Tests
 
 ## Verification

@@ -1,0 +1,19 @@
+{% extends "admin/layout.html" %}
+{% set title='Customers' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Customers</p><h1>Customers</h1><p>Manage individuals and companies, contact details, marketing subscriptions and balances.</p></div><a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a></header>
+<section class="metrics"><div><b>{{ counts.total }}</b><span>Total customers</span></div><div><b>{{ counts.individuals }}</b><span>Individuals</span></div><div><b>{{ counts.companies }}</b><span>Companies</span></div><div><b>{{ counts.subscribed }}</b><span>Marketing emails</span></div></section>
+<section class="panel list-panel">
+  <form class="toolbar filters" method="get">
+    <input type="search" name="query" placeholder="Search customers..." value="{{ filters.query }}">
+    <select name="customer_type"><option value="">All types</option><option value="individual" {% if filters.customer_type=='individual' %}selected{% endif %}>Individual</option><option value="company" {% if filters.customer_type=='company' %}selected{% endif %}>Company</option></select>
+    <select name="marketing"><option value="">All marketing</option><option value="subscribed" {% if filters.marketing=='subscribed' %}selected{% endif %}>Subscribed</option><option value="not_subscribed" {% if filters.marketing=='not_subscribed' %}selected{% endif %}>Not subscribed</option></select>
+    <button class="btn ghost">Filter</button>
+  </form>
+  {% if customers %}
+  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Type</th><th>Email</th><th>Phone</th><th>Orders</th><th>Balance due</th><th></th></tr></thead><tbody>
+  {% for c in customers %}<tr><td><strong>{{ c.name }}</strong><small>Created {{ c.created_at[:10] }}</small></td><td><span class="badge">{{ c.customer_type }}</span></td><td>{{ c.email or '—' }}</td><td>{{ c.phone or '—' }}</td><td>{{ c.order_count }}</td><td>R{{ '%.2f'|format(c.balance_due) }}</td><td><a class="btn ghost" href="{{ url_for('customers.detail', customer_id=c.id) }}">Open</a></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state"><h2>Add your first customer</h2><p>Create customer records for bookings, invoices, contracts and future order history.</p><a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a></div>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "admin/layout.html" %}
+{% set title='New customer' if not customer else 'Edit customer' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Customers</p><h1>{{ 'New customer' if not customer else 'Edit customer' }}</h1><p>Capture customer details for orders, documents and communication.</p></div><a class="btn ghost" href="{{ url_for('customers.index') }}">Back to customers</a></header>
+<form method="post" class="settings-form panel customer-form">
+  <section class="form-section"><h2>Customer type</h2><div class="option-grid two-options">{% for value,label,help in [('individual','Individual','A person renting or buying from ABI.'),('company','Company','A business or organisation contact.')] %}<label class="choice-card"><input type="radio" name="customer_type" value="{{ value }}" {% if (customer and customer.customer_type==value) or (not customer and value=='individual') %}checked{% endif %}><strong>{{ label }}</strong><span>{{ help }}</span></label>{% endfor %}</div></section>
+  <section class="form-section"><h2>Contact details</h2><div class="form-grid"><label class="span-2">Name<input name="name" required value="{{ customer.name if customer else '' }}" placeholder="Donovan Jackson or ABI Solutions Pty Ltd"></label><label>Email<input name="email" type="email" value="{{ customer.email if customer else '' }}" placeholder="customer@example.com"></label><label>Phone<input name="phone" value="{{ customer.phone if customer else '' }}" placeholder="+27..."></label><label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" {% if customer and customer.marketing_opt_in %}checked{% endif %}> Subscribed to marketing emails</label></div></section>
+  <div class="form-actions"><button class="btn primary">Save customer</button></div>
+</form>
+{% endblock %}

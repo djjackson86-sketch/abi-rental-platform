@@ -1,0 +1,9 @@
+{% extends "admin/layout.html" %}
+{% set title=customer.name %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Customer</p><h1>{{ customer.name }}</h1><p>{{ customer.email or 'No email' }}{% if customer.phone %} · {{ customer.phone }}{% endif %}</p></div><div class="header-actions"><a class="btn ghost" href="{{ url_for('customers.index') }}">Back</a><a class="btn primary" href="{{ url_for('customers.edit', customer_id=customer.id) }}">Edit customer</a></div></header>
+<section class="two-col">
+  <article class="panel"><h2>Contact information</h2><div class="list-row"><span>Type</span><b>{{ customer.customer_type|title }}</b></div><div class="list-row"><span>Email</span><b>{{ customer.email or '—' }}</b></div><div class="list-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div><div class="list-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div><div class="list-row"><span>Balance due</span><b>R{{ '%.2f'|format(customer.balance_due) }}</b></div></article>
+  <article class="panel"><h2>Order history</h2>{% if orders %}{% for order in orders %}<div class="list-row"><span>{{ order.order_number }}</span><b>{{ order.status }}</b></div>{% endfor %}{% else %}<p class="empty">No orders yet. This customer will be selectable when the order workflow is built.</p>{% endif %}</article>
+</section>
+{% endblock %}

@@ -59,11 +59,6 @@ def orders():
     return render_placeholder("Orders", "Orders", "Create, reserve, pick up, return and invoice rental orders with live availability.", "Add order")
 
 
-@bp.route("/customers")
-@login_required
-def customers():
-    return render_placeholder("Customers", "Customers", "Manage individuals and companies, balances, marketing status and order history.", "Add customer")
-
 
 @bp.route("/documents")
 @login_required

@@ -7,6 +7,7 @@ from .routes.admin import bp as admin_bp
 from .routes.settings import bp as settings_bp
 from .routes.public import bp as public_bp
 from .routes.inventory import bp as inventory_bp
+from .routes.customers import bp as customers_bp
 
 
 def create_app(test_config=None):
@@ -30,5 +31,6 @@ def create_app(test_config=None):
     app.register_blueprint(admin_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(inventory_bp)
+    app.register_blueprint(customers_bp)
     app.register_blueprint(public_bp)
     return app
