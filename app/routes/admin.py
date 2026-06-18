@@ -1,8 +1,11 @@
-from flask import Blueprint, render_template, redirect, url_for
+from flask import Blueprint, render_template, redirect, url_for, Response
+import csv
+from io import StringIO
 from app.routes.auth import login_required
 from app.db import get_db
 from app.services.settings import get_company_settings
 from app.services.orders import dashboard_schedule, scheduled_events
+from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 
 bp = Blueprint("admin", __name__)
 
@@ -64,4 +67,34 @@ def online_store():
 @bp.route("/reports")
 @login_required
 def reports():
-    return render_placeholder("Reports", "Reports", "Company performance, product performance, availability, fulfillment and customer reports.", "Run report")
+    return render_template(
+        "admin/reports.html",
+        settings=get_company_settings(),
+        metrics=summary_metrics(),
+        status_rows=orders_by_status(),
+        payment_rows=payments_by_method(),
+        product_rows=product_performance(),
+        customer_rows=customer_summary(),
+    )
+
+
+@bp.route("/reports/orders.csv")
+@login_required
+def reports_orders_csv():
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["order_number", "customer", "status", "payment_status", "total", "due_total"])
+    for row in orders_export_rows():
+        writer.writerow([
+            row["order_number"],
+            row["customer"],
+            row["status"],
+            row["payment_status"],
+            f"{float(row['total'] or 0):.2f}",
+            f"{float(row['due_total'] or 0):.2f}",
+        ])
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=orders.csv"},
+    )

@@ -1,0 +1,21 @@
+{% extends "admin/layout.html" %}
+{% set title='Reports' %}
+{% block admin_body %}
+<header class="page-header">
+  <div><p class="eyebrow">Reports</p><h1>Reports</h1><p>Company performance, orders, payments, products and customer summaries.</p></div>
+  <div class="header-actions"><a class="btn primary" href="{{ url_for('admin.reports_orders_csv') }}">Download orders CSV</a></div>
+</header>
+<div class="metrics">
+  <div><b>{{ metrics.orders }}</b><span>Orders</span></div>
+  <div><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Revenue summary</span></div>
+  <div><b>R{{ '%.2f'|format(metrics.paid) }}</b><span>Payment summary</span></div>
+  <div><b>R{{ '%.2f'|format(metrics.due) }}</b><span>Due</span></div>
+</div>
+<section class="report-grid">
+  <article class="panel"><h2>Revenue summary</h2><div class="list-row"><span>Total revenue</span><b>R{{ '%.2f'|format(metrics.revenue) }}</b></div><div class="list-row"><span>Total paid</span><b>R{{ '%.2f'|format(metrics.paid) }}</b></div><div class="list-row"><span>Total due</span><b>R{{ '%.2f'|format(metrics.due) }}</b></div></article>
+  <article class="panel"><h2>Orders by status</h2>{% for row in status_rows %}<div class="list-row"><span>{{ row.status|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>{% else %}<p class="empty">No orders yet.</p>{% endfor %}</article>
+  <article class="panel"><h2>Payment summary</h2>{% for row in payment_rows %}<div class="list-row"><span>{{ row.method|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>{% else %}<p class="empty">No payments recorded yet.</p>{% endfor %}</article>
+  <article class="panel"><h2>Product performance</h2>{% for row in product_rows %}<div class="list-row"><span>{{ row.product_name }}</span><b>{{ row.quantity }} items · R{{ '%.2f'|format(row.total) }}</b></div>{% else %}<p class="empty">No order items yet.</p>{% endfor %}</article>
+  <article class="panel"><h2>Customer summary</h2>{% for row in customer_rows %}<div class="list-row"><span>{{ row.customer_name }}</span><b>{{ row.orders }} orders · R{{ '%.2f'|format(row.total) }}</b></div>{% else %}<p class="empty">No customers yet.</p>{% endfor %}</article>
+</section>
+{% endblock %}

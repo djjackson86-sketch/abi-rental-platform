@@ -471,3 +471,42 @@ def test_payment_validation_rejects_non_positive_amount(client):
     }, follow_redirects=True)
     assert b'Payment amount must be greater than zero' in response.data
     assert b'BAD-001' not in response.data
+
+
+def test_reports_dashboard_summarizes_orders_payments_products_and_customers(client):
+    login(client)
+    seed_customer_and_product(client)
+    first_id = create_order_for_status(client, quantity='2')
+    second_id = create_order_for_status(client, quantity='1', start_date='2026-07-10', end_date='2026-07-11')
+    client.post(f'/orders/{first_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{second_id}/payments', data={'amount': '200', 'method': 'cash', 'reference': 'REPORT-CASH'}, follow_redirects=True)
+
+    report = client.get('/reports')
+    assert report.status_code == 200
+    assert b'Reports' in report.data
+    assert b'Revenue summary' in report.data
+    assert b'Orders by status' in report.data
+    assert b'Product performance' in report.data
+    assert b'Customer summary' in report.data
+    assert b'Payment summary' in report.data
+    assert b'R1600.00' in report.data
+    assert b'R200.00' in report.data
+    assert b'Reserved' in report.data
+    assert b'Draft' in report.data
+    assert b'Order Trailer' in report.data
+    assert b'Order Customer' in report.data
+    assert b'Download orders CSV' in report.data
+
+
+def test_reports_orders_csv_export(client):
+    login(client)
+    seed_customer_and_product(client)
+    create_order_for_status(client, quantity='1')
+
+    response = client.get('/reports/orders.csv')
+    assert response.status_code == 200
+    assert response.headers['Content-Type'].startswith('text/csv')
+    assert 'attachment; filename=orders.csv' in response.headers['Content-Disposition']
+    body = response.data.decode()
+    assert 'order_number,customer,status,payment_status,total,due_total' in body
+    assert 'ORD-00001,Order Customer,draft,payment_due,600.00,600.00' in body
