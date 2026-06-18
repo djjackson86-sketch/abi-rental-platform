@@ -1,0 +1,34 @@
+{% extends "admin/layout.html" %}
+{% set title=document.number %}
+{% block admin_body %}
+<header class="page-header">
+  <div><p class="eyebrow">{{ label }}</p><h1>{{ document.number }}</h1><p>{{ document.order_number }} · {{ document.customer_name or 'No customer' }}</p></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a><button class="btn primary" onclick="window.print()">Print</button></div>
+</header>
+<section class="document-page panel">
+  <div class="document-head">
+    <div><h2>ABI Solutions</h2><p>Rental management document</p></div>
+    <div><strong>{{ label }}</strong><span>{{ document.number }}</span></div>
+  </div>
+  <div class="two-col document-meta">
+    <article><h3>Customer</h3><p><strong>{{ document.customer_name or '—' }}</strong><br>{{ document.customer_email or '' }}<br>{{ document.customer_phone or '' }}</p></article>
+    <article><h3>Order</h3><p><strong>{{ document.order_number }}</strong><br>Pickup: {{ document.start_at or '—' }}<br>Return: {{ document.end_at or '—' }}</p></article>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr></thead>
+      <tbody>
+      {% for item in items %}
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.unit_price) }}</td><td>R{{ '%.2f'|format(item.line_subtotal) }}</td><td>R{{ '%.2f'|format(item.line_tax) }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="totals">
+    <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(document.subtotal or 0) }}</b></div>
+    <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(document.tax_total or 0) }}</b></div>
+    <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(document.deposit_total or 0) }}</b></div>
+    <div class="list-row"><span>Total</span><b>R{{ '%.2f'|format(document.total or 0) }}</b></div>
+  </div>
+</section>
+{% endblock %}

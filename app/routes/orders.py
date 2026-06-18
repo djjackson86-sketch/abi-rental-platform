@@ -3,6 +3,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from app.routes.auth import login_required
 from app.db import get_db
 from app.services.orders import create_order, get_order, list_orders, order_counts, order_items, status_actions, transition_order
+from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.settings import get_company_settings
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
@@ -46,7 +47,28 @@ def detail(order_id):
     if not order:
         flash("Order not found", "error")
         return redirect(url_for("orders.index"))
-    return render_template("admin/orders/detail.html", settings=get_company_settings(), order=order, items=order_items(order_id), actions=status_actions(order["status"]))
+    return render_template(
+        "admin/orders/detail.html",
+        settings=get_company_settings(),
+        order=order,
+        items=order_items(order_id),
+        actions=status_actions(order["status"]),
+        documents=documents_for_order(order_id),
+        document_types=document_type_options(),
+        label_for=label_for,
+    )
+
+
+@bp.post("/<int:order_id>/documents")
+@login_required
+def create_document_for_order(order_id):
+    try:
+        document_id = create_document(order_id, request.form.get("document_type", ""))
+        flash("Document created", "success")
+        return redirect(url_for("documents.detail", document_id=document_id))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("orders.detail", order_id=order_id))
 
 
 @bp.post("/<int:order_id>/<action>")

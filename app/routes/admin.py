@@ -55,13 +55,6 @@ def calendar():
 
 
 
-
-@bp.route("/documents")
-@login_required
-def documents():
-    return render_placeholder("Documents", "Documents", "Generate invoices, contracts, quotes and packing slips from orders.", "New document")
-
-
 @bp.route("/online-store")
 @login_required
 def online_store():

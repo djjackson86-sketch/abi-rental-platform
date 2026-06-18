@@ -1,0 +1,31 @@
+{% extends "admin/layout.html" %}
+{% set title='Documents' %}
+{% block admin_body %}
+<header class="page-header">
+  <div><p class="eyebrow">Documents</p><h1>Documents</h1><p>Quotes, contracts, invoices and packing slips generated from orders.</p></div>
+</header>
+<section class="panel">
+  {% if documents %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Number</th><th>Type</th><th>Order</th><th>Customer</th><th>Status</th><th>Total</th><th></th></tr></thead>
+      <tbody>
+      {% for document in documents %}
+        <tr>
+          <td><strong>{{ document.number }}</strong></td>
+          <td>{{ label_for(document.document_type) }}</td>
+          <td>{{ document.order_number or '—' }}</td>
+          <td>{{ document.customer_name or '—' }}</td>
+          <td><span class="pill">{{ document.status|title }}</span></td>
+          <td>R{{ '%.2f'|format(document.total or 0) }}</td>
+          <td><a href="{{ url_for('documents.detail', document_id=document.id) }}">Open</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No documents yet. Open an order to create a quote, contract, invoice or packing slip.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -9,6 +9,7 @@ from .routes.public import bp as public_bp
 from .routes.inventory import bp as inventory_bp
 from .routes.customers import bp as customers_bp
 from .routes.orders import bp as orders_bp
+from .routes.documents import bp as documents_bp
 
 
 def create_app(test_config=None):
@@ -34,5 +35,6 @@ def create_app(test_config=None):
     app.register_blueprint(inventory_bp)
     app.register_blueprint(customers_bp)
     app.register_blueprint(orders_bp)
+    app.register_blueprint(documents_bp)
     app.register_blueprint(public_bp)
     return app

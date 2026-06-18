@@ -20,7 +20,7 @@ Seed login:
 
 ## Current milestone
 
-Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, and Reservations foundation are implemented:
+Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, Reservations foundation, and Documents foundation are implemented:
 - Flask app factory
 - SQLite schema and seed data
 - Login/logout
@@ -41,8 +41,11 @@ Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, and Reserv
 - Availability check that prevents overbooking reserved/started rental stock
 - Reservation calendar with active reserved/started orders
 - Dashboard going-out and coming-back schedule panels
+- Documents list and printable document detail pages
+- Order-level document generation for quotes, contracts, invoices and packing slips
+- Sequential document numbering by type
 - Public store product cards from DB
-- Placeholder shells for documents, online store, reports
+- Placeholder shells for online store, reports
 - Tests
 
 ## Verification

@@ -33,7 +33,21 @@
     <div class="list-row"><span>Paid</span><b>R0.00</b></div>
     <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(order.due_total) }}</b></div>
     <h2>Documents</h2>
-    <p class="empty">Quotes, contracts, packing slips and invoices will attach here in the documents milestone.</p>
+    <div class="document-actions">
+      <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="quote"><button class="btn ghost" type="submit">New quote</button></form>
+      <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="contract"><button class="btn ghost" type="submit">New contract</button></form>
+      <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="invoice"><button class="btn ghost" type="submit">New invoice</button></form>
+      <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="packing_slip"><button class="btn ghost" type="submit">Packing slip</button></form>
+    </div>
+    {% if documents %}
+      <div class="schedule-list document-list">
+      {% for document in documents %}
+        <a class="schedule-row" href="{{ url_for('documents.detail', document_id=document.id) }}"><span><b>{{ document.number }}</b><small>{{ label_for(document.document_type) }}</small></span><span><small>Status</small><b>{{ document.status|title }}</b></span></a>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty">No documents generated yet.</p>
+    {% endif %}
   </article>
 </section>
 <section class="panel settings-form">

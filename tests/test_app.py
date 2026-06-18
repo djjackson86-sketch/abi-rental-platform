@@ -328,3 +328,43 @@ def test_reserve_prevents_overbooking(client):
     second = client.post(f'/orders/{second_id}/reserve', follow_redirects=True)
     assert b'Only 1 available for Order Trailer' in second.data
     assert b'Draft' in second.data
+
+
+def test_document_generation_list_and_printable_detail(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'New quote' in detail.data
+    assert b'New contract' in detail.data
+    assert b'New invoice' in detail.data
+    assert b'Packing slip' in detail.data
+
+    created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
+    assert b'Document created' in created.data
+    assert b'Quote' in created.data
+    assert b'QUO-00001' in created.data
+    assert b'Order Customer' in created.data
+    assert b'Order Trailer' in created.data
+    assert b'R1200.00' in created.data
+
+    order_detail = client.get(f'/orders/{order_id}')
+    assert b'QUO-00001' in order_detail.data
+    assert b'Quote' in order_detail.data
+
+    documents = client.get('/documents')
+    assert documents.status_code == 200
+    assert b'Documents' in documents.data
+    assert b'QUO-00001' in documents.data
+    assert b'ORD-00001' in documents.data
+
+
+def test_document_type_validation(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+
+    bad = client.post(f'/orders/{order_id}/documents', data={'document_type': 'receipt'}, follow_redirects=True)
+    assert b'Unsupported document type' in bad.data
+    assert b'Receipt' not in bad.data
