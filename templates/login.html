@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Sign in | ABI Rental Platform{% endblock %}
+{% block body_class %}login-body{% endblock %}
+{% block body %}
+<main class="login-card">
+  <div class="brand-mark">ABI</div>
+  <h1>Sign in to ABI Rental Platform</h1>
+  <p class="muted">Manage rentals, orders, customers, inventory and your online booking page.</p>
+  {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
+  <form method="post" class="stack">
+    <label>Email <input name="email" type="email" required autofocus value="admin@abi.local"></label>
+    <label>Password <input name="password" type="password" required value="admin123"></label>
+    <button class="btn primary" type="submit">Continue</button>
+  </form>
+  <p class="hint">Local seed login: admin@abi.local / admin123</p>
+</main>
+{% endblock %}

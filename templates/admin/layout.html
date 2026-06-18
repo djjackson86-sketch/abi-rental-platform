@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ title or 'Admin' }} | ABI Rental Platform{% endblock %}
+{% block body %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="logo" href="{{ url_for('admin.setup') }}"><span>ABI</span><strong>Rental</strong></a>
+    <a href="{{ url_for('admin.setup') }}">🚀 Continue setup</a>
+    <a href="{{ url_for('admin.orders') }}">＋ New order</a>
+    <a href="{{ url_for('admin.dashboard') }}">📊 Dashboard</a>
+    <a href="{{ url_for('admin.calendar') }}">📅 Calendar</a>
+    <a href="{{ url_for('admin.orders') }}">📦 Orders</a>
+    <a href="{{ url_for('admin.customers') }}">👤 Customers</a>
+    <a href="{{ url_for('admin.inventory') }}">🏷️ Inventory</a>
+    <a href="{{ url_for('admin.documents') }}">📄 Documents</a>
+    <a href="{{ url_for('admin.online_store') }}">🛒 Online store</a>
+    <a href="{{ url_for('admin.reports') }}">📈 Reports</a>
+    <a href="{{ url_for('settings.general') }}">⚙️ Settings</a>
+    <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button>Log out</button></form>
+  </aside>
+  <main class="main">
+    <div class="trial-banner"><span>Your trial workspace is active.</span><a href="#">Choose a plan</a></div>
+    <nav class="mobile-nav">
+      <a href="{{ url_for('admin.setup') }}">Setup</a><a href="{{ url_for('admin.orders') }}">Orders</a><a href="{{ url_for('admin.inventory') }}">Inventory</a><a href="{{ url_for('settings.general') }}">Settings</a>
+    </nav>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+    {% block admin_body %}{% endblock %}
+  </main>
+</div>
+{% endblock %}

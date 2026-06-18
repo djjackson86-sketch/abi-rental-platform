@@ -1,0 +1,7 @@
+{% extends "admin/layout.html" %}
+{% set title='Dashboard' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Dashboard</p><h1>Latest operational snapshot</h1></div></header>
+<div class="metrics"><div><b>{{ metrics.orders }}</b><span>Orders</span></div><div><b>{{ metrics.products }}</b><span>Products</span></div><div><b>{{ metrics.customers }}</b><span>Customers</span></div><div><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Revenue</span></div></div>
+<section class="two-col"><article class="panel"><h2>Going out</h2><p class="empty">No pickups scheduled for today.</p><a href="{{ url_for('admin.orders') }}">View all</a></article><article class="panel"><h2>Coming back</h2><p class="empty">No returns scheduled for today.</p><a href="{{ url_for('admin.orders') }}">View all</a></article></section>
+{% endblock %}

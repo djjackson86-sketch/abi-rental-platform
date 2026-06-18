@@ -1,0 +1,5 @@
+{% extends "admin/layout.html" %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">{{ name }}</p><h1>{{ title }}</h1><p>{{ description }}</p></div>{% if primary_label %}<a class="btn primary" href="#">{{ primary_label }}</a>{% endif %}</header>
+<section class="panel"><div class="toolbar"><input type="search" placeholder="Search..."><button class="btn ghost">Export</button></div><div class="empty-state"><h2>{{ title }} module shell is ready</h2><p>This route is wired into the app shell. The next milestone fills it with DB-backed CRUD and workflow logic.</p></div></section>
+{% endblock %}

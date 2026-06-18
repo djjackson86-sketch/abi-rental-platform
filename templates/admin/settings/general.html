@@ -1,0 +1,26 @@
+{% extends "admin/layout.html" %}
+{% set title='Settings' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Settings</p><h1>Company info</h1><p>Used across documents, emails, admin screens and the online store.</p></div></header>
+{% include "admin/settings/nav.html" %}
+<form method="post" class="settings-form panel">
+  <div class="form-grid">
+    <label>Company name<input name="company_name" value="{{ settings.company_name }}" required></label>
+    <label>Email<input name="email" type="email" value="{{ settings.email }}"></label>
+    <label>Phone<input name="phone" value="{{ settings.phone }}"></label>
+    <label>Website<input name="website" value="{{ settings.website }}"></label>
+    <label>Country<input name="country" value="{{ settings.country }}"></label>
+    <label>City<input name="city" value="{{ settings.city }}"></label>
+    <label>Province<input name="province" value="{{ settings.province }}"></label>
+    <label>Postcode<input name="postcode" value="{{ settings.postcode }}"></label>
+    <label class="span-2">Address line 1<input name="address_line1" value="{{ settings.address_line1 }}"></label>
+    <label class="span-2">Address line 2<input name="address_line2" value="{{ settings.address_line2 }}"></label>
+    <label>Timezone<input name="timezone" value="{{ settings.timezone }}"></label>
+    <label>Date format<input name="date_format" value="{{ settings.date_format }}"></label>
+    <label>Units<select name="units"><option value="metric" {% if settings.units=='metric' %}selected{% endif %}>Metric</option><option value="imperial" {% if settings.units=='imperial' %}selected{% endif %}>Imperial</option></select></label>
+    <label>First day<input name="first_day_of_week" value="{{ settings.first_day_of_week }}"></label>
+  </div>
+  {% include "admin/settings/hidden_defaults.html" %}
+  <button class="btn primary">Save</button>
+</form>
+{% endblock %}
