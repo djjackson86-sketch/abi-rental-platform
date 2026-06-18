@@ -53,11 +53,6 @@ def calendar():
     return render_placeholder("Calendar", "Calendar", "Timeline view for reservations, pickups, returns and availability checks.", "Check availability")
 
 
-@bp.route("/orders")
-@login_required
-def orders():
-    return render_placeholder("Orders", "Orders", "Create, reserve, pick up, return and invoice rental orders with live availability.", "Add order")
-
 
 
 @bp.route("/documents")

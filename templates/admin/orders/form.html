@@ -1,0 +1,12 @@
+{% extends "admin/layout.html" %}
+{% set title='New order' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Orders</p><h1>New order</h1><p>Create a draft order by choosing a customer, rental period and product.</p></div><a class="btn ghost" href="{{ url_for('orders.index') }}">Back to orders</a></header>
+<form method="post" class="settings-form panel order-form">
+  <section class="form-section"><h2>Customer</h2>{% if customers %}<label>Customer<select name="customer_id" required><option value="">Choose customer</option>{% for c in customers %}<option value="{{ c.id }}">{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}</option>{% endfor %}</select></label>{% else %}<div class="empty-state"><p>Add a customer before creating orders.</p><a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a></div>{% endif %}</section>
+  <section class="form-section"><h2>Pickup and return</h2><div class="form-grid"><label>Pickup date<input type="date" name="start_date" required></label><label>Pickup time<input type="time" name="start_time" value="{{ settings.default_pickup_time }}"></label><label>Return date<input type="date" name="end_date" required></label><label>Return time<input type="time" name="end_time" value="{{ settings.default_return_time }}"></label></div></section>
+  <section class="form-section"><h2>Products</h2>{% if products %}<div class="form-grid"><label>Product<select name="product_id" required><option value="">Choose product</option>{% for p in products %}<option value="{{ p.id }}">{{ p.name }}{% if p.sku %} — {{ p.sku }}{% endif %} · R{{ '%.2f'|format(p.price_amount) }}/{{ p.price_unit }}</option>{% endfor %}</select></label><label>Quantity<input type="number" name="quantity" min="1" value="1"></label></div>{% else %}<div class="empty-state"><p>Add products before creating orders.</p><a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a></div>{% endif %}</section>
+  <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional notes for this draft order"></textarea></label></section>
+  <div class="form-actions"><button class="btn primary" {% if not customers or not products %}disabled{% endif %}>Save as draft</button></div>
+</form>
+{% endblock %}

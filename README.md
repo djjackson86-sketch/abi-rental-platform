@@ -34,8 +34,11 @@ Milestone 1, part of Milestone 2, and the Inventory slice are implemented:
 - DB-backed customer list/detail
 - Add/edit customer flow
 - Individual/company type, email, phone and marketing opt-in fields
+- DB-backed orders list/detail
+- New draft order form with customer/product pickers
+- Server-side draft order calculations for rental days, subtotal, tax, deposit, total and due
 - Public store product cards from DB
-- Placeholder shells for orders, calendar, documents, online store, reports
+- Placeholder shells for calendar, documents, online store, reports
 - Tests
 
 ## Verification

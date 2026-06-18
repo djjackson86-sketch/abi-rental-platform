@@ -196,3 +196,70 @@ def test_setup_marks_customer_complete(client):
     assert b'Setup Customer' not in after.data
     # Setup completion count should now include seeded tax profile and this customer.
     assert b'2/14 completed' in after.data
+
+
+def seed_customer_and_product(client):
+    client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Order Customer',
+        'email': 'order@example.com',
+        'phone': '+27000000000',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Order Trailer',
+        'sku': 'ORD-TRL',
+        'quantity': '4',
+        'description': 'Order test trailer.',
+        'product_type': 'rental',
+        'price_amount': '200',
+        'price_unit': 'day',
+        'security_deposit': '750',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+
+def test_order_draft_creation_and_totals(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.get('/orders/new')
+    assert res.status_code == 200
+    assert b'Order Customer' in res.data
+    assert b'Order Trailer' in res.data
+
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '2',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'notes': 'Draft order test',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    assert b'ORD-00001' in res.data
+    assert b'Order Customer' in res.data
+    assert b'Order Trailer' in res.data
+    # 2 qty * R200 * 3 rounded rental days, no tax profile VAT in seed.
+    assert b'R1200.00' in res.data
+    assert b'R1500.00' in res.data  # security deposit 2 * R750
+
+    list_res = client.get('/orders')
+    assert b'ORD-00001' in list_res.data
+    assert b'Order Customer' in list_res.data
+    assert b'built-in method items' not in list_res.data
+
+
+def test_order_requires_customer_and_product(client):
+    login(client)
+    res = client.post('/orders/new', data={
+        'customer_id': '',
+        'product_id': '',
+        'start_date': '2026-07-01',
+        'end_date': '2026-07-02',
+    }, follow_redirects=True)
+    assert b'Customer is required' in res.data

@@ -1,0 +1,18 @@
+{% extends "admin/layout.html" %}
+{% set title='Orders' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Orders</p><h1>Orders</h1><p>Create draft rental orders with customers, products, rental dates and server-calculated totals.</p></div><a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a></header>
+<section class="metrics"><div><b>{{ counts.total }}</b><span>Orders</span></div><div><b>{{ counts['items'] }}</b><span>Items ordered</span></div><div><b>R{{ '%.2f'|format(counts.revenue) }}</b><span>Revenue</span></div><div><b>R{{ '%.2f'|format(counts.due) }}</b><span>Due</span></div></section>
+<section class="panel list-panel">
+  <form class="toolbar filters" method="get">
+    <input type="search" name="query" placeholder="Search orders or customers..." value="{{ filters.query }}">
+    <select name="status"><option value="">All statuses</option>{% for s in ['draft','reserved','started','returned','archived','canceled'] %}<option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s|title }}</option>{% endfor %}</select>
+    <select name="payment_status"><option value="">All payments</option>{% for s,label in [('payment_due','Payment due'),('partially_paid','Partially paid'),('paid','Paid'),('overpaid','Overpaid')] %}<option value="{{ s }}" {% if filters.payment_status==s %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <button class="btn ghost">Filter</button>
+  </form>
+  <nav class="tabs mini-tabs"><a href="{{ url_for('orders.index') }}">All</a><a href="#">Upcoming</a><a href="#">Late</a><a href="#">With shortage</a></nav>
+  {% if orders %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Rental period</th><th>Items</th><th>Total</th><th>Due</th><th></th></tr></thead><tbody>
+    {% for o in orders %}<tr><td><strong>{{ o.order_number }}</strong><small>{{ o.created_at[:10] }}</small></td><td>{{ o.customer_name or 'No customer' }}</td><td><span class="badge">{{ o.status }}</span></td><td>{{ o.start_at[:10] if o.start_at else '—' }} → {{ o.end_at[:10] if o.end_at else '—' }}</td><td>{{ o.item_count }}</td><td>R{{ '%.2f'|format(o.total) }}</td><td>R{{ '%.2f'|format(o.due_total) }}</td><td><a class="btn ghost" href="{{ url_for('orders.detail', order_id=o.id) }}">Open</a></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state"><h2>Create your first order</h2><p>Create and manage orders with live products, customers, pricing and tax calculations.</p><a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a></div>{% endif %}
+</section>
+{% endblock %}
