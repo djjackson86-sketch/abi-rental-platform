@@ -36,6 +36,17 @@ def test_health(client):
     assert res.get_json()['ok'] is True
 
 
+def test_production_requires_non_default_secrets(monkeypatch, tmp_path):
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.delenv('SECRET_KEY', raising=False)
+    monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        create_app({'DATABASE': str(tmp_path / 'prod.db')})
+    message = str(excinfo.value)
+    assert 'SECRET_KEY must be set' in message
+    assert 'ADMIN_PASSWORD must be set' in message
+
+
 def test_login_and_setup(client):
     res = login(client)
     assert res.status_code == 200

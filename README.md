@@ -58,6 +58,9 @@ Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, Reservatio
 - Public store visibility toggle
 - Store title, hero text, intro copy, checkout instructions and public contact details
 - Optional public price and availability display toggles
+- Render deployment blueprint with persistent SQLite disk path
+- Production secret guardrails for SECRET_KEY and ADMIN_PASSWORD
+- Deployment smoke-check script
 - Tests
 
 ## Verification
@@ -67,4 +70,19 @@ source .venv/bin/activate
 pytest -q
 python -m compileall app tests -q
 curl -fsS http://127.0.0.1:5057/health
+python scripts/smoke_check.py http://127.0.0.1:5057
 ```
+
+## Render deployment
+
+This repo includes `render.yaml` for a Python web service:
+
+- Build command: `pip install -r requirements.txt`
+- Start command: `gunicorn app:app`
+- Health check: `/health`
+- Persistent disk: `/var/data`
+- Database path: `/var/data/abi_rental.db`
+
+Production mode refuses to boot with default secrets. On Render, `SECRET_KEY` and `ADMIN_PASSWORD` are generated values in `render.yaml`; if creating the service manually, set them as environment variables before deploy.
+
+Useful env vars are documented in `.env.example`.

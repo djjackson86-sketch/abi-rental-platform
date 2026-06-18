@@ -13,6 +13,25 @@ from .routes.documents import bp as documents_bp
 from .routes.payments import bp as payments_bp
 
 
+def _truthy_env(name):
+    return os.environ.get(name, "").lower() in {"1", "true", "yes", "on"}
+
+
+def _validate_production_config(app):
+    production = app.config.get("ENV") == "production" or _truthy_env("RENDER") or _truthy_env("PRODUCTION")
+    if app.config.get("TESTING") or not production:
+        return
+    errors = []
+    if app.config.get("SECRET_KEY") in {"", "dev-change-me"}:
+        errors.append("SECRET_KEY must be set to a non-default value")
+    if app.config.get("ADMIN_PASSWORD") in {"", "admin123"}:
+        errors.append("ADMIN_PASSWORD must be set to a non-default value")
+    if not app.config.get("ADMIN_EMAIL"):
+        errors.append("ADMIN_EMAIL must be set")
+    if errors:
+        raise RuntimeError("Production configuration error: " + "; ".join(errors))
+
+
 def create_app(test_config=None):
     app = Flask(
         __name__,
@@ -25,9 +44,11 @@ def create_app(test_config=None):
         DATABASE=os.environ.get("DATABASE_PATH", os.path.join(app.instance_path, "abi_rental.db")),
         ADMIN_EMAIL=os.environ.get("ADMIN_EMAIL", "admin@abi.local"),
         ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD", "admin123"),
+        ENV=os.environ.get("FLASK_ENV", "development"),
     )
     if test_config:
         app.config.update(test_config)
+    _validate_production_config(app)
     os.makedirs(app.instance_path, exist_ok=True)
     init_db_app(app)
     app.register_blueprint(auth_bp)
