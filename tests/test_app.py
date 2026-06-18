@@ -419,3 +419,55 @@ def test_public_checkout_validates_required_fields(client):
     }, follow_redirects=True)
     assert b'Name and email are required' in response.data
     assert b'Book Order Trailer' in response.data
+
+
+def test_order_manual_payments_update_payment_status_and_history(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'Payment due' in detail.data
+    assert b'Record payment' in detail.data
+    assert b'R1200.00' in detail.data
+
+    partial = client.post(f'/orders/{order_id}/payments', data={
+        'amount': '500',
+        'method': 'cash',
+        'reference': 'CASH-001',
+    }, follow_redirects=True)
+    assert b'Payment recorded' in partial.data
+    assert b'Partially paid' in partial.data
+    assert b'R500.00' in partial.data
+    assert b'R700.00' in partial.data
+    assert b'CASH-001' in partial.data
+
+    paid = client.post(f'/orders/{order_id}/payments', data={
+        'amount': '700',
+        'method': 'eft',
+        'reference': 'EFT-001',
+    }, follow_redirects=True)
+    assert b'Paid' in paid.data
+    assert b'R1200.00' in paid.data
+    assert b'R0.00' in paid.data
+
+    ledger = client.get('/payments')
+    assert ledger.status_code == 200
+    assert b'Payments' in ledger.data
+    assert b'ORD-00001' in ledger.data
+    assert b'CASH-001' in ledger.data
+    assert b'EFT-001' in ledger.data
+
+
+def test_payment_validation_rejects_non_positive_amount(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+
+    response = client.post(f'/orders/{order_id}/payments', data={
+        'amount': '0',
+        'method': 'cash',
+        'reference': 'BAD-001',
+    }, follow_redirects=True)
+    assert b'Payment amount must be greater than zero' in response.data
+    assert b'BAD-001' not in response.data

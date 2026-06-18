@@ -1,0 +1,30 @@
+{% extends "admin/layout.html" %}
+{% set title='Payments' %}
+{% block admin_body %}
+<header class="page-header">
+  <div><p class="eyebrow">Payments</p><h1>Payments</h1><p>Manual payment ledger for rental orders.</p></div>
+</header>
+<section class="panel">
+  {% if payments %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Order</th><th>Customer</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for payment in payments %}
+        <tr>
+          <td>{{ payment.order_number or '—' }}</td>
+          <td>{{ payment.customer_name or '—' }}</td>
+          <td><strong>R{{ '%.2f'|format(payment.amount) }}</strong></td>
+          <td>{{ payment.method|title }}</td>
+          <td>{{ payment.reference or '—' }}</td>
+          <td><span class="pill">{{ payment.status|title }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No payments recorded yet. Open an order to record a payment.</p>
+  {% endif %}
+</section>
+{% endblock %}

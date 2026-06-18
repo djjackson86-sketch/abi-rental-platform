@@ -29,9 +29,22 @@
   <article class="panel">
     <h2>Status and payment</h2>
     <div class="list-row"><span>Status</span><b>{{ order.status|title }}</b></div>
-    <div class="list-row"><span>Payment</span><b>{{ order.payment_status.replace('_',' ')|title }}</b></div>
-    <div class="list-row"><span>Paid</span><b>R0.00</b></div>
-    <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(order.due_total) }}</b></div>
+    <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>
+    <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
+    <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(payment_summary.due_total) }}</b></div>
+    <form method="post" action="{{ url_for('orders.record_order_payment', order_id=order.id) }}" class="payment-form">
+      <h3>Record payment</h3>
+      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method"><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option><option value="manual">Manual</option></select></label></div>
+      <label>Reference<input name="reference" placeholder="Payment reference or note"></label>
+      <button class="btn primary" type="submit">Record payment</button>
+    </form>
+    {% if payments %}
+      <div class="schedule-list payment-list">
+      {% for payment in payments %}
+        <div class="schedule-row"><span><b>R{{ '%.2f'|format(payment.amount) }}</b><small>{{ payment.method|title }}</small></span><span><small>Reference</small><b>{{ payment.reference or '—' }}</b></span></div>
+      {% endfor %}
+      </div>
+    {% endif %}
     <h2>Documents</h2>
     <div class="document-actions">
       <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="quote"><button class="btn ghost" type="submit">New quote</button></form>

@@ -20,7 +20,7 @@ Seed login:
 
 ## Current milestone
 
-Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, Reservations foundation, Documents foundation, and Public Checkout foundation are implemented:
+Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, Reservations foundation, Documents foundation, Public Checkout foundation, and Payments foundation are implemented:
 - Flask app factory
 - SQLite schema and seed data
 - Login/logout
@@ -48,6 +48,10 @@ Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, Reservatio
 - Public product detail pages with booking request form
 - Public checkout customer capture and draft order creation
 - Public booking confirmation page with order estimate
+- Manual payment recording on order detail
+- Payment status recalculation: payment_due, partially_paid, paid, overpaid
+- Order payment history and due/paid totals
+- Payments ledger page
 - Placeholder shells for online store settings and reports
 - Tests
 
