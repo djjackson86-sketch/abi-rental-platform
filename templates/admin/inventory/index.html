@@ -1,0 +1,20 @@
+{% extends "admin/layout.html" %}
+{% set title='Inventory' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Inventory</p><h1>Products</h1><p>Manage rental products, sale items, services, stock and online store visibility.</p></div><a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a></header>
+<section class="metrics"><div><b>{{ counts.total }}</b><span>Total products</span></div><div><b>{{ counts.active }}</b><span>Active</span></div><div><b>{{ counts.public_visible }}</b><span>Visible online</span></div><div><b>{{ products|length }}</b><span>Showing</span></div></section>
+<section class="panel list-panel">
+  <form class="toolbar filters" method="get">
+    <input type="search" name="query" placeholder="Search products..." value="{{ filters.query }}">
+    <select name="product_type"><option value="">All types</option><option value="rental" {% if filters.product_type=='rental' %}selected{% endif %}>Rental products</option><option value="sale" {% if filters.product_type=='sale' %}selected{% endif %}>Sales items</option><option value="service" {% if filters.product_type=='service' %}selected{% endif %}>Services</option></select>
+    <select name="visibility"><option value="">All visibility</option><option value="public" {% if filters.visibility=='public' %}selected{% endif %}>Public & active</option><option value="hidden" {% if filters.visibility=='hidden' %}selected{% endif %}>Hidden/archived</option></select>
+    <button class="btn ghost">Filter</button>
+  </form>
+  <nav class="tabs mini-tabs"><a href="{{ url_for('inventory.index') }}">Products</a><a href="#">Bundles</a><a href="#">Collections</a><a href="#">Downtime</a></nav>
+  {% if products %}
+  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Type</th><th>Price</th><th>Stock</th><th>Deposit</th><th>Store</th><th></th></tr></thead><tbody>
+  {% for p in products %}<tr><td><strong>{{ p.name }}</strong><small>{{ p.sku or 'No SKU' }}</small></td><td><span class="badge">{{ p.product_type }}</span></td><td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td><td>{{ p.quantity }}</td><td>R{{ '%.2f'|format(p.security_deposit) }}</td><td>{{ 'Visible' if p.public_visible and p.active else 'Hidden' }}</td><td><a class="btn ghost" href="{{ url_for('inventory.edit', product_id=p.id) }}">Edit</a></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state"><h2>Add your first product</h2><p>Get ready for business by adding products to rent out, sales items to sell, or services to attach to orders.</p><a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a></div>{% endif %}
+</section>
+{% endblock %}

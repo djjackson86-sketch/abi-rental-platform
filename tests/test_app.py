@@ -95,3 +95,58 @@ def test_store_empty_state(client):
     assert res.status_code == 200
     assert b'No products' in res.data
     assert b'Select a rental period' in res.data
+
+
+def test_inventory_product_crud_and_public_store(client):
+    login(client)
+    res = client.get('/inventory')
+    assert res.status_code == 200
+    assert b'Add your first product' in res.data
+
+    product_data = {
+        'name': 'Box Trailer',
+        'sku': 'TRL-BOX-001',
+        'quantity': '3',
+        'description': 'Reliable enclosed rental trailer.',
+        'product_type': 'rental',
+        'price_amount': '450',
+        'price_unit': 'day',
+        'security_deposit': '1000',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }
+    res = client.post('/inventory/new', data=product_data, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Product created' in res.data
+    assert b'Box Trailer' in res.data
+
+    res = client.get('/inventory')
+    assert b'Box Trailer' in res.data
+    assert b'TRL-BOX-001' in res.data
+    assert b'Visible' in res.data
+
+    res = client.get('/store')
+    assert b'Box Trailer' in res.data
+    assert b'R450.00 / day' in res.data
+
+
+def test_archived_product_hidden_from_store(client):
+    login(client)
+    res = client.post('/inventory/new', data={
+        'name': 'Hidden Trailer',
+        'sku': 'HIDE-001',
+        'quantity': '1',
+        'description': 'Should disappear from store.',
+        'product_type': 'rental',
+        'price_amount': '100',
+        'price_unit': 'day',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=False)
+    product_id = res.headers['Location'].rstrip('/').split('/')[-2]
+    client.post(f'/inventory/{product_id}/archive', follow_redirects=True)
+    store = client.get('/store')
+    assert b'Hidden Trailer' not in store.data

@@ -10,7 +10,7 @@
     <a href="{{ url_for('admin.calendar') }}">📅 Calendar</a>
     <a href="{{ url_for('admin.orders') }}">📦 Orders</a>
     <a href="{{ url_for('admin.customers') }}">👤 Customers</a>
-    <a href="{{ url_for('admin.inventory') }}">🏷️ Inventory</a>
+    <a href="{{ url_for('inventory.index') }}">🏷️ Inventory</a>
     <a href="{{ url_for('admin.documents') }}">📄 Documents</a>
     <a href="{{ url_for('admin.online_store') }}">🛒 Online store</a>
     <a href="{{ url_for('admin.reports') }}">📈 Reports</a>
@@ -20,7 +20,7 @@
   <main class="main">
     <div class="trial-banner"><span>Your trial workspace is active.</span><a href="#">Choose a plan</a></div>
     <nav class="mobile-nav">
-      <a href="{{ url_for('admin.setup') }}">Setup</a><a href="{{ url_for('admin.orders') }}">Orders</a><a href="{{ url_for('admin.inventory') }}">Inventory</a><a href="{{ url_for('settings.general') }}">Settings</a>
+      <a href="{{ url_for('admin.setup') }}">Setup</a><a href="{{ url_for('admin.orders') }}">Orders</a><a href="{{ url_for('inventory.index') }}">Inventory</a><a href="{{ url_for('settings.general') }}">Settings</a>
     </nav>
     {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}

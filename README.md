@@ -20,7 +20,7 @@ Seed login:
 
 ## Current milestone
 
-Milestone 1 and part of Milestone 2 are implemented:
+Milestone 1, part of Milestone 2, and the Inventory slice are implemented:
 - Flask app factory
 - SQLite schema and seed data
 - Login/logout
@@ -28,8 +28,11 @@ Milestone 1 and part of Milestone 2 are implemented:
 - Setup dashboard
 - Dashboard metrics shell
 - Settings: general, pricing, taxes, rental period
-- Public store empty-state shell
-- Placeholder shells for orders, customers, inventory, calendar, documents, online store, reports
+- DB-backed inventory/product list
+- Add/edit/archive product flow
+- Product type, price, stock, deposit, active/public visibility fields
+- Public store product cards from DB
+- Placeholder shells for orders, customers, calendar, documents, online store, reports
 - Tests
 
 ## Verification

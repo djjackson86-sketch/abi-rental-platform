@@ -65,12 +65,6 @@ def customers():
     return render_placeholder("Customers", "Customers", "Manage individuals and companies, balances, marketing status and order history.", "Add customer")
 
 
-@bp.route("/inventory")
-@login_required
-def inventory():
-    return render_placeholder("Inventory", "Inventory", "Manage rental products, sale items, services, bundles, stock and public visibility.", "Add product")
-
-
 @bp.route("/documents")
 @login_required
 def documents():
