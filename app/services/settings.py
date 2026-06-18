@@ -39,3 +39,21 @@ def create_tax_profile(name, rate, is_default=False):
 
 def list_operating_hours():
     return get_db().execute("SELECT * FROM operating_hours ORDER BY day_of_week").fetchall()
+
+
+def update_online_store_settings(form):
+    values = {
+        "store_title": form.get("store_title", "").strip() or "ABI Solutions Rentals",
+        "store_intro": form.get("store_intro", "").strip(),
+        "store_hero_text": form.get("store_hero_text", "").strip(),
+        "checkout_instructions": form.get("checkout_instructions", "").strip(),
+        "store_contact_email": form.get("store_contact_email", "").strip().lower(),
+        "store_contact_phone": form.get("store_contact_phone", "").strip(),
+        "store_enabled": 1 if form.get("store_enabled") else 0,
+        "show_prices": 1 if form.get("show_prices") else 0,
+        "show_availability": 1 if form.get("show_availability") else 0,
+        "updated_at": now(),
+    }
+    set_clause = ", ".join([f"{key} = :{key}" for key in values])
+    get_db().execute(f"UPDATE company_settings SET {set_clause} WHERE id = 1", values)
+    get_db().commit()

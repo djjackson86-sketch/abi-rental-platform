@@ -54,7 +54,10 @@ Milestone 1, part of Milestone 2, Inventory, Customers, Draft Orders, Reservatio
 - Payments ledger page
 - Reports page with revenue, payment, order, product and customer summaries
 - Orders CSV export
-- Placeholder shell for online store settings
+- DB-backed online store settings
+- Public store visibility toggle
+- Store title, hero text, intro copy, checkout instructions and public contact details
+- Optional public price and availability display toggles
 - Tests
 
 ## Verification

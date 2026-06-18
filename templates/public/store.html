@@ -1,9 +1,18 @@
 {% extends "base.html" %}
-{% block title %}{{ settings.company_name }} Store{% endblock %}
+{% block title %}{{ settings.store_title }} | {{ settings.company_name }}{% endblock %}
 {% block body %}
-<header class="store-header"><a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a><input type="search" placeholder="Search products"></header>
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+  <input type="search" placeholder="Search products" aria-label="Search products">
+</header>
 <main class="store-main">
-  <section class="rental-period"><span>Select a rental period</span><strong>View prices and availability</strong></section>
+  <section class="store-hero">
+    <p class="eyebrow">Online bookings</p>
+    <h1>{{ settings.store_title }}</h1>
+    {% if settings.store_hero_text %}<p class="hero-copy">{{ settings.store_hero_text }}</p>{% endif %}
+    {% if settings.store_intro %}<p>{{ settings.store_intro }}</p>{% endif %}
+  </section>
+  {% if settings.show_availability %}<section class="rental-period"><span>Select a rental period</span><strong>View prices and availability</strong></section>{% endif %}
   {% if products %}
   <div class="product-grid">
     {% for p in products %}
@@ -11,7 +20,8 @@
       <div class="product-image">{{ p.name[:2].upper() }}</div>
       <h2>{{ p.name }}</h2>
       <p>{{ p.description }}</p>
-      <b>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</b>
+      {% if settings.show_prices %}<b>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</b>{% endif %}
+      {% if settings.show_availability %}<p class="muted">{{ p.quantity }} available</p>{% endif %}
       <a class="btn primary" href="{{ url_for('public.product_detail', product_id=p.id) }}">Book now</a>
     </article>
     {% endfor %}
@@ -20,5 +30,5 @@
   <section class="empty-state"><h1>No products</h1><p>Unfortunately, we couldn’t find any products in this collection.</p><a class="btn ghost" href="#">Browse all products</a></section>
   {% endif %}
 </main>
-<footer class="store-footer">© 2026, {{ settings.company_name }}</footer>
+<footer class="store-footer">© 2026, {{ settings.company_name }}{% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}</footer>
 {% endblock %}

@@ -1,9 +1,9 @@
-from flask import Blueprint, render_template, redirect, url_for, Response
+from flask import Blueprint, render_template, redirect, request, url_for, Response, flash
 import csv
 from io import StringIO
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.settings import get_company_settings
+from app.services.settings import get_company_settings, update_online_store_settings
 from app.services.orders import dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 
@@ -58,10 +58,14 @@ def calendar():
 
 
 
-@bp.route("/online-store")
+@bp.route("/online-store", methods=["GET", "POST"])
 @login_required
 def online_store():
-    return render_placeholder("Online store", "Online store", "Configure public booking page, checkout, rental periods, availability and SEO.", "View store")
+    if request.method == "POST":
+        update_online_store_settings(request.form)
+        flash("Online store settings saved", "success")
+        return redirect(url_for("admin.online_store"))
+    return render_template("admin/online_store.html", settings=get_company_settings())
 
 
 @bp.route("/reports")

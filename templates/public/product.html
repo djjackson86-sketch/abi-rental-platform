@@ -6,15 +6,16 @@
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
   <section class="product-detail-card">
     <div class="product-image large">{{ product.name[:2].upper() }}</div>
-    <div><p class="eyebrow">Rental product</p><h1>Book {{ product.name }}</h1><p>{{ product.description }}</p><b>R{{ '%.2f'|format(product.price_amount) }} / {{ product.price_unit }}</b><p class="muted">Security deposit: R{{ '%.2f'|format(product.security_deposit) }}</p></div>
+    <div><p class="eyebrow">Rental product</p><h1>Book {{ product.name }}</h1><p>{{ product.description }}</p>{% if settings.show_prices %}<b>R{{ '%.2f'|format(product.price_amount) }} / {{ product.price_unit }}</b><p class="muted">Security deposit: R{{ '%.2f'|format(product.security_deposit) }}</p>{% endif %}{% if settings.show_availability %}<p class="muted">{{ product.quantity }} available before existing reservations.</p>{% endif %}</div>
   </section>
   <form method="post" action="{{ url_for('public.book_product', product_id=product.id) }}" class="panel checkout-form">
     <h2>Request this booking</h2>
+    {% if settings.checkout_instructions %}<p class="muted">{{ settings.checkout_instructions }}</p>{% endif %}
     <div class="form-grid"><label>Name<input name="customer_name" required></label><label>Email<input type="email" name="customer_email" required></label><label>Phone<input name="customer_phone"></label><label>Quantity<input type="number" name="quantity" min="1" value="1" required></label><label>Pickup date<input type="date" name="start_date" required></label><label>Pickup time<input type="time" name="start_time" value="09:00"></label><label>Return date<input type="date" name="end_date" required></label><label>Return time<input type="time" name="end_time" value="15:00"></label></div>
     <label>Notes<textarea name="notes" rows="3" placeholder="Tell us anything we should know"></textarea></label>
     <label class="checkline"><input type="checkbox" name="marketing_opt_in" value="1"> Keep me updated about ABI Solutions offers</label>
     <button class="btn primary" type="submit">Send booking request</button>
   </form>
 </main>
-<footer class="store-footer">© 2026, {{ settings.company_name }}</footer>
+<footer class="store-footer">© 2026, {{ settings.company_name }}{% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}</footer>
 {% endblock %}

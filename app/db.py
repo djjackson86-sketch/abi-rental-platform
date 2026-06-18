@@ -49,6 +49,15 @@ CREATE TABLE IF NOT EXISTS company_settings (
     enable_operating_hours INTEGER NOT NULL DEFAULT 0,
     deposit_mode TEXT NOT NULL DEFAULT 'product_specific',
     deposit_value REAL NOT NULL DEFAULT 0,
+    store_enabled INTEGER NOT NULL DEFAULT 1,
+    show_prices INTEGER NOT NULL DEFAULT 1,
+    show_availability INTEGER NOT NULL DEFAULT 1,
+    store_title TEXT NOT NULL DEFAULT 'ABI Solutions Rentals',
+    store_intro TEXT NOT NULL DEFAULT 'Browse our rental catalogue and request a booking online.',
+    store_hero_text TEXT NOT NULL DEFAULT 'Select your rental period and we will confirm availability.',
+    checkout_instructions TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.',
+    store_contact_email TEXT NOT NULL DEFAULT '',
+    store_contact_phone TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
 );
 
@@ -166,9 +175,28 @@ def close_db(e=None):
         db.close()
 
 
+
+def ensure_column(db, table, column, definition):
+    existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def run_migrations(db):
+    ensure_column(db, "company_settings", "store_enabled", "INTEGER NOT NULL DEFAULT 1")
+    ensure_column(db, "company_settings", "show_prices", "INTEGER NOT NULL DEFAULT 1")
+    ensure_column(db, "company_settings", "show_availability", "INTEGER NOT NULL DEFAULT 1")
+    ensure_column(db, "company_settings", "store_title", "TEXT NOT NULL DEFAULT 'ABI Solutions Rentals'")
+    ensure_column(db, "company_settings", "store_intro", "TEXT NOT NULL DEFAULT 'Browse our rental catalogue and request a booking online.'")
+    ensure_column(db, "company_settings", "store_hero_text", "TEXT NOT NULL DEFAULT 'Select your rental period and we will confirm availability.'")
+    ensure_column(db, "company_settings", "checkout_instructions", "TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.'")
+    ensure_column(db, "company_settings", "store_contact_email", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
+
 def init_db():
     db = get_db()
     db.executescript(SCHEMA)
+    run_migrations(db)
     ts = now()
     db.execute("INSERT OR IGNORE INTO company_settings (id, company_name, email, updated_at) VALUES (1, 'ABI Solutions', 'info@abi-solutions.local', ?)", (ts,))
     db.execute("INSERT OR IGNORE INTO tax_profiles (id, name, rate, is_default, active, created_at) VALUES (1, 'No VAT', 0, 1, 1, ?)", (ts,))

@@ -18,21 +18,30 @@ def _public_product(product_id):
 
 @bp.route("/store")
 def store():
+    settings = get_company_settings()
+    if not settings["store_enabled"]:
+        return render_template("public/store_unavailable.html", settings=settings)
     products = _public_products()
-    return render_template("public/store.html", settings=get_company_settings(), products=products)
+    return render_template("public/store.html", settings=settings, products=products)
 
 
 @bp.route("/store/products/<int:product_id>")
 def product_detail(product_id):
+    settings = get_company_settings()
+    if not settings["store_enabled"]:
+        return render_template("public/store_unavailable.html", settings=settings)
     product = _public_product(product_id)
     if not product:
         flash("Product not found", "error")
         return redirect(url_for("public.store"))
-    return render_template("public/product.html", settings=get_company_settings(), product=product)
+    return render_template("public/product.html", settings=settings, product=product)
 
 
 @bp.post("/store/products/<int:product_id>/book")
 def book_product(product_id):
+    settings = get_company_settings()
+    if not settings["store_enabled"]:
+        return render_template("public/store_unavailable.html", settings=settings), 403
     product = _public_product(product_id)
     if not product:
         flash("Product not found", "error")

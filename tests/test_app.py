@@ -97,6 +97,49 @@ def test_store_empty_state(client):
     assert b'Select a rental period' in res.data
 
 
+def test_online_store_settings_persist_and_drive_public_store(client):
+    login(client)
+    res = client.post('/online-store', data={
+        'store_enabled': '1',
+        'show_prices': '1',
+        'show_availability': '1',
+        'store_title': 'ABI Event Rentals',
+        'store_intro': 'Choose equipment, dates and request a booking online.',
+        'store_hero_text': 'Reliable trailers and event gear for your next job.',
+        'checkout_instructions': 'Submit your request and our team will confirm availability before payment.',
+        'store_contact_email': 'bookings@abi.test',
+        'store_contact_phone': '+27 11 555 0100',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Online store settings saved' in res.data
+    assert b'ABI Event Rentals' in res.data
+    assert b'bookings@abi.test' in res.data
+
+    public = client.get('/store')
+    assert b'ABI Event Rentals' in public.data
+    assert b'Choose equipment, dates and request a booking online.' in public.data
+    assert b'Reliable trailers and event gear for your next job.' in public.data
+    assert b'bookings@abi.test' in public.data
+
+
+def test_online_store_can_be_disabled(client):
+    login(client)
+    res = client.post('/online-store', data={
+        'store_title': 'Hidden Store',
+        'store_intro': 'Should not be visible while disabled.',
+        'store_hero_text': 'Temporarily unavailable.',
+        'checkout_instructions': 'Do not show checkout.',
+        'store_contact_email': 'closed@abi.test',
+        'store_contact_phone': '+27 11 555 0200',
+    }, follow_redirects=True)
+    assert b'Online store settings saved' in res.data
+
+    public = client.get('/store')
+    assert public.status_code == 200
+    assert b'Online booking is temporarily unavailable' in public.data
+    assert b'Should not be visible while disabled.' not in public.data
+
+
 def test_inventory_product_crud_and_public_store(client):
     login(client)
     res = client.get('/inventory')
