@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, redirect, url_for
 from app.routes.auth import login_required
 from app.db import get_db
 from app.services.settings import get_company_settings
+from app.services.orders import dashboard_schedule, scheduled_events
 
 bp = Blueprint("admin", __name__)
 
@@ -40,7 +41,7 @@ def dashboard():
         "customers": db.execute("SELECT COUNT(*) c FROM customers").fetchone()["c"],
         "revenue": db.execute("SELECT COALESCE(SUM(total),0) s FROM orders").fetchone()["s"],
     }
-    return render_template("admin/dashboard.html", settings=get_company_settings(), metrics=metrics)
+    return render_template("admin/dashboard.html", settings=get_company_settings(), metrics=metrics, schedule=dashboard_schedule())
 
 
 def render_placeholder(name, title, description, primary_label=None):
@@ -50,7 +51,7 @@ def render_placeholder(name, title, description, primary_label=None):
 @bp.route("/calendar")
 @login_required
 def calendar():
-    return render_placeholder("Calendar", "Calendar", "Timeline view for reservations, pickups, returns and availability checks.", "Check availability")
+    return render_template("admin/calendar.html", settings=get_company_settings(), events=scheduled_events())
 
 
 

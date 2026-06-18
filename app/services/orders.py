@@ -139,3 +139,97 @@ def create_order(form):
     )
     db.commit()
     return order_id
+
+
+TRANSITIONS = {
+    "reserve": {"from": {"draft"}, "to": "reserved", "message": "Order reserved"},
+    "start": {"from": {"reserved"}, "to": "started", "message": "Order started"},
+    "return": {"from": {"started"}, "to": "returned", "message": "Order returned"},
+    "archive": {"from": {"returned"}, "to": "archived", "message": "Order archived"},
+    "cancel": {"from": {"draft", "reserved"}, "to": "canceled", "message": "Order canceled"},
+}
+
+
+def availability_errors(order_id):
+    order = get_order(order_id)
+    if not order or not order["start_at"] or not order["end_at"]:
+        return ["Order needs a pickup and return date before it can be reserved"]
+    errors = []
+    db = get_db()
+    for item in order_items(order_id):
+        if not item["product_id"]:
+            continue
+        product = db.execute("SELECT name, quantity FROM products WHERE id = ?", (item["product_id"],)).fetchone()
+        if not product:
+            errors.append("One of the products on this order is no longer available")
+            continue
+        booked = db.execute(
+            """SELECT COALESCE(SUM(oi.quantity), 0) AS booked
+            FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE oi.product_id = ?
+              AND o.id != ?
+              AND o.status IN ('reserved', 'started')
+              AND o.start_at < ?
+              AND o.end_at > ?""",
+            (item["product_id"], order_id, order["end_at"], order["start_at"]),
+        ).fetchone()["booked"] or 0
+        available = int(product["quantity"] or 0) - int(booked)
+        if item["quantity"] > available:
+            errors.append(f"Only {available} available for {product['name']} during this rental period")
+    return errors
+
+
+def transition_order(order_id, action):
+    if action not in TRANSITIONS:
+        raise ValueError("Unknown order action")
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    transition = TRANSITIONS[action]
+    if order["status"] not in transition["from"]:
+        raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
+    if action == "reserve":
+        errors = availability_errors(order_id)
+        if errors:
+            raise ValueError(errors[0])
+    db = get_db()
+    db.execute("UPDATE orders SET status = ? WHERE id = ?", (transition["to"], order_id))
+    db.commit()
+    return transition["message"]
+
+
+def status_actions(status):
+    actions = []
+    if status == "draft":
+        actions.append(("reserve", "Reserve order", "primary"))
+        actions.append(("cancel", "Cancel order", "danger"))
+    elif status == "reserved":
+        actions.append(("start", "Start order", "primary"))
+        actions.append(("cancel", "Cancel order", "danger"))
+    elif status == "started":
+        actions.append(("return", "Return order", "primary"))
+    elif status == "returned":
+        actions.append(("archive", "Archive order", "ghost"))
+    return actions
+
+
+def scheduled_events(limit=50):
+    return get_db().execute(
+        """SELECT o.*, c.name AS customer_name,
+            (SELECT GROUP_CONCAT(COALESCE(p.name, oi.custom_name), ', ')
+             FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
+             WHERE oi.order_id = o.id) AS product_names
+        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE o.status IN ('reserved', 'started')
+        ORDER BY o.start_at ASC, o.end_at ASC
+        LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+
+def dashboard_schedule():
+    events = scheduled_events(limit=100)
+    return {
+        "going_out": [event for event in events if event["status"] == "reserved"][:5],
+        "coming_back": [event for event in events if event["status"] in {"reserved", "started"}][:5],
+    }

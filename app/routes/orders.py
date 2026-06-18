@@ -2,7 +2,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import create_order, get_order, list_orders, order_counts, order_items
+from app.services.orders import create_order, get_order, list_orders, order_counts, order_items, status_actions, transition_order
 from app.services.settings import get_company_settings
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
@@ -46,4 +46,15 @@ def detail(order_id):
     if not order:
         flash("Order not found", "error")
         return redirect(url_for("orders.index"))
-    return render_template("admin/orders/detail.html", settings=get_company_settings(), order=order, items=order_items(order_id))
+    return render_template("admin/orders/detail.html", settings=get_company_settings(), order=order, items=order_items(order_id), actions=status_actions(order["status"]))
+
+
+@bp.post("/<int:order_id>/<action>")
+@login_required
+def change_status(order_id, action):
+    try:
+        message = transition_order(order_id, action)
+        flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))

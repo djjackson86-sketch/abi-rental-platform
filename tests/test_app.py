@@ -263,3 +263,68 @@ def test_order_requires_customer_and_product(client):
         'end_date': '2026-07-02',
     }, follow_redirects=True)
     assert b'Customer is required' in res.data
+
+
+def create_order_for_status(client, quantity='2', start_date='2026-07-01', end_date='2026-07-03'):
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': quantity,
+        'start_date': start_date,
+        'start_time': '09:00',
+        'end_date': end_date,
+        'end_time': '15:00',
+        'notes': 'Status workflow order',
+    }, follow_redirects=False)
+    assert res.status_code == 302
+    return res.headers['Location'].rstrip('/').split('/')[-1]
+
+
+def test_order_status_workflow_and_calendar(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'Draft' in detail.data
+    assert b'Reserve order' in detail.data
+
+    reserve = client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    assert b'Order reserved' in reserve.data
+    assert b'Reserved' in reserve.data
+    assert b'Start order' in reserve.data
+
+    dashboard = client.get('/dashboard')
+    assert b'ORD-00001' in dashboard.data
+    assert b'Going out' in dashboard.data
+    assert b'Coming back' in dashboard.data
+
+    calendar = client.get('/calendar')
+    assert calendar.status_code == 200
+    assert b'Reservation calendar' in calendar.data
+    assert b'ORD-00001' in calendar.data
+    assert b'Order Trailer' in calendar.data
+
+    start = client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    assert b'Order started' in start.data
+    assert b'Started' in start.data
+    assert b'Return order' in start.data
+
+    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'Order returned' in returned.data
+    assert b'Returned' in returned.data
+    assert b'Archive order' in returned.data
+
+
+def test_reserve_prevents_overbooking(client):
+    login(client)
+    seed_customer_and_product(client)
+    first_id = create_order_for_status(client, quantity='3')
+    second_id = create_order_for_status(client, quantity='2')
+
+    first = client.post(f'/orders/{first_id}/reserve', follow_redirects=True)
+    assert b'Order reserved' in first.data
+
+    second = client.post(f'/orders/{second_id}/reserve', follow_redirects=True)
+    assert b'Only 1 available for Order Trailer' in second.data
+    assert b'Draft' in second.data

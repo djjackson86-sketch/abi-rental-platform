@@ -3,5 +3,30 @@
 {% block admin_body %}
 <header class="page-header"><div><p class="eyebrow">Dashboard</p><h1>Latest operational snapshot</h1></div></header>
 <div class="metrics"><div><b>{{ metrics.orders }}</b><span>Orders</span></div><div><b>{{ metrics.products }}</b><span>Products</span></div><div><b>{{ metrics.customers }}</b><span>Customers</span></div><div><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Revenue</span></div></div>
-<section class="two-col"><article class="panel"><h2>Going out</h2><p class="empty">No pickups scheduled for today.</p><a href="{{ url_for('orders.index') }}">View all</a></article><article class="panel"><h2>Coming back</h2><p class="empty">No returns scheduled for today.</p><a href="{{ url_for('orders.index') }}">View all</a></article></section>
+<section class="two-col">
+  <article class="panel">
+    <div class="panel-title"><h2>Going out</h2><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>
+    {% if schedule.going_out %}
+      <div class="schedule-list">
+      {% for order in schedule.going_out %}
+        <a class="schedule-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span><span><small>Pickup</small><b>{{ order.start_at }}</b></span></a>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty">No reserved pickups scheduled yet.</p>
+    {% endif %}
+  </article>
+  <article class="panel">
+    <div class="panel-title"><h2>Coming back</h2><a href="{{ url_for('orders.index') }}">View all</a></div>
+    {% if schedule.coming_back %}
+      <div class="schedule-list">
+      {% for order in schedule.coming_back %}
+        <a class="schedule-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.order_number }}</b><small>{{ order.product_names or 'No items' }}</small></span><span><small>Return</small><b>{{ order.end_at }}</b></span></a>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty">No reserved returns scheduled yet.</p>
+    {% endif %}
+  </article>
+</section>
 {% endblock %}

@@ -1,0 +1,23 @@
+{% extends "admin/layout.html" %}
+{% set title='Calendar' %}
+{% block admin_body %}
+<header class="page-header">
+  <div><p class="eyebrow">Calendar</p><h1>Reservation calendar</h1><p>Pickup and return timeline for reserved and started orders.</p></div>
+  <div class="header-actions"><a class="btn primary" href="{{ url_for('orders.new') }}">New order</a></div>
+</header>
+<section class="panel">
+  {% if events %}
+  <div class="timeline">
+    {% for order in events %}
+    <a class="timeline-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
+      <div class="timeline-date"><b>{{ order.start_at }}</b><small>to {{ order.end_at }}</small></div>
+      <div class="timeline-main"><b>{{ order.order_number }} · {{ order.status|title }}</b><span>{{ order.customer_name or 'No customer' }} · {{ order.product_names or 'No items' }}</span></div>
+      <div class="timeline-action">Open</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">No active reservations yet. Reserve an order to see it on the calendar.</p>
+  {% endif %}
+</section>
+{% endblock %}
