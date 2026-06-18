@@ -368,3 +368,54 @@ def test_document_type_validation(client):
     bad = client.post(f'/orders/{order_id}/documents', data={'document_type': 'receipt'}, follow_redirects=True)
     assert b'Unsupported document type' in bad.data
     assert b'Receipt' not in bad.data
+
+
+def test_public_store_checkout_creates_draft_order(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    store = client.get('/store')
+    assert b'Order Trailer' in store.data
+    assert b'Book now' in store.data
+
+    product_page = client.get('/store/products/1')
+    assert product_page.status_code == 200
+    assert b'Book Order Trailer' in product_page.data
+    assert b'Pickup date' in product_page.data
+
+    confirmation = client.post('/store/products/1/book', data={
+        'customer_name': 'Public Booker',
+        'customer_email': 'public@example.test',
+        'customer_phone': '+270****0003',
+        'quantity': '1',
+        'start_date': '2026-10-01',
+        'start_time': '09:00',
+        'end_date': '2026-10-03',
+        'end_time': '15:00',
+        'notes': 'Public booking request',
+    }, follow_redirects=True)
+    assert confirmation.status_code == 200
+    assert b'Booking request received' in confirmation.data
+    assert b'ORD-00001' in confirmation.data
+    assert b'Order Trailer' in confirmation.data
+    assert b'R600.00' in confirmation.data
+
+    login(client)
+    orders = client.get('/orders?query=Public+Booker')
+    assert b'ORD-00001' in orders.data
+    assert b'Public Booker' in orders.data
+
+
+def test_public_checkout_validates_required_fields(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    response = client.post('/store/products/1/book', data={
+        'customer_name': '',
+        'customer_email': '',
+        'quantity': '1',
+        'start_date': '2026-10-01',
+        'end_date': '2026-10-03',
+    }, follow_redirects=True)
+    assert b'Name and email are required' in response.data
+    assert b'Book Order Trailer' in response.data

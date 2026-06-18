@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Booking request received | {{ settings.company_name }}{% endblock %}
+{% block body %}
+<header class="store-header"><a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a><a class="btn ghost" href="{{ url_for('public.store') }}">Continue browsing</a></header>
+<main class="store-main checkout-main">
+  <section class="panel confirmation-card">
+    <p class="eyebrow">Booking request received</p>
+    <h1>Booking request received</h1>
+    <p>Thanks {{ order.customer_name }}. We created draft order <strong>{{ order.order_number }}</strong>. ABI Solutions will confirm availability and follow up with you.</p>
+    <div class="two-col">
+      <article><h2>Rental period</h2><p>Pickup: {{ order.start_at }}<br>Return: {{ order.end_at }}</p></article>
+      <article><h2>Estimated total</h2><p><strong>R{{ '%.2f'|format(order.total) }}</strong><br>Security deposit: R{{ '%.2f'|format(order.deposit_total) }}</p></article>
+    </div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Total</th></tr></thead><tbody>{% for item in items %}<tr><td>{{ item.product_name or item.custom_name }}</td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+</main>
+<footer class="store-footer">© 2026, {{ settings.company_name }}</footer>
+{% endblock %}
