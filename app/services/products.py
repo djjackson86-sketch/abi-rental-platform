@@ -33,6 +33,21 @@ def product_counts():
     return {"total": row["total"] or 0, "active": row["active"] or 0, "public_visible": row["public_visible"] or 0}
 
 
+def product_filter_counts():
+    db = get_db()
+    type_rows = db.execute("SELECT product_type, COUNT(*) count FROM products GROUP BY product_type").fetchall()
+    visibility = db.execute(
+        """SELECT
+            SUM(CASE WHEN public_visible = 1 AND active = 1 THEN 1 ELSE 0 END) public,
+            SUM(CASE WHEN public_visible = 0 OR active = 0 THEN 1 ELSE 0 END) hidden
+        FROM products"""
+    ).fetchone()
+    return {
+        "product_type": {row["product_type"]: row["count"] for row in type_rows},
+        "visibility": {"public": visibility["public"] or 0, "hidden": visibility["hidden"] or 0},
+    }
+
+
 def _clean(form):
     name = form.get("name", "").strip()
     if not name:

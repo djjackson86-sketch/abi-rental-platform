@@ -1,7 +1,10 @@
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+import csv
+from io import StringIO
+
+from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
-from app.services.products import archive_product, create_product, get_product, list_products, product_counts, update_product
+from app.services.products import archive_product, create_product, get_product, list_products, product_counts, product_filter_counts, update_product
 from app.services.settings import get_company_settings, list_tax_profiles
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
@@ -19,8 +22,34 @@ def index():
         settings=get_company_settings(),
         products=products,
         counts=product_counts(),
+        filter_counts=product_filter_counts(),
         filters={"query": query, "product_type": product_type, "visibility": visibility},
     )
+
+
+@bp.route("/export.csv")
+@login_required
+def export_csv():
+    query = request.args.get("query", "").strip()
+    product_type = request.args.get("product_type", "")
+    visibility = request.args.get("visibility", "")
+    products = list_products(query=query, product_type=product_type, visibility=visibility)
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["name", "sku", "product_type", "price_amount", "price_unit", "quantity", "security_deposit", "active", "public_visible"])
+    for product in products:
+        writer.writerow([
+            product["name"],
+            product["sku"],
+            product["product_type"],
+            product["price_amount"],
+            product["price_unit"],
+            product["quantity"],
+            product["security_deposit"],
+            product["active"],
+            product["public_visible"],
+        ])
+    return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=products.csv"})
 
 
 @bp.route("/new", methods=["GET", "POST"])

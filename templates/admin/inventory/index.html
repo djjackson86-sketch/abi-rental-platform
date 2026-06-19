@@ -1,20 +1,144 @@
 {% extends "admin/layout.html" %}
 {% set title='Inventory' %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Inventory</p><h1>Products</h1><p>Manage rental products, sale items, services, stock and online store visibility.</p></div><a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a></header>
-<section class="metrics"><div><b>{{ counts.total }}</b><span>Total products</span></div><div><b>{{ counts.active }}</b><span>Active</span></div><div><b>{{ counts.public_visible }}</b><span>Visible online</span></div><div><b>{{ products|length }}</b><span>Showing</span></div></section>
-<section class="panel list-panel">
-  <form class="toolbar filters" method="get">
-    <input type="search" name="query" placeholder="Search products..." value="{{ filters.query }}">
-    <select name="product_type"><option value="">All types</option><option value="rental" {% if filters.product_type=='rental' %}selected{% endif %}>Rental products</option><option value="sale" {% if filters.product_type=='sale' %}selected{% endif %}>Sales items</option><option value="service" {% if filters.product_type=='service' %}selected{% endif %}>Services</option></select>
-    <select name="visibility"><option value="">All visibility</option><option value="public" {% if filters.visibility=='public' %}selected{% endif %}>Public & active</option><option value="hidden" {% if filters.visibility=='hidden' %}selected{% endif %}>Hidden/archived</option></select>
-    <button class="btn ghost">Filter</button>
+<header class="page-header inventory-header">
+  <div class="module-title">
+    <span class="module-icon">▱</span>
+    <div>
+      <p class="eyebrow">Inventory</p>
+      <h1>Inventory</h1>
+    </div>
+  </div>
+  <form class="orders-search inventory-search" method="get">
+    <span>⌕</span>
+    <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search inventory">
+    {% if filters.product_type %}<input type="hidden" name="product_type" value="{{ filters.product_type }}">{% endif %}
+    {% if filters.visibility %}<input type="hidden" name="visibility" value="{{ filters.visibility }}">{% endif %}
   </form>
-  <nav class="tabs mini-tabs"><a href="{{ url_for('inventory.index') }}">Products</a><a href="#">Bundles</a><a href="#">Collections</a><a href="#">Downtime</a></nav>
-  {% if products %}
-  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Type</th><th>Price</th><th>Stock</th><th>Deposit</th><th>Store</th><th></th></tr></thead><tbody>
-  {% for p in products %}<tr><td><strong>{{ p.name }}</strong><small>{{ p.sku or 'No SKU' }}</small></td><td><span class="badge">{{ p.product_type }}</span></td><td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td><td>{{ p.quantity }}</td><td>R{{ '%.2f'|format(p.security_deposit) }}</td><td>{{ 'Visible' if p.public_visible and p.active else 'Hidden' }}</td><td><a class="btn ghost" href="{{ url_for('inventory.edit', product_id=p.id) }}">Edit</a></td></tr>{% endfor %}
-  </tbody></table></div>
-  {% else %}<div class="empty-state"><h2>Add your first product</h2><p>Get ready for business by adding products to rent out, sales items to sell, or services to attach to orders.</p><a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a></div>{% endif %}
+  <div class="split-action">
+    <a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a>
+    <a class="btn primary split-caret" href="{{ url_for('inventory.new') }}" aria-label="Add product options">⌄</a>
+  </div>
+</header>
+
+<section class="inventory-page-shell">
+  <aside class="inventory-filter-rail panel">
+    <form method="get" class="inventory-filter-form">
+      {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Product type</strong><span>⌃</span></div>
+        <a class="select-like {% if not filters.product_type %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility) }}">
+          <span>All</span><em>{{ counts.total }}</em>
+        </a>
+        {% for type_value,label in [('rental','Rental products'),('sale','Sales items'),('service','Services')] %}
+          <label class="filter-check">
+            <input type="radio" name="product_type" value="{{ type_value }}" {% if filters.product_type==type_value %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ label }}</span>
+            <em>({{ filter_counts.product_type.get(type_value, 0) }})</em>
+          </label>
+        {% endfor %}
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Store visibility</strong><span>⌃</span></div>
+        <a class="select-like {% if not filters.visibility %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type) }}">
+          <span>All</span><em>{{ counts.total }}</em>
+        </a>
+        <label class="filter-check">
+          <input type="radio" name="visibility" value="public" {% if filters.visibility=='public' %}checked{% endif %} onchange="this.form.submit()">
+          <span>Public & active</span>
+          <em>({{ filter_counts.visibility.public }})</em>
+        </label>
+        <label class="filter-check">
+          <input type="radio" name="visibility" value="hidden" {% if filters.visibility=='hidden' %}checked{% endif %} onchange="this.form.submit()">
+          <span>Hidden/archived</span>
+          <em>({{ filter_counts.visibility.hidden }})</em>
+        </label>
+      </div>
+
+      <div class="filter-group compact">
+        <div class="filter-group-head"><strong>Price ruleset</strong><span>⌃</span></div>
+        <div class="select-like active"><span>All</span><em>Flat rates</em></div>
+      </div>
+
+      <button class="btn ghost import-btn" type="button" disabled title="CSV import is planned for a later pass">Import</button>
+      <a class="btn ghost export-btn" href="{{ url_for('inventory.export_csv', query=filters.query, product_type=filters.product_type, visibility=filters.visibility) }}">Export</a>
+    </form>
+  </aside>
+
+  <main class="inventory-workspace">
+    <div class="inventory-tabs-row">
+      <nav class="tabs mini-tabs inventory-tabs" aria-label="Inventory views">
+        <a class="active" href="{{ url_for('inventory.index') }}">Products</a>
+        <a href="#">Bundles</a>
+        <a href="#">Collections</a>
+        <a href="#">Downtime</a>
+      </nav>
+    </div>
+
+    <section class="metrics inventory-metrics">
+      <div class="metric-card"><small>Total products</small><b>{{ counts.total }}</b></div>
+      <div class="metric-card"><small>Active</small><b>{{ counts.active }}</b></div>
+      <div class="metric-card"><small>Visible online</small><b>{{ counts.public_visible }}</b></div>
+      <div class="metric-card"><small>Showing</small><b>{{ products|length }}</b></div>
+    </section>
+
+    <section class="panel inventory-list-panel">
+      {% if filters.query or filters.product_type or filters.visibility %}
+        <div class="active-filter-line">
+          <span>Showing filtered products</span>
+          <a href="{{ url_for('inventory.index') }}">Clear all filters</a>
+        </div>
+      {% endif %}
+
+      {% if products %}
+        <div class="table-wrap inventory-table-wrap">
+          <table class="data-table inventory-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Type</th>
+                <th>Price</th>
+                <th>Stock</th>
+                <th>Deposit</th>
+                <th>Store</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in products %}
+                <tr>
+                  <td>
+                    <strong>{{ p.name }}</strong>
+                    <small>{{ p.sku or 'No SKU' }}</small>
+                  </td>
+                  <td><span class="badge product-type-{{ p.product_type }}">{{ p.product_type }}</span></td>
+                  <td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td>
+                  <td>{{ p.quantity }}</td>
+                  <td>R{{ '%.2f'|format(p.security_deposit) }}</td>
+                  <td>
+                    {% if p.public_visible and p.active %}
+                      <span class="store-dot visible">Visible</span>
+                    {% else %}
+                      <span class="store-dot hidden">Hidden</span>
+                    {% endif %}
+                  </td>
+                  <td><a class="btn ghost" href="{{ url_for('inventory.edit', product_id=p.id) }}">Edit</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="inventory-empty-state">
+          <div class="empty-arrow" aria-hidden="true"></div>
+          <h2>Add your first <span>product</span></h2>
+          <span hidden>Add your first product</span>
+          <p>Get ready for business by adding your first product. Add products to rent out, or add services and sale items to sell. Make sure to add some stock after creating a product.</p>
+          <a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a>
+        </div>
+      {% endif %}
+    </section>
+  </main>
 </section>
 {% endblock %}
