@@ -1,18 +1,137 @@
 {% extends "admin/layout.html" %}
 {% set title='Orders' %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Orders</p><h1>Orders</h1><p>Create draft rental orders with customers, products, rental dates and server-calculated totals.</p></div><a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a></header>
-<section class="metrics"><div><b>{{ counts.total }}</b><span>Orders</span></div><div><b>{{ counts['items'] }}</b><span>Items ordered</span></div><div><b>R{{ '%.2f'|format(counts.revenue) }}</b><span>Revenue</span></div><div><b>R{{ '%.2f'|format(counts.due) }}</b><span>Due</span></div></section>
-<section class="panel list-panel">
-  <form class="toolbar filters" method="get">
-    <input type="search" name="query" placeholder="Search orders or customers..." value="{{ filters.query }}">
-    <select name="status"><option value="">All statuses</option>{% for s in ['draft','reserved','started','returned','archived','canceled'] %}<option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s|title }}</option>{% endfor %}</select>
-    <select name="payment_status"><option value="">All payments</option>{% for s,label in [('payment_due','Payment due'),('partially_paid','Partially paid'),('paid','Paid'),('overpaid','Overpaid')] %}<option value="{{ s }}" {% if filters.payment_status==s %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
-    <button class="btn ghost">Filter</button>
+<header class="page-header orders-header">
+  <div class="module-title">
+    <span class="module-icon">□</span>
+    <div>
+      <p class="eyebrow">Orders</p>
+      <h1>Orders</h1>
+    </div>
+  </div>
+  <form class="orders-search" method="get">
+    <span>⌕</span>
+    <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search orders">
+    {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
+    {% if filters.payment_status %}<input type="hidden" name="payment_status" value="{{ filters.payment_status }}">{% endif %}
   </form>
-  <nav class="tabs mini-tabs"><a href="{{ url_for('orders.index') }}">All</a><a href="#">Upcoming</a><a href="#">Late</a><a href="#">With shortage</a></nav>
-  {% if orders %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Rental period</th><th>Items</th><th>Total</th><th>Due</th><th></th></tr></thead><tbody>
-    {% for o in orders %}<tr><td><strong>{{ o.order_number }}</strong><small>{{ o.created_at[:10] }}</small></td><td>{{ o.customer_name or 'No customer' }}</td><td><span class="badge">{{ o.status }}</span></td><td>{{ o.start_at[:10] if o.start_at else '—' }} → {{ o.end_at[:10] if o.end_at else '—' }}</td><td>{{ o.item_count }}</td><td>R{{ '%.2f'|format(o.total) }}</td><td>R{{ '%.2f'|format(o.due_total) }}</td><td><a class="btn ghost" href="{{ url_for('orders.detail', order_id=o.id) }}">Open</a></td></tr>{% endfor %}
-  </tbody></table></div>{% else %}<div class="empty-state"><h2>Create your first order</h2><p>Create and manage orders with live products, customers, pricing and tax calculations.</p><a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a></div>{% endif %}
+  <a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>
+</header>
+
+<section class="orders-page-shell">
+  <aside class="orders-filter-rail panel">
+    <form method="get" class="orders-filter-form">
+      {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Status</strong><span>⌃</span></div>
+        {% for s,label in [('draft','Draft'),('reserved','Reserved'),('started','Started'),('returned','Returned'),('archived','Archived'),('canceled','Canceled')] %}
+          <label class="filter-check">
+            <input type="radio" name="status" value="{{ s }}" {% if filters.status==s %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ label }}</span>
+            <em>({{ filter_counts.status.get(s, 0) }})</em>
+          </label>
+        {% endfor %}
+        {% if filters.status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, payment_status=filters.payment_status) }}">Clear status</a>{% endif %}
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Payment status</strong><span>⌃</span></div>
+        {% for s,label in [('payment_due','Payment due'),('partially_paid','Partially paid'),('paid','Paid'),('overpaid','Overpaid')] %}
+          <label class="filter-check">
+            <input type="radio" name="payment_status" value="{{ s }}" {% if filters.payment_status==s %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ label }}</span>
+            <em>({{ filter_counts.payment_status.get(s, 0) }})</em>
+          </label>
+        {% endfor %}
+        <label class="filter-check disabled">
+          <input type="checkbox" disabled>
+          <span>Process deposit</span>
+          <em>(0)</em>
+        </label>
+        {% if filters.payment_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status) }}">Clear payment</a>{% endif %}
+      </div>
+
+      <div class="filter-group compact">
+        <div class="filter-group-head"><strong>Date range</strong><span>⌃</span></div>
+        <div class="filter-date-line">▣ <span>All time</span></div>
+      </div>
+
+      <a class="btn ghost export-btn" href="{{ url_for('admin.reports_orders_csv') }}">Export</a>
+    </form>
+  </aside>
+
+  <main class="orders-workspace">
+    <div class="orders-tabs-row">
+      <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
+        <a class="active" href="{{ url_for('orders.index') }}">All</a>
+        <a href="#">Upcoming</a>
+        <a href="#">Late</a>
+        <a href="#">With shortage</a>
+      </nav>
+      <button class="btn ghost metrics-toggle" type="button" aria-disabled="true">Hide metrics⌃</button>
+    </div>
+
+    <section class="metrics orders-metrics">
+      <div class="metric-card"><small>Orders</small><b>{{ counts.total }}</b></div>
+      <div class="metric-card"><small>Items ordered</small><b>{{ counts['items'] }}</b></div>
+      <div class="metric-card"><small>Revenue</small><b>R{{ '%.2f'|format(counts.revenue) }}</b></div>
+      <div class="metric-card"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
+    </section>
+
+    <section class="panel orders-list-panel">
+      {% if filters.query or filters.status or filters.payment_status %}
+        <div class="active-filter-line">
+          <span>Showing filtered orders</span>
+          <a href="{{ url_for('orders.index') }}">Clear all filters</a>
+        </div>
+      {% endif %}
+
+      {% if orders %}
+        <div class="table-wrap orders-table-wrap">
+          <table class="data-table orders-table">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Rental period</th>
+                <th>Items</th>
+                <th>Total</th>
+                <th>Due</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for o in orders %}
+                <tr>
+                  <td>
+                    <strong>{{ o.order_number }}</strong>
+                    <small>Created {{ o.created_at[:10] }}</small>
+                  </td>
+                  <td>
+                    <strong class="table-primary-text">{{ o.customer_name or 'No customer' }}</strong>
+                    <small>{{ o.customer_email or 'No email on file' }}</small>
+                  </td>
+                  <td><span class="badge status-{{ o.status }}">{{ o.status }}</span></td>
+                  <td>{{ o.start_at[:10] if o.start_at else '—' }} → {{ o.end_at[:10] if o.end_at else '—' }}</td>
+                  <td>{{ o.item_count }}</td>
+                  <td>R{{ '%.2f'|format(o.total) }}</td>
+                  <td>R{{ '%.2f'|format(o.due_total) }}</td>
+                  <td><a class="btn ghost" href="{{ url_for('orders.detail', order_id=o.id) }}">Open</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="orders-empty-state">
+          <div class="empty-arrow" aria-hidden="true"></div>
+          <h2>Create your first <span>order</span></h2>
+          <p>Create and manage your orders with live availability and automatic pricing calculations. Then try reserving, picking up, and returning items to learn the full workflow.</p>
+          <a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>
+        </div>
+      {% endif %}
+    </section>
+  </main>
 </section>
 {% endblock %}

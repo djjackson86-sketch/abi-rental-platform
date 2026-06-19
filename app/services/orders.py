@@ -38,6 +38,16 @@ def order_counts():
     return {"total": row["total"] or 0, "revenue": row["revenue"] or 0, "due": row["due"] or 0, "items": item_row["items"] or 0}
 
 
+def order_filter_counts():
+    db = get_db()
+    status_rows = db.execute("SELECT status, COUNT(*) count FROM orders GROUP BY status").fetchall()
+    payment_rows = db.execute("SELECT payment_status, COUNT(*) count FROM orders GROUP BY payment_status").fetchall()
+    return {
+        "status": {row["status"]: row["count"] for row in status_rows},
+        "payment_status": {row["payment_status"]: row["count"] for row in payment_rows},
+    }
+
+
 def get_order(order_id):
     return get_db().execute(
         """SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone

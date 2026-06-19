@@ -2,7 +2,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import create_order, get_order, list_orders, order_counts, order_items, status_actions, transition_order
+from app.services.orders import create_order, get_order, list_orders, order_counts, order_filter_counts, order_items, status_actions, transition_order
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
@@ -25,7 +25,14 @@ def index():
     status = request.args.get("status", "")
     payment_status = request.args.get("payment_status", "")
     orders = list_orders(query=query, status=status, payment_status=payment_status)
-    return render_template("admin/orders/index.html", settings=get_company_settings(), orders=orders, counts=order_counts(), filters={"query": query, "status": status, "payment_status": payment_status})
+    return render_template(
+        "admin/orders/index.html",
+        settings=get_company_settings(),
+        orders=orders,
+        counts=order_counts(),
+        filter_counts=order_filter_counts(),
+        filters={"query": query, "status": status, "payment_status": payment_status},
+    )
 
 
 @bp.route("/new", methods=["GET", "POST"])
