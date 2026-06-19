@@ -1,7 +1,10 @@
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+import csv
+from io import StringIO
+
+from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
-from app.services.customers import create_customer, customer_counts, customer_orders, get_customer, list_customers, update_customer
+from app.services.customers import create_customer, customer_counts, customer_filter_counts, customer_orders, get_customer, list_customers, update_customer
 from app.services.settings import get_company_settings
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
@@ -19,8 +22,33 @@ def index():
         settings=get_company_settings(),
         customers=customers,
         counts=customer_counts(),
+        filter_counts=customer_filter_counts(),
         filters={"query": query, "customer_type": customer_type, "marketing": marketing},
     )
+
+
+@bp.route("/export.csv")
+@login_required
+def export_csv():
+    query = request.args.get("query", "").strip()
+    customer_type = request.args.get("customer_type", "")
+    marketing = request.args.get("marketing", "")
+    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing)
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["name", "customer_type", "email", "phone", "marketing_opt_in", "orders", "balance_due", "created_at"])
+    for customer in customers:
+        writer.writerow([
+            customer["name"],
+            customer["customer_type"],
+            customer["email"],
+            customer["phone"],
+            customer["marketing_opt_in"],
+            customer["order_count"],
+            customer["balance_due"],
+            customer["created_at"],
+        ])
+    return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=customers.csv"})
 
 
 @bp.route("/new", methods=["GET", "POST"])

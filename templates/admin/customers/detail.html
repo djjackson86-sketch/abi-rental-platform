@@ -1,9 +1,70 @@
 {% extends "admin/layout.html" %}
 {% set title=customer.name %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Customer</p><h1>{{ customer.name }}</h1><p>{{ customer.email or 'No email' }}{% if customer.phone %} · {{ customer.phone }}{% endif %}</p></div><div class="header-actions"><a class="btn ghost" href="{{ url_for('customers.index') }}">Back</a><a class="btn primary" href="{{ url_for('customers.edit', customer_id=customer.id) }}">Edit customer</a></div></header>
-<section class="two-col">
-  <article class="panel"><h2>Contact information</h2><div class="list-row"><span>Type</span><b>{{ customer.customer_type|title }}</b></div><div class="list-row"><span>Email</span><b>{{ customer.email or '—' }}</b></div><div class="list-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div><div class="list-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div><div class="list-row"><span>Balance due</span><b>R{{ '%.2f'|format(customer.balance_due) }}</b></div></article>
-  <article class="panel"><h2>Order history</h2>{% if orders %}{% for order in orders %}<div class="list-row"><span>{{ order.order_number }}</span><b>{{ order.status }}</b></div>{% endfor %}{% else %}<p class="empty">No orders yet. This customer will be selectable when the order workflow is built.</p>{% endif %}</article>
+<header class="page-header customer-detail-header">
+  <div class="customer-title-block">
+    <span class="avatar large">{{ (customer.name[:2] or 'CU')|upper }}</span>
+    <div>
+      <p class="eyebrow">Customer</p>
+      <h1>{{ customer.name }}</h1>
+      <p>{{ customer.email or 'No email' }}{% if customer.phone %} · {{ customer.phone }}{% endif %}</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <a class="btn ghost" href="{{ url_for('customers.index') }}">Back</a>
+    <a class="btn primary" href="{{ url_for('customers.edit', customer_id=customer.id) }}">Edit customer</a>
+  </div>
+</header>
+
+<section class="customer-profile-grid">
+  <article class="panel customer-summary-card">
+    <div class="profile-card-head">
+      <span class="avatar large">{{ (customer.name[:2] or 'CU')|upper }}</span>
+      <div>
+        <h2>{{ customer.name }}</h2>
+        <p>{{ customer.customer_type|title }} customer</p>
+      </div>
+    </div>
+    <div class="profile-stat-row">
+      <div><small>Balance due</small><strong>R{{ '%.2f'|format(customer.balance_due) }}</strong></div>
+      <div><small>Orders</small><strong>{{ orders|length }}</strong></div>
+    </div>
+    <div class="contact-stack">
+      <a href="mailto:{{ customer.email }}" class="contact-line {% if not customer.email %}muted{% endif %}">✉ {{ customer.email or 'No email on file' }}</a>
+      <span class="contact-line {% if not customer.phone %}muted{% endif %}">☎ {{ customer.phone or 'No phone on file' }}</span>
+    </div>
+  </article>
+
+  <article class="panel customer-info-card">
+    <div class="panel-title"><h2>Contact information</h2><a href="{{ url_for('customers.edit', customer_id=customer.id) }}">Edit</a></div>
+    <div class="detail-list">
+      <div class="detail-row"><span>Type</span><b>{{ customer.customer_type|title }}</b></div>
+      <div class="detail-row"><span>Email</span><b>{{ customer.email or '—' }}</b></div>
+      <div class="detail-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div>
+      <div class="detail-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div>
+      <div class="detail-row"><span>Balance due</span><b>R{{ '%.2f'|format(customer.balance_due) }}</b></div>
+    </div>
+  </article>
+
+  <article class="panel customer-orders-card">
+    <div class="panel-title"><h2>Order history</h2><a href="{{ url_for('orders.new') }}">New order</a></div>
+    {% if orders %}
+      <div class="customer-order-list">
+        {% for order in orders %}
+          <a class="customer-order-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
+            <span><strong>{{ order.order_number }}</strong><small>{{ order.start_at[:10] if order.start_at else order.created_at[:10] }}</small></span>
+            <span class="badge status-{{ order.status }}">{{ order.status }}</span>
+            <b>R{{ '%.2f'|format(order.due_total) }}</b>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="soft-empty">
+        <h3>No orders yet</h3>
+        <p>This customer is ready to use on a draft order.</p>
+        <a class="btn primary" href="{{ url_for('orders.new') }}">Create order</a>
+      </div>
+    {% endif %}
+  </article>
 </section>
 {% endblock %}

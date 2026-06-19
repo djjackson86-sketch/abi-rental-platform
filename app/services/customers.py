@@ -30,6 +30,15 @@ def customer_counts():
         "individuals": row["individuals"] or 0,
         "companies": row["companies"] or 0,
         "subscribed": row["subscribed"] or 0,
+        "not_subscribed": (row["total"] or 0) - (row["subscribed"] or 0),
+    }
+
+
+def customer_filter_counts():
+    counts = customer_counts()
+    return {
+        "customer_type": {"individual": counts["individuals"], "company": counts["companies"]},
+        "marketing": {"subscribed": counts["subscribed"], "not_subscribed": counts["not_subscribed"]},
     }
 
 

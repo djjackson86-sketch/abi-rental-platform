@@ -1,19 +1,147 @@
 {% extends "admin/layout.html" %}
 {% set title='Customers' %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Customers</p><h1>Customers</h1><p>Manage individuals and companies, contact details, marketing subscriptions and balances.</p></div><a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a></header>
-<section class="metrics"><div><b>{{ counts.total }}</b><span>Total customers</span></div><div><b>{{ counts.individuals }}</b><span>Individuals</span></div><div><b>{{ counts.companies }}</b><span>Companies</span></div><div><b>{{ counts.subscribed }}</b><span>Marketing emails</span></div></section>
-<section class="panel list-panel">
-  <form class="toolbar filters" method="get">
-    <input type="search" name="query" placeholder="Search customers..." value="{{ filters.query }}">
-    <select name="customer_type"><option value="">All types</option><option value="individual" {% if filters.customer_type=='individual' %}selected{% endif %}>Individual</option><option value="company" {% if filters.customer_type=='company' %}selected{% endif %}>Company</option></select>
-    <select name="marketing"><option value="">All marketing</option><option value="subscribed" {% if filters.marketing=='subscribed' %}selected{% endif %}>Subscribed</option><option value="not_subscribed" {% if filters.marketing=='not_subscribed' %}selected{% endif %}>Not subscribed</option></select>
-    <button class="btn ghost">Filter</button>
+<header class="page-header customers-header">
+  <div class="module-title">
+    <span class="module-icon">♙</span>
+    <div>
+      <p class="eyebrow">Customers</p>
+      <h1>Customers</h1>
+    </div>
+  </div>
+  <form class="orders-search customers-search" method="get">
+    <span>⌕</span>
+    <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search customers">
+    {% if filters.customer_type %}<input type="hidden" name="customer_type" value="{{ filters.customer_type }}">{% endif %}
+    {% if filters.marketing %}<input type="hidden" name="marketing" value="{{ filters.marketing }}">{% endif %}
   </form>
-  {% if customers %}
-  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Type</th><th>Email</th><th>Phone</th><th>Orders</th><th>Balance due</th><th></th></tr></thead><tbody>
-  {% for c in customers %}<tr><td><strong>{{ c.name }}</strong><small>Created {{ c.created_at[:10] }}</small></td><td><span class="badge">{{ c.customer_type }}</span></td><td>{{ c.email or '—' }}</td><td>{{ c.phone or '—' }}</td><td>{{ c.order_count }}</td><td>R{{ '%.2f'|format(c.balance_due) }}</td><td><a class="btn ghost" href="{{ url_for('customers.detail', customer_id=c.id) }}">Open</a></td></tr>{% endfor %}
-  </tbody></table></div>
-  {% else %}<div class="empty-state"><h2>Add your first customer</h2><p>Create customer records for bookings, invoices, contracts and future order history.</p><a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a></div>{% endif %}
+  <a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a>
+</header>
+
+<section class="customers-page-shell">
+  <aside class="customers-filter-rail panel">
+    <form method="get" class="customers-filter-form">
+      {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Customer type</strong><span>⌃</span></div>
+        {% for type_value,label in [('individual','Individual'),('company','Company')] %}
+          <label class="filter-check">
+            <input type="radio" name="customer_type" value="{{ type_value }}" {% if filters.customer_type==type_value %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ label }}</span>
+            <em>({{ filter_counts.customer_type.get(type_value, 0) }})</em>
+          </label>
+        {% endfor %}
+        {% if filters.customer_type %}<a class="filter-clear" href="{{ url_for('customers.index', query=filters.query, marketing=filters.marketing) }}">Clear type</a>{% endif %}
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Marketing emails</strong><span>⌃</span></div>
+        {% for value,label in [('subscribed','Subscribed'),('not_subscribed','Not subscribed')] %}
+          <label class="filter-check">
+            <input type="radio" name="marketing" value="{{ value }}" {% if filters.marketing==value %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ label }}</span>
+            <em>({{ filter_counts.marketing.get(value, 0) }})</em>
+          </label>
+        {% endfor %}
+        {% if filters.marketing %}<a class="filter-clear" href="{{ url_for('customers.index', query=filters.query, customer_type=filters.customer_type) }}">Clear marketing</a>{% endif %}
+      </div>
+
+      <div class="filter-group compact">
+        <div class="filter-group-head"><strong>Customer created</strong><span>⌃</span></div>
+        <div class="filter-date-line">▣ <span>All time</span></div>
+      </div>
+
+      <div class="filter-group compact">
+        <div class="filter-group-head"><strong>Latest order</strong><span>⌃</span></div>
+        <div class="filter-date-line">▣ <span>All time</span></div>
+      </div>
+
+      <button class="btn ghost import-btn" type="button" disabled title="CSV import is planned for a later pass">Import</button>
+      <a class="btn ghost export-btn" href="{{ url_for('customers.export_csv', query=filters.query, customer_type=filters.customer_type, marketing=filters.marketing) }}">Export</a>
+
+      <article class="customer-help-card">
+        <h3>Customers</h3>
+        <p>Keep contact records, balances, and order history connected in one place.</p>
+        <a href="{{ url_for('customers.new') }}">Add a customer</a>
+      </article>
+    </form>
+  </aside>
+
+  <main class="customers-workspace">
+    <section class="metrics customers-metrics">
+      <div class="metric-card"><small>Total customers</small><b>{{ counts.total }}</b></div>
+      <div class="metric-card"><small>Individuals</small><b>{{ counts.individuals }}</b></div>
+      <div class="metric-card"><small>Companies</small><b>{{ counts.companies }}</b></div>
+      <div class="metric-card"><small>Marketing emails</small><b>{{ counts.subscribed }}</b></div>
+    </section>
+
+    <section class="panel customers-list-panel">
+      <div class="customers-table-toolbar">
+        <div class="bulk-actions">
+          <button class="btn ghost" type="button" disabled>Actions⌄</button>
+          <span>0 customers selected</span>
+          {% if customers %}<a href="#">Select all {{ customers|length }} customer{% if customers|length != 1 %}s{% endif %}</a>{% endif %}
+        </div>
+        <div class="table-tools">
+          <button class="btn ghost" type="button" disabled>Columns</button>
+          <span>Showing {{ 1 if customers else 0 }} - {{ customers|length }} of {{ customers|length }}</span>
+        </div>
+      </div>
+
+      {% if filters.query or filters.customer_type or filters.marketing %}
+        <div class="active-filter-line">
+          <span>Showing filtered customers</span>
+          <a href="{{ url_for('customers.index') }}">Clear all filters</a>
+        </div>
+      {% endif %}
+
+      {% if customers %}
+        <div class="table-wrap customers-table-wrap">
+          <table class="data-table customers-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" disabled aria-label="Select all customers"></th>
+                <th>#</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Created at</th>
+                <th>Orders</th>
+                <th>Balance due</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in customers %}
+                <tr>
+                  <td><input type="checkbox" disabled aria-label="Select {{ c.name }}"></td>
+                  <td>#{{ c.id }}</td>
+                  <td>
+                    <a class="customer-name-cell" href="{{ url_for('customers.detail', customer_id=c.id) }}">
+                      <span class="avatar">{{ (c.name[:2] or 'CU')|upper }}</span>
+                      <span><strong>{{ c.name }}</strong><small>{{ c.customer_type|title }}{% if c.phone %} · {{ c.phone }}{% endif %}</small></span>
+                    </a>
+                  </td>
+                  <td>{{ c.email or '—' }}</td>
+                  <td>{{ c.created_at[:10] }}</td>
+                  <td>{{ c.order_count }}</td>
+                  <td>R{{ '%.2f'|format(c.balance_due) }}</td>
+                  <td><a class="btn ghost" href="{{ url_for('customers.detail', customer_id=c.id) }}">Open</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer-count">Showing 1 - {{ customers|length }} of {{ customers|length }}</div>
+      {% else %}
+        <div class="customers-empty-state">
+          <div class="empty-arrow" aria-hidden="true"></div>
+          <h2>Add your first <span>customer</span></h2>
+          <span hidden>Add your first customer</span>
+          <p>Create customer records for bookings, invoices, contracts and future order history.</p>
+          <a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a>
+        </div>
+      {% endif %}
+    </section>
+  </main>
 </section>
 {% endblock %}
