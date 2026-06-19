@@ -1,32 +1,78 @@
 {% extends "admin/layout.html" %}
 {% set title='Dashboard' %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Dashboard</p><h1>Latest operational snapshot</h1></div></header>
-<div class="metrics"><div><b>{{ metrics.orders }}</b><span>Orders</span></div><div><b>{{ metrics.products }}</b><span>Products</span></div><div><b>{{ metrics.customers }}</b><span>Customers</span></div><div><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Revenue</span></div></div>
-<section class="two-col">
-  <article class="panel">
-    <div class="panel-title"><h2>Going out</h2><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>
+<header class="page-header dashboard-header">
+  <div>
+    <p class="eyebrow">Dashboard</p>
+    <h1>Dashboard</h1>
+  </div>
+  <a class="btn ghost" href="{{ url_for('admin.reports') }}">▤ Reports</a>
+</header>
+
+<section class="dashboard-note panel">
+  <div class="note-icon">ⓘ</div>
+  <div>
+    <b>Latest operational snapshot is ready.</b>
+    <p>Track today’s movement, upcoming returns, customer growth and revenue from one clean workspace.</p>
+  </div>
+  <a href="{{ url_for('orders.new') }}">Create order</a>
+</section>
+
+<section class="metrics dashboard-metrics">
+  <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Orders</span></div>
+  <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Products</span></div>
+  <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Customers</span></div>
+  <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Revenue</span></div>
+</section>
+
+<section class="dashboard-grid">
+  <article class="panel movement-card">
+    <div class="movement-head">
+      <h2>Going out</h2>
+      <div class="header-actions">
+        <a class="btn ghost" href="{{ url_for('admin.reports') }}">Run report</a>
+        <a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>
+      </div>
+    </div>
+    <div class="movement-body">
     {% if schedule.going_out %}
       <div class="schedule-list">
       {% for order in schedule.going_out %}
-        <a class="schedule-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span><span><small>Pickup</small><b>{{ order.start_at }}</b></span></a>
+        <a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
+          <span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span>
+          <span><small>Pickup</small><b>{{ order.start_at }}</b></span>
+        </a>
       {% endfor %}
       </div>
     {% else %}
-      <p class="empty">No reserved pickups scheduled yet.</p>
+      <div class="empty-results"><strong>No results</strong><span>No reserved pickups scheduled yet.</span></div>
     {% endif %}
+    </div>
+    <div class="movement-foot"><a href="{{ url_for('orders.index', status='reserved') }}">View late</a><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>
   </article>
-  <article class="panel">
-    <div class="panel-title"><h2>Coming back</h2><a href="{{ url_for('orders.index') }}">View all</a></div>
+
+  <article class="panel movement-card">
+    <div class="movement-head">
+      <h2>Coming back</h2>
+      <div class="header-actions">
+        <a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>
+      </div>
+    </div>
+    <div class="movement-body">
     {% if schedule.coming_back %}
       <div class="schedule-list">
       {% for order in schedule.coming_back %}
-        <a class="schedule-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.order_number }}</b><small>{{ order.product_names or 'No items' }}</small></span><span><small>Return</small><b>{{ order.end_at }}</b></span></a>
+        <a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
+          <span><b>{{ order.order_number }}</b><small>{{ order.product_names or 'No items' }}</small></span>
+          <span><small>Return</small><b>{{ order.end_at }}</b></span>
+        </a>
       {% endfor %}
       </div>
     {% else %}
-      <p class="empty">No reserved returns scheduled yet.</p>
+      <div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>
     {% endif %}
+    </div>
+    <div class="movement-foot"><a href="{{ url_for('orders.index') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>
   </article>
 </section>
 {% endblock %}
