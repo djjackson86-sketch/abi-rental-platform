@@ -4,22 +4,22 @@
 <div class="app-shell">
   <aside class="sidebar">
     <a class="logo" href="{{ url_for('admin.setup') }}"><span>ABI</span><strong>Rental</strong></a>
-    <a href="{{ url_for('admin.setup') }}">🚀 Continue setup</a>
-    <a href="{{ url_for('orders.new') }}">＋ New order</a>
-    <a href="{{ url_for('admin.dashboard') }}">📊 Dashboard</a>
-    <a href="{{ url_for('admin.calendar') }}">📅 Calendar</a>
-    <a href="{{ url_for('orders.index') }}">📦 Orders</a>
-    <a href="{{ url_for('customers.index') }}">👤 Customers</a>
-    <a href="{{ url_for('inventory.index') }}">🏷️ Inventory</a>
-    <a href="{{ url_for('documents.index') }}">📄 Documents</a>
-    <a href="{{ url_for('payments.index') }}">💳 Payments</a>
-    <a href="{{ url_for('admin.online_store') }}">🛒 Online store</a>
-    <a href="{{ url_for('admin.reports') }}">📈 Reports</a>
-    <a href="{{ url_for('settings.general') }}">⚙️ Settings</a>
-    <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button>Log out</button></form>
+    <a href="{{ url_for('admin.setup') }}"><span>⚡</span><span>Continue setup</span></a>
+    <a href="{{ url_for('orders.new') }}"><span>＋</span><span>New order</span></a>
+    <a href="{{ url_for('admin.dashboard') }}"><span>◎</span><span>Dashboard</span></a>
+    <a href="{{ url_for('admin.calendar') }}"><span>▣</span><span>Calendar</span></a>
+    <a href="{{ url_for('orders.index') }}"><span>□</span><span>Orders</span></a>
+    <a href="{{ url_for('customers.index') }}"><span>♙</span><span>Customers</span></a>
+    <a href="{{ url_for('inventory.index') }}"><span>▱</span><span>Inventory</span></a>
+    <a href="{{ url_for('documents.index') }}"><span>◴</span><span>Documents</span></a>
+    <a href="{{ url_for('payments.index') }}"><span>▤</span><span>Payments</span></a>
+    <a href="{{ url_for('admin.online_store') }}"><span>⌂</span><span>Online store</span></a>
+    <a href="{{ url_for('admin.reports') }}"><span>≋</span><span>Reports</span></a>
+    <a href="{{ url_for('settings.general') }}"><span>⚙</span><span>Settings</span></a>
+    <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button type="submit"><span>↩</span><span>Log out</span></button></form>
   </aside>
   <main class="main">
-    <div class="trial-banner"><span>Your trial workspace is active.</span><a href="#">Choose a plan</a></div>
+    <div class="trial-banner"><span>ⓘ Your trial workspace is active. Upgrade when you are ready to publish.</span><a href="#">Choose a plan</a></div>
     <nav class="mobile-nav">
       <a href="{{ url_for('admin.setup') }}">Setup</a><a href="{{ url_for('orders.index') }}">Orders</a><a href="{{ url_for('inventory.index') }}">Inventory</a><a href="{{ url_for('settings.general') }}">Settings</a>
     </nav>

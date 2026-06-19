@@ -1,10 +1,73 @@
 {% extends "admin/layout.html" %}
 {% set title='Setup' %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Setup</p><h1>Welcome, follow these steps to get started</h1><p>{{ completed }}/14 completed · {{ settings.company_name }}</p></div></header>
-<section class="setup-grid">
-  {% set groups=[('Step 1: Add your products',[('Create a tax profile', url_for('settings.taxes'), counts.tax_profiles>0),('Add a rental product', url_for('inventory.index'), counts.products>0),('Set up pricing', url_for('settings.pricing'), False),('Set up security deposits', url_for('settings.pricing'), False)]),('Step 2: Set up your online store',[('Set up your website', url_for('admin.online_store'), False),('Set up rental periods and operating hours', url_for('settings.rental_period'), False),('Display product availability', url_for('admin.online_store'), False),('Place a test booking', url_for('public.store'), False)]),('Step 3: Create and fulfill orders',[('Create an order', url_for('orders.index'), counts.orders>0),('Reserve an order', url_for('orders.index'), False),('Pick up an order', url_for('orders.index'), False),('Return an order', url_for('orders.index'), False)]),('Step 4: Accept payments',[('Start accepting payments', url_for('settings.pricing'), False),('Enable payments in checkout', url_for('admin.online_store'), False)])] %}
-  {% for group, tasks in groups %}<article class="setup-card"><h2>{{ group }}</h2>{% for label, href, done in tasks %}<a class="check-row" href="{{ href }}"><span class="check {{ 'done' if done else '' }}">{{ '✓' if done else '○' }}</span><span>{{ label }}</span></a>{% endfor %}</article>{% endfor %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Setup</p>
+    <h1>Welcome, follow these steps to get started</h1>
+    <p>{{ completed }}/14 completed · {{ settings.company_name }}</p>
+  </div>
+</header>
+
+{% set groups=[
+  ('▱','Step 1: Add your products',[('Create a tax profile', url_for('settings.taxes'), counts.tax_profiles>0),('Add a rental product', url_for('inventory.index'), counts.products>0),('Set up pricing', url_for('settings.pricing'), False),('Set up security deposits', url_for('settings.pricing'), False)]),
+  ('⌂','Step 2: Set up your online store',[('Set up your website', url_for('admin.online_store'), False),('Set up rental periods and operating hours', url_for('settings.rental_period'), False),('Display product availability', url_for('admin.online_store'), False),('Place a test booking', url_for('public.store'), False)]),
+  ('□','Step 3: Create and fulfill orders',[('Create an order', url_for('orders.index'), counts.orders>0),('Reserve an order', url_for('orders.index'), False),('Pick up an order', url_for('orders.index'), False),('Return an order', url_for('orders.index'), False)]),
+  ('▤','Step 4: Accept payments',[('Start accepting payments', url_for('settings.pricing'), False),('Enable payments in checkout', url_for('admin.online_store'), False)])
+] %}
+
+<section class="setup-layout">
+  <div class="setup-main">
+    {% for icon, group, tasks in groups %}
+    {% set done_count = tasks|selectattr(2)|list|length %}
+    <article class="setup-card">
+      <div class="setup-card-head">
+        <div class="setup-icon">{{ icon }}</div>
+        <div>
+          <h2>{{ group }}</h2>
+          <small>{{ done_count }}/{{ tasks|length }} completed</small>
+        </div>
+        <span class="setup-count">{{ done_count }}/{{ tasks|length }}</span>
+      </div>
+      <div class="setup-task-list">
+        {% for label, href, done in tasks %}
+        <a class="check-row {% if loop.first and not done %}active{% endif %}" href="{{ href }}">
+          <span class="check {{ 'done' if done else '' }}">{{ '✓' if done else '○' }}</span>
+          <span>{{ label }}</span>
+          <span class="task-arrow">›</span>
+        </a>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+
+  <aside class="setup-aside">
+    <article class="promo-card blue">
+      <h3>Public booking page</h3>
+      <p>Preview the ABI storefront with search, rental-period prompts, product cards and checkout flow.</p>
+      <a class="btn primary" href="{{ url_for('public.store') }}">View store</a>
+    </article>
+    <article class="promo-card">
+      <h3>Ready to pick a plan?</h3>
+      <p>Compare plans when the operational workflow is ready for production.</p>
+      <a class="btn ghost" href="#">Choose a plan</a>
+    </article>
+    <article class="promo-card">
+      <div class="rating"><strong>4.8</strong><span>Based on rental-business workflow reviews</span></div>
+    </article>
+  </aside>
 </section>
-<section class="feature-grid"><article><h3>Discover more features</h3><p>Team members, barcodes, custom domains, documents, reports, checkout fields and customer-facing language are planned after the core rental workflow works.</p></article><article><h3>Public booking page</h3><p>Preview the ABI storefront with search, rental period prompts, product cards and checkout shell.</p><a class="btn ghost" href="{{ url_for('public.store') }}">View store</a></article></section>
+
+<section class="feature-grid">
+  <article>
+    <h3>Discover more features</h3>
+    <p>Team members, barcodes, custom domains, documents, reports, checkout fields and customer-facing language are planned after the core rental workflow works.</p>
+  </article>
+  <article>
+    <h3>Next best action</h3>
+    <p>Add products, configure online booking, then place a test booking to validate the full customer-to-admin loop.</p>
+    <a class="btn ghost" href="{{ url_for('inventory.index') }}">Manage inventory</a>
+  </article>
+</section>
 {% endblock %}
