@@ -81,10 +81,22 @@ def ask_bo():
     return render_placeholder("Ask Bo", "Ask Bo", "Ask operational questions about rentals, inventory, orders and reports. AI assistant functionality is planned.")
 
 
-@bp.route("/scan-barcode")
+@bp.route("/scan-barcode", methods=["GET", "POST"])
 @login_required
 def scan_barcode():
-    return render_placeholder("Scan a barcode", "Scan a barcode", "Scan or enter product barcodes to find inventory, pick up orders and process returns.")
+    if request.method == "POST":
+        barcode = (request.form.get("barcode") or "").strip()
+        if not barcode:
+            flash("Barcode is required", "error")
+            return redirect(url_for("admin.scan_barcode"))
+        # Look for product by SKU (barcode)
+        product = get_db().execute("SELECT id FROM products WHERE sku = ? AND active = 1", (barcode,)).fetchone()
+        if product:
+            return redirect(url_for("inventory.edit", product_id=product["id"]))
+        else:
+            flash(f"No active product found with barcode '{barcode}'", "error")
+            return redirect(url_for("admin.scan_barcode"))
+    return render_template("admin/scan_barcode.html", settings=get_company_settings())
 
 
 @bp.route("/help")

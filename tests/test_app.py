@@ -106,37 +106,47 @@ def test_coupon_creation_and_order_application(client):
     assert b'R1080.00' in order.data
 
 
-def test_settings_persist(client, app):
+def test_barcode_lookup(client):
     login(client)
-    res = client.post('/settings/general', data={
-        'company_name': 'ABI Solutions Test',
-        'email': 'hello@example.com',
-        'phone': '123',
-        'website': 'https://example.com',
-        'country': 'South Africa',
-        'city': 'Cape Town',
-        'province': 'Western Cape',
-        'postcode': '8000',
-        'address_line1': '1 Road',
-        'address_line2': '',
-        'timezone': 'Africa/Johannesburg',
-        'date_format': 'dd-mm-yyyy',
-        'units': 'metric',
-        'first_day_of_week': 'Sunday',
-        'currency': 'ZAR',
-        'currency_symbol': 'R',
-        'currency_position': 'before',
-        'tax_mode': 'exclusive',
-        'default_pickup_time': '09:00',
-        'default_return_time': '15:00',
-        'time_increment_minutes': '60',
-        'deposit_mode': 'product_specific',
-        'deposit_value': '0',
-        'pricing_enabled': '1',
-        'enable_time_selection': '1',
-    }, follow_redirects=True)
+    # GET the page
+    res = client.get('/scan-barcode')
     assert res.status_code == 200
-    assert b'ABI Solutions Test' in res.data
+    assert b'Scan a barcode' in res.data
+    assert b'Barcode (SKU)' in res.data
+
+    # Create a product to test with
+    product_data = {
+        'name': 'Barcode Test Product',
+        'sku': 'BARCODE-TEST',
+        'quantity': '1',
+        'description': 'Product for barcode test',
+        'product_type': 'rental',
+        'price_amount': '100',
+        'price_unit': 'day',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }
+    # Create the product via the inventory route
+    resp = client.post('/inventory/new', data=product_data, follow_redirects=False)
+    assert resp.status_code == 302  # redirect to edit page
+
+    # Test valid barcode
+    res = client.post('/scan-barcode', data={'barcode': 'BARCODE-TEST'}, follow_redirects=False)
+    assert res.status_code == 302
+    assert '/inventory/' in res.location
+    assert '/edit' in res.location
+
+    # Test blank barcode
+    res = client.post('/scan-barcode', data={'barcode': ''}, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Barcode is required' in res.data
+
+    # Test invalid barcode
+    res = client.post('/scan-barcode', data={'barcode': 'NON-EXISTENT'}, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'No active product found with barcode' in res.data
 
 
 def test_tax_profile_creation(client):
