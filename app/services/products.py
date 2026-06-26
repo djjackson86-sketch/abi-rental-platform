@@ -2,6 +2,11 @@ from app.db import get_db, now
 
 VALID_TYPES = {"rental", "sale", "service"}
 VALID_UNITS = {"hour", "day", "week", "month", "fixed"}
+VALID_TRACKING_METHODS = {"bulk", "individual"}
+
+
+def tracking_label(value):
+    return "Track individually" if value == "individual" else "Track quantities"
 
 
 def list_products(query="", product_type="", visibility=""):
@@ -58,9 +63,13 @@ def _clean(form):
     price_unit = form.get("price_unit", "day")
     if price_unit not in VALID_UNITS:
         price_unit = "day"
+    tracking_method = form.get("tracking_method", "bulk")
+    if tracking_method not in VALID_TRACKING_METHODS:
+        tracking_method = "bulk"
     return {
         "name": name,
         "product_type": product_type,
+        "tracking_method": tracking_method,
         "description": form.get("description", "").strip(),
         "sku": form.get("sku", "").strip(),
         "active": 1 if form.get("active") else 0,
@@ -78,8 +87,8 @@ def create_product(form):
     db = get_db()
     cur = db.execute(
         """INSERT INTO products
-        (name, product_type, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, quantity, created_at)
-        VALUES (:name, :product_type, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :tax_profile_id, :quantity, :created_at)""",
+        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, quantity, created_at)
+        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :tax_profile_id, :quantity, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -88,15 +97,25 @@ def create_product(form):
 
 def update_product(product_id, form):
     data = _clean(form)
+    existing = get_product(product_id)
+    immutable_change_requested = False
+    if existing:
+        immutable_change_requested = (
+            data["product_type"] != existing["product_type"]
+            or data["tracking_method"] != existing["tracking_method"]
+        )
+        data["product_type"] = existing["product_type"]
+        data["tracking_method"] = existing["tracking_method"]
     data["id"] = product_id
     get_db().execute(
         """UPDATE products SET
-        name=:name, product_type=:product_type, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
+        name=:name, product_type=:product_type, tracking_method=:tracking_method, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
         price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, tax_profile_id=:tax_profile_id, quantity=:quantity
         WHERE id=:id""",
         data,
     )
     get_db().commit()
+    return immutable_change_requested
 
 
 def archive_product(product_id):

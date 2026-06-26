@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS products (
     security_deposit REAL NOT NULL DEFAULT 0,
     tax_profile_id INTEGER REFERENCES tax_profiles(id) ON DELETE SET NULL,
     quantity INTEGER NOT NULL DEFAULT 1,
+    tracking_method TEXT NOT NULL DEFAULT 'bulk',
     created_at TEXT NOT NULL
 );
 
@@ -192,6 +193,7 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "checkout_instructions", "TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.'")
     ensure_column(db, "company_settings", "store_contact_email", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "products", "tracking_method", "TEXT NOT NULL DEFAULT 'bulk'")
 
 def init_db():
     db = get_db()

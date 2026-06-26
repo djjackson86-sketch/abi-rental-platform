@@ -60,6 +60,20 @@ def test_protected_pages_redirect(client):
     assert '/login' in res.headers['Location']
 
 
+def test_booqable_reference_navigation_pages_exist(client):
+    login(client)
+    for path, expected in [
+        ('/coupons', b'Coupons'),
+        ('/app-store', b'App store'),
+        ('/ask-bo', b'Ask Bo'),
+        ('/scan-barcode', b'Scan a barcode'),
+        ('/help', b'Help'),
+    ]:
+        res = client.get(path)
+        assert res.status_code == 200
+        assert expected in res.data
+
+
 def test_settings_persist(client, app):
     login(client)
     res = client.post('/settings/general', data={
@@ -161,6 +175,7 @@ def test_inventory_product_crud_and_public_store(client):
         'name': 'Box Trailer',
         'sku': 'TRL-BOX-001',
         'quantity': '3',
+        'tracking_method': 'bulk',
         'description': 'Reliable enclosed rental trailer.',
         'product_type': 'rental',
         'price_amount': '450',
@@ -174,6 +189,7 @@ def test_inventory_product_crud_and_public_store(client):
     assert res.status_code == 200
     assert b'Product created' in res.data
     assert b'Box Trailer' in res.data
+    assert b'Track quantities' in res.data
 
     res = client.get('/inventory')
     assert b'Box Trailer' in res.data
@@ -183,6 +199,50 @@ def test_inventory_product_crud_and_public_store(client):
     res = client.get('/store')
     assert b'Box Trailer' in res.data
     assert b'R450.00 / day' in res.data
+
+
+def test_product_type_and_tracking_method_are_immutable_after_create(client, app):
+    login(client)
+    res = client.post('/inventory/new', data={
+        'name': 'Immutable Trailer',
+        'sku': 'IMM-TRL',
+        'quantity': '2',
+        'tracking_method': 'bulk',
+        'description': 'Booqable-style immutable type test.',
+        'product_type': 'rental',
+        'price_amount': '300',
+        'price_unit': 'day',
+        'security_deposit': '500',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=False)
+    product_id = res.headers['Location'].rstrip('/').split('/')[-2]
+
+    edited = client.post(f'/inventory/{product_id}/edit', data={
+        'name': 'Immutable Trailer Updated',
+        'sku': 'IMM-TRL',
+        'quantity': '4',
+        'tracking_method': 'individual',
+        'description': 'Attempted to change type and tracking.',
+        'product_type': 'sale',
+        'price_amount': '350',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    assert b'Product saved' in edited.data
+    assert b'Product type and tracking method cannot be changed after saving' in edited.data
+
+    with app.app_context():
+        product = app.db.execute('SELECT product_type, tracking_method, quantity FROM products WHERE id = ?', (product_id,)).fetchone() if hasattr(app, 'db') else None
+        from app.db import get_db
+        product = get_db().execute('SELECT product_type, tracking_method, quantity FROM products WHERE id = ?', (product_id,)).fetchone()
+        assert product['product_type'] == 'rental'
+        assert product['tracking_method'] == 'bulk'
+        assert product['quantity'] == 4
 
 
 def test_archived_product_hidden_from_store(client):
@@ -308,6 +368,56 @@ def test_order_draft_creation_and_totals(client):
     assert b'built-in method items' not in list_res.data
 
 
+def test_order_supports_mixed_rental_sales_and_service_lines(client):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/inventory/new', data={
+        'name': 'LED Trailer Light Kit',
+        'sku': 'CTW-PART-LIGHTKIT',
+        'quantity': '20',
+        'description': 'Sale part for mixed order.',
+        'product_type': 'sale',
+        'price_amount': '475',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Trailer Safety Inspection',
+        'sku': 'CTW-SVC-SAFE',
+        'quantity': '999',
+        'description': 'Workshop inspection service.',
+        'product_type': 'service',
+        'price_amount': '550',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': ['1', '2', '3'],
+        'quantity': ['1', '2', '1'],
+        'start_date': '2026-07-10',
+        'start_time': '09:00',
+        'end_date': '2026-07-12',
+        'end_time': '15:00',
+        'notes': 'Mixed line order',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    assert b'Order Trailer' in res.data
+    assert b'LED Trailer Light Kit' in res.data
+    assert b'Trailer Safety Inspection' in res.data
+    # Rental: 1 * R200 * 3 days; sales: 2 * R475 once; service: 1 * R550 once.
+    assert b'R2100.00' in res.data
+    assert b'R750.00' in res.data
+
+
 def test_order_requires_customer_and_product(client):
     login(client)
     res = client.post('/orders/new', data={
@@ -412,6 +522,13 @@ def test_document_generation_list_and_printable_detail(client):
     assert b'Documents' in documents.data
     assert b'QUO-00001' in documents.data
     assert b'ORD-00001' in documents.data
+
+    export = client.get('/documents/export.csv')
+    assert export.status_code == 200
+    assert export.mimetype == 'text/csv'
+    assert b'number,document_type,order_number,customer_name,status,total,created_at' in export.data
+    assert b'QUO-00001' in export.data
+    assert b'ORD-00001' in export.data
 
 
 def test_document_type_validation(client):

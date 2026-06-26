@@ -1,31 +1,142 @@
 {% extends "admin/layout.html" %}
 {% set title='Documents' %}
 {% block admin_body %}
-<header class="page-header">
-  <div><p class="eyebrow">Documents</p><h1>Documents</h1><p>Quotes, contracts, invoices and packing slips generated from orders.</p></div>
-</header>
-<section class="panel">
-  {% if documents %}
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead><tr><th>Number</th><th>Type</th><th>Order</th><th>Customer</th><th>Status</th><th>Total</th><th></th></tr></thead>
-      <tbody>
-      {% for document in documents %}
-        <tr>
-          <td><strong>{{ document.number }}</strong></td>
-          <td>{{ label_for(document.document_type) }}</td>
-          <td>{{ document.order_number or '—' }}</td>
-          <td>{{ document.customer_name or '—' }}</td>
-          <td><span class="pill">{{ document.status|title }}</span></td>
-          <td>R{{ '%.2f'|format(document.total or 0) }}</td>
-          <td><a href="{{ url_for('documents.detail', document_id=document.id) }}">Open</a></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+<header class="page-header documents-header">
+  <div class="module-title">
+    <span class="module-icon">▰</span>
+    <div>
+      <p class="eyebrow">Documents</p>
+      <h1>Documents</h1>
+    </div>
   </div>
-  {% else %}
-  <p class="empty">No documents yet. Open an order to create a quote, contract, invoice or packing slip.</p>
-  {% endif %}
+  <form class="documents-search" method="get">
+    <span>⌕</span>
+    <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search documents">
+    {% if filters.document_type %}<input type="hidden" name="document_type" value="{{ filters.document_type }}">{% endif %}
+    {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
+    {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
+    {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
+  </form>
+  <a class="btn primary" href="{{ url_for('documents.index') }}">Add document</a>
+</header>
+
+<section class="documents-page-shell">
+  <aside class="documents-filter-rail panel">
+    <form method="get" class="documents-filter-form">
+      {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Document type</strong><span>⌃</span></div>
+        <a class="select-like {% if not filters.document_type %}active{% endif %}" href="{{ url_for('documents.index') }}">
+          <span>All</span><em>{{ docs_total }}</em>
+        </a>
+        {% for type_value,label in [('quote','Quote'),('contract','Contract'),('invoice','Invoice'),('packing_slip','Packing slip')] %}
+          <label class="filter-check">
+            <input type="radio" name="document_type" value="{{ type_value }}" {% if filters.document_type==type_value %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ label }}</span>
+            <em>({{ filter_counts.document_type.get(type_value, 0) }})</em>
+          </label>
+        {% endfor %}
+        {% if filters.document_type %}<a class="filter-clear" href="{{ url_for('documents.index') }}">Clear type</a>{% endif %}
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Status</strong><span>⌃</span></div>
+        <a class="select-like {% if not filters.status %}active{% endif %}" href="{{ url_for('documents.index') }}">
+          <span>All</span><em>{{ docs_total }}</em>
+        </a>
+        {% for status_value,label in [('draft','Draft'),('finalized','Finalized'),('sent','Sent')] %}
+          <label class="filter-check">
+            <input type="radio" name="status" value="{{ status_value }}" {% if filters.status==status_value %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ label }}</span>
+            <em>({{ filter_counts.status.get(status_value, 0) }})</em>
+          </label>
+        {% endfor %}
+        {% if filters.status %}<a class="filter-clear" href="{{ url_for('documents.index') }}">Clear status</a>{% endif %}
+      </div>
+
+      <div class="filter-group compact">
+        <div class="filter-group-head"><strong>Date range</strong><span>⌃</span></div>
+        <div class="select-like active"><span>All time</span></div>
+      </div>
+
+      <a class="btn ghost export-btn" href="{{ url_for('documents.export_csv', query=filters.query, document_type=filters.document_type, status=filters.status, start_date=filters.start_date, end_date=filters.end_date) }}">Export</a>
+
+      <article class="document-help-card">
+        <h3>Documents</h3>
+        <p>Keep track of every invoice, contract or quote you’ve created. You can generate quotes and contracts for individual orders on the order screen, invoices are automatically generated.</p>
+        <a href="#">Add document</a>
+      </article>
+    </form>
+  </aside>
+
+  <main class="documents-workspace">
+    <section class="metrics documents-metrics">
+      <div class="metric-card"><small>Documents</small><b>{{ docs_total }}</b></div>
+      <div class="metric-card"><small>Total amount</small><b>R{{ '%.2f'|format(docs_total_amount) }}</b></div>
+      <div class="metric-card"><small>Average</small><b>R{{ '%.2f'|format(docs_total_amount / docs_total if docs_total > 0 else 0) }}</b></div>
+    </section>
+
+    <section class="panel documents-list-panel">
+      <div class="documents-table-toolbar">
+        <div class="bulk-actions">
+          <button class="btn ghost" type="button" disabled>Actions⌄</button>
+          <span>0 documents selected</span>
+          {% if documents %}<a href="#">Select all {{ documents|length }} document{% if documents|length != 1 %}s{% endif %}</a>{% endif %}
+        </div>
+        <div class="table-tools">
+          <button class="btn ghost" type="button" disabled>Columns</button>
+          <span>Showing {{ 1 if documents else 0 }} - {{ documents|length }} of {{ documents|length }}</span>
+        </div>
+      </div>
+
+      {% if filters.query or filters.document_type or filters.status or filters.start_date or filters.end_date %}
+        <div class="active-filter-line">
+          <span>Showing filtered documents</span>
+          <a href="{{ url_for('documents.index') }}">Clear all filters</a>
+        </div>
+      {% endif %}
+
+      {% if documents %}
+        <div class="table-wrap documents-table-wrap">
+          <table class="data-table documents-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" disabled aria-label="Select all documents"></th>
+                <th>Number</th>
+                <th>Type</th>
+                <th>Order</th>
+                <th>Customer</th>
+                <th>Status</th>
+                <th>Total</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in documents %}
+                <tr>
+                  <td><input type="checkbox" disabled aria-label="Select {{ d.number }}"></td>
+                  <td><strong>{{ d.number }}</strong></td>
+                  <td>{{ label_for(d.document_type) }}</td>
+                  <td>{{ d.order_number or '—' }}</td>
+                  <td>{{ d.customer_name or '—' }}</td>
+                  <td><span class="pill">{{ d.status|title }}</span></td>
+                  <td>R{{ '%.2f'|format(d.total or 0) }}</td>
+                  <td><a class="btn ghost" href="{{ url_for('documents.detail', document_id=d.id) }}">Open</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="documents-empty-state">
+          <div class="empty-arrow" aria-hidden="true"></div>
+          <h2>Add your first <span>document</span></h2>
+          <span hidden>Add your first document</span>
+          <p>Keep track of every invoice, contract or quote you’ve created. You can generate quotes and contracts for individual orders on the order screen, invoices are automatically generated.</p>
+          <a class="btn primary" href="{{ url_for('orders.new') }}">Create order</a>
+        </div>
+      {% endif %}
+    </section>
+  </main>
 </section>
 {% endblock %}

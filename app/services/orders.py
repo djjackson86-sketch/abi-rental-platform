@@ -102,23 +102,26 @@ def calculate_line(product, quantity, days, tax_mode="exclusive"):
     return {"quantity": qty, "line_subtotal": round(line_subtotal, 2), "line_tax": round(line_tax, 2), "line_total": round(line_total, 2), "deposit": round(deposit, 2)}
 
 
+def _form_list(form, name):
+    if hasattr(form, "getlist"):
+        return [value for value in form.getlist(name) if str(value).strip()]
+    value = form.get(name)
+    if isinstance(value, (list, tuple)):
+        return [item for item in value if str(item).strip()]
+    return [value] if value else []
+
+
 def create_order(form):
     customer_id = int(form.get("customer_id") or 0)
-    product_id = int(form.get("product_id") or 0)
+    product_ids = _form_list(form, "product_id")
+    quantities = _form_list(form, "quantity")
     if not customer_id:
         raise ValueError("Customer is required")
-    if not product_id:
+    if not product_ids:
         raise ValueError("Product is required")
     customer = get_db().execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
-    product = get_db().execute(
-        """SELECT p.*, COALESCE(t.rate, 0) AS tax_rate FROM products p LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
-        WHERE p.id = ? AND p.active = 1""",
-        (product_id,),
-    ).fetchone()
     if not customer:
         raise ValueError("Selected customer was not found")
-    if not product:
-        raise ValueError("Selected product was not found or is archived")
 
     settings = get_db().execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
     start_dt = _parse_dt(form.get("start_date"), form.get("start_time"), settings["default_pickup_time"])
@@ -129,12 +132,30 @@ def create_order(form):
         raise ValueError("Return must be after pickup")
 
     days = rental_days(start_dt, end_dt)
-    line = calculate_line(product, form.get("quantity", 1), days, settings["tax_mode"])
-    subtotal = line["line_subtotal"]
-    tax_total = line["line_tax"]
-    total = line["line_total"]
-    deposit_total = line["deposit"]
+    lines = []
+    subtotal = tax_total = total = deposit_total = 0
     db = get_db()
+    for index, product_id_value in enumerate(product_ids):
+        product_id = int(product_id_value or 0)
+        product = db.execute(
+            """SELECT p.*, COALESCE(t.rate, 0) AS tax_rate FROM products p LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
+            WHERE p.id = ? AND p.active = 1""",
+            (product_id,),
+        ).fetchone()
+        if not product:
+            raise ValueError("Selected product was not found or is archived")
+        quantity = quantities[index] if index < len(quantities) else 1
+        line = calculate_line(product, quantity, days, settings["tax_mode"])
+        lines.append((product, line))
+        subtotal += line["line_subtotal"]
+        tax_total += line["line_tax"]
+        total += line["line_total"]
+        deposit_total += line["deposit"]
+
+    subtotal = round(subtotal, 2)
+    tax_total = round(tax_total, 2)
+    total = round(total, 2)
+    deposit_total = round(deposit_total, 2)
     order_number = next_order_number()
     cur = db.execute(
         """INSERT INTO orders (order_number, customer_id, status, payment_status, start_at, end_at, subtotal, discount_total, tax_total, deposit_total, total, due_total, notes, created_at)
@@ -142,11 +163,12 @@ def create_order(form):
         (order_number, customer_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, tax_total, deposit_total, total, total, form.get("notes", "").strip(), now()),
     )
     order_id = cur.lastrowid
-    db.execute(
-        """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total)
-        VALUES (?, ?, '', ?, ?, ?, ?, ?)""",
-        (order_id, product_id, line["quantity"], float(product["price_amount"] or 0), subtotal, tax_total, total),
-    )
+    for product, line in lines:
+        db.execute(
+            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total)
+            VALUES (?, ?, '', ?, ?, ?, ?, ?)""",
+            (order_id, product["id"], line["quantity"], float(product["price_amount"] or 0), line["line_subtotal"], line["line_tax"], line["line_total"]),
+        )
     db.commit()
     return order_id
 
@@ -223,20 +245,24 @@ def status_actions(status):
     return actions
 
 
-def scheduled_events(limit=50):
-    return get_db().execute(
-        """SELECT o.*, c.name AS customer_name,
+def scheduled_events(limit=50, start_date=None, end_date=None):
+    db = get_db()
+    sql = """SELECT o.*, c.name AS customer_name,
             (SELECT GROUP_CONCAT(COALESCE(p.name, oi.custom_name), ', ')
              FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
              WHERE oi.order_id = o.id) AS product_names
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
-        WHERE o.status IN ('reserved', 'started')
-        ORDER BY o.start_at ASC, o.end_at ASC
-        LIMIT ?""",
-        (limit,),
-    ).fetchall()
-
-
+        WHERE o.status IN ('reserved', 'started')"""
+    params = []
+    if start_date:
+        sql += " AND DATE(o.start_at) >= ?"
+        params.append(start_date)
+    if end_date:
+        sql += " AND DATE(o.start_at) <= ?"
+        params.append(end_date)
+    sql += " ORDER BY o.start_at ASC, o.end_at ASC LIMIT ?"
+    params.append(limit)
+    return db.execute(sql, params).fetchall()
 def dashboard_schedule():
     events = scheduled_events(limit=100)
     return {

@@ -1,23 +1,58 @@
 {% extends "admin/layout.html" %}
 {% set title='Calendar' %}
 {% block admin_body %}
-<header class="page-header">
-  <div><p class="eyebrow">Calendar</p><h1>Reservation calendar</h1><p>Pickup and return timeline for reserved and started orders.</p></div>
-  <div class="header-actions"><a class="btn primary" href="{{ url_for('orders.new') }}">New order</a></div>
-</header>
-<section class="panel">
-  {% if events %}
-  <div class="timeline">
-    {% for order in events %}
-    <a class="timeline-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
-      <div class="timeline-date"><b>{{ order.start_at }}</b><small>to {{ order.end_at }}</small></div>
-      <div class="timeline-main"><b>{{ order.order_number }} · {{ order.status|title }}</b><span>{{ order.customer_name or 'No customer' }} · {{ order.product_names or 'No items' }}</span></div>
-      <div class="timeline-action">Open</div>
-    </a>
-    {% endfor %}
+<header class="page-header calendar-header">
+  <div class="module-title">
+    <span class="module-icon">▣</span>
+    <div>
+      <p class="eyebrow">Calendar</p>
+      <h1>Reservation calendar</h1>
+      <p>Pickup and return timeline for reserved and started orders.</p>
+    </div>
   </div>
-  {% else %}
-  <p class="empty">No active reservations yet. Reserve an order to see it on the calendar.</p>
-  {% endif %}
+  <div class="header-actions">
+    <a class="btn primary" href="{{ url_for('orders.new') }}">New order</a>
+  </div>
+</header>
+
+<section class="calendar-page-shell">
+  <aside class="calendar-filter-rail panel">
+    <form method="get" class="calendar-filter-form">
+      {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
+      {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Start date</strong></div>
+        <input type="date" name="start_date" value="{{ filters.start_date }}">
+
+      </div>
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>End date</strong></div>
+        <input type="date" name="end_date" value="{{ filters.end_date }}">
+
+      </div>
+      <button class="btn ghost" type="submit">Filter</button>
+      {% if filters.start_date or filters.end_date %}
+        <a class="link-muted" href="{{ url_for('admin.calendar') }}">Clear</a>
+      {% endif %}
+    </form>
+  </aside>
+
+  <main class="calendar-workspace">
+    <section class="panel">
+      {% if events %}
+        <div class="timeline">
+          {% for order in events %}
+          <a class="timeline-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
+            <div class="timeline-date"><b>{{ order.start_at }}</b><small>to {{ order.end_at }}</small></div>
+            <div class="timeline-main"><b>{{ order.order_number }} · {{ order.status|title }}</b><span>{{ order.customer_name or 'No customer' }} · {{ order.product_names or 'No items' }}</span></div>
+            <div class="timeline-action">Open</div>
+          </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty">No active reservations yet. Reserve an order to see it on the calendar.</p>
+      {% endif %}
+    </section>
+  </main>
 </section>
 {% endblock %}

@@ -11,10 +11,15 @@
     <a href="{{ url_for('orders.index') }}"><span>□</span><span>Orders</span></a>
     <a href="{{ url_for('customers.index') }}"><span>♙</span><span>Customers</span></a>
     <a href="{{ url_for('inventory.index') }}"><span>▱</span><span>Inventory</span></a>
+    <a href="{{ url_for('admin.coupons') }}"><span>%</span><span>Coupons</span></a>
     <a href="{{ url_for('documents.index') }}"><span>◴</span><span>Documents</span></a>
     <a href="{{ url_for('payments.index') }}"><span>▤</span><span>Payments</span></a>
     <a href="{{ url_for('admin.online_store') }}"><span>⌂</span><span>Online store</span></a>
+    <a href="{{ url_for('admin.app_store') }}"><span>▧</span><span>App store</span></a>
     <a href="{{ url_for('admin.reports') }}"><span>≋</span><span>Reports</span></a>
+    <a href="{{ url_for('admin.ask_bo') }}"><span>?</span><span>Ask Bo</span></a>
+    <a href="{{ url_for('admin.scan_barcode') }}"><span>▥</span><span>Scan a barcode</span></a>
+    <a href="{{ url_for('admin.help_page') }}"><span>♡</span><span>Help</span></a>
     <a href="{{ url_for('settings.general') }}"><span>⚙</span><span>Settings</span></a>
     <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button type="submit"><span>↩</span><span>Log out</span></button></form>
   </aside>

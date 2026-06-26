@@ -36,14 +36,42 @@ def create_document(order_id, document_type):
     return cur.lastrowid
 
 
-def list_documents():
-    return get_db().execute(
-        """SELECT d.*, o.order_number, o.total, c.name AS customer_name
+def list_documents(query="", document_type="", status="", start_date="", end_date=""):
+    sql = """SELECT d.*, o.order_number, o.total, c.name AS customer_name
         FROM documents d
         LEFT JOIN orders o ON o.id = d.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
-        ORDER BY d.created_at DESC, d.id DESC"""
-    ).fetchall()
+        WHERE 1=1"""
+    params = []
+    if query:
+        sql += """ AND (LOWER(d.number) LIKE ? OR LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ?)"""
+        needle = f"%{query.lower()}%"
+        params.extend([needle, needle, needle])
+    if document_type:
+        sql += " AND d.document_type = ?"
+        params.append(document_type)
+    if status:
+        sql += " AND d.status = ?"
+        params.append(status)
+    if start_date:
+        sql += " AND DATE(d.created_at) >= ?"
+        params.append(start_date)
+    if end_date:
+        sql += " AND DATE(d.created_at) <= ?"
+        params.append(end_date)
+    sql += " ORDER BY d.created_at DESC, d.id DESC"
+    return get_db().execute(sql, params).fetchall()
+
+
+def document_filter_counts():
+    db = get_db()
+    type_rows = db.execute("SELECT document_type, COUNT(*) count FROM documents GROUP BY document_type").fetchall()
+    status_rows = db.execute("SELECT status, COUNT(*) count FROM documents GROUP BY status").fetchall()
+    return {
+        "document_type": {row["document_type"]: row["count"] for row in type_rows},
+        "status": {row["status"]: row["count"] for row in status_rows},
+    }
+
 
 
 def get_document(document_id):
