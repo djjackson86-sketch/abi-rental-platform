@@ -71,6 +71,11 @@ CUSTOMERS = [
     ("company", "Metro Events Logistics", "ops@metroevents.test", "+27 21 555 0199", 0),
 ]
 
+COUPONS = [
+    ("TRAILER10", "10 percent trailer promo", "percent", 10, 1),
+    ("PARTS150", "R150 off trailer parts and service bundles", "fixed", 150, 1),
+]
+
 
 def upsert_product(db, tax_id, product):
     name, sku, product_type, quantity, price, unit, deposit, description = product
@@ -103,6 +108,19 @@ def upsert_customer(db, customer):
     cur = db.execute(
         "INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, balance_due, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
         (customer_type, name, email, phone, marketing, now()),
+    )
+    return cur.lastrowid
+
+
+def upsert_coupon(db, coupon):
+    code, description, discount_type, value, active = coupon
+    existing = db.execute("SELECT id FROM coupons WHERE code = ?", (code,)).fetchone()
+    if existing:
+        db.execute("UPDATE coupons SET description=?, discount_type=?, value=?, active=? WHERE id=?", (description, discount_type, value, active, existing["id"]))
+        return existing["id"]
+    cur = db.execute(
+        "INSERT INTO coupons (code, description, discount_type, value, active, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (code, description, discount_type, value, active, now()),
     )
     return cur.lastrowid
 
@@ -147,6 +165,7 @@ def create_workflow_orders(db, product_ids, customer_ids):
         ("product_id", str(product_ids["CTW-SVC-SAFE"])), ("quantity", "1"),
         ("start_date", "2026-07-10"), ("start_time", "08:00"),
         ("end_date", "2026-07-12"), ("end_time", "16:00"),
+        ("coupon_code", "TRAILER10"),
         ("notes", "Cape Trailworks parity: mixed rental sale service order"),
     ]))
     transition_order(order_2, "reserve")
@@ -168,6 +187,8 @@ def main():
         tax_id = configure_company_and_tax(db)
         product_ids = {product[1]: upsert_product(db, tax_id, product) for product in PRODUCTS}
         customer_ids = {customer[2]: upsert_customer(db, customer) for customer in CUSTOMERS}
+        for coupon in COUPONS:
+            upsert_coupon(db, coupon)
         db.commit()
         created_orders = create_workflow_orders(db, product_ids, customer_ids)
         print(f"Seeded Cape Trailworks fixture: {len(PRODUCTS)} products, {len(CUSTOMERS)} customers, {created_orders} new orders")

@@ -6,6 +6,7 @@ from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services.orders import dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
+from app.services.coupons import coupon_counts, create_coupon, format_discount, list_coupons
 
 bp = Blueprint("admin", __name__)
 
@@ -46,10 +47,26 @@ def render_placeholder(name, title, description, primary_label=None):
     return render_template("admin/placeholder.html", settings=get_company_settings(), name=name, title=title, description=description, primary_label=primary_label)
 
 
-@bp.route("/coupons")
+@bp.route("/coupons", methods=["GET", "POST"])
 @login_required
 def coupons():
-    return render_placeholder("Coupons", "Coupons", "Create and track coupon codes for online checkout discounts. Full coupon rules are planned for a parity pass.")
+    if request.method == "POST":
+        try:
+            create_coupon(request.form)
+            flash("Coupon created", "success")
+            return redirect(url_for("admin.coupons"))
+        except ValueError as exc:
+            flash(str(exc), "error")
+    query = request.args.get("query", "").strip()
+    status = request.args.get("status", "")
+    return render_template(
+        "admin/coupons.html",
+        settings=get_company_settings(),
+        coupons=list_coupons(query=query, status=status),
+        counts=coupon_counts(),
+        filters={"query": query, "status": status},
+        format_discount=format_discount,
+    )
 
 
 @bp.route("/app-store")

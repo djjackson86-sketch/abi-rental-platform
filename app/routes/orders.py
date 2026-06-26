@@ -6,6 +6,7 @@ from app.services.orders import create_order, get_order, list_orders, order_coun
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
+from app.services.coupons import list_coupons
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -45,7 +46,7 @@ def new():
             return redirect(url_for("orders.detail", order_id=order_id))
         except ValueError as exc:
             flash(str(exc), "error")
-    return render_template("admin/orders/form.html", settings=get_company_settings(), customers=_customers(), products=_products())
+    return render_template("admin/orders/form.html", settings=get_company_settings(), customers=_customers(), products=_products(), coupons=list_coupons(status="active"))
 
 
 @bp.route("/<int:order_id>")

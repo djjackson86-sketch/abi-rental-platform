@@ -74,6 +74,38 @@ def test_booqable_reference_navigation_pages_exist(client):
         assert expected in res.data
 
 
+def test_coupon_creation_and_order_application(client):
+    login(client)
+    created = client.post('/coupons', data={
+        'code': 'TRAILER10',
+        'description': '10 percent trailer promo',
+        'discount_type': 'percent',
+        'value': '10',
+        'active': '1',
+    }, follow_redirects=True)
+    assert created.status_code == 200
+    assert b'Coupon created' in created.data
+    assert b'TRAILER10' in created.data
+    assert b'10.0%' in created.data
+
+    seed_customer_and_product(client)
+    order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '2',
+        'coupon_code': 'TRAILER10',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'notes': 'Discounted order test',
+    }, follow_redirects=True)
+    assert b'Draft order created' in order.data
+    assert b'TRAILER10' in order.data
+    assert b'R120.00' in order.data  # 10% discount on R1200 rental subtotal.
+    assert b'R1080.00' in order.data
+
+
 def test_settings_persist(client, app):
     login(client)
     res = client.post('/settings/general', data={

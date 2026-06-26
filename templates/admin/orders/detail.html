@@ -77,6 +77,8 @@
   </div>
   <div class="totals">
     <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(order.subtotal) }}</b></div>
+    {% if order.coupon_code %}<div class="list-row"><span>Coupon</span><b>{{ order.coupon_code }}</b></div>{% endif %}
+    <div class="list-row"><span>Discount</span><b>R{{ '%.2f'|format(order.discount_total) }}</b></div>
     <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(order.tax_total) }}</b></div>
     <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(order.deposit_total) }}</b></div>
     <div class="list-row"><span>Total incl. taxes</span><b>R{{ '%.2f'|format(order.total) }}</b></div>

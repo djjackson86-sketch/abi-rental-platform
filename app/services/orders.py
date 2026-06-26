@@ -2,6 +2,7 @@ from datetime import datetime, date, time
 from math import ceil
 
 from app.db import get_db, now
+from app.services.coupons import calculate_discount, get_coupon_by_code
 
 STATUS_LABELS = {
     "draft": "Draft",
@@ -154,13 +155,18 @@ def create_order(form):
 
     subtotal = round(subtotal, 2)
     tax_total = round(tax_total, 2)
-    total = round(total, 2)
+    coupon_code = (form.get("coupon_code") or "").strip().upper()
+    coupon = get_coupon_by_code(coupon_code)
+    discount_total = calculate_discount(coupon, subtotal) if coupon_code else 0
+    if coupon_code and not coupon:
+        raise ValueError("Coupon code was not found or is inactive")
+    total = round(max(0, subtotal - discount_total) + tax_total, 2)
     deposit_total = round(deposit_total, 2)
     order_number = next_order_number()
     cur = db.execute(
-        """INSERT INTO orders (order_number, customer_id, status, payment_status, start_at, end_at, subtotal, discount_total, tax_total, deposit_total, total, due_total, notes, created_at)
-        VALUES (?, ?, 'draft', 'payment_due', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)""",
-        (order_number, customer_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, tax_total, deposit_total, total, total, form.get("notes", "").strip(), now()),
+        """INSERT INTO orders (order_number, customer_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, total, due_total, notes, created_at)
+        VALUES (?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (order_number, customer_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, discount_total, coupon_code if coupon else "", tax_total, deposit_total, total, total, form.get("notes", "").strip(), now()),
     )
     order_id = cur.lastrowid
     for product, line in lines:

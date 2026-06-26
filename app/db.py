@@ -106,6 +106,16 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS coupons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    discount_type TEXT NOT NULL DEFAULT 'percent',
+    value REAL NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_number TEXT NOT NULL UNIQUE,
@@ -116,6 +126,7 @@ CREATE TABLE IF NOT EXISTS orders (
     end_at TEXT,
     subtotal REAL NOT NULL DEFAULT 0,
     discount_total REAL NOT NULL DEFAULT 0,
+    coupon_code TEXT NOT NULL DEFAULT '',
     tax_total REAL NOT NULL DEFAULT 0,
     deposit_total REAL NOT NULL DEFAULT 0,
     total REAL NOT NULL DEFAULT 0,
@@ -194,6 +205,7 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "store_contact_email", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "products", "tracking_method", "TEXT NOT NULL DEFAULT 'bulk'")
+    ensure_column(db, "orders", "coupon_code", "TEXT NOT NULL DEFAULT ''")
 
 def init_db():
     db = get_db()

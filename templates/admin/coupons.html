@@ -1,0 +1,53 @@
+{% extends "admin/layout.html" %}
+{% set title='Coupons' %}
+{% block admin_body %}
+<header class="page-header inventory-header">
+  <div class="module-title">
+    <span class="module-icon">%</span>
+    <div><p class="eyebrow">Online checkout</p><h1>Coupons</h1><p>Create coupon codes customers can use on orders and checkout.</p></div>
+  </div>
+  <form class="inventory-search" method="get">
+    <span>⌕</span><input type="search" name="query" placeholder="Search coupons..." value="{{ filters.query }}" aria-label="Search coupons">
+  </form>
+</header>
+
+<section class="two-col">
+  <article class="panel settings-form">
+    <h2>Create coupon</h2>
+    <form method="post" class="form-grid">
+      <label>Code<input name="code" required placeholder="TRAILER10" style="text-transform:uppercase"></label>
+      <label>Discount type<select name="discount_type"><option value="percent">Percentage</option><option value="fixed">Fixed amount</option></select></label>
+      <label>Value<input name="value" required type="number" min="0.01" step="0.01" placeholder="10"></label>
+      <label class="span-2">Description<input name="description" placeholder="Winter trailer discount"></label>
+      <label class="switch"><input type="checkbox" name="active" value="1" checked> Active</label>
+      <div class="form-actions span-2"><button class="btn primary" type="submit">Create coupon</button></div>
+    </form>
+  </article>
+  <article class="panel">
+    <h2>Coupon summary</h2>
+    <div class="stats-grid compact-stats">
+      <div><strong>{{ counts.total }}</strong><span>Total</span></div>
+      <div><strong>{{ counts.active }}</strong><span>Active</span></div>
+      <div><strong>{{ counts.inactive }}</strong><span>Inactive</span></div>
+    </div>
+    <p class="empty">Coupons can be entered on the order creation screen. Discount totals are stored against the order.</p>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="table-toolbar">
+    <strong>{{ coupons|length }} coupons</strong>
+    <div><a class="btn ghost {% if not filters.status %}active{% endif %}" href="{{ url_for('admin.coupons', query=filters.query) }}">All</a> <a class="btn ghost" href="{{ url_for('admin.coupons', query=filters.query, status='active') }}">Active</a> <a class="btn ghost" href="{{ url_for('admin.coupons', query=filters.query, status='inactive') }}">Inactive</a></div>
+  </div>
+  {% if coupons %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Code</th><th>Description</th><th>Discount</th><th>Status</th><th>Created</th></tr></thead>
+      <tbody>{% for coupon in coupons %}<tr><td><strong>{{ coupon.code }}</strong></td><td>{{ coupon.description or '—' }}</td><td>{{ format_discount(coupon) }}</td><td>{% if coupon.active %}<span class="store-dot visible">Active</span>{% else %}<span class="store-dot hidden">Inactive</span>{% endif %}</td><td>{{ coupon.created_at }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="inventory-empty-state"><h2>Create your first <span>coupon</span></h2><p>Add a coupon code like TRAILER10, then apply it while creating an order.</p></div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -21,6 +21,13 @@
       <div class="empty-state"><p>Add products before creating orders.</p><a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a></div>
     {% endif %}
   </section>
+  <section class="form-section">
+    <h2>Coupon</h2>
+    <div class="form-grid">
+      <label>Coupon code<input name="coupon_code" placeholder="TRAILER10" list="coupon-options" style="text-transform:uppercase"></label>
+      <datalist id="coupon-options">{% for coupon in coupons %}<option value="{{ coupon.code }}">{{ coupon.description }}</option>{% endfor %}</datalist>
+    </div>
+  </section>
   <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional notes for this draft order"></textarea></label></section>
   <div class="form-actions"><button class="btn primary" {% if not customers or not products %}disabled{% endif %}>Save as draft</button></div>
 </form>
