@@ -23,6 +23,11 @@ class TursoConnection:
         kwargs = {}
         if auth_token:
             kwargs["auth_token"] = auth_token
+        # libsql-client's libsql:// path uses WebSockets; Turso's HTTP endpoint is
+        # more reliable on Render/WSL. Keep env vars in Turso's standard libsql://
+        # form and translate at connection time.
+        if url.startswith("libsql://"):
+            url = "https://" + url.removeprefix("libsql://")
         self._client = create_client_sync(url, **kwargs)
         self.total_changes = 0
 
