@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .env
 *turso-access.txt
+render-deploy.json
 instance/*.db
 data/dev/*
 !.gitkeep
