@@ -78,6 +78,17 @@ CREATE TABLE IF NOT EXISTS operating_hours (
     closed INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS app_store_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    installed_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_type TEXT NOT NULL DEFAULT 'individual',
@@ -194,7 +205,14 @@ def ensure_column(db, table, column, definition):
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def rename_column(db, table, old_name, new_name):
+    existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    if old_name in existing and new_name not in existing:
+        db.execute(f"ALTER TABLE {table} RENAME COLUMN {old_name} TO {new_name}")
+
+
 def run_migrations(db):
+    rename_column(db, "operating_hours", "checked", "closed")
     ensure_column(db, "company_settings", "store_enabled", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "company_settings", "show_prices", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "company_settings", "show_availability", "INTEGER NOT NULL DEFAULT 1")
@@ -206,6 +224,16 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "products", "tracking_method", "TEXT NOT NULL DEFAULT 'bulk'")
     ensure_column(db, "orders", "coupon_code", "TEXT NOT NULL DEFAULT ''")
+    db.execute("""CREATE TABLE IF NOT EXISTS app_store_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        provider TEXT NOT NULL DEFAULT '',
+        is_active INTEGER NOT NULL DEFAULT 0,
+        config_json TEXT NOT NULL DEFAULT '{}',
+        installed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""")
 
 def init_db():
     db = get_db()

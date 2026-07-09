@@ -7,6 +7,7 @@ from app.services.settings import get_company_settings, update_online_store_sett
 from app.services.orders import dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.coupons import coupon_counts, create_coupon, format_discount, list_coupons
+from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 
 bp = Blueprint("admin", __name__)
 
@@ -69,10 +70,23 @@ def coupons():
     )
 
 
-@bp.route("/app-store")
+@bp.route("/app-store", methods=["GET", "POST"])
 @login_required
 def app_store():
-    return render_placeholder("App store", "App store", "Review available integrations and add-ons for payments, documents, messaging and store extensions.")
+    # Seed default items if none exist
+    seed_app_store_items()
+    if request.method == "POST":
+        item_id = request.form.get("item_id")
+        if item_id:
+            is_active = 1 if request.form.get("is_active") else 0
+            try:
+                update_app_store_item(item_id, is_active=is_active)
+                flash("App store item updated", "success")
+            except Exception as exc:
+                flash(str(exc), "error")
+        return redirect(url_for("admin.app_store"))
+    items = list_app_store_items()
+    return render_template("admin/app_store.html", items=items)
 
 
 @bp.route("/ask-bo")

@@ -1,0 +1,71 @@
+{% extends "admin/layout.html" %}
+{% set title='App store' %}
+{% block admin_body %}
+<header class="page-header">
+  <div class="module-title">
+    <span class="module-icon">▧</span>
+    <div><p class="eyebrow">Integrations</p><h1>App store</h1><p>Enable or disable available integrations.</p></div>
+  </div>
+</header>
+
+<section class="panel">
+  <h2>Available integrations</h2>
+  {% if items %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Description</th>
+          <th>Provider</th>
+          <th>Status</th>
+          <th>Configuration</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td><strong>{{ item.name }}</strong></td>
+          <td>{{ item.description }}</td>
+          <td>{{ item.provider }}</td>
+          <td>
+            {% if item.is_active %}
+              <span class="store-dot visible">Active</span>
+            {% else %}
+              <span class="store-dot hidden">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.config_json and item.config_json != '{}' %}
+              <details class="config-details">
+                <summary>View config</summary>
+                <pre class="config-json">{{ item.config_json }}</pre>
+              </details>
+            {% else %}
+              <span class="text-muted">No configuration</span>
+            {% endif %}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('admin.app_store') }}" class="inline-form">
+              <input type="hidden" name="item_id" value="{{ item.id }}">
+              <label class="switch">
+                <input type="checkbox" name="is_active" {% if item.is_active %}checked{% endif %}>
+                Active
+              </label>
+              <button type="submit" class="btn primary">Update</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="inventory-empty-state">
+    <h2>No integrations available</h2>
+    <p>The app store is empty. Check back later for available integrations.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

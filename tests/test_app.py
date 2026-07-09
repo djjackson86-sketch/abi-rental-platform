@@ -279,7 +279,6 @@ def test_product_type_and_tracking_method_are_immutable_after_create(client, app
     assert b'Product type and tracking method cannot be changed after saving' in edited.data
 
     with app.app_context():
-        product = app.db.execute('SELECT product_type, tracking_method, quantity FROM products WHERE id = ?', (product_id,)).fetchone() if hasattr(app, 'db') else None
         from app.db import get_db
         product = get_db().execute('SELECT product_type, tracking_method, quantity FROM products WHERE id = ?', (product_id,)).fetchone()
         assert product['product_type'] == 'rental'
@@ -318,7 +317,7 @@ def test_customer_crud_search_and_detail(client):
         'customer_type': 'company',
         'name': 'Acme Rentals',
         'email': 'bookings@acme.test',
-        'phone': '+27123456789',
+        'phone': '+271****6789',
         'marketing_opt_in': '1',
     }, follow_redirects=True)
     assert res.status_code == 200
@@ -336,7 +335,7 @@ def test_customer_crud_search_and_detail(client):
         'customer_type': 'individual',
         'name': 'Don Customer',
         'email': 'don@example.com',
-        'phone': '+27999999999',
+        'phone': '+279****9999',
     }, follow_redirects=True)
     assert b'Customer saved' in res.data
     assert b'Don Customer' in res.data
@@ -359,7 +358,7 @@ def seed_customer_and_product(client):
         'customer_type': 'individual',
         'name': 'Order Customer',
         'email': 'order@example.com',
-        'phone': '+27000000000',
+        'phone': '+270****0000',
     }, follow_redirects=True)
     client.post('/inventory/new', data={
         'name': 'Order Trailer',
@@ -480,7 +479,7 @@ def create_order_for_status(client, quantity='2', start_date='2026-07-01', end_d
         'start_time': '09:00',
         'end_date': end_date,
         'end_time': '15:00',
-        'notes': 'Status workflow order',
+        'notes': 'Status workload order',
     }, follow_redirects=False)
     assert res.status_code == 302
     return res.headers['Location'].rstrip('/').split('/')[-1]
@@ -723,3 +722,45 @@ def test_reports_orders_csv_export(client):
     body = response.data.decode()
     assert 'order_number,customer,status,payment_status,total,due_total' in body
     assert 'ORD-00001,Order Customer,draft,payment_due,600.00,600.00' in body
+
+
+def test_app_store_functionality(client):
+    login(client)
+    # GET the app store page
+    resp = client.get('/app-store')
+    assert resp.status_code == 200
+    assert b'App store' in resp.data
+    # Check that we have at least one item (from seeding)
+    assert b'ShipStation' in resp.data or b'Mailchimp' in resp.data  # one of the seeded items
+    # We'll get the item id from the database for a known item.
+    with client.application.app_context():
+        from app.db import get_db
+        db = get_db()
+        item = db.execute('SELECT id FROM app_store_items WHERE name = ?', ('ShipStation',)).fetchone()
+        # If ShipStation is not found (maybe the order is different), try the first item.
+        if item is None:
+            item = db.execute('SELECT id FROM app_store_items LIMIT 1').fetchone()
+        assert item is not None, 'No app store items found'
+        item_id = item['id']
+    # Now test toggling the item's active status.
+    # First, deactivate it: we do not send the 'is_active' key (unchecked checkbox).
+    resp = client.post('/app-store', data={'item_id': str(item_id)}, follow_redirects=True)
+    assert resp.status_code == 200
+    assert b'App store item updated' in resp.data
+    # Check that the item is now inactive in the database.
+    with client.application.app_context():
+        from app.db import get_db
+        db = get_db()
+        item = db.execute('SELECT is_active FROM app_store_items WHERE id = ?', (item_id,)).fetchone()
+        assert item is not None
+        assert item['is_active'] == 0
+    # Now activate it again: we send 'is_active': 'on' (checked checkbox).
+    resp = client.post('/app-store', data={'item_id': str(item_id), 'is_active': 'on'}, follow_redirects=True)
+    assert resp.status_code == 200
+    assert b'App store item updated' in resp.data
+    with client.application.app_context():
+        from app.db import get_db
+        db = get_db()
+        item = db.execute('SELECT is_active FROM app_store_items WHERE id = ?', (item_id,)).fetchone()
+        assert item is not None
+        assert item['is_active'] == 1
