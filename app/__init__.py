@@ -42,6 +42,8 @@ def create_app(test_config=None):
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-me"),
         DATABASE=os.environ.get("DATABASE_PATH", os.path.join(app.instance_path, "abi_rental.db")),
+        TURSO_DATABASE_URL=os.environ.get("TURSO_DATABASE_URL", ""),
+        TURSO_AUTH_TOKEN=os.environ.get("TURSO_AUTH_TOKEN", ""),
         ADMIN_EMAIL=os.environ.get("ADMIN_EMAIL", "admin@abi.local"),
         ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD", "admin123"),
         ENV=os.environ.get("FLASK_ENV", "development"),

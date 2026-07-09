@@ -3,6 +3,8 @@ from datetime import datetime
 from flask import current_app, g
 from werkzeug.security import generate_password_hash
 
+from app.turso_db import connect_turso
+
 SCHEMA = r"""
 PRAGMA foreign_keys = ON;
 
@@ -186,9 +188,13 @@ def now():
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(current_app.config["DATABASE"])
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
+        turso_url = current_app.config.get("TURSO_DATABASE_URL")
+        if turso_url:
+            g.db = connect_turso(turso_url, current_app.config.get("TURSO_AUTH_TOKEN"))
+        else:
+            g.db = sqlite3.connect(current_app.config["DATABASE"])
+            g.db.row_factory = sqlite3.Row
+            g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
 
 

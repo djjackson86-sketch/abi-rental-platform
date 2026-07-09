@@ -15,9 +15,7 @@ services:
         value: admin@abi.local
       - key: ADMIN_PASSWORD
         generateValue: true
-      - key: DATABASE_PATH
-        value: /var/data/abi_rental.db
-    disk:
-      name: abi-rental-data
-      mountPath: /var/data
-      sizeGB: 1
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
