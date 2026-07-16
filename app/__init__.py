@@ -11,6 +11,7 @@ from .routes.customers import bp as customers_bp
 from .routes.orders import bp as orders_bp
 from .routes.documents import bp as documents_bp
 from .routes.payments import bp as payments_bp
+from .routes.internal_telegram import bp as internal_telegram_bp
 
 
 def _truthy_env(name):
@@ -47,6 +48,13 @@ def create_app(test_config=None):
         ADMIN_EMAIL=os.environ.get("ADMIN_EMAIL", "admin@abi.local"),
         ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD", "admin123"),
         ENV=os.environ.get("FLASK_ENV", "development"),
+        TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
+        TELEGRAM_CRON_SECRET=os.environ.get("TELEGRAM_CRON_SECRET", ""),
+        TELEGRAM_NOTIFICATIONS_ENABLED=os.environ.get("TELEGRAM_NOTIFICATIONS_ENABLED", ""),
+        PUBLIC_BASE_URL=os.environ.get("PUBLIC_BASE_URL", ""),
+        BUSINESS_TIMEZONE=os.environ.get("BUSINESS_TIMEZONE", "Africa/Johannesburg"),
+        CURRENCY_SYMBOL=os.environ.get("CURRENCY_SYMBOL", "R"),
     )
     if test_config:
         app.config.update(test_config)
@@ -61,5 +69,6 @@ def create_app(test_config=None):
     app.register_blueprint(orders_bp)
     app.register_blueprint(documents_bp)
     app.register_blueprint(payments_bp)
+    app.register_blueprint(internal_telegram_bp)
     app.register_blueprint(public_bp)
     return app

@@ -764,3 +764,43 @@ def test_app_store_functionality(client):
         item = db.execute('SELECT is_active FROM app_store_items WHERE id = ?', (item_id,)).fetchone()
         assert item is not None
         assert item['is_active'] == 1
+
+
+def test_internal_telegram_requires_secret(client):
+    res = client.post('/api/internal/telegram/daily-summary')
+    assert res.status_code == 401
+
+
+def test_internal_telegram_daily_summary_skips_when_disabled(tmp_path):
+    app = create_app({
+        'TESTING': True,
+        'DATABASE': str(tmp_path / 'telegram.db'),
+        'SECRET_KEY': 'test',
+        'ADMIN_EMAIL': 'admin@abi.local',
+        'ADMIN_PASSWORD': 'admin123',
+        'TELEGRAM_CRON_SECRET': 'secret',
+        'TELEGRAM_NOTIFICATIONS_ENABLED': '',
+        'PUBLIC_BASE_URL': 'https://abi-rental-platform.onrender.com',
+    })
+    test_client = app.test_client()
+    res = test_client.post('/api/internal/telegram/daily-summary?date=2026-07-02', headers={'x-cron-secret': 'secret'})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data['ok'] is True
+    assert data['sent'] is False
+    assert data['skipped'] == 'disabled'
+    assert data['date'] == '2026-07-02'
+
+
+def test_telegram_customer_formatter_escapes_html(client):
+    from app.services.telegram import format_customer_message
+
+    message = format_customer_message({
+        'name': '<ACME & Co>',
+        'customer_type': 'company',
+        'email': 'boss@example.com',
+        'phone': '<123>',
+        'marketing_opt_in': 1,
+    })
+    assert '&lt;ACME &amp; Co&gt;' in message
+    assert '<ACME' not in message

@@ -176,6 +176,11 @@ def create_order(form):
             (order_id, product["id"], line["quantity"], float(product["price_amount"] or 0), line["line_subtotal"], line["line_tax"], line["line_total"]),
         )
     db.commit()
+    try:
+        from app.services.telegram import send_new_order_notification
+        send_new_order_notification(order_id)
+    except Exception:
+        pass
     return order_id
 
 

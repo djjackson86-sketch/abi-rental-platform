@@ -75,7 +75,13 @@ def create_customer(form):
         {**data, "created_at": now()},
     )
     db.commit()
-    return cur.lastrowid
+    customer_id = cur.lastrowid
+    try:
+        from app.services.telegram import send_new_customer_notification
+        send_new_customer_notification(customer_id)
+    except Exception:
+        pass
+    return customer_id
 
 
 def update_customer(customer_id, form):
