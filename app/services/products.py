@@ -10,7 +10,7 @@ def tracking_label(value):
 
 
 def list_products(query="", product_type="", visibility=""):
-    sql = "SELECT p.*, t.name AS tax_name, t.rate AS tax_rate FROM products p LEFT JOIN tax_profiles t ON p.tax_profile_id = t.id WHERE 1=1"
+    sql = "SELECT p.*, t.name AS tax_name, t.rate AS tax_rate, b.name AS branch_name FROM products p LEFT JOIN tax_profiles t ON p.tax_profile_id = t.id LEFT JOIN branches b ON b.id = p.branch_id WHERE 1=1"
     params = []
     if query:
         sql += " AND (LOWER(p.name) LIKE ? OR LOWER(p.sku) LIKE ? OR LOWER(p.description) LIKE ?)"
@@ -53,6 +53,11 @@ def product_filter_counts():
     }
 
 
+def _default_branch_id():
+    row = get_db().execute("SELECT id FROM branches WHERE active = 1 ORDER BY id LIMIT 1").fetchone()
+    return row["id"] if row else None
+
+
 def _clean(form):
     name = form.get("name", "").strip()
     if not name:
@@ -79,6 +84,7 @@ def _clean(form):
         "security_deposit": float(form.get("security_deposit") or 0),
         "tax_profile_id": int(form.get("tax_profile_id") or 1),
         "quantity": max(0, int(form.get("quantity") or 0)),
+        "branch_id": int(form.get("branch_id") or 0) or _default_branch_id(),
     }
 
 
@@ -87,8 +93,8 @@ def create_product(form):
     db = get_db()
     cur = db.execute(
         """INSERT INTO products
-        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, quantity, created_at)
-        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :tax_profile_id, :quantity, :created_at)""",
+        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, quantity, branch_id, created_at)
+        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :tax_profile_id, :quantity, :branch_id, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -110,7 +116,7 @@ def update_product(product_id, form):
     get_db().execute(
         """UPDATE products SET
         name=:name, product_type=:product_type, tracking_method=:tracking_method, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
-        price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, tax_profile_id=:tax_profile_id, quantity=:quantity
+        price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, tax_profile_id=:tax_profile_id, quantity=:quantity, branch_id=:branch_id
         WHERE id=:id""",
         data,
     )

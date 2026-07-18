@@ -1,0 +1,34 @@
+{% extends "admin/layout.html" %}
+{% set title='Branches' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Operations</p><h1>Branches</h1><p>Manage editable depot branches and the current stock location model.</p></div></header>
+<section class="two-col">
+  <article class="panel settings-form">
+    <h2>{{ 'Edit branch' if edit_branch else 'Add branch' }}</h2>
+    <form method="post">
+      {% if edit_branch %}<input type="hidden" name="branch_id" value="{{ edit_branch.id }}">{% endif %}
+      <div class="form-grid">
+        <label>Name<input name="name" required value="{{ edit_branch.name if edit_branch else '' }}" placeholder="Branch name"></label>
+        <label>Code<input name="code" value="{{ edit_branch.code if edit_branch else '' }}" placeholder="BR1"></label>
+        <label>Phone<input name="phone" value="{{ edit_branch.phone if edit_branch else '' }}"></label>
+        <label>Email<input name="email" type="email" value="{{ edit_branch.email if edit_branch else '' }}"></label>
+        <label class="span-2">Address line 1<input name="address_line1" value="{{ edit_branch.address_line1 if edit_branch else '' }}"></label>
+        <label class="span-2">Address line 2<input name="address_line2" value="{{ edit_branch.address_line2 if edit_branch else '' }}"></label>
+        <label>City<input name="city" value="{{ edit_branch.city if edit_branch else '' }}"></label>
+        <label>Province<input name="province" value="{{ edit_branch.province if edit_branch else '' }}"></label>
+        <label>Postal code<input name="postal_code" value="{{ edit_branch.postal_code if edit_branch else '' }}"></label>
+        <label class="switch"><input type="checkbox" name="active" value="1" {% if not edit_branch or edit_branch.active %}checked{% endif %}> Active</label>
+      </div>
+      <div class="form-actions"><button class="btn primary">Save branch</button>{% if edit_branch %}<a class="btn ghost" href="{{ url_for('branches.index') }}">Cancel</a>{% endif %}</div>
+    </form>
+  </article>
+  <article class="panel">
+    <h2>How stock works</h2>
+    <p class="form-help">Each physical rental product/trailer has a current branch. Return bookings stay at the same branch. One-way bookings move the item to the selected return branch when the order is returned.</p>
+  </article>
+</section>
+<section class="panel">
+  <h2>Depot branches</h2>
+  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Code</th><th>Contact</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody>{% for branch in branches %}<tr><td><strong>{{ branch.name }}</strong><small>{{ branch.address_line1 or branch.city or '' }}</small></td><td>{{ branch.code or '—' }}</td><td>{{ branch.phone or branch.email or '—' }}</td><td>{{ branch.product_count }} item(s)</td><td>{{ 'Active' if branch.active else 'Inactive' }}</td><td><a class="btn ghost" href="{{ url_for('branches.index', edit=branch.id) }}">Edit</a></td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

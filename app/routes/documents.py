@@ -3,8 +3,10 @@ import csv
 from io import StringIO
 
 from app.routes.auth import login_required
-from app.services.documents import create_document, label_for, list_documents, printable_document, document_filter_counts
+from app.services.documents import create_document, get_document, label_for, list_documents, printable_document, document_filter_counts, mark_document_email
 from app.services.settings import get_company_settings
+from app.services.email_delivery import email_configured, send_email_with_attachment
+from app.services.pdf_documents import document_pdf_bytes, document_pdf_filename
 
 bp = Blueprint("documents", __name__, url_prefix="/documents")
 
@@ -70,6 +72,7 @@ def detail(document_id):
         document=document,
         items=items,
         label=label_for(document["document_type"]),
+        email_configured=email_configured(),
     )
 
 
@@ -83,3 +86,28 @@ def create_for_order(order_id):
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("orders.detail", order_id=order_id))
+
+@bp.post("/<int:document_id>/send-email")
+@login_required
+def send_document_email(document_id):
+    document = get_document(document_id)
+    if not document:
+        flash("Document not found", "error")
+        return redirect(url_for("documents.index"))
+    to_email = (request.form.get("to_email") or document["customer_email"] or "").strip()
+    if not to_email:
+        flash("Customer email is required before sending", "error")
+        return redirect(url_for("documents.detail", document_id=document_id))
+    try:
+        pdf_bytes = document_pdf_bytes(document_id)
+        filename = document_pdf_filename(document)
+        label = label_for(document["document_type"])
+        subject = f"{label} {document['number']} for order {document['order_number']}"
+        body = request.form.get("message") or f"Please find attached {label.lower()} {document['number']}."
+        send_email_with_attachment(to_email, subject, body, pdf_bytes, filename)
+        mark_document_email(document_id, to_email, "sent")
+        flash("Document emailed", "success")
+    except Exception as exc:
+        mark_document_email(document_id, to_email, "failed", str(exc))
+        flash(str(exc), "error")
+    return redirect(url_for("documents.detail", document_id=document_id))

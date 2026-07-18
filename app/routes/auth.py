@@ -26,6 +26,8 @@ def login():
             session["user_id"] = user["id"]
             session["user_name"] = user["name"]
             session["initials"] = user["initials"]
+            session["branch_id"] = user["branch_id"]
+            session["can_view_all_branches"] = bool(user["can_view_all_branches"])
             return redirect(url_for("admin.setup"))
         flash("Invalid email or password", "error")
     return render_template("login.html")

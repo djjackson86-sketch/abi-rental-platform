@@ -1,4 +1,4 @@
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 from math import ceil
 
 from app.db import get_db, now
@@ -15,9 +15,11 @@ STATUS_LABELS = {
 
 
 def list_orders(query="", status="", payment_status=""):
-    sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email,
+    sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
-        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE 1=1"""
+        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id WHERE 1=1"""
     params = []
     if query:
         sql += " AND (LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ?)"
@@ -51,8 +53,13 @@ def order_filter_counts():
 
 def get_order(order_id):
     return get_db().execute(
-        """SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone
-        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE o.id = ?""",
+        """SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
+            c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
+            c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
+            cb.name AS collect_branch_name, rb.name AS return_branch_name
+        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id WHERE o.id = ?""",
         (order_id,),
     ).fetchone()
 
@@ -76,6 +83,17 @@ def _parse_dt(date_value, time_value, fallback_time):
     t = time_value or fallback_time
     return datetime.fromisoformat(f"{date_value}T{t}")
 
+
+
+def next_time_slot(now_dt=None, increment_minutes=15):
+    now_dt = now_dt or datetime.now()
+    if increment_minutes <= 0:
+        increment_minutes = 15
+    minute = now_dt.minute
+    remainder = minute % increment_minutes
+    if remainder:
+        now_dt = now_dt + timedelta(minutes=increment_minutes - remainder)
+    return now_dt.replace(second=0, microsecond=0)
 
 def rental_days(start_at, end_at):
     if not start_at or not end_at or end_at <= start_at:
@@ -112,17 +130,39 @@ def _form_list(form, name):
     return [value] if value else []
 
 
+def calculate_custom_line(name, quantity, unit_price, billing_mode, days, tax_rate=0, tax_mode="exclusive"):
+    qty = max(1, int(quantity or 1))
+    price = max(0, float(unit_price or 0))
+    multiplier = days if billing_mode == "rental_day" else 1
+    base = price * qty * multiplier
+    rate = max(0, float(tax_rate or 0)) / 100
+    if tax_mode == "inclusive" and rate:
+        line_tax = base - (base / (1 + rate))
+        line_total = base
+        line_subtotal = base - line_tax
+    else:
+        line_subtotal = base
+        line_tax = base * rate
+        line_total = line_subtotal + line_tax
+    return {"quantity": qty, "line_subtotal": round(line_subtotal, 2), "line_tax": round(line_tax, 2), "line_total": round(line_total, 2), "deposit": 0, "unit_price": price, "billing_mode": billing_mode}
+
+
 def create_order(form):
     customer_id = int(form.get("customer_id") or 0)
-    product_ids = _form_list(form, "product_id")
-    quantities = _form_list(form, "quantity")
     if not customer_id:
         raise ValueError("Customer is required")
-    if not product_ids:
-        raise ValueError("Product is required")
     customer = get_db().execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
     if not customer:
         raise ValueError("Selected customer was not found")
+    booking_type = form.get("booking_type") if form.get("booking_type") in {"return", "oneway"} else "return"
+    collect_branch_id = int(form.get("collect_branch_id") or 0) or None
+    return_branch_id = int(form.get("return_branch_id") or 0) or collect_branch_id
+    if booking_type == "return":
+        return_branch_id = collect_branch_id
+    if not collect_branch_id:
+        default_branch = get_db().execute("SELECT id FROM branches WHERE active = 1 ORDER BY id LIMIT 1").fetchone()
+        collect_branch_id = default_branch["id"] if default_branch else None
+        return_branch_id = return_branch_id or collect_branch_id
 
     settings = get_db().execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
     start_dt = _parse_dt(form.get("start_date"), form.get("start_time"), settings["default_pickup_time"])
@@ -136,22 +176,44 @@ def create_order(form):
     lines = []
     subtotal = tax_total = total = deposit_total = 0
     db = get_db()
-    for index, product_id_value in enumerate(product_ids):
-        product_id = int(product_id_value or 0)
-        product = db.execute(
-            """SELECT p.*, COALESCE(t.rate, 0) AS tax_rate FROM products p LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
-            WHERE p.id = ? AND p.active = 1""",
-            (product_id,),
-        ).fetchone()
-        if not product:
-            raise ValueError("Selected product was not found or is archived")
-        quantity = quantities[index] if index < len(quantities) else 1
-        line = calculate_line(product, quantity, days, settings["tax_mode"])
-        lines.append((product, line))
+    product_ids = form.getlist("product_id") if hasattr(form, "getlist") else _form_list(form, "product_id")
+    quantities = form.getlist("quantity") if hasattr(form, "getlist") else _form_list(form, "quantity")
+    custom_names = form.getlist("custom_name") if hasattr(form, "getlist") else _form_list(form, "custom_name")
+    custom_prices = form.getlist("custom_unit_price") if hasattr(form, "getlist") else _form_list(form, "custom_unit_price")
+    custom_modes = form.getlist("custom_billing_mode") if hasattr(form, "getlist") else _form_list(form, "custom_billing_mode")
+    max_lines = max(len(product_ids), len(quantities), len(custom_names), len(custom_prices), len(custom_modes), 1)
+    for index in range(max_lines):
+        product_id_value = product_ids[index].strip() if index < len(product_ids) and product_ids[index] else ""
+        quantity = quantities[index] if index < len(quantities) and quantities[index] else 1
+        custom_name = custom_names[index].strip() if index < len(custom_names) and custom_names[index] else ""
+        custom_price = custom_prices[index] if index < len(custom_prices) and custom_prices[index] else ""
+        custom_mode = custom_modes[index] if index < len(custom_modes) and custom_modes[index] in {"fixed", "rental_day"} else "fixed"
+        if product_id_value:
+            product_id = int(product_id_value or 0)
+            product = db.execute(
+                """SELECT p.*, COALESCE(t.rate, 0) AS tax_rate FROM products p LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
+                WHERE p.id = ? AND p.active = 1""",
+                (product_id,),
+            ).fetchone()
+            if not product:
+                raise ValueError("Selected product was not found or is archived")
+            if collect_branch_id and product["branch_id"] and product["branch_id"] != collect_branch_id:
+                raise ValueError("Selected product is not assigned to the collection branch")
+            line = calculate_line(product, quantity, days, settings["tax_mode"])
+            line["billing_mode"] = "catalog"
+            lines.append({"product": product, "custom_name": "", "line": line})
+        elif custom_name:
+            line = calculate_custom_line(custom_name, quantity, custom_price or 0, custom_mode, days, 0, settings["tax_mode"])
+            lines.append({"product": None, "custom_name": custom_name, "line": line})
+        else:
+            continue
         subtotal += line["line_subtotal"]
         tax_total += line["line_tax"]
         total += line["line_total"]
         deposit_total += line["deposit"]
+
+    if not lines:
+        raise ValueError("At least one product or custom line is required")
 
     subtotal = round(subtotal, 2)
     tax_total = round(tax_total, 2)
@@ -164,16 +226,20 @@ def create_order(form):
     deposit_total = round(deposit_total, 2)
     order_number = next_order_number()
     cur = db.execute(
-        """INSERT INTO orders (order_number, customer_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, total, due_total, notes, created_at)
-        VALUES (?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (order_number, customer_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, discount_total, coupon_code if coupon else "", tax_total, deposit_total, total, total, form.get("notes", "").strip(), now()),
+        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, total, due_total, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, discount_total, coupon_code if coupon else "", tax_total, deposit_total, total, total, form.get("notes", "").strip(), now()),
     )
     order_id = cur.lastrowid
-    for product, line in lines:
+    for entry in lines:
+        product = entry["product"]
+        line = entry["line"]
+        product_id = product["id"] if product else None
+        unit_price = float(product["price_amount"] or 0) if product else line["unit_price"]
         db.execute(
-            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total)
-            VALUES (?, ?, '', ?, ?, ?, ?, ?)""",
-            (order_id, product["id"], line["quantity"], float(product["price_amount"] or 0), line["line_subtotal"], line["line_tax"], line["line_total"]),
+            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (order_id, product_id, entry["custom_name"], line["quantity"], unit_price, line["line_subtotal"], line["line_tax"], line["line_total"], line["billing_mode"]),
         )
     db.commit()
     try:
@@ -202,7 +268,7 @@ def availability_errors(order_id):
     for item in order_items(order_id):
         if not item["product_id"]:
             continue
-        product = db.execute("SELECT name, quantity FROM products WHERE id = ?", (item["product_id"],)).fetchone()
+        product = db.execute("SELECT name, quantity, branch_id FROM products WHERE id = ?", (item["product_id"],)).fetchone()
         if not product:
             errors.append("One of the products on this order is no longer available")
             continue
@@ -212,9 +278,10 @@ def availability_errors(order_id):
             WHERE oi.product_id = ?
               AND o.id != ?
               AND o.status IN ('reserved', 'started')
+              AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)
               AND o.start_at < ?
               AND o.end_at > ?""",
-            (item["product_id"], order_id, order["end_at"], order["start_at"]),
+            (item["product_id"], order_id, order["collect_branch_id"], order["end_at"], order["start_at"]),
         ).fetchone()["booked"] or 0
         available = int(product["quantity"] or 0) - int(booked)
         if item["quantity"] > available:
@@ -237,6 +304,10 @@ def transition_order(order_id, action):
             raise ValueError(errors[0])
     db = get_db()
     db.execute("UPDATE orders SET status = ? WHERE id = ?", (transition["to"], order_id))
+    if action == "return" and order["booking_type"] == "oneway" and order["return_branch_id"]:
+        for item in order_items(order_id):
+            if item["product_id"]:
+                db.execute("UPDATE products SET branch_id = ? WHERE id = ?", (order["return_branch_id"], item["product_id"]))
     db.commit()
     return transition["message"]
 
@@ -258,11 +329,13 @@ def status_actions(status):
 
 def scheduled_events(limit=50, start_date=None, end_date=None):
     db = get_db()
-    sql = """SELECT o.*, c.name AS customer_name,
+    sql = """SELECT o.*, c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
             (SELECT GROUP_CONCAT(COALESCE(p.name, oi.custom_name), ', ')
              FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id
              WHERE oi.order_id = o.id) AS product_names
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id
         WHERE o.status IN ('reserved', 'started')"""
     params = []
     if start_date:

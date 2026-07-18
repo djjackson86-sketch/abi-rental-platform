@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT NOT NULL,
     initials TEXT NOT NULL DEFAULT 'AD',
     role TEXT NOT NULL DEFAULT 'owner',
+    branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+    can_view_all_branches INTEGER NOT NULL DEFAULT 1,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
@@ -91,6 +93,22 @@ CREATE TABLE IF NOT EXISTS app_store_items (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS branches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    code TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    address_line1 TEXT NOT NULL DEFAULT '',
+    address_line2 TEXT NOT NULL DEFAULT '',
+    city TEXT NOT NULL DEFAULT '',
+    province TEXT NOT NULL DEFAULT '',
+    postal_code TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_type TEXT NOT NULL DEFAULT 'individual',
@@ -98,6 +116,13 @@ CREATE TABLE IF NOT EXISTS customers (
     email TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     marketing_opt_in INTEGER NOT NULL DEFAULT 0,
+    address_line1 TEXT NOT NULL DEFAULT '',
+    address_line2 TEXT NOT NULL DEFAULT '',
+    suburb TEXT NOT NULL DEFAULT '',
+    city TEXT NOT NULL DEFAULT '',
+    province TEXT NOT NULL DEFAULT '',
+    postal_code TEXT NOT NULL DEFAULT '',
+    country TEXT NOT NULL DEFAULT 'South Africa',
     balance_due REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
@@ -116,6 +141,7 @@ CREATE TABLE IF NOT EXISTS products (
     tax_profile_id INTEGER REFERENCES tax_profiles(id) ON DELETE SET NULL,
     quantity INTEGER NOT NULL DEFAULT 1,
     tracking_method TEXT NOT NULL DEFAULT 'bulk',
+    branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
 
@@ -133,6 +159,9 @@ CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_number TEXT NOT NULL UNIQUE,
     customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+    booking_type TEXT NOT NULL DEFAULT 'return',
+    collect_branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+    return_branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     status TEXT NOT NULL DEFAULT 'draft',
     payment_status TEXT NOT NULL DEFAULT 'payment_due',
     start_at TEXT,
@@ -157,7 +186,8 @@ CREATE TABLE IF NOT EXISTS order_items (
     unit_price REAL NOT NULL DEFAULT 0,
     line_subtotal REAL NOT NULL DEFAULT 0,
     line_tax REAL NOT NULL DEFAULT 0,
-    line_total REAL NOT NULL DEFAULT 0
+    line_total REAL NOT NULL DEFAULT 0,
+    billing_mode TEXT NOT NULL DEFAULT 'catalog'
 );
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -177,6 +207,10 @@ CREATE TABLE IF NOT EXISTS documents (
     status TEXT NOT NULL DEFAULT 'draft',
     number TEXT NOT NULL DEFAULT '',
     pdf_path TEXT NOT NULL DEFAULT '',
+    sent_at TEXT NOT NULL DEFAULT '',
+    sent_to TEXT NOT NULL DEFAULT '',
+    email_status TEXT NOT NULL DEFAULT 'not_sent',
+    email_error TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 """
@@ -218,6 +252,22 @@ def rename_column(db, table, old_name, new_name):
 
 
 def run_migrations(db):
+
+    db.execute("""CREATE TABLE IF NOT EXISTS branches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        code TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        address_line1 TEXT NOT NULL DEFAULT '',
+        address_line2 TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        province TEXT NOT NULL DEFAULT '',
+        postal_code TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""")
     rename_column(db, "operating_hours", "checked", "closed")
     ensure_column(db, "company_settings", "store_enabled", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "company_settings", "show_prices", "INTEGER NOT NULL DEFAULT 1")
@@ -228,8 +278,26 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "checkout_instructions", "TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.'")
     ensure_column(db, "company_settings", "store_contact_email", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "users", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
+    ensure_column(db, "users", "can_view_all_branches", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "products", "tracking_method", "TEXT NOT NULL DEFAULT 'bulk'")
+    ensure_column(db, "products", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
+    ensure_column(db, "orders", "booking_type", "TEXT NOT NULL DEFAULT 'return'")
+    ensure_column(db, "orders", "collect_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
+    ensure_column(db, "orders", "return_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "orders", "coupon_code", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "city", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "province", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "postal_code", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "country", "TEXT NOT NULL DEFAULT 'South Africa'")
+    ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
+    ensure_column(db, "documents", "sent_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "documents", "sent_to", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "documents", "email_status", "TEXT NOT NULL DEFAULT 'not_sent'")
+    ensure_column(db, "documents", "email_error", "TEXT NOT NULL DEFAULT ''")
     db.execute("""CREATE TABLE IF NOT EXISTS app_store_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -248,14 +316,20 @@ def init_db():
     ts = now()
     db.execute("INSERT OR IGNORE INTO company_settings (id, company_name, email, updated_at) VALUES (1, 'ABI Solutions', 'info@abi-solutions.local', ?)", (ts,))
     db.execute("INSERT OR IGNORE INTO tax_profiles (id, name, rate, is_default, active, created_at) VALUES (1, 'No VAT', 0, 1, 1, ?)", (ts,))
+    for branch_name, code in [('Branch 1', 'BR1'), ('Branch 2', 'BR2'), ('Branch 3', 'BR3')]:
+        db.execute("INSERT OR IGNORE INTO branches (name, code, created_at, updated_at) VALUES (?, ?, ?, ?)", (branch_name, code, ts, ts))
+    default_branch = db.execute("SELECT id FROM branches ORDER BY id LIMIT 1").fetchone()
+    if default_branch:
+        db.execute("UPDATE products SET branch_id = COALESCE(branch_id, ?) WHERE branch_id IS NULL", (default_branch['id'],))
+        db.execute("UPDATE orders SET collect_branch_id = COALESCE(collect_branch_id, ?), return_branch_id = COALESCE(return_branch_id, ?) WHERE collect_branch_id IS NULL OR return_branch_id IS NULL", (default_branch['id'], default_branch['id']))
     for day in range(7):
         db.execute("INSERT OR IGNORE INTO operating_hours (day_of_week, open_time, close_time, closed) VALUES (?, '09:00', '17:00', ?)", (day, 1 if day in (0,6) else 0))
     admin_email = current_app.config["ADMIN_EMAIL"]
     existing = db.execute("SELECT id FROM users WHERE email = ?", (admin_email,)).fetchone()
     if not existing:
         db.execute(
-            "INSERT INTO users (email, password_hash, name, initials, role, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
-            (admin_email, generate_password_hash(current_app.config["ADMIN_PASSWORD"]), "ABI Admin", "AA", "owner", ts),
+            "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)",
+            (admin_email, generate_password_hash(current_app.config["ADMIN_PASSWORD"]), "ABI Admin", "AA", "owner", default_branch['id'] if default_branch else None, ts),
         )
     db.commit()
 

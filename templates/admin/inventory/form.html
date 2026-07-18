@@ -8,7 +8,7 @@
     <div class="form-grid">
       <label class="span-2">Product name<input name="name" required value="{{ product.name if product else '' }}" placeholder="6m Trailer"></label>
       <label>SKU<input name="sku" value="{{ product.sku if product else '' }}" placeholder="TRL-001"></label>
-      <label>Quantity / stock<input name="quantity" type="number" min="0" value="{{ product.quantity if product else 1 }}"></label>
+      <label>Quantity / stock<input name="quantity" type="number" min="0" value="{{ product.quantity if product else 1 }}"></label><label>Current branch<select name="branch_id"><option value="">Unassigned</option>{% for branch in branches %}<option value="{{ branch.id }}" {% if product and product.branch_id==branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label>
       <label class="span-2">Description<textarea name="description" rows="4" placeholder="Describe this product for staff and customers">{{ product.description if product else '' }}</textarea></label>
     </div>
   </section>

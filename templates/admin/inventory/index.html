@@ -73,6 +73,7 @@
                 <th>Tracking</th>
                 <th>Price</th>
                 <th>Stock</th>
+                <th>Branch</th>
                 <th>Deposit</th>
                 <th>Store</th>
                 <th></th>
@@ -89,6 +90,7 @@
                   <td>{{ tracking_label(p.tracking_method) }}</td>
                   <td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td>
                   <td>{{ p.quantity }}</td>
+                  <td>{{ p.branch_name or 'Unassigned' }}</td>
                   <td>R{{ '%.2f'|format(p.security_deposit) }}</td>
                   <td>
                     {% if p.public_visible and p.active %}

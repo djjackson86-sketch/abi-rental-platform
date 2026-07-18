@@ -804,3 +804,67 @@ def test_telegram_customer_formatter_escapes_html(client):
     })
     assert '&lt;ACME &amp; Co&gt;' in message
     assert '<ACME' not in message
+
+def test_customer_address_add_customer_from_order_and_custom_rental_line(client):
+    login(client)
+    client.post('/inventory/new', data={
+        'name': 'Order Trailer', 'sku': 'ORD-TRL', 'quantity': '4', 'description': 'Order test trailer.',
+        'product_type': 'rental', 'price_amount': '200', 'price_unit': 'day', 'security_deposit': '750',
+        'tax_profile_id': '1', 'active': '1', 'public_visible': '1',
+    }, follow_redirects=True)
+    created = client.post('/orders/new', data={
+        'order_action': 'create_customer_continue',
+        'customer_type': 'company', 'name': 'Address Customer', 'email': 'address@example.test', 'phone': '+2711',
+        'address_line1': '12 Test Street', 'city': 'Cape Town',
+    }, follow_redirects=True)
+    assert b'Customer created' in created.data
+    assert b'Address Customer' in created.data
+    order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': ['', ''],
+        'custom_name': ['Custom Rental Addon'],
+        'custom_unit_price': ['50'],
+        'custom_billing_mode': ['rental_day'],
+        'quantity': ['2'],
+        'start_date': '2026-07-01', 'start_time': '09:00',
+        'end_date': '2026-07-03', 'end_time': '15:00',
+    }, follow_redirects=True)
+    assert b'Draft order created' in order.data
+    assert b'Custom Rental Addon' in order.data
+    assert b'R300.00' in order.data  # 2 qty * R50 * 3 rental days.
+    assert b'12 Test Street' in order.data
+
+
+def test_branch_one_way_return_moves_product_to_return_branch(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    branches_page = client.get('/branches')
+    assert b'Branch 1' in branches_page.data
+    assert b'Branch 2' in branches_page.data
+    assert b'Branch 3' in branches_page.data
+    saved = client.post('/branches', data={'branch_id': '2', 'name': 'North Depot', 'code': 'NORTH', 'active': '1'}, follow_redirects=True)
+    assert b'Branch saved' in saved.data
+    assert b'North Depot' in saved.data
+    order_id = create_order_for_status(client, quantity='1')
+    with app.app_context():
+        db = __import__('app.db', fromlist=['get_db']).get_db()
+        db.execute("UPDATE orders SET booking_type='oneway', collect_branch_id=1, return_branch_id=2 WHERE id=?", (order_id,))
+        db.commit()
+    assert b'Order reserved' in client.post(f'/orders/{order_id}/reserve', follow_redirects=True).data
+    assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
+    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'Order returned' in returned.data
+    inventory = client.get('/inventory')
+    assert b'North Depot' in inventory.data
+
+
+def test_document_email_requires_provider_but_generates_pdf_status(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    detail = client.get('/documents/1')
+    assert b'Send PDF email' in detail.data
+    response = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=True)
+    assert b'Email provider not configured' in response.data
+    assert b'Failed' in response.data

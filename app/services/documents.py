@@ -78,7 +78,9 @@ def get_document(document_id):
     return get_db().execute(
         """SELECT d.*, o.order_number, o.customer_id, o.status AS order_status, o.start_at, o.end_at,
             o.subtotal, o.tax_total, o.deposit_total, o.total, o.due_total, o.notes,
-            c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone
+            c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
+            c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
+            c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country
         FROM documents d
         LEFT JOIN orders o ON o.id = d.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
@@ -103,3 +105,10 @@ def printable_document(document_id):
     if not document:
         return None, []
     return document, order_items(document["order_id"])
+
+
+def mark_document_email(document_id, sent_to, status, error=''):
+    db = get_db()
+    sent_at = now() if status == 'sent' else ''
+    db.execute("UPDATE documents SET sent_at = ?, sent_to = ?, email_status = ?, email_error = ? WHERE id = ?", (sent_at, sent_to, status, error, document_id))
+    db.commit()

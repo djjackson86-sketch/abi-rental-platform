@@ -22,6 +22,11 @@
     <div class="list-row"><span>Name</span><b>{{ order.customer_name or '—' }}</b></div>
     <div class="list-row"><span>Email</span><b>{{ order.customer_email or '—' }}</b></div>
     <div class="list-row"><span>Phone</span><b>{{ order.customer_phone or '—' }}</b></div>
+    <div class="list-row"><span>Address</span><b>{% if order.customer_address_line1 or order.customer_city %}{{ order.customer_address_line1 }}{% if order.customer_address_line2 %}<br>{{ order.customer_address_line2 }}{% endif %}{% if order.customer_suburb %}<br>{{ order.customer_suburb }}{% endif %}{% if order.customer_city %}<br>{{ order.customer_city }}{% endif %}{% if order.customer_province or order.customer_postal_code %}<br>{{ order.customer_province }} {{ order.customer_postal_code }}{% endif %}{% if order.customer_country %}<br>{{ order.customer_country }}{% endif %}{% else %}—{% endif %}</b></div>
+    <h2>Branch trip</h2>
+    <div class="list-row"><span>Trip type</span><b>{{ 'One-way' if order.booking_type == 'oneway' else 'Return' }}</b></div>
+    <div class="list-row"><span>Collection branch</span><b>{{ order.collect_branch_name or '—' }}</b></div>
+    <div class="list-row"><span>Return branch</span><b>{{ order.return_branch_name or order.collect_branch_name or '—' }}</b></div>
     <h2>Rental period</h2>
     <div class="list-row"><span>Pickup</span><b>{{ order.start_at or '—' }}</b></div>
     <div class="list-row"><span>Return</span><b>{{ order.end_at or '—' }}</b></div>

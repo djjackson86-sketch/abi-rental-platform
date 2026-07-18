@@ -11,6 +11,7 @@ from .routes.customers import bp as customers_bp
 from .routes.orders import bp as orders_bp
 from .routes.documents import bp as documents_bp
 from .routes.payments import bp as payments_bp
+from .routes.branches import bp as branches_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
 
 
@@ -69,6 +70,7 @@ def create_app(test_config=None):
     app.register_blueprint(orders_bp)
     app.register_blueprint(documents_bp)
     app.register_blueprint(payments_bp)
+    app.register_blueprint(branches_bp)
     app.register_blueprint(internal_telegram_bp)
     app.register_blueprint(public_bp)
     return app

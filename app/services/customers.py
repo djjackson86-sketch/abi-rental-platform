@@ -63,6 +63,13 @@ def _clean(form):
         "email": form.get("email", "").strip().lower(),
         "phone": form.get("phone", "").strip(),
         "marketing_opt_in": 1 if form.get("marketing_opt_in") else 0,
+        "address_line1": form.get("address_line1", "").strip(),
+        "address_line2": form.get("address_line2", "").strip(),
+        "suburb": form.get("suburb", "").strip(),
+        "city": form.get("city", "").strip(),
+        "province": form.get("province", "").strip(),
+        "postal_code": form.get("postal_code", "").strip(),
+        "country": form.get("country", "South Africa").strip() or "South Africa",
     }
 
 
@@ -70,8 +77,8 @@ def create_customer(form):
     data = _clean(form)
     db = get_db()
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, balance_due, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, 0, :created_at)""",
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, balance_due, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, 0, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -88,7 +95,7 @@ def update_customer(customer_id, form):
     data = _clean(form)
     data["id"] = customer_id
     get_db().execute(
-        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in WHERE id=:id""",
+        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country WHERE id=:id""",
         data,
     )
     get_db().commit()

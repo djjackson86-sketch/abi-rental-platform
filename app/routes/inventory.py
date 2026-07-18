@@ -6,6 +6,7 @@ from flask import Blueprint, Response, flash, redirect, render_template, request
 from app.routes.auth import login_required
 from app.services.products import archive_product, create_product, get_product, list_products, product_counts, product_filter_counts, tracking_label, update_product
 from app.services.settings import get_company_settings, list_tax_profiles
+from app.services.branches import branch_options
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -63,7 +64,7 @@ def new():
             return redirect(url_for("inventory.edit", product_id=product_id))
         except ValueError as exc:
             flash(str(exc), "error")
-    return render_template("admin/inventory/form.html", settings=get_company_settings(), product=None, tax_profiles=list_tax_profiles(), tracking_label=tracking_label)
+    return render_template("admin/inventory/form.html", settings=get_company_settings(), product=None, tax_profiles=list_tax_profiles(), branches=branch_options(), tracking_label=tracking_label)
 
 
 @bp.route("/<int:product_id>/edit", methods=["GET", "POST"])
@@ -83,7 +84,7 @@ def edit(product_id):
         except ValueError as exc:
             flash(str(exc), "error")
     product = get_product(product_id)
-    return render_template("admin/inventory/form.html", settings=get_company_settings(), product=product, tax_profiles=list_tax_profiles(), tracking_label=tracking_label)
+    return render_template("admin/inventory/form.html", settings=get_company_settings(), product=product, tax_profiles=list_tax_profiles(), branches=branch_options(), tracking_label=tracking_label)
 
 
 @bp.route("/<int:product_id>/archive", methods=["POST"])
