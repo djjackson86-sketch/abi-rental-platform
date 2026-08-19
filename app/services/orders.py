@@ -56,6 +56,7 @@ def get_order(order_id):
         """SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
+            c.custom_fields_json AS custom_fields_json,
             cb.name AS collect_branch_name, rb.name AS return_branch_name
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
         LEFT JOIN branches cb ON cb.id = o.collect_branch_id
@@ -223,12 +224,20 @@ def create_order(form):
     if coupon_code and not coupon:
         raise ValueError("Coupon code was not found or is inactive")
     total = round(max(0, subtotal - discount_total) + tax_total, 2)
-    deposit_total = round(deposit_total, 2)
+    deposit_option = form.get("deposit_option", "security_deposit")
+    if deposit_option not in {"security_deposit", "damage_waiver", "no_deposit"}:
+        deposit_option = "security_deposit"
+    try:
+        damage_waiver_amount = max(0, float(form.get("damage_waiver_amount") or 0)) if deposit_option == "damage_waiver" else 0
+    except ValueError as exc:
+        raise ValueError("Damage waiver amount must be a number") from exc
+    deposit_total = round(deposit_total, 2) if deposit_option == "security_deposit" else 0
+    total = round(total + damage_waiver_amount, 2)
     order_number = next_order_number()
     cur = db.execute(
-        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, total, due_total, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, discount_total, coupon_code if coupon else "", tax_total, deposit_total, total, total, form.get("notes", "").strip(), now()),
+        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, discount_total, coupon_code if coupon else "", tax_total, deposit_total, deposit_option, damage_waiver_amount, total, total, form.get("notes", "").strip(), now()),
     )
     order_id = cur.lastrowid
     for entry in lines:
@@ -252,7 +261,7 @@ def create_order(form):
 
 TRANSITIONS = {
     "reserve": {"from": {"draft"}, "to": "reserved", "message": "Order reserved"},
-    "start": {"from": {"reserved"}, "to": "started", "message": "Order started"},
+    "start": {"from": {"draft", "reserved"}, "to": "started", "message": "Order started / picked up"},
     "return": {"from": {"started"}, "to": "returned", "message": "Order returned"},
     "archive": {"from": {"returned"}, "to": "archived", "message": "Order archived"},
     "cancel": {"from": {"draft", "reserved"}, "to": "canceled", "message": "Order canceled"},
@@ -298,7 +307,7 @@ def transition_order(order_id, action):
     transition = TRANSITIONS[action]
     if order["status"] not in transition["from"]:
         raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
-    if action == "reserve":
+    if action in {"reserve", "start"}:
         errors = availability_errors(order_id)
         if errors:
             raise ValueError(errors[0])
@@ -316,6 +325,7 @@ def status_actions(status):
     actions = []
     if status == "draft":
         actions.append(("reserve", "Reserve order", "primary"))
+        actions.append(("start", "Pick up now", "ghost"))
         actions.append(("cancel", "Cancel order", "danger"))
     elif status == "reserved":
         actions.append(("start", "Start order", "primary"))
@@ -325,6 +335,47 @@ def status_actions(status):
     elif status == "returned":
         actions.append(("archive", "Archive order", "ghost"))
     return actions
+
+
+def settle_return_deposit(order_id, form):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    try:
+        extra_hours = max(0, float(form.get("extra_hours") or 0))
+        hourly_rate = max(0, float(form.get("extra_hourly_rate") or 0))
+    except ValueError as exc:
+        raise ValueError("Extra hours and hourly rate must be numbers") from exc
+    note = form.get("deposit_note", "").strip()
+    extra_charge = round(extra_hours * hourly_rate, 2)
+    deposit_available = float(order["deposit_total"] or 0)
+    deposit_applied = round(min(deposit_available, extra_charge), 2)
+    deposit_refund = round(max(deposit_available - deposit_applied, 0), 2)
+    db = get_db()
+    if extra_charge > 0:
+        new_total = round(float(order["total"] or 0) + extra_charge, 2)
+        db.execute("UPDATE orders SET total = ? WHERE id = ?", (new_total, order_id))
+    db.execute(
+        """UPDATE orders SET extra_hours = ?, deposit_applied_amount = ?, deposit_refund_amount = ?, deposit_note = ? WHERE id = ?""",
+        (extra_hours, deposit_applied, deposit_refund, note, order_id),
+    )
+    if deposit_applied > 0:
+        existing = db.execute("SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT'", (order_id,)).fetchone()
+        if existing:
+            db.execute("UPDATE payments SET amount = ?, created_at = ? WHERE id = ?", (deposit_applied, now(), existing["id"]))
+        else:
+            db.execute(
+                "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, ?, 'deposit_applied', 'DEPOSIT-SETTLEMENT', 'paid', ?)",
+                (order_id, deposit_applied, now()),
+            )
+    db.commit()
+    from app.services.payments import recalculate_order_payment
+    recalculate_order_payment(order_id)
+    if extra_charge and deposit_applied:
+        return f"Return settled: R{deposit_applied:.2f} used from deposit; refund R{deposit_refund:.2f}"
+    if extra_charge:
+        return "Extra hours charge added"
+    return f"Deposit refund marked: R{deposit_refund:.2f}"
 
 
 def scheduled_events(limit=50, start_date=None, end_date=None):

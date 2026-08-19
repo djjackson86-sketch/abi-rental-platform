@@ -43,6 +43,9 @@
       <div class="detail-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div>
       <div class="detail-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div>
       <div class="detail-row"><span>Balance due</span><b>R{{ '%.2f'|format(customer.balance_due) }}</b></div>
+      {% if custom_fields %}
+        {% for key, value in custom_fields.items() %}<div class="detail-row"><span>{{ key.replace('_', ' ')|title }}</span><b>{{ value }}</b></div>{% endfor %}
+      {% endif %}
     </div>
   </article>
 

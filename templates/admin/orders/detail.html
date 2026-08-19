@@ -23,6 +23,12 @@
     <div class="list-row"><span>Email</span><b>{{ order.customer_email or '—' }}</b></div>
     <div class="list-row"><span>Phone</span><b>{{ order.customer_phone or '—' }}</b></div>
     <div class="list-row"><span>Address</span><b>{% if order.customer_address_line1 or order.customer_city %}{{ order.customer_address_line1 }}{% if order.customer_address_line2 %}<br>{{ order.customer_address_line2 }}{% endif %}{% if order.customer_suburb %}<br>{{ order.customer_suburb }}{% endif %}{% if order.customer_city %}<br>{{ order.customer_city }}{% endif %}{% if order.customer_province or order.customer_postal_code %}<br>{{ order.customer_province }} {{ order.customer_postal_code }}{% endif %}{% if order.customer_country %}<br>{{ order.customer_country }}{% endif %}{% else %}—{% endif %}</b></div>
+    {% if customer_custom_fields %}
+      <h2>Custom customer details</h2>
+      {% for key, value in customer_custom_fields.items() %}
+        <div class="list-row"><span>{{ key.replace('_', ' ')|title }}</span><b>{{ value }}</b></div>
+      {% endfor %}
+    {% endif %}
     <h2>Branch trip</h2>
     <div class="list-row"><span>Trip type</span><b>{{ 'One-way' if order.booking_type == 'oneway' else 'Return' }}</b></div>
     <div class="list-row"><span>Collection branch</span><b>{{ order.collect_branch_name or '—' }}</b></div>
@@ -39,7 +45,7 @@
     <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(payment_summary.due_total) }}</b></div>
     <form method="post" action="{{ url_for('orders.record_order_payment', order_id=order.id) }}" class="payment-form">
       <h3>Record payment</h3>
-      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method"><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option><option value="manual">Manual</option></select></label></div>
+      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method"><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option><option value="security_deposit">Security deposit</option><option value="damage_waiver">Damage waiver</option><option value="manual">Manual</option></select></label></div>
       <label>Reference<input name="reference" placeholder="Payment reference or note"></label>
       <button class="btn primary" type="submit">Record payment</button>
     </form>
@@ -86,7 +92,20 @@
     <div class="list-row"><span>Discount</span><b>R{{ '%.2f'|format(order.discount_total) }}</b></div>
     <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(order.tax_total) }}</b></div>
     <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(order.deposit_total) }}</b></div>
+    <div class="list-row"><span>Deposit choice</span><b>{{ (order.deposit_option or 'security_deposit').replace('_', ' ')|title }}</b></div>
+    {% if order.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(order.damage_waiver_amount) }}</b></div>{% endif %}
+    {% if order.extra_hours %}<div class="list-row"><span>Extra hours</span><b>{{ order.extra_hours }} hrs</b></div>{% endif %}
+    {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
     <div class="list-row"><span>Total incl. taxes</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
   </div>
+</section>
+<section class="panel settings-form">
+  <h2>Return / deposit settlement</h2>
+  <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
+    <div class="form-grid compact"><label>Extra hours<input type="number" step="0.25" min="0" name="extra_hours" value="{{ order.extra_hours or 0 }}"></label><label>Hourly extra rate<input type="number" step="0.01" min="0" name="extra_hourly_rate" placeholder="0.00"></label></div>
+    <label>Settlement note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Damage, late return, refund note"></label>
+    <p class="form-help">If extra hours are charged, the system can apply available security deposit to that charge and shows the remainder to refund.</p>
+    <button class="btn primary" type="submit">Settle return / use deposit</button>
+  </form>
 </section>
 {% endblock %}

@@ -1,13 +1,15 @@
+from datetime import timedelta
+
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import create_order, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, status_actions, transition_order
+from app.services.orders import create_order, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
 from app.services.coupons import list_coupons
-from app.services.customers import create_customer
+from app.services.customers import create_customer, custom_fields_for
 from app.services.branches import branch_options, default_branch_id
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
@@ -19,6 +21,10 @@ def _customers():
 
 def _products():
     return get_db().execute("SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id, b.name AS branch_name FROM products p LEFT JOIN branches b ON b.id = p.branch_id WHERE p.active = 1 ORDER BY p.name").fetchall()
+
+
+def _time_options(increment=15):
+    return [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in range(0, 60, increment)]
 
 
 @bp.route("")
@@ -59,7 +65,7 @@ def new():
             except ValueError as exc:
                 flash(str(exc), "error")
     slot = next_time_slot(increment_minutes=15)
-    return render_template("admin/orders/form.html", settings=settings, customers=_customers(), products=_products(), coupons=list_coupons(status="active"), selected_customer_id=selected_customer_id, default_start_date=slot.date().isoformat(), default_start_time=slot.strftime("%H:%M"), branches=branch_options(), default_branch_id=default_branch_id())
+    return render_template("admin/orders/form.html", settings=settings, customers=_customers(), products=_products(), coupons=list_coupons(status="active"), selected_customer_id=selected_customer_id, default_start_date=slot.date().isoformat(), default_return_date=(slot + timedelta(days=1)).date().isoformat(), default_start_time=slot.strftime("%H:%M"), time_options=_time_options(15), branches=branch_options(), default_branch_id=default_branch_id())
 
 
 @bp.route("/<int:order_id>")
@@ -81,7 +87,19 @@ def detail(order_id):
         payments=payments_for_order(order_id),
         payment_summary=payment_summary(order_id),
         payment_label_for=payment_label_for,
+        customer_custom_fields=custom_fields_for(order),
     )
+
+
+@bp.post("/<int:order_id>/settle-return")
+@login_required
+def settle_return(order_id):
+    try:
+        message = settle_return_deposit(order_id, request.form)
+        flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))
 
 
 @bp.post("/<int:order_id>/payments")

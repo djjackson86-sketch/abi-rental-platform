@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS customers (
     province TEXT NOT NULL DEFAULT '',
     postal_code TEXT NOT NULL DEFAULT '',
     country TEXT NOT NULL DEFAULT 'South Africa',
+    custom_fields_json TEXT NOT NULL DEFAULT '{}',
     balance_due REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
@@ -171,6 +172,12 @@ CREATE TABLE IF NOT EXISTS orders (
     coupon_code TEXT NOT NULL DEFAULT '',
     tax_total REAL NOT NULL DEFAULT 0,
     deposit_total REAL NOT NULL DEFAULT 0,
+    deposit_option TEXT NOT NULL DEFAULT 'security_deposit',
+    damage_waiver_amount REAL NOT NULL DEFAULT 0,
+    extra_hours REAL NOT NULL DEFAULT 0,
+    deposit_applied_amount REAL NOT NULL DEFAULT 0,
+    deposit_refund_amount REAL NOT NULL DEFAULT 0,
+    deposit_note TEXT NOT NULL DEFAULT '',
     total REAL NOT NULL DEFAULT 0,
     due_total REAL NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
@@ -286,6 +293,12 @@ def run_migrations(db):
     ensure_column(db, "orders", "collect_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "orders", "return_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "orders", "coupon_code", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "deposit_option", "TEXT NOT NULL DEFAULT 'security_deposit'")
+    ensure_column(db, "orders", "damage_waiver_amount", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "extra_hours", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "deposit_applied_amount", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "deposit_refund_amount", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "deposit_note", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")
@@ -293,6 +306,7 @@ def run_migrations(db):
     ensure_column(db, "customers", "province", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "postal_code", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "country", "TEXT NOT NULL DEFAULT 'South Africa'")
+    ensure_column(db, "customers", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
     ensure_column(db, "documents", "sent_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "sent_to", "TEXT NOT NULL DEFAULT ''")

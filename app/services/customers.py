@@ -1,3 +1,5 @@
+import json
+
 from app.db import get_db, now
 
 VALID_TYPES = {"individual", "company"}
@@ -57,6 +59,15 @@ def _clean(form):
     customer_type = form.get("customer_type", "individual")
     if customer_type not in VALID_TYPES:
         customer_type = "individual"
+    custom_fields = {
+        "vehicle_details": form.get("vehicle_details", "").strip(),
+        "alternative_contact": form.get("alternative_contact", "").strip(),
+        "id_or_license": form.get("id_or_license", "").strip(),
+        "custom_question": form.get("custom_question", "").strip(),
+        "custom_answer_type": form.get("custom_answer_type", "text").strip() or "text",
+        "custom_answer": form.get("custom_answer", "").strip(),
+    }
+    custom_fields = {key: value for key, value in custom_fields.items() if value}
     return {
         "customer_type": customer_type,
         "name": name,
@@ -70,6 +81,7 @@ def _clean(form):
         "province": form.get("province", "").strip(),
         "postal_code": form.get("postal_code", "").strip(),
         "country": form.get("country", "South Africa").strip() or "South Africa",
+        "custom_fields_json": json.dumps(custom_fields, ensure_ascii=False),
     }
 
 
@@ -77,8 +89,8 @@ def create_customer(form):
     data = _clean(form)
     db = get_db()
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, balance_due, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, 0, :created_at)""",
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -95,7 +107,17 @@ def update_customer(customer_id, form):
     data = _clean(form)
     data["id"] = customer_id
     get_db().execute(
-        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country WHERE id=:id""",
+        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json WHERE id=:id""",
         data,
     )
     get_db().commit()
+
+
+def custom_fields_for(customer):
+    if not customer:
+        return {}
+    try:
+        data = json.loads(customer["custom_fields_json"] or "{}")
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}

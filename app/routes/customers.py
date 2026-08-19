@@ -4,7 +4,7 @@ from io import StringIO
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
-from app.services.customers import create_customer, customer_counts, customer_filter_counts, customer_orders, get_customer, list_customers, update_customer
+from app.services.customers import create_customer, custom_fields_for, customer_counts, customer_filter_counts, customer_orders, get_customer, list_customers, update_customer
 from app.services.settings import get_company_settings
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
@@ -61,7 +61,7 @@ def new():
             return redirect(url_for("customers.detail", customer_id=customer_id))
         except ValueError as exc:
             flash(str(exc), "error")
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=None)
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=None, custom_fields={})
 
 
 @bp.route("/<int:customer_id>")
@@ -71,7 +71,7 @@ def detail(customer_id):
     if not customer:
         flash("Customer not found", "error")
         return redirect(url_for("customers.index"))
-    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, orders=customer_orders(customer_id))
+    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=customer_orders(customer_id))
 
 
 @bp.route("/<int:customer_id>/edit", methods=["GET", "POST"])
@@ -88,4 +88,5 @@ def edit(customer_id):
             return redirect(url_for("customers.detail", customer_id=customer_id))
         except ValueError as exc:
             flash(str(exc), "error")
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=get_customer(customer_id))
+    customer = get_customer(customer_id)
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer))
