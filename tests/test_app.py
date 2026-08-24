@@ -409,6 +409,80 @@ def test_order_draft_creation_and_totals(client):
     assert b'built-in method items' not in list_res.data
 
 
+
+
+def test_draft_order_can_be_edited_without_creating_new_order(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    edit_page = client.get(f'/orders/{order_id}/edit')
+    assert edit_page.status_code == 200
+    assert b'Edit draft' in edit_page.data
+    assert b'Save draft changes' in edit_page.data
+    assert b'Edit draft' in client.get(f'/orders/{order_id}').data
+
+    saved = client.post(f'/orders/{order_id}/edit', data={
+        'customer_id': '1',
+        'product_id': ['1', ''],
+        'custom_name': ['', 'Admin edit fee'],
+        'custom_unit_price': ['', '50'],
+        'custom_billing_mode': ['fixed', 'fixed'],
+        'quantity': ['3', '1'],
+        'start_date': '2026-07-02',
+        'start_time': '10:15',
+        'end_date': '2026-07-04',
+        'end_time': '11:00',
+        'deposit_option': 'damage_waiver',
+        'damage_waiver_amount': '125',
+        'notes': 'Edited draft note',
+    }, follow_redirects=True)
+
+    assert saved.status_code == 200
+    assert b'Draft order saved' in saved.data
+    assert b'ORD-00001' in saved.data
+    assert b'Admin edit fee' in saved.data
+    assert b'Edited draft note' not in saved.data  # internal notes are saved but not shown on detail yet.
+    assert b'R1975.00' in saved.data  # 3 * R200 * 3 days + R50 + R125 damage waiver.
+    assert b'R0.00' in saved.data  # security deposit removed by damage waiver option.
+
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        orders_count = db.execute('SELECT COUNT(*) AS count FROM orders').fetchone()['count']
+        order = db.execute('SELECT status, total, due_total, deposit_total, damage_waiver_amount, notes FROM orders WHERE id=?', (order_id,)).fetchone()
+        item_count = db.execute('SELECT COUNT(*) AS count FROM order_items WHERE order_id=?', (order_id,)).fetchone()['count']
+        assert orders_count == 1
+        assert order['status'] == 'draft'
+        assert order['total'] == 1975
+        assert order['due_total'] == 1975
+        assert order['deposit_total'] == 0
+        assert order['damage_waiver_amount'] == 125
+        assert order['notes'] == 'Edited draft note'
+        assert item_count == 2
+
+
+def test_non_draft_order_edit_is_rejected(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+
+    get_response = client.get(f'/orders/{order_id}/edit', follow_redirects=True)
+    assert b'Only draft orders can be edited' in get_response.data
+    assert b'Reserved' in get_response.data
+
+    post_response = client.post(f'/orders/{order_id}/edit', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'end_date': '2026-07-02',
+    }, follow_redirects=True)
+    assert b'Only draft orders can be edited' in post_response.data
+    assert b'Reserved' in post_response.data
+
+
 def test_order_supports_mixed_rental_sales_and_service_lines(client):
     login(client)
     seed_customer_and_product(client)

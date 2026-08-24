@@ -117,7 +117,7 @@
                   <td>{{ o.item_count }}</td>
                   <td>R{{ '%.2f'|format(o.total) }}</td>
                   <td>R{{ '%.2f'|format(o.due_total) }}</td>
-                  <td><a class="btn ghost" href="{{ url_for('orders.detail', order_id=o.id) }}">Open</a></td>
+                  <td><a class="btn ghost" href="{{ url_for('orders.detail', order_id=o.id) }}">Open</a>{% if o.status == 'draft' %} <a class="btn ghost" href="{{ url_for('orders.edit', order_id=o.id) }}">Edit draft</a>{% endif %}</td>
                 </tr>
               {% endfor %}
             </tbody>

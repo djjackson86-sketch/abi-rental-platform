@@ -171,11 +171,12 @@ def calculate_custom_line(name, quantity, unit_price, billing_mode, days, tax_ra
     return {"quantity": qty, "line_subtotal": round(line_subtotal, 2), "line_tax": round(line_tax, 2), "line_total": round(line_total, 2), "deposit": 0, "unit_price": price, "billing_mode": billing_mode}
 
 
-def create_order(form):
+def _build_order_payload(form):
     customer_id = int(form.get("customer_id") or 0)
     if not customer_id:
         raise ValueError("Customer is required")
-    customer = get_db().execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    db = get_db()
+    customer = db.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
     if not customer:
         raise ValueError("Selected customer was not found")
     booking_type = form.get("booking_type") if form.get("booking_type") in {"return", "oneway"} else "return"
@@ -184,11 +185,11 @@ def create_order(form):
     if booking_type == "return":
         return_branch_id = collect_branch_id
     if not collect_branch_id:
-        default_branch = get_db().execute("SELECT id FROM branches WHERE active = 1 ORDER BY id LIMIT 1").fetchone()
+        default_branch = db.execute("SELECT id FROM branches WHERE active = 1 ORDER BY id LIMIT 1").fetchone()
         collect_branch_id = default_branch["id"] if default_branch else None
         return_branch_id = return_branch_id or collect_branch_id
 
-    settings = get_db().execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
+    settings = db.execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
     start_dt = _parse_dt(form.get("start_date"), form.get("start_time"), settings["default_pickup_time"])
     end_dt = _parse_dt(form.get("end_date"), form.get("end_time"), settings["default_return_time"])
     if not start_dt or not end_dt:
@@ -199,7 +200,6 @@ def create_order(form):
     days = rental_days(start_dt, end_dt)
     lines = []
     subtotal = tax_total = total = deposit_total = 0
-    db = get_db()
     product_ids = form.getlist("product_id") if hasattr(form, "getlist") else _form_list(form, "product_id")
     quantities = form.getlist("quantity") if hasattr(form, "getlist") else _form_list(form, "quantity")
     custom_names = form.getlist("custom_name") if hasattr(form, "getlist") else _form_list(form, "custom_name")
@@ -256,13 +256,28 @@ def create_order(form):
         raise ValueError("Damage waiver amount must be a number") from exc
     deposit_total = round(deposit_total, 2) if deposit_option == "security_deposit" else 0
     total = round(total + damage_waiver_amount, 2)
-    order_number = next_order_number()
-    cur = db.execute(
-        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, start_dt.isoformat(timespec="minutes"), end_dt.isoformat(timespec="minutes"), subtotal, discount_total, coupon_code if coupon else "", tax_total, deposit_total, deposit_option, damage_waiver_amount, total, total, form.get("notes", "").strip(), now()),
-    )
-    order_id = cur.lastrowid
+    return {
+        "customer_id": customer_id,
+        "booking_type": booking_type,
+        "collect_branch_id": collect_branch_id,
+        "return_branch_id": return_branch_id,
+        "start_at": start_dt.isoformat(timespec="minutes"),
+        "end_at": end_dt.isoformat(timespec="minutes"),
+        "subtotal": subtotal,
+        "discount_total": discount_total,
+        "coupon_code": coupon_code if coupon else "",
+        "tax_total": tax_total,
+        "deposit_total": deposit_total,
+        "deposit_option": deposit_option,
+        "damage_waiver_amount": damage_waiver_amount,
+        "total": total,
+        "notes": form.get("notes", "").strip(),
+        "lines": lines,
+    }
+
+
+def _insert_order_items(order_id, lines):
+    db = get_db()
     for entry in lines:
         product = entry["product"]
         line = entry["line"]
@@ -273,6 +288,19 @@ def create_order(form):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (order_id, product_id, entry["custom_name"], line["quantity"], unit_price, line["line_subtotal"], line["line_tax"], line["line_total"], line["billing_mode"]),
         )
+
+
+def create_order(form):
+    payload = _build_order_payload(form)
+    order_number = next_order_number()
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (order_number, payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], payload["total"], payload["notes"], now()),
+    )
+    order_id = cur.lastrowid
+    _insert_order_items(order_id, payload["lines"])
     db.commit()
     try:
         from app.services.telegram import send_new_order_notification
@@ -280,6 +308,82 @@ def create_order(form):
     except Exception:
         pass
     return order_id
+
+
+def update_draft_order(order_id, form):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    if order["status"] != "draft":
+        raise ValueError("Only draft orders can be edited")
+    payload = _build_order_payload(form)
+    db = get_db()
+    paid_row = db.execute("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND status = 'paid'", (order_id,)).fetchone()
+    paid_total = float(paid_row["paid"] or 0) if paid_row else 0
+    due_total = round(max(float(payload["total"] or 0) - paid_total, 0), 2)
+    if paid_total <= 0:
+        payment_status = "payment_due"
+    elif paid_total < float(payload["total"] or 0):
+        payment_status = "partially_paid"
+    elif paid_total == float(payload["total"] or 0):
+        payment_status = "paid"
+    else:
+        payment_status = "overpaid"
+    db.execute(
+        """UPDATE orders SET customer_id = ?, booking_type = ?, collect_branch_id = ?, return_branch_id = ?,
+        start_at = ?, end_at = ?, subtotal = ?, discount_total = ?, coupon_code = ?, tax_total = ?,
+        deposit_total = ?, deposit_option = ?, damage_waiver_amount = ?, total = ?, due_total = ?,
+        payment_status = ?, notes = ? WHERE id = ?""",
+        (payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], due_total, payment_status, payload["notes"], order_id),
+    )
+    db.execute("DELETE FROM order_items WHERE order_id = ?", (order_id,))
+    _insert_order_items(order_id, payload["lines"])
+    db.commit()
+    return order_id
+
+
+def draft_order_form(order_id):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    if order["status"] != "draft":
+        raise ValueError("Only draft orders can be edited")
+    start_at = datetime.fromisoformat(order["start_at"]) if order["start_at"] else None
+    end_at = datetime.fromisoformat(order["end_at"]) if order["end_at"] else None
+    lines = []
+    for item in order_items(order_id):
+        product_display = ""
+        if item["product_id"]:
+            product_display = item["product_name"] or ""
+            if item["product_sku"]:
+                product_display += f" — {item['product_sku']}"
+        lines.append({
+            "product_id": item["product_id"] or "",
+            "product_display": product_display,
+            "custom_name": item["custom_name"] or "",
+            "custom_billing_mode": item["billing_mode"] if item["billing_mode"] in {"fixed", "rental_day"} else "fixed",
+            "custom_unit_price": item["unit_price"] if not item["product_id"] else "",
+            "quantity": item["quantity"] or 1,
+        })
+    while len(lines) < 4:
+        lines.append({"product_id": "", "product_display": "", "custom_name": "", "custom_billing_mode": "fixed", "custom_unit_price": "", "quantity": 1})
+    return {
+        "order": order,
+        "selected_customer_id": order["customer_id"] or "",
+        "customer_display": order["customer_name"] + (f" — {order['customer_email']}" if order["customer_email"] else "") if order["customer_name"] else "",
+        "booking_type": order["booking_type"] or "return",
+        "collect_branch_id": order["collect_branch_id"],
+        "return_branch_id": order["return_branch_id"] or order["collect_branch_id"],
+        "start_date": start_at.date().isoformat() if start_at else "",
+        "start_time": start_at.strftime("%H:%M") if start_at else "",
+        "end_date": end_at.date().isoformat() if end_at else "",
+        "end_time": end_at.strftime("%H:%M") if end_at else "",
+        "deposit_option": order["deposit_option"] or "security_deposit",
+        "damage_waiver_amount": order["damage_waiver_amount"] or "",
+        "coupon_code": order["coupon_code"] or "",
+        "notes": order["notes"] or "",
+        "lines": lines,
+    }
 
 
 TRANSITIONS = {

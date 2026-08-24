@@ -4,7 +4,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import create_order, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order
+from app.services.orders import create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order, update_draft_order
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
@@ -65,7 +65,48 @@ def new():
             except ValueError as exc:
                 flash(str(exc), "error")
     slot = next_time_slot(increment_minutes=15)
-    return render_template("admin/orders/form.html", settings=settings, customers=_customers(), products=_products(), coupons=list_coupons(status="active"), selected_customer_id=selected_customer_id, default_start_date=slot.date().isoformat(), default_return_date=(slot + timedelta(days=1)).date().isoformat(), default_start_time=slot.strftime("%H:%M"), time_options=_time_options(15), branches=branch_options(), default_branch_id=default_branch_id())
+    return render_template("admin/orders/form.html", settings=settings, customers=_customers(), products=_products(), coupons=list_coupons(status="active"), selected_customer_id=selected_customer_id, default_start_date=slot.date().isoformat(), default_return_date=(slot + timedelta(days=1)).date().isoformat(), default_start_time=slot.strftime("%H:%M"), time_options=_time_options(15), branches=branch_options(), default_branch_id=default_branch_id(), form_mode="new", form_action=url_for("orders.new"))
+
+
+@bp.route("/<int:order_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit(order_id):
+    try:
+        form_data = draft_order_form(order_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("orders.detail", order_id=order_id))
+    if request.method == "POST":
+        try:
+            update_draft_order(order_id, request.form)
+            flash("Draft order saved", "success")
+            return redirect(url_for("orders.detail", order_id=order_id))
+        except ValueError as exc:
+            flash(str(exc), "error")
+            form_data = None
+    if form_data is None:
+        try:
+            form_data = draft_order_form(order_id)
+        except ValueError:
+            form_data = {"order": get_order(order_id), "lines": []}
+    return render_template(
+        "admin/orders/form.html",
+        settings=get_company_settings(),
+        customers=_customers(),
+        products=_products(),
+        coupons=list_coupons(status="active"),
+        selected_customer_id=form_data.get("selected_customer_id", ""),
+        default_start_date=form_data.get("start_date", ""),
+        default_return_date=form_data.get("end_date", ""),
+        default_start_time=form_data.get("start_time", ""),
+        default_return_time=form_data.get("end_time", ""),
+        time_options=_time_options(15),
+        branches=branch_options(),
+        default_branch_id=form_data.get("collect_branch_id") or default_branch_id(),
+        form_mode="edit",
+        form_action=url_for("orders.edit", order_id=order_id),
+        order_form=form_data,
+    )
 
 
 @bp.route("/<int:order_id>")
