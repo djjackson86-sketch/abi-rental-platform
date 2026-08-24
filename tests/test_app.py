@@ -867,7 +867,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
     assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
     assert b'Order returned' in client.post(f'/orders/{order_id}/return', follow_redirects=True).data
 
-    due_before = client.get('/orders?payment_status=payment_due')
+    due_before = client.get('/orders?payment_status=process_deposit')
     assert b'ORD-00001' in due_before.data
 
     settled = client.post(f'/orders/{order_id}/settle-return', data={
@@ -879,7 +879,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
     assert b'Deposit refund marked' in settled.data
     assert label in settled.data
 
-    due_after = client.get('/orders?payment_status=payment_due')
+    due_after = client.get('/orders?payment_status=process_deposit')
     assert b'ORD-00001' not in due_after.data
     returned = client.get('/orders?status=returned')
     assert b'ORD-00001' in returned.data
@@ -891,8 +891,29 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
         assert order['deposit_processed_at']
         refunded_on = order['deposit_processed_at'][:16].replace('T', ' ')
 
-    assert b'Deposit refunded on' in settled.data
+    assert b'Deposit refund date' in settled.data
     assert refunded_on.encode() in settled.data
+
+
+def test_historical_refunded_deposit_is_not_in_process_deposit_filter(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    with app.app_context():
+        db = __import__('app.db', fromlist=['get_db']).get_db()
+        db.execute('UPDATE orders SET deposit_refund_amount=1000, deposit_process_method="", deposit_processed_at="" WHERE id=?', (order_id,))
+        db.commit()
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'Deposit refund date' in detail.data
+    assert b'processed before date tracking' in detail.data
+    assert b'Not recorded' in detail.data
+
+    process_deposit = client.get('/orders?payment_status=process_deposit')
+    assert b'ORD-00001' not in process_deposit.data
 
 
 def test_return_deposit_settlement_rejects_invalid_method(client):

@@ -36,7 +36,7 @@
 
       <div class="filter-group">
         <div class="filter-group-head"><strong>Payment status</strong><span>⌃</span></div>
-        {% for s,label in [('partially_paid','Partially paid'),('paid','Paid'),('overpaid','Overpaid')] %}
+        {% for s,label in [('partially_paid','Partially paid'),('paid','Paid'),('overpaid','Overpaid'),('payment_due','Payment due')] %}
           <label class="filter-check">
             <input type="radio" name="payment_status" value="{{ s }}" {% if filters.payment_status==s %}checked{% endif %} onchange="this.form.submit()">
             <span>{{ label }}</span>
@@ -44,9 +44,9 @@
           </label>
         {% endfor %}
         <label class="filter-check">
-          <input type="radio" name="payment_status" value="payment_due" {% if filters.payment_status=='payment_due' %}checked{% endif %} onchange="this.form.submit()">
-          <span>Process deposit / due</span>
-          <em>({{ filter_counts.payment_status.get('payment_due', 0) }})</em>
+          <input type="radio" name="payment_status" value="process_deposit" {% if filters.payment_status=='process_deposit' %}checked{% endif %} onchange="this.form.submit()">
+          <span>Process deposit</span>
+          <em>({{ filter_counts.payment_status.get('process_deposit', 0) }})</em>
         </label>
         {% if filters.payment_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status) }}">Clear payment</a>{% endif %}
       </div>

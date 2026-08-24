@@ -14,6 +14,24 @@ STATUS_LABELS = {
 }
 
 
+def _process_deposit_clause(alias="o"):
+    """Returned orders that still need the refundable deposit action completed.
+
+    This is deliberately separate from payment due. A returned order can still
+    have rental money outstanding, but if its deposit has already been marked as
+    refunded/used it should not remain in the staff "Process deposit" folder.
+    """
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"{prefix}status = 'returned' "
+        f"AND COALESCE({prefix}deposit_total, 0) > 0 "
+        f"AND COALESCE({prefix}deposit_processed_at, '') = '' "
+        f"AND COALESCE({prefix}deposit_process_method, '') = '' "
+        f"AND COALESCE({prefix}deposit_refund_amount, 0) = 0 "
+        f"AND COALESCE({prefix}deposit_applied_amount, 0) = 0"
+    )
+
+
 def list_orders(query="", status="", payment_status=""):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
@@ -28,11 +46,11 @@ def list_orders(query="", status="", payment_status=""):
     if status:
         sql += " AND o.status = ?"
         params.append(status)
-    if payment_status:
+    if payment_status == "process_deposit":
+        sql += f" AND {_process_deposit_clause('o')}"
+    elif payment_status:
         sql += " AND o.payment_status = ?"
         params.append(payment_status)
-        if payment_status == "payment_due":
-            sql += " AND NOT (o.status = 'returned' AND COALESCE(o.deposit_processed_at, '') != '')"
     sql += " ORDER BY o.created_at DESC, o.id DESC"
     return get_db().execute(sql, params).fetchall()
 
@@ -46,15 +64,13 @@ def order_counts():
 def order_filter_counts():
     db = get_db()
     status_rows = db.execute("SELECT status, COUNT(*) count FROM orders GROUP BY status").fetchall()
-    payment_rows = db.execute(
-        """SELECT payment_status, COUNT(*) count FROM orders
-        WHERE payment_status != 'payment_due'
-           OR NOT (status = 'returned' AND COALESCE(deposit_processed_at, '') != '')
-        GROUP BY payment_status"""
-    ).fetchall()
+    payment_rows = db.execute("SELECT payment_status, COUNT(*) count FROM orders GROUP BY payment_status").fetchall()
+    process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders WHERE {_process_deposit_clause('')}").fetchone()
+    payment_counts = {row["payment_status"]: row["count"] for row in payment_rows}
+    payment_counts["process_deposit"] = process_deposit_row["count"] if process_deposit_row else 0
     return {
         "status": {row["status"]: row["count"] for row in status_rows},
-        "payment_status": {row["payment_status"]: row["count"] for row in payment_rows},
+        "payment_status": payment_counts,
     }
 
 
