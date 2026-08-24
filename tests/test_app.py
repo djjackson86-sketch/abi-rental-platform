@@ -889,6 +889,10 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
         order = db.execute('SELECT deposit_process_method, deposit_processed_at FROM orders WHERE id=?', (order_id,)).fetchone()
         assert order['deposit_process_method'] == method
         assert order['deposit_processed_at']
+        refunded_on = order['deposit_processed_at'][:16].replace('T', ' ')
+
+    assert b'Deposit refunded on' in settled.data
+    assert refunded_on.encode() in settled.data
 
 
 def test_return_deposit_settlement_rejects_invalid_method(client):
