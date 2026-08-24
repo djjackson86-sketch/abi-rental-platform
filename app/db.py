@@ -177,6 +177,8 @@ CREATE TABLE IF NOT EXISTS orders (
     extra_hours REAL NOT NULL DEFAULT 0,
     deposit_applied_amount REAL NOT NULL DEFAULT 0,
     deposit_refund_amount REAL NOT NULL DEFAULT 0,
+    deposit_process_method TEXT NOT NULL DEFAULT '',
+    deposit_processed_at TEXT NOT NULL DEFAULT '',
     deposit_note TEXT NOT NULL DEFAULT '',
     total REAL NOT NULL DEFAULT 0,
     due_total REAL NOT NULL DEFAULT 0,
@@ -298,6 +300,8 @@ def run_migrations(db):
     ensure_column(db, "orders", "extra_hours", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "orders", "deposit_applied_amount", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "orders", "deposit_refund_amount", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "deposit_process_method", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "deposit_processed_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "deposit_note", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")

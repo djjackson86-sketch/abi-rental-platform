@@ -31,6 +31,8 @@ def list_orders(query="", status="", payment_status=""):
     if payment_status:
         sql += " AND o.payment_status = ?"
         params.append(payment_status)
+        if payment_status == "payment_due":
+            sql += " AND NOT (o.status = 'returned' AND COALESCE(o.deposit_processed_at, '') != '')"
     sql += " ORDER BY o.created_at DESC, o.id DESC"
     return get_db().execute(sql, params).fetchall()
 
@@ -44,7 +46,12 @@ def order_counts():
 def order_filter_counts():
     db = get_db()
     status_rows = db.execute("SELECT status, COUNT(*) count FROM orders GROUP BY status").fetchall()
-    payment_rows = db.execute("SELECT payment_status, COUNT(*) count FROM orders GROUP BY payment_status").fetchall()
+    payment_rows = db.execute(
+        """SELECT payment_status, COUNT(*) count FROM orders
+        WHERE payment_status != 'payment_due'
+           OR NOT (status = 'returned' AND COALESCE(deposit_processed_at, '') != '')
+        GROUP BY payment_status"""
+    ).fetchall()
     return {
         "status": {row["status"]: row["count"] for row in status_rows},
         "payment_status": {row["payment_status"]: row["count"] for row in payment_rows},
@@ -346,6 +353,9 @@ def settle_return_deposit(order_id, form):
         hourly_rate = max(0, float(form.get("extra_hourly_rate") or 0))
     except ValueError as exc:
         raise ValueError("Extra hours and hourly rate must be numbers") from exc
+    deposit_process_method = (form.get("deposit_process_method") or "").strip().lower()
+    if deposit_process_method not in {"eft", "card", "cash"}:
+        raise ValueError("Deposit process method must be EFT, Card, or Cash")
     note = form.get("deposit_note", "").strip()
     extra_charge = round(extra_hours * hourly_rate, 2)
     deposit_available = float(order["deposit_total"] or 0)
@@ -356,8 +366,9 @@ def settle_return_deposit(order_id, form):
         new_total = round(float(order["total"] or 0) + extra_charge, 2)
         db.execute("UPDATE orders SET total = ? WHERE id = ?", (new_total, order_id))
     db.execute(
-        """UPDATE orders SET extra_hours = ?, deposit_applied_amount = ?, deposit_refund_amount = ?, deposit_note = ? WHERE id = ?""",
-        (extra_hours, deposit_applied, deposit_refund, note, order_id),
+        """UPDATE orders SET extra_hours = ?, deposit_applied_amount = ?, deposit_refund_amount = ?,
+        deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
+        (extra_hours, deposit_applied, deposit_refund, deposit_process_method, now(), note, order_id),
     )
     if deposit_applied > 0:
         existing = db.execute("SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT'", (order_id,)).fetchone()

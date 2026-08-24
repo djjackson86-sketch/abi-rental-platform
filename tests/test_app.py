@@ -858,6 +858,51 @@ def test_branch_one_way_return_moves_product_to_return_branch(client, app):
     assert b'North Depot' in inventory.data
 
 
+@pytest.mark.parametrize('method,label', [('eft', b'EFT'), ('card', b'CARD'), ('cash', b'CASH')])
+def test_return_deposit_settlement_records_method_and_removes_from_due_filter(client, app, method, label):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    assert b'Order reserved' in client.post(f'/orders/{order_id}/reserve', follow_redirects=True).data
+    assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
+    assert b'Order returned' in client.post(f'/orders/{order_id}/return', follow_redirects=True).data
+
+    due_before = client.get('/orders?payment_status=payment_due')
+    assert b'ORD-00001' in due_before.data
+
+    settled = client.post(f'/orders/{order_id}/settle-return', data={
+        'extra_hours': '0',
+        'extra_hourly_rate': '0',
+        'deposit_process_method': method,
+        'deposit_note': 'Processed deposit at counter',
+    }, follow_redirects=True)
+    assert b'Deposit refund marked' in settled.data
+    assert label in settled.data
+
+    due_after = client.get('/orders?payment_status=payment_due')
+    assert b'ORD-00001' not in due_after.data
+    returned = client.get('/orders?status=returned')
+    assert b'ORD-00001' in returned.data
+
+    with app.app_context():
+        db = __import__('app.db', fromlist=['get_db']).get_db()
+        order = db.execute('SELECT deposit_process_method, deposit_processed_at FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['deposit_process_method'] == method
+        assert order['deposit_processed_at']
+
+
+def test_return_deposit_settlement_rejects_invalid_method(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    response = client.post(f'/orders/{order_id}/settle-return', data={
+        'extra_hours': '0',
+        'extra_hourly_rate': '0',
+        'deposit_process_method': 'cheque',
+    }, follow_redirects=True)
+    assert b'Deposit process method must be EFT, Card, or Cash' in response.data
+
+
 def test_document_email_requires_provider_but_generates_pdf_status(client):
     login(client)
     seed_customer_and_product(client)

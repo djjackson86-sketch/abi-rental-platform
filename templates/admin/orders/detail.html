@@ -96,13 +96,14 @@
     {% if order.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(order.damage_waiver_amount) }}</b></div>{% endif %}
     {% if order.extra_hours %}<div class="list-row"><span>Extra hours</span><b>{{ order.extra_hours }} hrs</b></div>{% endif %}
     {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
+    {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% endif %}
     <div class="list-row"><span>Total incl. taxes</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
   </div>
 </section>
 <section class="panel settings-form">
   <h2>Return / deposit settlement</h2>
   <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
-    <div class="form-grid compact"><label>Extra hours<input type="number" step="0.25" min="0" name="extra_hours" value="{{ order.extra_hours or 0 }}"></label><label>Hourly extra rate<input type="number" step="0.01" min="0" name="extra_hourly_rate" placeholder="0.00"></label></div>
+    <div class="form-grid compact"><label>Extra hours<input type="number" step="0.25" min="0" name="extra_hours" value="{{ order.extra_hours or 0 }}"></label><label>Hourly extra rate<input type="number" step="0.01" min="0" name="extra_hourly_rate" placeholder="0.00"></label><label>Deposit processed by<select name="deposit_process_method" required><option value="">Choose method</option>{% for value,label in [('eft','EFT'),('card','Card'),('cash','Cash')] %}<option value="{{ value }}" {% if order.deposit_process_method==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label></div>
     <label>Settlement note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Damage, late return, refund note"></label>
     <p class="form-help">If extra hours are charged, the system can apply available security deposit to that charge and shows the remainder to refund.</p>
     <button class="btn primary" type="submit">Settle return / use deposit</button>
