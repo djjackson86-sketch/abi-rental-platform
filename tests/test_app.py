@@ -411,6 +411,24 @@ def test_order_draft_creation_and_totals(client):
 
 
 
+def edit_order_payload(quantity='3', custom_price='50', start_date='2026-07-02', start_time='10:15', end_date='2026-07-04', end_time='11:00'):
+    return {
+        'customer_id': '1',
+        'product_id': ['1', ''],
+        'custom_name': ['', 'Admin edit fee'],
+        'custom_unit_price': ['', custom_price],
+        'custom_billing_mode': ['fixed', 'fixed'],
+        'quantity': [quantity, '1'],
+        'start_date': start_date,
+        'start_time': start_time,
+        'end_date': end_date,
+        'end_time': end_time,
+        'deposit_option': 'damage_waiver',
+        'damage_waiver_amount': '125',
+        'notes': 'Edited order note',
+    }
+
+
 def test_draft_order_can_be_edited_without_creating_new_order(client, app):
     login(client)
     seed_customer_and_product(client)
@@ -418,31 +436,17 @@ def test_draft_order_can_be_edited_without_creating_new_order(client, app):
 
     edit_page = client.get(f'/orders/{order_id}/edit')
     assert edit_page.status_code == 200
-    assert b'Edit draft' in edit_page.data
-    assert b'Save draft changes' in edit_page.data
-    assert b'Edit draft' in client.get(f'/orders/{order_id}').data
+    assert b'Edit order' in edit_page.data
+    assert b'Save order changes' in edit_page.data
+    assert b'Edit order' in client.get(f'/orders/{order_id}').data
 
-    saved = client.post(f'/orders/{order_id}/edit', data={
-        'customer_id': '1',
-        'product_id': ['1', ''],
-        'custom_name': ['', 'Admin edit fee'],
-        'custom_unit_price': ['', '50'],
-        'custom_billing_mode': ['fixed', 'fixed'],
-        'quantity': ['3', '1'],
-        'start_date': '2026-07-02',
-        'start_time': '10:15',
-        'end_date': '2026-07-04',
-        'end_time': '11:00',
-        'deposit_option': 'damage_waiver',
-        'damage_waiver_amount': '125',
-        'notes': 'Edited draft note',
-    }, follow_redirects=True)
+    saved = client.post(f'/orders/{order_id}/edit', data=edit_order_payload(), follow_redirects=True)
 
     assert saved.status_code == 200
-    assert b'Draft order saved' in saved.data
+    assert b'Order saved' in saved.data
     assert b'ORD-00001' in saved.data
     assert b'Admin edit fee' in saved.data
-    assert b'Edited draft note' not in saved.data  # internal notes are saved but not shown on detail yet.
+    assert b'Edited order note' not in saved.data  # internal notes are saved but not shown on detail yet.
     assert b'R1975.00' in saved.data  # 3 * R200 * 3 days + R50 + R125 damage waiver.
     assert b'R0.00' in saved.data  # security deposit removed by damage waiver option.
 
@@ -458,29 +462,79 @@ def test_draft_order_can_be_edited_without_creating_new_order(client, app):
         assert order['due_total'] == 1975
         assert order['deposit_total'] == 0
         assert order['damage_waiver_amount'] == 125
-        assert order['notes'] == 'Edited draft note'
+        assert order['notes'] == 'Edited order note'
         assert item_count == 2
 
 
-def test_non_draft_order_edit_is_rejected(client):
+def test_non_draft_order_can_be_edited_and_keeps_status_with_payment_recalculation(client, app):
     login(client)
     seed_customer_and_product(client)
     order_id = create_order_for_status(client)
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
 
-    get_response = client.get(f'/orders/{order_id}/edit', follow_redirects=True)
-    assert b'Only draft orders can be edited' in get_response.data
-    assert b'Reserved' in get_response.data
+    edit_page = client.get(f'/orders/{order_id}/edit')
+    assert edit_page.status_code == 200
+    assert b'Edit order' in edit_page.data
+    assert b'Save order changes' in edit_page.data
+    assert b'Edit order' in client.get('/orders').data
+    assert b'Edit order' in client.get(f'/orders/{order_id}').data
 
-    post_response = client.post(f'/orders/{order_id}/edit', data={
-        'customer_id': '1',
-        'product_id': '1',
-        'quantity': '1',
-        'start_date': '2026-07-01',
-        'end_date': '2026-07-02',
-    }, follow_redirects=True)
-    assert b'Only draft orders can be edited' in post_response.data
-    assert b'Reserved' in post_response.data
+    with app.app_context():
+        from app.db import get_db, now
+        db = get_db()
+        db.execute("INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, 150, 'cash', 'TEST-PARTIAL', 'paid', ?)", (order_id, now()))
+        db.commit()
+
+    saved = client.post(
+        f'/orders/{order_id}/edit',
+        data=edit_order_payload(quantity='1', custom_price='75', start_date='2026-07-02', start_time='10:00', end_date='2026-07-03', end_time='10:00'),
+        follow_redirects=True,
+    )
+    assert saved.status_code == 200
+    assert b'Order saved' in saved.data
+    assert b'Reserved' in saved.data
+    assert b'R400.00' in saved.data  # 1 * R200 * 1 day + R75 custom + R125 damage waiver.
+
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT status, total, due_total, payment_status, start_at, end_at FROM orders WHERE id=?', (order_id,)).fetchone()
+        items = db.execute('SELECT product_id, custom_name, quantity, unit_price FROM order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
+        assert order['status'] == 'reserved'
+        assert order['total'] == 400
+        assert order['due_total'] == 250
+        assert order['payment_status'] == 'partially_paid'
+        assert order['start_at'] == '2026-07-02T10:00'
+        assert order['end_at'] == '2026-07-03T10:00'
+        assert len(items) == 2
+        assert items[0]['product_id'] == 1
+        assert items[0]['quantity'] == 1
+        assert items[1]['custom_name'] == 'Admin edit fee'
+        assert items[1]['unit_price'] == 75
+
+
+def test_canceled_and_archived_order_edit_is_rejected(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    canceled_id = create_order_for_status(client)
+    client.post(f'/orders/{canceled_id}/cancel', follow_redirects=True)
+    for method in ('get', 'post'):
+        response = getattr(client, method)(f'/orders/{canceled_id}/edit', data=edit_order_payload(), follow_redirects=True)
+        assert b'Canceled and archived orders cannot be edited' in response.data
+        assert b'Canceled' in response.data
+    assert b'Edit order' not in client.get(f'/orders/{canceled_id}').data
+
+    archived_id = create_order_for_status(client, start_date='2026-08-01', end_date='2026-08-03')
+    client.post(f'/orders/{archived_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{archived_id}/start', follow_redirects=True)
+    client.post(f'/orders/{archived_id}/return', follow_redirects=True)
+    client.post(f'/orders/{archived_id}/archive', follow_redirects=True)
+    for method in ('get', 'post'):
+        response = getattr(client, method)(f'/orders/{archived_id}/edit', data=edit_order_payload(start_date='2026-08-02', end_date='2026-08-03'), follow_redirects=True)
+        assert b'Canceled and archived orders cannot be edited' in response.data
+        assert b'Archived' in response.data
+    assert b'Edit order' not in client.get(f'/orders/{archived_id}').data
 
 
 def test_order_supports_mixed_rental_sales_and_service_lines(client):

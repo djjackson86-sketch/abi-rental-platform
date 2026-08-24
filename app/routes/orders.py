@@ -79,7 +79,7 @@ def edit(order_id):
     if request.method == "POST":
         try:
             update_draft_order(order_id, request.form)
-            flash("Draft order saved", "success")
+            flash("Order saved", "success")
             return redirect(url_for("orders.detail", order_id=order_id))
         except ValueError as exc:
             flash(str(exc), "error")

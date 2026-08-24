@@ -1,9 +1,9 @@
 {% extends "admin/layout.html" %}
 {% set editing = form_mode == 'edit' %}
-{% set title = 'Edit draft' if editing else 'New order' %}
+{% set title = 'Edit order' if editing else 'New order' %}
 {% set order_form = order_form or {} %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Orders</p><h1>{{ 'Edit draft' if editing else 'New order' }}</h1><p>{{ 'Update this draft order without creating a new order.' if editing else 'Create a draft order by choosing or adding a customer, rental period and catalogue/custom lines.' }}</p></div><a class="btn ghost" href="{{ url_for('orders.detail', order_id=order_form.order.id) if editing else url_for('orders.index') }}">{{ 'Back to order' if editing else 'Back to orders' }}</a></header>
+<header class="page-header"><div><p class="eyebrow">Orders</p><h1>{{ 'Edit order' if editing else 'New order' }}</h1><p>{{ 'Update this order without changing its status.' if editing else 'Create a draft order by choosing or adding a customer, rental period and catalogue/custom lines.' }}</p></div><a class="btn ghost" href="{{ url_for('orders.detail', order_id=order_form.order.id) if editing else url_for('orders.index') }}">{{ 'Back to order' if editing else 'Back to orders' }}</a></header>
 <form method="post" action="{{ form_action or url_for('orders.new') }}" class="settings-form panel order-form">
   <section class="form-section">
     <h2>Customer</h2>
@@ -94,8 +94,8 @@
   </section>
 
   <section class="form-section"><h2>Coupon</h2><div class="form-grid"><label>Coupon code<input name="coupon_code" placeholder="TRAILER10" list="coupon-options" style="text-transform:uppercase" value="{{ order_form.get('coupon_code', '') }}"></label><datalist id="coupon-options">{% for coupon in coupons %}<option value="{{ coupon.code }}">{{ coupon.description }}</option>{% endfor %}</datalist></div></section>
-  <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional notes for this draft order">{{ order_form.get('notes', '') }}</textarea></label></section>
-  <div class="form-actions"><button class="btn primary" type="submit" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save draft changes' if editing else 'Save as draft' }}</button></div>
+  <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional internal notes for this order">{{ order_form.get('notes', '') }}</textarea></label></section>
+  <div class="form-actions"><button class="btn primary" type="submit" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save order changes' if editing else 'Save as draft' }}</button></div>
 </form>
 <script>
 (function(){

@@ -13,6 +13,13 @@ STATUS_LABELS = {
     "canceled": "Canceled",
 }
 
+BLOCKED_EDIT_STATUSES = {"archived", "canceled", "cancelled"}
+BLOCKED_EDIT_MESSAGE = "Canceled and archived orders cannot be edited"
+
+
+def can_edit_order_status(status):
+    return status not in BLOCKED_EDIT_STATUSES
+
 
 def _process_deposit_clause(alias="o"):
     """Returned orders that still need the refundable deposit action completed.
@@ -314,8 +321,8 @@ def update_draft_order(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
-    if order["status"] != "draft":
-        raise ValueError("Only draft orders can be edited")
+    if not can_edit_order_status(order["status"]):
+        raise ValueError(BLOCKED_EDIT_MESSAGE)
     payload = _build_order_payload(form)
     db = get_db()
     paid_row = db.execute("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND status = 'paid'", (order_id,)).fetchone()
@@ -346,8 +353,8 @@ def draft_order_form(order_id):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
-    if order["status"] != "draft":
-        raise ValueError("Only draft orders can be edited")
+    if not can_edit_order_status(order["status"]):
+        raise ValueError(BLOCKED_EDIT_MESSAGE)
     start_at = datetime.fromisoformat(order["start_at"]) if order["start_at"] else None
     end_at = datetime.fromisoformat(order["end_at"]) if order["end_at"] else None
     lines = []

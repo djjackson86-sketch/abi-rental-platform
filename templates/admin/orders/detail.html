@@ -9,7 +9,7 @@
   </div>
   <div class="header-actions">
     <a class="btn ghost" href="{{ url_for('orders.index') }}">Back</a>
-    {% if order.status == 'draft' %}<a class="btn primary" href="{{ url_for('orders.edit', order_id=order.id) }}">Edit draft</a>{% endif %}
+    {% if order.status not in ['canceled', 'cancelled', 'archived'] %}<a class="btn primary" href="{{ url_for('orders.edit', order_id=order.id) }}">Edit order</a>{% endif %}
     {% for action, label, style in actions %}
     <form method="post" action="{{ url_for('orders.change_status', order_id=order.id, action=action) }}" class="inline-form">
       <button class="btn {{ style }}" type="submit">{{ label }}</button>
