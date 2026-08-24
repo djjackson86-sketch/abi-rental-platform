@@ -108,3 +108,6 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
 
 /* ABI order customisation pass */
 .order-lines-table{min-width:980px}.order-lines-table td{vertical-align:top}.order-lines-table input,.order-lines-table select{min-width:120px}.order-lines-table td:nth-child(2){min-width:340px}.order-lines-table td:nth-child(2) input{margin-bottom:8px}.customer-custom-fields{display:grid;gap:12px;padding:14px;border:1px solid var(--line-soft);border-radius:16px;background:var(--surface-soft)}.form-help{margin:0;color:var(--muted);font-weight:600}.filter-check:not(.disabled){cursor:pointer}
+
+/* Product group inventory folders */
+.inventory-group-row td{background:#f3f6fb!important;color:var(--ink);border-top:2px solid #d5dfec;border-bottom:1px solid #d5dfec}.inventory-group-row strong{display:block;font-size:15px}.inventory-group-row small{display:block;color:var(--muted);margin-top:3px}.inventory-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}

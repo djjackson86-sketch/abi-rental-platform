@@ -8,9 +8,12 @@
     <div class="form-grid">
       <label class="span-2">Product name<input name="name" required value="{{ product.name if product else '' }}" placeholder="6m Trailer"></label>
       <label>SKU<input name="sku" value="{{ product.sku if product else '' }}" placeholder="TRL-001"></label>
-      <label>Quantity / stock<input name="quantity" type="number" min="0" value="{{ product.quantity if product else 1 }}"></label><label>Current branch<select name="branch_id"><option value="">Unassigned</option>{% for branch in branches %}<option value="{{ branch.id }}" {% if product and product.branch_id==branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label>
+      <label>Product group<select name="product_group_id"><option value="">Ungrouped</option>{% for group in product_groups %}<option value="{{ group.id }}" {% if product and product.product_group_id==group.id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></label>
+      <label>Quantity / stock<input name="quantity" type="number" min="0" value="{{ product.quantity if product else 1 }}"></label>
+      <label>Current branch<select name="branch_id"><option value="">Unassigned</option>{% for branch in branches %}<option value="{{ branch.id }}" {% if product and product.branch_id==branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label>
       <label class="span-2">Description<textarea name="description" rows="4" placeholder="Describe this product for staff and customers">{{ product.description if product else '' }}</textarea></label>
     </div>
+    <p class="form-help"><a href="{{ url_for('inventory.new_group') }}">Create or edit product groups</a> to show category headings/folders in inventory.</p>
   </section>
 
   <section class="form-section">

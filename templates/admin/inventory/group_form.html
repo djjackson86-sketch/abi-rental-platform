@@ -1,0 +1,53 @@
+{% extends "admin/layout.html" %}
+{% set title='Product groups' %}
+{% block admin_body %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Inventory</p>
+    <h1>{{ 'Edit product group' if group else 'Product groups' }}</h1>
+    <p>Create category headings/folders, then assign rental products, sales items, or stock items to them.</p>
+  </div>
+  <a class="btn ghost" href="{{ url_for('inventory.index') }}">Back to inventory</a>
+</header>
+
+<div class="two-col">
+  <form method="post" class="settings-form panel">
+    <section class="form-section">
+      <h2>{{ 'Edit group' if group else 'New group' }}</h2>
+      <div class="form-grid">
+        <label class="span-2">Group name<input name="name" required value="{{ group.name if group else '' }}" placeholder="Trailers"></label>
+        <label>Sort order<input name="sort_order" type="number" value="{{ group.sort_order if group else 0 }}"></label>
+        <label class="switch"><input type="checkbox" name="active" value="1" {% if not group or group.active %}checked{% endif %}> Active</label>
+        <label class="span-2">Description<textarea name="description" rows="4" placeholder="Optional staff note shown under the category heading">{{ group.description if group else '' }}</textarea></label>
+      </div>
+    </section>
+    <div class="form-actions">
+      <button class="btn primary">{{ 'Save group' if group else 'Create group' }}</button>
+      {% if group %}<a class="btn ghost" href="{{ url_for('inventory.new_group') }}">New group</a>{% endif %}
+    </div>
+  </form>
+
+  <section class="panel">
+    <h2>Existing groups</h2>
+    {% if groups %}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Group</th><th>Status</th><th>Sort</th><th></th></tr></thead>
+          <tbody>
+            {% for row in groups %}
+              <tr>
+                <td><strong>{{ row.name }}</strong><small>{{ row.description }}</small></td>
+                <td>{{ 'Active' if row.active else 'Inactive' }}</td>
+                <td>{{ row.sort_order }}</td>
+                <td><a class="btn ghost" href="{{ url_for('inventory.edit_group', group_id=row.id) }}">Edit</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No groups yet. Create a group such as Trailers, Camping gear, or Sales items.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

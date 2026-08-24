@@ -12,10 +12,13 @@
   <form class="inventory-search" method="get">
     <span>⌕</span>
     <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search inventory">
+    {% if filters.product_type %}<input type="hidden" name="product_type" value="{{ filters.product_type }}">{% endif %}
+    {% if filters.visibility %}<input type="hidden" name="visibility" value="{{ filters.visibility }}">{% endif %}
+    {% if filters.product_group_id %}<input type="hidden" name="product_group_id" value="{{ filters.product_group_id }}">{% endif %}
   </form>
   <div class="inventory-actions">
+    <a class="btn ghost" href="{{ url_for('inventory.new_group') }}">Add group</a>
     <a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a>
-    <button class="btn ghost" type="button">⋮</button>
   </div>
 </header>
 
@@ -24,39 +27,40 @@
     <form method="get" class="inventory-filter-form">
       {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
       <div class="filter-group">
+        <div class="filter-group-head"><strong>Product group</strong></div>
+        <a class="select-like {% if not filters.product_group_id %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility) }}">All groups</a>
+        {% for group in product_groups %}
+          <label class="filter-check">
+            <input type="radio" name="product_group_id" value="{{ group.id }}" {% if filters.product_group_id|string==group.id|string %}checked{% endif %} onchange="this.form.submit()">
+            <span>{{ group.name }}</span>
+          </label>
+        {% endfor %}
+        <label class="filter-check">
+          <input type="radio" name="product_group_id" value="ungrouped" {% if filters.product_group_id=='ungrouped' %}checked{% endif %} onchange="this.form.submit()">
+          <span>Ungrouped products</span>
+        </label>
+        <a class="filter-clear" href="{{ url_for('inventory.new_group') }}">Manage groups</a>
+      </div>
+      <div class="filter-group">
         <div class="filter-group-head"><strong>Product type</strong></div>
-        <a class="select-like {% if not filters.product_type %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility) }}">All</a>
+        <a class="select-like {% if not filters.product_type %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">All</a>
         {% for type_value,label in [('rental','Rental products'),('sale','Sales items'),('service','Services')] %}
           <label class="filter-check">
             <input type="radio" name="product_type" value="{{ type_value }}" {% if filters.product_type==type_value %}checked{% endif %} onchange="this.form.submit()">
             <span>{{ label }}</span>
           </label>
         {% endfor %}
-        {% if filters.product_type %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility) }}">Clear</a>{% endif %}
-      </div>
-
-      <div class="filter-group">
-        <div class="filter-group-head"><strong>Pricing structure template</strong></div>
-        <a class="select-like active" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility) }}">All</a>
-        <!-- TODO: Add actual pricing structure template options when available -->
-        {% if false %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility) }}">Clear</a>{% endif %}
-      </div>
-
-      <div class="filter-group">
-        <div class="filter-group-head"><strong>Price ruleset</strong></div>
-        <a class="select-like active" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility) }}">All</a>
-        <!-- TODO: Add actual price ruleset options when available -->
-        {% if false %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility) }}">Clear</a>{% endif %}
+        {% if filters.product_type %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">Clear</a>{% endif %}
       </div>
 
       <button class="btn ghost import-btn" type="button" disabled title="CSV import is planned for a later pass">Import</button>
-      <a class="btn ghost export-btn" href="{{ url_for('inventory.export_csv', query=filters.query, product_type=filters.product_type, visibility=filters.visibility) }}">Export</a>
+      <a class="btn ghost export-btn" href="{{ url_for('inventory.export_csv', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">Export</a>
     </form>
   </nav>
 
   <main class="inventory-workspace">
     <section class="panel inventory-list-panel">
-      {% if filters.query or filters.product_type or filters.visibility %}
+      {% if filters.query or filters.product_type or filters.visibility or filters.product_group_id %}
         <div class="active-filter-line">
           <span>Showing filtered products</span>
           <a href="{{ url_for('inventory.index') }}">Clear all filters</a>
@@ -80,27 +84,35 @@
               </tr>
             </thead>
             <tbody>
-              {% for p in products %}
-                <tr>
-                  <td>
-                    <strong>{{ p.name }}</strong>
-                    <small>{{ p.sku or 'No SKU' }}</small>
+              {% for group in grouped_products %}
+                <tr class="inventory-group-row">
+                  <td colspan="9">
+                    <strong>▾ {{ group.name }}</strong>
+                    <small>{{ group.products|length }} item{{ '' if group.products|length == 1 else 's' }}{% if group.description %} · {{ group.description }}{% endif %}</small>
                   </td>
-                  <td><span class="badge product-type-{{ p.product_type }}">{{ p.product_type }}</span></td>
-                  <td>{{ tracking_label(p.tracking_method) }}</td>
-                  <td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td>
-                  <td>{{ p.quantity }}</td>
-                  <td>{{ p.branch_name or 'Unassigned' }}</td>
-                  <td>R{{ '%.2f'|format(p.security_deposit) }}</td>
-                  <td>
-                    {% if p.public_visible and p.active %}
-                      <span class="store-dot visible">Visible</span>
-                    {% else %}
-                      <span class="store-dot hidden">Hidden</span>
-                    {% endif %}
-                  </td>
-                  <td><a class="btn ghost" href="{{ url_for('inventory.edit', product_id=p.id) }}">Edit</a></td>
                 </tr>
+                {% for p in group.products %}
+                  <tr>
+                    <td>
+                      <strong>{{ p.name }}</strong>
+                      <small>{{ p.sku or 'No SKU' }}</small>
+                    </td>
+                    <td><span class="badge product-type-{{ p.product_type }}">{{ p.product_type }}</span></td>
+                    <td>{{ tracking_label(p.tracking_method) }}</td>
+                    <td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td>
+                    <td>{{ p.quantity }}</td>
+                    <td>{{ p.branch_name or 'Unassigned' }}</td>
+                    <td>R{{ '%.2f'|format(p.security_deposit) }}</td>
+                    <td>
+                      {% if p.public_visible and p.active %}
+                        <span class="store-dot visible">Visible</span>
+                      {% else %}
+                        <span class="store-dot hidden">Hidden</span>
+                      {% endif %}
+                    </td>
+                    <td><a class="btn ghost" href="{{ url_for('inventory.edit', product_id=p.id) }}">Edit</a></td>
+                  </tr>
+                {% endfor %}
               {% endfor %}
             </tbody>
           </table>
@@ -110,7 +122,7 @@
           <div class="empty-arrow" aria-hidden="true"></div>
           <h2>Add your first <span>product</span></h2>
           <span hidden>Add your first product</span>
-          <p>Get ready for business by adding your first product. Add products to rent out, or add services and sale items to sell. Make sure to add some stock after creating a product.</p>
+          <p>Get ready for business by adding your first product. Add products to rent out, or add services and sale items to sell. Use product groups to keep category folders above the stock rows.</p>
           <a class="btn primary" href="{{ url_for('inventory.new') }}">Add product</a>
         </div>
       {% endif %}

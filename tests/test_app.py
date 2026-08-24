@@ -243,6 +243,129 @@ def test_inventory_product_crud_and_public_store(client):
     assert b'R450.00 / day' in res.data
 
 
+
+def test_inventory_product_groups_assign_products_and_show_branch(client, app):
+    login(client)
+    group = client.post('/inventory/groups/new', data={
+        'name': 'Trailer rentals',
+        'description': 'Rental product folder',
+        'sort_order': '1',
+        'active': '1',
+    }, follow_redirects=True)
+    assert group.status_code == 200
+    assert b'Product group created' in group.data
+    assert b'Trailer rentals' in group.data
+
+    client.post('/branches', data={'branch_id': '2', 'name': 'North Depot', 'code': 'NORTH', 'active': '1'}, follow_redirects=True)
+    rental = client.post('/inventory/new', data={
+        'name': 'Grouped Rental Trailer',
+        'sku': 'GRP-RENT',
+        'quantity': '1',
+        'tracking_method': 'individual',
+        'description': 'Individual rental stock under a category.',
+        'product_type': 'rental',
+        'product_group_id': '1',
+        'branch_id': '2',
+        'price_amount': '500',
+        'price_unit': 'day',
+        'security_deposit': '1000',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    assert b'Product created' in rental.data
+    assert b'Trailer rentals' in rental.data
+
+    sale = client.post('/inventory/new', data={
+        'name': 'Grouped Sales Strap',
+        'sku': 'GRP-SALE',
+        'quantity': '8',
+        'tracking_method': 'bulk',
+        'description': 'Sales stock under the same category.',
+        'product_type': 'sale',
+        'product_group_id': '1',
+        'branch_id': '2',
+        'price_amount': '75',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    assert b'Product created' in sale.data
+
+    inventory = client.get('/inventory')
+    assert b'\xe2\x96\xbe Trailer rentals' in inventory.data
+    assert b'Grouped Rental Trailer' in inventory.data
+    assert b'Grouped Sales Strap' in inventory.data
+    assert b'North Depot' in inventory.data
+    assert b'Track individually' in inventory.data
+
+    filtered = client.get('/inventory?product_group_id=1')
+    assert b'Grouped Rental Trailer' in filtered.data
+    assert b'Grouped Sales Strap' in filtered.data
+    assert b'North Depot' in filtered.data
+
+    export = client.get('/inventory/export.csv?product_group_id=1')
+    body = export.data.decode()
+    assert 'group,name,sku,product_type,branch' in body
+    assert 'Trailer rentals,Grouped Rental Trailer,GRP-RENT,rental,North Depot' in body
+
+    with app.app_context():
+        from app.db import get_db
+        rows = get_db().execute('SELECT product_group_id, branch_id FROM products WHERE sku IN (?, ?) ORDER BY sku', ('GRP-RENT', 'GRP-SALE')).fetchall()
+        assert [row['product_group_id'] for row in rows] == [1, 1]
+        assert [row['branch_id'] for row in rows] == [2, 2]
+
+
+def test_editing_product_group_assignment_keeps_order_creation_working(client, app):
+    login(client)
+    client.post('/inventory/groups/new', data={'name': 'Rental folders', 'sort_order': '1', 'active': '1'}, follow_redirects=True)
+    seed_customer_and_product(client)
+
+    edited = client.post('/inventory/1/edit', data={
+        'name': 'Order Trailer',
+        'sku': 'ORD-TRL',
+        'quantity': '4',
+        'tracking_method': 'bulk',
+        'description': 'Order test trailer.',
+        'product_type': 'rental',
+        'product_group_id': '1',
+        'branch_id': '1',
+        'price_amount': '200',
+        'price_unit': 'day',
+        'security_deposit': '750',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    assert b'Product saved' in edited.data
+    assert b'value="1" selected' in edited.data
+
+    order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '2',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'notes': 'Grouped product order test',
+    }, follow_redirects=True)
+    assert order.status_code == 200
+    assert b'Draft order created' in order.data
+    assert b'Order Trailer' in order.data
+    assert b'R1200.00' in order.data
+
+    inventory = client.get('/inventory?product_group_id=1')
+    assert b'Order Trailer' in inventory.data
+    assert b'Branch 1' in inventory.data
+
+    with app.app_context():
+        from app.db import get_db
+        product = get_db().execute('SELECT product_group_id FROM products WHERE id=1').fetchone()
+        assert product['product_group_id'] == 1
+
 def test_product_type_and_tracking_method_are_immutable_after_create(client, app):
     login(client)
     res = client.post('/inventory/new', data={
