@@ -874,6 +874,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
         'extra_hours': '0',
         'extra_hourly_rate': '0',
         'deposit_process_method': method,
+        'deposit_processed_at': '',
         'deposit_note': 'Processed deposit at counter',
     }, follow_redirects=True)
     assert b'Deposit refund marked' in settled.data
@@ -893,6 +894,61 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
 
     assert b'Deposit refund date' in settled.data
     assert refunded_on.encode() in settled.data
+
+
+def test_return_deposit_settlement_records_manual_refund_date(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+
+    settled = client.post(f'/orders/{order_id}/settle-return', data={
+        'extra_hours': '0',
+        'extra_hourly_rate': '0',
+        'deposit_process_method': 'eft',
+        'deposit_processed_at': '2026-08-20T14:45',
+        'deposit_note': 'Backdated deposit refund',
+    }, follow_redirects=True)
+
+    assert b'Deposit refund marked' in settled.data
+    assert b'2026-08-20 14:45 UTC' in settled.data
+    assert b'value="2026-08-20T14:45"' in settled.data
+    with app.app_context():
+        db = __import__('app.db', fromlist=['get_db']).get_db()
+        order = db.execute('SELECT deposit_processed_at FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['deposit_processed_at'] == '2026-08-20T14:45:00'
+
+
+def test_return_deposit_settlement_rejects_invalid_refund_date_without_overwrite(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    with app.app_context():
+        db = __import__('app.db', fromlist=['get_db']).get_db()
+        db.execute("""UPDATE orders SET deposit_refund_amount=1000, deposit_process_method='eft',
+            deposit_processed_at='2026-08-20T14:45:00' WHERE id=?""", (order_id,))
+        db.commit()
+
+    response = client.post(f'/orders/{order_id}/settle-return', data={
+        'extra_hours': '0',
+        'extra_hourly_rate': '0',
+        'deposit_process_method': 'cash',
+        'deposit_processed_at': 'not-a-date',
+        'deposit_note': 'Should not save',
+    }, follow_redirects=True)
+
+    assert b'Deposit refund date must be a valid date and time' in response.data
+    with app.app_context():
+        db = __import__('app.db', fromlist=['get_db']).get_db()
+        order = db.execute('SELECT deposit_process_method, deposit_processed_at, deposit_note FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['deposit_process_method'] == 'eft'
+        assert order['deposit_processed_at'] == '2026-08-20T14:45:00'
+        assert order['deposit_note'] != 'Should not save'
 
 
 def test_historical_refunded_deposit_is_not_in_process_deposit_filter(client, app):

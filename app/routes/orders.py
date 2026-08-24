@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
@@ -88,6 +88,7 @@ def detail(order_id):
         payment_summary=payment_summary(order_id),
         payment_label_for=payment_label_for,
         customer_custom_fields=custom_fields_for(order),
+        default_deposit_processed_at=(order["deposit_processed_at"] or datetime.utcnow().isoformat(timespec="minutes"))[:16],
     )
 
 

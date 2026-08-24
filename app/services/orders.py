@@ -360,6 +360,19 @@ def status_actions(status):
     return actions
 
 
+def _parse_deposit_processed_at(value):
+    value = (value or "").strip()
+    if not value:
+        return now()
+    try:
+        processed_at = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("Deposit refund date must be a valid date and time") from exc
+    if processed_at > datetime.utcnow().replace(microsecond=0):
+        raise ValueError("Deposit refund date cannot be in the future")
+    return processed_at.isoformat(timespec="seconds")
+
+
 def settle_return_deposit(order_id, form):
     order = get_order(order_id)
     if not order:
@@ -373,6 +386,7 @@ def settle_return_deposit(order_id, form):
     if deposit_process_method not in {"eft", "card", "cash"}:
         raise ValueError("Deposit process method must be EFT, Card, or Cash")
     note = form.get("deposit_note", "").strip()
+    deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
     extra_charge = round(extra_hours * hourly_rate, 2)
     deposit_available = float(order["deposit_total"] or 0)
     deposit_applied = round(min(deposit_available, extra_charge), 2)
@@ -384,7 +398,7 @@ def settle_return_deposit(order_id, form):
     db.execute(
         """UPDATE orders SET extra_hours = ?, deposit_applied_amount = ?, deposit_refund_amount = ?,
         deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
-        (extra_hours, deposit_applied, deposit_refund, deposit_process_method, now(), note, order_id),
+        (extra_hours, deposit_applied, deposit_refund, deposit_process_method, deposit_processed_at, note, order_id),
     )
     if deposit_applied > 0:
         existing = db.execute("SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT'", (order_id,)).fetchone()
