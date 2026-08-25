@@ -179,13 +179,12 @@ def calculate_custom_line(name, quantity, unit_price, billing_mode, days, tax_ra
 
 
 def _build_order_payload(form):
-    customer_id = int(form.get("customer_id") or 0)
-    if not customer_id:
-        raise ValueError("Customer is required")
     db = get_db()
-    customer = db.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
-    if not customer:
-        raise ValueError("Selected customer was not found")
+    customer_id = int(form.get("customer_id") or 0) or None
+    if customer_id:
+        customer = db.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        if not customer:
+            raise ValueError("Selected customer was not found")
     booking_type = form.get("booking_type") if form.get("booking_type") in {"return", "oneway"} else "return"
     collect_branch_id = int(form.get("collect_branch_id") or 0) or None
     return_branch_id = int(form.get("return_branch_id") or 0) or collect_branch_id
@@ -442,6 +441,8 @@ def transition_order(order_id, action):
     if order["status"] not in transition["from"]:
         raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
     if action in {"reserve", "start"}:
+        if not order["customer_id"]:
+            raise ValueError("Add customer details before reserving or pickup")
         errors = availability_errors(order_id)
         if errors:
             raise ValueError(errors[0])

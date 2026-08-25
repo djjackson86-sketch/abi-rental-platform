@@ -109,8 +109,8 @@
                     <small>Created {{ o.created_at[:10] }}</small>
                   </td>
                   <td>
-                    <strong class="table-primary-text">{{ o.customer_name or 'No customer' }}</strong>
-                    <small>{{ o.customer_email or 'No email on file' }}</small>
+                    <strong class="table-primary-text">{{ o.customer_name or 'No customer yet' }}</strong>
+                    <small>{{ o.customer_email or 'Edit order to add customer details' }}</small>
                   </td>
                   <td><span class="badge status-{{ o.status }}">{{ o.status }}</span></td>
                   <td>{{ o.start_at[:10] if o.start_at else '—' }} → {{ o.end_at[:10] if o.end_at else '—' }}</td>

@@ -3,7 +3,7 @@
 {% set title = 'Edit order' if editing else 'New order' %}
 {% set order_form = order_form or {} %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Orders</p><h1>{{ 'Edit order' if editing else 'New order' }}</h1><p>{{ 'Update this order without changing its status.' if editing else 'Create a draft order by choosing or adding a customer, rental period and catalogue/custom lines.' }}</p></div><a class="btn ghost" href="{{ url_for('orders.detail', order_id=order_form.order.id) if editing else url_for('orders.index') }}">{{ 'Back to order' if editing else 'Back to orders' }}</a></header>
+<header class="page-header"><div><p class="eyebrow">Orders</p><h1>{{ 'Edit order' if editing else 'New order' }}</h1><p>{{ 'Update this order without changing its status.' if editing else 'Create a draft order with rental period and catalogue/custom lines. Customer details can be added now or attached later from Edit order before reserving or pickup.' }}</p></div><a class="btn ghost" href="{{ url_for('orders.detail', order_id=order_form.order.id) if editing else url_for('orders.index') }}">{{ 'Back to order' if editing else 'Back to orders' }}</a></header>
 <form method="post" action="{{ form_action or url_for('orders.new') }}" class="settings-form panel order-form">
   <section class="form-section">
     <h2>Customer</h2>
@@ -11,13 +11,14 @@
       <label>Search customer
         <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') }}">
       </label>
-      <input type="hidden" name="customer_id" id="customer-id" value="{{ selected_customer_id or '' }}" required>
+      <input type="hidden" name="customer_id" id="customer-id" value="{{ selected_customer_id or '' }}">
       <datalist id="customer-options">
         {% for c in customers %}<option data-id="{{ c.id }}" value="{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}">{% if c.email %}{{ c.email }}{% endif %}</option>{% endfor %}
       </datalist>
-      <label class="fallback-select">Customer<select id="customer-select"><option value="">Choose customer</option>{% for c in customers %}<option value="{{ c.id }}" {% if selected_customer_id and selected_customer_id|int == c.id %}selected{% endif %}>{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}</option>{% endfor %}</select></label>
+      <label class="fallback-select">Customer<select id="customer-select"><option value="">No customer yet — save draft</option>{% for c in customers %}<option value="{{ c.id }}" {% if selected_customer_id and selected_customer_id|int == c.id %}selected{% endif %}>{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}</option>{% endfor %}</select></label>
+      <p class="form-help">Customer is optional for saving a draft. Add customer details before reserving or pickup.</p>
     {% else %}
-      <div class="empty-state"><p>Add a customer below before creating orders.</p></div>
+      <div class="empty-state"><p>No customers yet. You can still save a draft and add customer details later before reserving or pickup.</p></div>
     {% endif %}
   </section>
 

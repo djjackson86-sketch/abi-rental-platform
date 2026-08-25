@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 
 from app import create_app
+from app.db import get_db
 from app.services.orders import rental_days
 
 
@@ -1005,7 +1006,7 @@ def test_order_supports_mixed_rental_sales_and_service_lines(client):
     assert b'R750.00' in res.data
 
 
-def test_order_requires_customer_and_product(client):
+def test_order_requires_product_or_custom_line_not_customer(client):
     login(client)
     res = client.post('/orders/new', data={
         'customer_id': '',
@@ -1013,7 +1014,101 @@ def test_order_requires_customer_and_product(client):
         'start_date': '2026-07-01',
         'end_date': '2026-07-02',
     }, follow_redirects=True)
-    assert b'Customer is required' in res.data
+    assert b'At least one product or custom line is required' in res.data
+    assert b'Customer is required' not in res.data
+
+
+def test_order_draft_can_be_saved_without_customer(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    res = client.post('/orders/new', data={
+        'customer_id': '',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'notes': 'Customer to follow',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    assert b'No customer is attached yet' in res.data
+    assert b'Edit order to add customer details' in client.get('/orders').data
+    with app.app_context():
+        order = get_db().execute('SELECT customer_id, status FROM orders WHERE id = 1').fetchone()
+        assert order is not None
+        assert order['customer_id'] is None
+        assert order['status'] == 'draft'
+
+
+def test_customerless_draft_must_attach_customer_before_reserve_or_start(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    created = client.post('/orders/new', data={
+        'customer_id': '',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+    }, follow_redirects=False)
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+
+    reserve = client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    assert b'Add customer details before reserving or pickup' in reserve.data
+    start = client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    assert b'Add customer details before reserving or pickup' in start.data
+
+    edited = client.post(f'/orders/{order_id}/edit', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+    }, follow_redirects=True)
+    assert b'Order saved' in edited.data
+    with app.app_context():
+        order = get_db().execute('SELECT customer_id, status FROM orders WHERE id = ?', (order_id,)).fetchone()
+        assert order is not None
+        assert order['customer_id'] == 1
+        assert order['status'] == 'draft'
+
+    reserve_after_customer = client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    assert b'Order reserved' in reserve_after_customer.data
+    with app.app_context():
+        order = get_db().execute('SELECT status FROM orders WHERE id = ?', (order_id,)).fetchone()
+        assert order is not None
+        assert order['status'] == 'reserved'
+
+    second = client.post('/orders/new', data={
+        'customer_id': '',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-03',
+        'start_time': '09:00',
+        'end_date': '2026-07-04',
+        'end_time': '09:00',
+    }, follow_redirects=False)
+    second_id = second.headers['Location'].rstrip('/').split('/')[-1]
+    client.post(f'/orders/{second_id}/edit', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-03',
+        'start_time': '09:00',
+        'end_date': '2026-07-04',
+        'end_time': '09:00',
+    }, follow_redirects=True)
+    start_after_customer = client.post(f'/orders/{second_id}/start', follow_redirects=True)
+    assert b'Order started' in start_after_customer.data
+    with app.app_context():
+        order = get_db().execute('SELECT status FROM orders WHERE id = ?', (second_id,)).fetchone()
+        assert order is not None
+        assert order['status'] == 'started'
 
 
 def create_order_for_status(client, quantity='2', start_date='2026-07-01', end_date='2026-07-03'):

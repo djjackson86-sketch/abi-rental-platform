@@ -20,6 +20,7 @@
 <section class="two-col">
   <article class="panel">
     <h2>Customer</h2>
+    {% if not order.customer_id %}<p class="form-help">No customer is attached yet. Use Edit order to add customer details before reserving or pickup.</p>{% endif %}
     <div class="list-row"><span>Name</span><b>{{ order.customer_name or '—' }}</b></div>
     <div class="list-row"><span>Email</span><b>{{ order.customer_email or '—' }}</b></div>
     <div class="list-row"><span>Phone</span><b>{{ order.customer_phone or '—' }}</b></div>
