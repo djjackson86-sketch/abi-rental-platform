@@ -20,7 +20,15 @@ def _customers():
 
 
 def _products():
-    return get_db().execute("SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id, b.name AS branch_name FROM products p LEFT JOIN branches b ON b.id = p.branch_id WHERE p.active = 1 ORDER BY p.name").fetchall()
+    return get_db().execute("""
+        SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
+               p.security_deposit, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
+        FROM products p
+        LEFT JOIN branches b ON b.id = p.branch_id
+        LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
+        WHERE p.active = 1
+        ORDER BY p.name
+    """).fetchall()
 
 
 def _time_options(increment=15):

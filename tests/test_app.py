@@ -511,6 +511,12 @@ def test_order_draft_creation_and_totals(client):
     assert b'id="rental-days-card"' in res.data
     assert b'Rental days' in res.data
     assert b'id="rental-days-count"' in res.data
+    assert b'id="order-estimate-panel"' in res.data
+    assert b'Order estimate' in res.data
+    assert b'Product total' in res.data
+    assert b'class="line-total-preview"' in res.data
+    assert b'data-deposit="750.00"' in res.data
+    assert b'data-tax-rate=' in res.data
 
     res = client.post('/orders/new', data={
         'customer_id': '1',
@@ -573,6 +579,9 @@ def test_draft_order_can_be_edited_without_creating_new_order(client, app):
     assert edit_page.status_code == 200
     assert b'Edit order' in edit_page.data
     assert b'Save order changes' in edit_page.data
+    assert b'id="order-estimate-panel"' in edit_page.data
+    assert b'class="line-total-preview"' in edit_page.data
+    assert b'data-deposit="750.00"' in edit_page.data
     assert b'Edit order' in client.get(f'/orders/{order_id}').data
 
     saved = client.post(f'/orders/{order_id}/edit', data=edit_order_payload(), follow_redirects=True)

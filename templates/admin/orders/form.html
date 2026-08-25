@@ -54,10 +54,10 @@
 
   <section class="form-section">
     <h2>Products, sales items, services and custom lines</h2>
-    <datalist id="product-options">{% for p in products %}<option data-id="{{ p.id }}" data-price="{{ '%.2f'|format(p.price_amount) }}" data-unit="{{ p.price_unit }}" value="{{ p.name }}{% if p.sku %} — {{ p.sku }}{% endif %}{% if p.branch_name %} — {{ p.branch_name }}{% endif %}">R{{ '%.2f'|format(p.price_amount) }}/{{ p.price_unit }}</option>{% endfor %}</datalist>
+    <datalist id="product-options">{% for p in products %}<option data-id="{{ p.id }}" data-price="{{ '%.2f'|format(p.price_amount) }}" data-unit="{{ p.price_unit }}" data-deposit="{{ '%.2f'|format(p.security_deposit or 0) }}" data-tax-rate="{{ '%.2f'|format(p.tax_rate or 0) }}" value="{{ p.name }}{% if p.sku %} — {{ p.sku }}{% endif %}{% if p.branch_name %} — {{ p.branch_name }}{% endif %}">R{{ '%.2f'|format(p.price_amount) }}/{{ p.price_unit }}</option>{% endfor %}</datalist>
     <div class="table-wrap order-lines-wrap">
       <table class="data-table order-lines-table">
-        <thead><tr><th>ITEM NO.</th><th>DESCRIPTION</th><th>BILLING</th><th>UNIT</th><th>QTY</th></tr></thead>
+        <thead><tr><th>ITEM NO.</th><th>DESCRIPTION</th><th>BILLING</th><th>UNIT</th><th>QTY</th><th>LINE TOTAL</th></tr></thead>
         <tbody>
         {% for line in order_form.get('lines', []) if editing %}
           <tr class="enhanced-line">
@@ -66,6 +66,7 @@
             <td><select name="custom_billing_mode"><option value="fixed" {% if line.custom_billing_mode == 'fixed' %}selected{% endif %}>Fixed price</option><option value="rental_day" {% if line.custom_billing_mode == 'rental_day' %}selected{% endif %}>Multiply by rental days</option></select></td>
             <td><input type="number" step="0.01" min="0" name="custom_unit_price" class="custom-unit-price" placeholder="Auto from inventory" value="{{ line.custom_unit_price }}"></td>
             <td><input type="number" name="quantity" min="1" value="{{ line.quantity or 1 }}"></td>
+            <td><output class="line-total-preview">R0.00</output></td>
           </tr>
         {% else %}
           {% for line_no in range(1, 5) %}
@@ -75,6 +76,7 @@
             <td><select name="custom_billing_mode"><option value="fixed">Fixed price</option><option value="rental_day">Multiply by rental days</option></select></td>
             <td><input type="number" step="0.01" min="0" name="custom_unit_price" class="custom-unit-price" placeholder="Auto from inventory"></td>
             <td><input type="number" name="quantity" min="1" value="1"></td>
+            <td><output class="line-total-preview">R0.00</output></td>
           </tr>
           {% endfor %}
         {% endfor %}
@@ -93,7 +95,19 @@
     <p class="form-help">Security deposit is refundable and calculated from the selected inventory. Damage waiver removes security deposit and adds the waiver fee to the order total.</p>
   </section>
 
-  <section class="form-section"><h2>Coupon</h2><div class="form-grid"><label>Coupon code<input name="coupon_code" placeholder="TRAILER10" list="coupon-options" style="text-transform:uppercase" value="{{ order_form.get('coupon_code', '') }}"></label><datalist id="coupon-options">{% for coupon in coupons %}<option value="{{ coupon.code }}">{{ coupon.description }}</option>{% endfor %}</datalist></div></section>
+  <section class="form-section"><h2>Coupon</h2><div class="form-grid"><label>Coupon code<input name="coupon_code" id="coupon-code" placeholder="TRAILER10" list="coupon-options" style="text-transform:uppercase" value="{{ order_form.get('coupon_code', '') }}"></label><datalist id="coupon-options">{% for coupon in coupons %}<option value="{{ coupon.code }}" data-type="{{ coupon.discount_type }}" data-value="{{ '%.2f'|format(coupon.value or 0) }}">{{ coupon.description }}</option>{% endfor %}</datalist></div></section>
+  <section class="form-section order-estimate-panel" id="order-estimate-panel" data-tax-mode="{{ settings.tax_mode or 'exclusive' }}" aria-live="polite">
+    <h2>Order estimate</h2>
+    <div class="estimate-grid">
+      <div><span>Product total</span><strong id="estimate-product-total">R0.00</strong></div>
+      <div><span>Discount</span><strong id="estimate-discount-total">R0.00</strong></div>
+      <div><span>Tax estimate</span><strong id="estimate-tax-total">R0.00</strong></div>
+      <div><span>Security deposit</span><strong id="estimate-deposit-total">R0.00</strong></div>
+      <div><span>Damage waiver</span><strong id="estimate-waiver-total">R0.00</strong></div>
+      <div class="estimate-grand-total"><span>Estimated order total</span><strong id="estimate-order-total">R0.00</strong></div>
+    </div>
+    <p class="form-help">Estimate updates before saving. Saved orders are still recalculated on the server.</p>
+  </section>
   <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional internal notes for this order">{{ order_form.get('notes', '') }}</textarea></label></section>
   <div class="form-actions"><button class="btn primary" type="submit" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save order changes' if editing else 'Save as draft' }}</button></div>
 </form>
@@ -109,17 +123,30 @@
   const bookingType=document.getElementById('booking-type'); const collectBranch=document.getElementById('collect-branch'); const returnBranch=document.getElementById('return-branch'); function syncReturnBranch(){ if(bookingType && collectBranch && returnBranch && bookingType.value==='return'){ returnBranch.value=collectBranch.value; }} if(bookingType) bookingType.addEventListener('change',syncReturnBranch); if(collectBranch) collectBranch.addEventListener('change',syncReturnBranch); syncReturnBranch();
   const startDate=document.getElementById('start-date'); const endDate=document.getElementById('end-date'); const startTime=document.getElementById('start-time'); const endTime=document.getElementById('end-time');
   const rentalDaysCount=document.getElementById('rental-days-count'); const rentalDaysHelp=document.getElementById('rental-days-help');
+  const estimatePanel=document.getElementById('order-estimate-panel');
+  const productTotalEl=document.getElementById('estimate-product-total'); const discountEl=document.getElementById('estimate-discount-total'); const taxEl=document.getElementById('estimate-tax-total'); const depositEl=document.getElementById('estimate-deposit-total'); const waiverEl=document.getElementById('estimate-waiver-total'); const orderTotalEl=document.getElementById('estimate-order-total');
+  const couponInput=document.getElementById('coupon-code'); const couponOptions=[...document.querySelectorAll('#coupon-options option')];
+  const money=new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR'});
+  function fmt(value){ return money.format(Number.isFinite(value)?value:0); }
+  function amount(value){ const n=parseFloat(value); return Number.isFinite(n)?n:0; }
   function tomorrowOf(ds){ const parts=(ds||'').split('-').map(Number); if(parts.length!==3 || !parts[0]) return ''; const d=new Date(Date.UTC(parts[0],parts[1]-1,parts[2])); d.setUTCDate(d.getUTCDate()+1); return d.toISOString().slice(0,10); }
   function parseLocalDateTime(dateInput,timeInput){ const ds=dateInput&&dateInput.value; const tv=(timeInput&&timeInput.value)||(timeInput&&timeInput.dataset.defaultTime)||'00:00'; const dp=(ds||'').split('-').map(Number); const tp=(tv||'00:00').split(':').map(Number); if(dp.length!==3 || !dp[0]) return null; return new Date(dp[0],dp[1]-1,dp[2],tp[0]||0,tp[1]||0,0,0); }
-  function updateRentalDays(){ if(!rentalDaysCount||!rentalDaysHelp) return; const start=parseLocalDateTime(startDate,startTime); const end=parseLocalDateTime(endDate,endTime); if(!start||!end){ rentalDaysCount.textContent='—'; rentalDaysHelp.textContent='Choose pickup and return dates.'; return; } if(end<=start){ rentalDaysCount.textContent='—'; rentalDaysHelp.textContent='Return must be after pickup.'; return; } const days=Math.max(1,Math.ceil((end-start)/(24*60*60*1000))); rentalDaysCount.textContent=String(days); rentalDaysHelp.textContent=days===1?'Minimum 1 rental day; partial days round up.':'Partial days round up.'; }
+  function currentRentalDays(){ const start=parseLocalDateTime(startDate,startTime); const end=parseLocalDateTime(endDate,endTime); if(!start||!end||end<=start) return 1; return Math.max(1,Math.ceil((end-start)/(24*60*60*1000))); }
+  function updateRentalDays(){ if(!rentalDaysCount||!rentalDaysHelp) return; const start=parseLocalDateTime(startDate,startTime); const end=parseLocalDateTime(endDate,endTime); if(!start||!end){ rentalDaysCount.textContent='—'; rentalDaysHelp.textContent='Choose pickup and return dates.'; updateEstimate(); return; } if(end<=start){ rentalDaysCount.textContent='—'; rentalDaysHelp.textContent='Return must be after pickup.'; updateEstimate(); return; } const days=currentRentalDays(); rentalDaysCount.textContent=String(days); rentalDaysHelp.textContent=days===1?'Minimum 1 rental day; partial days round up.':'Partial days round up.'; updateEstimate(); }
   if(startDate){ startDate.addEventListener('change',()=>{ if(endDate && !endDate.dataset.manual) endDate.value=tomorrowOf(startDate.value); updateRentalDays(); }); }
   if(endDate){ endDate.addEventListener('input',()=>{ endDate.dataset.manual='1'; updateRentalDays(); }); }
   if(startTime){ startTime.addEventListener('change',()=>{ if(endTime && !endTime.dataset.manual) endTime.value=startTime.value; updateRentalDays(); }); }
   if(endTime){ endTime.addEventListener('input',()=>{ endTime.dataset.manual='1'; updateRentalDays(); }); }
-  updateRentalDays();
   const productOptions=[...document.querySelectorAll('#product-options option')];
-  document.querySelectorAll('.enhanced-line').forEach(row=>{ const input=row.querySelector('.product-search'); const hidden=row.querySelector('.product-id'); const price=row.querySelector('.custom-unit-price'); const custom=row.querySelector('.custom-name'); function sync(){ const match=productOptions.find(o=>o.value===input.value); hidden.value=match?match.dataset.id:''; if(match){ price.value=match.dataset.price||''; price.placeholder='From inventory'; custom.value=''; } else if(!input.value){ hidden.value=''; price.value=''; price.placeholder='Custom only'; } } input.addEventListener('input',sync); input.addEventListener('change',sync); });
-  const depositOption=document.getElementById('deposit-option'); const waiver=document.getElementById('damage-waiver-amount'); function syncWaiver(){ if(!depositOption||!waiver) return; waiver.disabled=depositOption.value!=='damage_waiver'; if(waiver.disabled) waiver.value=''; } if(depositOption) depositOption.addEventListener('change',syncWaiver); syncWaiver();
+  const depositOption=document.getElementById('deposit-option'); const waiver=document.getElementById('damage-waiver-amount');
+  function selectedProduct(row){ const input=row.querySelector('.product-search'); const hidden=row.querySelector('.product-id'); return productOptions.find(o=>o.value===(input&&input.value))||productOptions.find(o=>o.dataset.id===(hidden&&hidden.value)); }
+  function lineEstimate(row){ const match=selectedProduct(row); const qty=Math.max(1,parseInt((row.querySelector('input[name="quantity"]')||{}).value||'1',10)||1); const days=currentRentalDays(); const billing=(row.querySelector('select[name="custom_billing_mode"]')||{}).value||'fixed'; const customName=(row.querySelector('.custom-name')||{}).value||''; const unitInput=row.querySelector('.custom-unit-price'); let unit=amount(unitInput&&unitInput.value); let multiplier=1; let deposit=0; let taxRate=0; let active=false;
+    if(match){ unit=amount(match.dataset.price); multiplier=['day','week','month','hour'].includes(match.dataset.unit)?days:1; deposit=amount(match.dataset.deposit)*qty; taxRate=amount(match.dataset.taxRate)/100; active=true; }
+    else if(customName.trim()){ multiplier=billing==='rental_day'?days:1; active=true; }
+    const base=active?unit*qty*multiplier:0; const taxMode=(estimatePanel&&estimatePanel.dataset.taxMode)||'exclusive'; const tax=taxMode==='inclusive'&&taxRate?base-(base/(1+taxRate)):base*taxRate; const subtotal=taxMode==='inclusive'&&taxRate?base-tax:base; const total=taxMode==='inclusive'&&taxRate?base:subtotal+tax; return {active,subtotal,tax,total,deposit}; }
+  function updateEstimate(){ if(!estimatePanel) return; let subtotal=0,tax=0,lineTotal=0,deposit=0; document.querySelectorAll('.enhanced-line').forEach(row=>{ const est=lineEstimate(row); subtotal+=est.subtotal; tax+=est.tax; lineTotal+=est.total; deposit+=est.deposit; const out=row.querySelector('.line-total-preview'); if(out) out.textContent=fmt(est.total); }); const coupon=(couponInput&&couponInput.value||'').trim().toUpperCase(); const couponOpt=couponOptions.find(o=>o.value.toUpperCase()===coupon); let discount=0; if(couponOpt){ const v=amount(couponOpt.dataset.value); discount=couponOpt.dataset.type==='percent'?subtotal*Math.min(v,100)/100:Math.min(v,subtotal); } const useSecurity=depositOption&&!['damage_waiver','no_deposit'].includes(depositOption.value); const depositTotal=useSecurity?deposit:0; const waiverTotal=depositOption&&depositOption.value==='damage_waiver'?amount(waiver&&waiver.value):0; const estimatedTotal=Math.max(0,subtotal-discount)+tax+waiverTotal; productTotalEl.textContent=fmt(lineTotal); discountEl.textContent=fmt(discount); taxEl.textContent=fmt(tax); depositEl.textContent=fmt(depositTotal); waiverEl.textContent=fmt(waiverTotal); orderTotalEl.textContent=fmt(estimatedTotal); }
+  document.querySelectorAll('.enhanced-line').forEach(row=>{ const input=row.querySelector('.product-search'); const hidden=row.querySelector('.product-id'); const price=row.querySelector('.custom-unit-price'); const custom=row.querySelector('.custom-name'); function sync(){ const match=productOptions.find(o=>o.value===input.value); if(match){ hidden.value=match.dataset.id||''; price.value=match.dataset.price||''; price.placeholder='From inventory'; custom.value=''; } else if(!input.value){ hidden.value=''; price.value=''; price.placeholder='Custom only'; } updateEstimate(); } input.addEventListener('input',sync); input.addEventListener('change',sync); row.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',updateEstimate)); row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',updateEstimate)); sync(); });
+  function syncWaiver(){ if(!depositOption||!waiver) return; waiver.disabled=depositOption.value!=='damage_waiver'; if(waiver.disabled) waiver.value=''; updateEstimate(); } if(depositOption) depositOption.addEventListener('change',syncWaiver); if(waiver) waiver.addEventListener('input',updateEstimate); if(couponInput){ couponInput.addEventListener('input',updateEstimate); couponInput.addEventListener('change',updateEstimate); } syncWaiver(); updateRentalDays();
 })();
 </script>
 {% endblock %}
