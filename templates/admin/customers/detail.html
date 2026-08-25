@@ -43,8 +43,12 @@
       <div class="detail-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div>
       <div class="detail-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div>
       <div class="detail-row"><span>Balance due</span><b>R{{ '%.2f'|format(customer.balance_due) }}</b></div>
+      {% if customer.customer_type == 'company' and (custom_fields.get('vat_number') or custom_fields.get('company_reg_no')) %}
+        <div class="detail-row"><span>VAT No</span><b>{{ custom_fields.get('vat_number') or '—' }}</b></div>
+        <div class="detail-row"><span>Company Reg No</span><b>{{ custom_fields.get('company_reg_no') or '—' }}</b></div>
+      {% endif %}
       {% if custom_fields %}
-        {% for key, value in custom_fields.items() %}<div class="detail-row"><span>{{ key.replace('_', ' ')|title }}</span><b>{{ value }}</b></div>{% endfor %}
+        {% for key, value in custom_fields.items() %}{% if key not in ['vat_number', 'company_reg_no'] %}<div class="detail-row"><span>{{ key.replace('_', ' ')|title }}</span><b>{{ value }}</b></div>{% endif %}{% endfor %}
       {% endif %}
     </div>
   </article>

@@ -592,11 +592,27 @@ def test_customer_crud_search_and_detail(client):
         'email': 'bookings@acme.test',
         'phone': '+271****6789',
         'marketing_opt_in': '1',
+        'vat_number': '4123456789',
+        'company_reg_no': '2024/123456/07',
+        'vehicle_details': 'Bakkie CA 123',
     }, follow_redirects=True)
     assert res.status_code == 200
     assert b'Customer created' in res.data
     assert b'Acme Rentals' in res.data
     assert b'Subscribed' in res.data
+    assert b'VAT No' in res.data
+    assert b'4123456789' in res.data
+    assert b'Company Reg No' in res.data
+    assert b'2024/123456/07' in res.data
+    assert b'Bakkie CA 123' in res.data
+
+    edit_page = client.get('/customers/1/edit')
+    assert edit_page.status_code == 200
+    assert b'data-company-details' in edit_page.data
+    assert b'name="vat_number"' in edit_page.data
+    assert b'value="4123456789"' in edit_page.data
+    assert b'name="company_reg_no"' in edit_page.data
+    assert b'value="2024/123456/07"' in edit_page.data
 
     res = client.get('/customers?query=acme&customer_type=company&marketing=subscribed')
     assert b'Acme Rentals' in res.data
@@ -613,6 +629,11 @@ def test_customer_crud_search_and_detail(client):
     assert b'Customer saved' in res.data
     assert b'Don Customer' in res.data
     assert b'Not subscribed' in res.data
+    assert b'VAT No' not in res.data
+    assert b'4123456789' not in res.data
+    assert b'Company Reg No' not in res.data
+    assert b'2024/123456/07' not in res.data
+    assert b'Bakkie CA 123' not in res.data
 
 
 def test_setup_marks_customer_complete(client):

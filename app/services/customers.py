@@ -52,22 +52,29 @@ def customer_orders(customer_id):
     return get_db().execute("SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC", (customer_id,)).fetchall()
 
 
-def _clean(form):
+def _clean(form, existing_custom_fields=None):
     name = form.get("name", "").strip()
     if not name:
         raise ValueError("Customer name is required")
     customer_type = form.get("customer_type", "individual")
     if customer_type not in VALID_TYPES:
         customer_type = "individual"
-    custom_fields = {
+    custom_fields = dict(existing_custom_fields or {})
+    submitted_custom_fields = {
         "vehicle_details": form.get("vehicle_details", "").strip(),
         "alternative_contact": form.get("alternative_contact", "").strip(),
         "id_or_license": form.get("id_or_license", "").strip(),
         "custom_question": form.get("custom_question", "").strip(),
         "custom_answer_type": form.get("custom_answer_type", "text").strip() or "text",
         "custom_answer": form.get("custom_answer", "").strip(),
+        "vat_number": form.get("vat_number", "").strip(),
+        "company_reg_no": form.get("company_reg_no", "").strip(),
     }
-    custom_fields = {key: value for key, value in custom_fields.items() if value}
+    for key, value in submitted_custom_fields.items():
+        if value:
+            custom_fields[key] = value
+        else:
+            custom_fields.pop(key, None)
     return {
         "customer_type": customer_type,
         "name": name,
@@ -104,7 +111,7 @@ def create_customer(form):
 
 
 def update_customer(customer_id, form):
-    data = _clean(form)
+    data = _clean(form, existing_custom_fields=custom_fields_for(get_customer(customer_id)))
     data["id"] = customer_id
     get_db().execute(
         """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json WHERE id=:id""",
