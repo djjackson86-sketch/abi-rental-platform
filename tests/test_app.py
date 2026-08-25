@@ -1,9 +1,11 @@
 import os
 import tempfile
+from datetime import datetime
 
 import pytest
 
 from app import create_app
+from app.services.orders import rental_days
 
 
 @pytest.fixture()
@@ -506,6 +508,9 @@ def test_order_draft_creation_and_totals(client):
     assert res.status_code == 200
     assert b'Order Customer' in res.data
     assert b'Order Trailer' in res.data
+    assert b'id="rental-days-card"' in res.data
+    assert b'Rental days' in res.data
+    assert b'id="rental-days-count"' in res.data
 
     res = client.post('/orders/new', data={
         'customer_id': '1',
@@ -530,6 +535,13 @@ def test_order_draft_creation_and_totals(client):
     assert b'ORD-00001' in list_res.data
     assert b'Order Customer' in list_res.data
     assert b'built-in method items' not in list_res.data
+
+
+def test_rental_days_matches_partial_day_rounding_rule():
+    assert rental_days(datetime(2026, 7, 1, 9, 0), datetime(2026, 7, 1, 11, 0)) == 1
+    assert rental_days(datetime(2026, 7, 1, 9, 0), datetime(2026, 7, 2, 9, 0)) == 1
+    assert rental_days(datetime(2026, 7, 1, 9, 0), datetime(2026, 7, 2, 9, 1)) == 2
+    assert rental_days(datetime(2026, 7, 3, 9, 0), datetime(2026, 7, 2, 9, 0)) == 1
 
 
 
