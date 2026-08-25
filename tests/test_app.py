@@ -108,6 +108,154 @@ def test_coupon_creation_and_order_application(client):
     assert b'R2580.00' in order.data  # discounted rental total plus refundable security deposit.
 
 
+def test_admin_can_edit_coupon_fields_and_validation(client, app):
+    login(client)
+    client.post('/coupons', data={
+        'code': 'SAVE10',
+        'description': 'Original promo',
+        'discount_type': 'percent',
+        'value': '10',
+        'active': '1',
+    }, follow_redirects=True)
+    client.post('/coupons', data={
+        'code': 'OTHER',
+        'description': 'Other promo',
+        'discount_type': 'fixed',
+        'value': '5',
+        'active': '1',
+    }, follow_redirects=True)
+
+    edit_page = client.get('/coupons/1/edit')
+    assert edit_page.status_code == 200
+    assert b'Edit coupon' in edit_page.data
+    assert b'Save coupon changes' in edit_page.data
+    assert b'SAVE10' in edit_page.data
+
+    duplicate = client.post('/coupons/1/edit', data={
+        'code': 'OTHER',
+        'description': 'Duplicate code attempt',
+        'discount_type': 'fixed',
+        'value': '25',
+        'active': '1',
+    }, follow_redirects=True)
+    assert b'Coupon code already exists' in duplicate.data
+
+    for invalid_value, message in [
+        ('0', b'Coupon discount must be greater than zero'),
+        ('101', b'Percentage coupons cannot exceed 100%'),
+    ]:
+        response = client.post('/coupons/1/edit', data={
+            'code': 'SAVE10',
+            'description': 'Invalid promo',
+            'discount_type': 'percent',
+            'value': invalid_value,
+            'active': '1',
+        }, follow_redirects=True)
+        assert message in response.data
+
+    saved = client.post('/coupons/1/edit', data={
+        'code': 'SAVE25',
+        'description': 'Updated fixed discount',
+        'discount_type': 'fixed',
+        'value': '25',
+    }, follow_redirects=True)
+    assert saved.status_code == 200
+    assert b'Coupon updated' in saved.data
+    assert b'SAVE25' in saved.data
+    assert b'Updated fixed discount' in saved.data
+    assert b'R25.00' in saved.data
+    assert b'Inactive' in saved.data
+
+    with app.app_context():
+        from app.db import get_db
+        coupon = get_db().execute('SELECT code, description, discount_type, value, active FROM coupons WHERE id=1').fetchone()
+        assert coupon is not None
+        assert coupon['code'] == 'SAVE25'
+        assert coupon['description'] == 'Updated fixed discount'
+        assert coupon['discount_type'] == 'fixed'
+        assert coupon['value'] == 25
+        assert coupon['active'] == 0
+
+
+def test_edited_coupon_values_affect_new_and_edited_orders(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/coupons', data={
+        'code': 'EDITME',
+        'description': 'Starts as ten percent',
+        'discount_type': 'percent',
+        'value': '10',
+        'active': '1',
+    }, follow_redirects=True)
+
+    first_order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'coupon_code': 'EDITME',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }, follow_redirects=True)
+    assert b'Draft order created' in first_order.data
+    with app.app_context():
+        from app.db import get_db
+        original = get_db().execute('SELECT discount_total, total FROM orders WHERE id=1').fetchone()
+        assert original is not None
+        assert original['discount_total'] == 20
+        assert original['total'] == 180
+
+    client.post('/coupons/1/edit', data={
+        'code': 'EDITME',
+        'description': 'Now fixed seventy five',
+        'discount_type': 'fixed',
+        'value': '75',
+        'active': '1',
+    }, follow_redirects=True)
+
+    new_order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'coupon_code': 'EDITME',
+        'start_date': '2026-07-03',
+        'start_time': '09:00',
+        'end_date': '2026-07-04',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }, follow_redirects=True)
+    assert b'Draft order created' in new_order.data
+    with app.app_context():
+        from app.db import get_db
+        created_after_edit = get_db().execute('SELECT discount_total, total FROM orders WHERE id=2').fetchone()
+        assert created_after_edit is not None
+        assert created_after_edit['discount_total'] == 75
+        assert created_after_edit['total'] == 125
+
+    edited_order = client.post('/orders/1/edit', data={
+        'customer_id': '1',
+        'product_id': ['1'],
+        'custom_name': [''],
+        'custom_unit_price': [''],
+        'custom_billing_mode': ['fixed'],
+        'quantity': ['1'],
+        'coupon_code': 'EDITME',
+        'start_date': '2026-07-05',
+        'start_time': '09:00',
+        'end_date': '2026-07-06',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }, follow_redirects=True)
+    assert b'Order saved' in edited_order.data
+    with app.app_context():
+        from app.db import get_db
+        edited = get_db().execute('SELECT discount_total, total FROM orders WHERE id=1').fetchone()
+        assert edited is not None
+        assert edited['discount_total'] == 75
+        assert edited['total'] == 125
+
 def test_barcode_lookup(client):
     login(client)
     # GET the page

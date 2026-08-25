@@ -1,0 +1,23 @@
+{% extends "admin/layout.html" %}
+{% set title='Edit coupon' %}
+{% block admin_body %}
+<header class="page-header inventory-header">
+  <div class="module-title">
+    <span class="module-icon">%</span>
+    <div><p class="eyebrow">Online checkout</p><h1>Edit coupon</h1><p>Update this coupon code, discount value, and active status.</p></div>
+  </div>
+  <a class="btn ghost" href="{{ url_for('admin.coupons') }}">Back to coupons</a>
+</header>
+
+<section class="panel settings-form">
+  <h2>{{ coupon.code }}</h2>
+  <form method="post" class="form-grid">
+    <label>Code<input name="code" required value="{{ coupon.code }}" style="text-transform:uppercase"></label>
+    <label>Discount type<select name="discount_type"><option value="percent" {% if coupon.discount_type == 'percent' %}selected{% endif %}>Percentage</option><option value="fixed" {% if coupon.discount_type == 'fixed' %}selected{% endif %}>Fixed amount</option></select></label>
+    <label>Value<input name="value" required type="number" min="0.01" step="0.01" value="{{ '%.2f'|format(coupon.value) }}"></label>
+    <label class="span-2">Description<input name="description" value="{{ coupon.description or '' }}"></label>
+    <label class="switch"><input type="checkbox" name="active" value="1" {% if coupon.active %}checked{% endif %}> Active</label>
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Save coupon changes</button></div>
+  </form>
+</section>
+{% endblock %}

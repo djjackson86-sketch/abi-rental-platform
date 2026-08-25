@@ -42,8 +42,8 @@
   {% if coupons %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Code</th><th>Description</th><th>Discount</th><th>Status</th><th>Created</th></tr></thead>
-      <tbody>{% for coupon in coupons %}<tr><td><strong>{{ coupon.code }}</strong></td><td>{{ coupon.description or '—' }}</td><td>{{ format_discount(coupon) }}</td><td>{% if coupon.active %}<span class="store-dot visible">Active</span>{% else %}<span class="store-dot hidden">Inactive</span>{% endif %}</td><td>{{ coupon.created_at }}</td></tr>{% endfor %}</tbody>
+      <thead><tr><th>Code</th><th>Description</th><th>Discount</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody>{% for coupon in coupons %}<tr><td><strong>{{ coupon.code }}</strong></td><td>{{ coupon.description or '—' }}</td><td>{{ format_discount(coupon) }}</td><td>{% if coupon.active %}<span class="store-dot visible">Active</span>{% else %}<span class="store-dot hidden">Inactive</span>{% endif %}</td><td>{{ coupon.created_at }}</td><td><a class="btn ghost" href="{{ url_for('admin.edit_coupon', coupon_id=coupon.id) }}">Edit</a></td></tr>{% endfor %}</tbody>
     </table>
   </div>
   {% else %}
