@@ -811,6 +811,76 @@ def edit_order_payload(quantity='3', custom_price='50', start_date='2026-07-02',
     }
 
 
+def test_edit_order_shows_attached_customer_standard_and_custom_fields(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/customers/1/edit', data={
+        'customer_type': 'individual',
+        'name': 'Order Customer',
+        'email': 'order@example.com',
+        'phone': '+270****0000',
+        'address_line1': '12 Trailer Street',
+        'address_line2': 'Yard 4',
+        'suburb': 'Paarden Eiland',
+        'city': 'Cape Town',
+        'province': 'Western Cape',
+        'postal_code': '7405',
+        'country': 'South Africa',
+        'vehicle_details': 'Toyota Hilux CA 123-456',
+        'alternative_contact': 'Alt Contact +27000000001',
+        'id_or_license': 'ID 8001015009087',
+        'custom_question': 'Has towbar fitted?',
+        'custom_answer': 'Yes',
+    }, follow_redirects=True)
+    order_id = create_order_for_status(client, quantity='1')
+
+    edit_page = client.get(f'/orders/{order_id}/edit')
+
+    assert edit_page.status_code == 200
+    assert b'Attached customer details' in edit_page.data
+    assert b'Order Customer' in edit_page.data
+    assert b'order@example.com' in edit_page.data
+    assert b'+270****0000' in edit_page.data
+    assert b'12 Trailer Street, Yard 4, Paarden Eiland, Cape Town, Western Cape, 7405, South Africa' in edit_page.data
+    assert b'Toyota Hilux CA 123-456' in edit_page.data
+    assert b'Alt Contact +27000000001' in edit_page.data
+    assert b'ID 8001015009087' in edit_page.data
+    assert b'Has towbar fitted?' in edit_page.data
+    assert b'Yes' in edit_page.data
+    assert b'href="/customers/1/edit"' in edit_page.data
+    assert b'name="customer_id" id="customer-id" value="1"' in edit_page.data
+
+    saved = client.post(f'/orders/{order_id}/edit', data=edit_order_payload(quantity='1'), follow_redirects=True)
+    assert b'Order saved' in saved.data
+    with app.app_context():
+        order = get_db().execute('SELECT customer_id FROM orders WHERE id = ?', (order_id,)).fetchone()
+        assert order is not None
+        assert order['customer_id'] == 1
+
+
+def test_customerless_order_edit_keeps_picker_and_no_customer_copy(client):
+    login(client)
+    seed_customer_and_product(client)
+    created = client.post('/orders/new', data={
+        'customer_id': '',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+    }, follow_redirects=False)
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+
+    edit_page = client.get(f'/orders/{order_id}/edit')
+
+    assert edit_page.status_code == 200
+    assert b'No customer yet. Search above to attach customer details before reserving or pickup.' in edit_page.data
+    assert b'id="customer-search"' in edit_page.data
+    assert b'name="customer_id" id="customer-id" value=""' in edit_page.data
+    assert b'No customer yet \xe2\x80\x94 save draft' in edit_page.data
+
+
 def test_draft_order_can_be_edited_without_creating_new_order(client, app):
     login(client)
     seed_customer_and_product(client)

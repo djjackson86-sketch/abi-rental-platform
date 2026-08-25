@@ -12,6 +12,26 @@
         <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') }}">
       </label>
       <input type="hidden" name="customer_id" id="customer-id" value="{{ selected_customer_id or '' }}">
+      {% if editing %}
+        {% set customer_summary = order_form.get('customer_summary') %}
+        {% if customer_summary %}
+          <div class="customer-summary-card soft-card">
+            <div class="panel-title"><h3>Attached customer details</h3><a href="{{ url_for('customers.edit', customer_id=customer_summary.id) }}">Edit customer</a></div>
+            <div class="detail-list">
+              <div class="detail-row"><span>Name</span><b>{{ customer_summary.name }}</b></div>
+              <div class="detail-row"><span>Email</span><b>{{ customer_summary.email }}</b></div>
+              <div class="detail-row"><span>Phone</span><b>{{ customer_summary.phone }}</b></div>
+              <div class="detail-row"><span>Address</span><b>{{ customer_summary.address }}</b></div>
+              {% for key, value in customer_summary.custom_fields.items() if value %}
+                <div class="detail-row"><span>{{ key.replace('_', ' ')|title }}</span><b>{{ value }}</b></div>
+              {% endfor %}
+            </div>
+            <p class="form-help">These saved customer fields are shown here for checking while editing this order. Use Edit customer to change the customer record.</p>
+          </div>
+        {% else %}
+          <div class="empty-state"><p>No customer yet. Search above to attach customer details before reserving or pickup.</p></div>
+        {% endif %}
+      {% endif %}
       <datalist id="customer-options">
         {% for c in customers %}<option data-id="{{ c.id }}" value="{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}">{% if c.email %}{{ c.email }}{% endif %}</option>{% endfor %}
       </datalist>

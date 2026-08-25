@@ -354,8 +354,28 @@ def draft_order_form(order_id):
         raise ValueError("Order not found")
     if not can_edit_order_status(order["status"]):
         raise ValueError(BLOCKED_EDIT_MESSAGE)
+    from app.services.customers import custom_fields_for
     start_at = datetime.fromisoformat(order["start_at"]) if order["start_at"] else None
     end_at = datetime.fromisoformat(order["end_at"]) if order["end_at"] else None
+    address_parts = [
+        order["customer_address_line1"],
+        order["customer_address_line2"],
+        order["customer_suburb"],
+        order["customer_city"],
+        order["customer_province"],
+        order["customer_postal_code"],
+        order["customer_country"],
+    ]
+    customer_summary = None
+    if order["customer_id"]:
+        customer_summary = {
+            "id": order["customer_id"],
+            "name": order["customer_name"] or "—",
+            "email": order["customer_email"] or "—",
+            "phone": order["customer_phone"] or "—",
+            "address": ", ".join(str(part).strip() for part in address_parts if part and str(part).strip()) or "—",
+            "custom_fields": custom_fields_for(order),
+        }
     lines = []
     for item in order_items(order_id):
         product_display = ""
@@ -377,6 +397,7 @@ def draft_order_form(order_id):
         "order": order,
         "selected_customer_id": order["customer_id"] or "",
         "customer_display": order["customer_name"] + (f" — {order['customer_email']}" if order["customer_email"] else "") if order["customer_name"] else "",
+        "customer_summary": customer_summary,
         "booking_type": order["booking_type"] or "return",
         "collect_branch_id": order["collect_branch_id"],
         "return_branch_id": order["return_branch_id"] or order["collect_branch_id"],
