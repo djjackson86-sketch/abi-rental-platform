@@ -99,7 +99,7 @@
     {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
     {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not recorded</b></div>{% endif %}
     {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }} UTC</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
-    <div class="list-row"><span>Total incl. taxes</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
+    <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
   </div>
 </section>
 <section class="panel settings-form">

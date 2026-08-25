@@ -38,7 +38,7 @@
     <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(document.subtotal or 0) }}</b></div>
     <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(document.tax_total or 0) }}</b></div>
     <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(document.deposit_total or 0) }}</b></div>
-    <div class="list-row"><span>Total</span><b>R{{ '%.2f'|format(document.total or 0) }}</b></div>
+    <div class="list-row"><span>Total{% if (document.deposit_option or 'security_deposit') == 'security_deposit' and document.deposit_total %} incl. refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(document.total or 0) }}</b></div>
   </div>
 </section>
 {% endblock %}

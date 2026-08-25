@@ -37,7 +37,7 @@ def create_document(order_id, document_type):
 
 
 def list_documents(query="", document_type="", status="", start_date="", end_date=""):
-    sql = """SELECT d.*, o.order_number, o.total, c.name AS customer_name
+    sql = """SELECT d.*, o.order_number, o.total, o.deposit_option, c.name AS customer_name
         FROM documents d
         LEFT JOIN orders o ON o.id = d.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
@@ -77,7 +77,7 @@ def document_filter_counts():
 def get_document(document_id):
     return get_db().execute(
         """SELECT d.*, o.order_number, o.customer_id, o.status AS order_status, o.start_at, o.end_at,
-            o.subtotal, o.tax_total, o.deposit_total, o.total, o.due_total, o.notes,
+            o.subtotal, o.tax_total, o.deposit_total, o.deposit_option, o.total, o.due_total, o.notes,
             c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country

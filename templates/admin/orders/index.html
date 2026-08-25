@@ -96,7 +96,7 @@
                 <th>Status</th>
                 <th>Rental period</th>
                 <th>Items</th>
-                <th>Total</th>
+                <th>Total{% if orders|selectattr('deposit_option', 'equalto', 'security_deposit')|list %} incl. deposit{% endif %}</th>
                 <th>Due</th>
                 <th></th>
               </tr>

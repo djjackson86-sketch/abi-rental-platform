@@ -105,7 +105,7 @@ def test_coupon_creation_and_order_application(client):
     assert b'Draft order created' in order.data
     assert b'TRAILER10' in order.data
     assert b'R120.00' in order.data  # 10% discount on R1200 rental subtotal.
-    assert b'R1080.00' in order.data
+    assert b'R2580.00' in order.data  # discounted rental total plus refundable security deposit.
 
 
 def test_barcode_lookup(client):
@@ -536,11 +536,77 @@ def test_order_draft_creation_and_totals(client):
     # 2 qty * R200 * 3 rounded rental days, no tax profile VAT in seed.
     assert b'R1200.00' in res.data
     assert b'R1500.00' in res.data  # security deposit 2 * R750
+    assert b'R2700.00' in res.data  # order total includes refundable security deposit.
+    assert b'Total incl. taxes and refundable deposit' in res.data
 
     list_res = client.get('/orders')
     assert b'ORD-00001' in list_res.data
     assert b'Order Customer' in list_res.data
+    assert b'Total incl. deposit' in list_res.data
     assert b'built-in method items' not in list_res.data
+
+
+def test_security_deposit_is_in_order_total_and_due_but_stored_separately(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'security_deposit',
+    }, follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'R950.00' in res.data  # R200 rental + R750 refundable security deposit.
+    assert b'Security deposit' in res.data
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT total, due_total, deposit_total, deposit_option, payment_status FROM orders WHERE id=1').fetchone()
+        assert order is not None
+        assert order['total'] == 950
+        assert order['due_total'] == 950
+        assert order['deposit_total'] == 750
+        assert order['deposit_option'] == 'security_deposit'
+        assert order['payment_status'] == 'payment_due'
+
+
+@pytest.mark.parametrize('deposit_option,waiver,total,due,deposit_total', [
+    ('damage_waiver', '125', 325, 325, 0),
+    ('no_deposit', '', 200, 200, 0),
+])
+def test_non_security_deposit_modes_do_not_add_security_deposit_to_total(client, app, deposit_option, waiver, total, due, deposit_total):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': deposit_option,
+        'damage_waiver_amount': waiver,
+    }, follow_redirects=True)
+
+    assert res.status_code == 200
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT total, due_total, deposit_total, deposit_option, damage_waiver_amount FROM orders WHERE id=1').fetchone()
+        assert order is not None
+        assert order['total'] == total
+        assert order['due_total'] == due
+        assert order['deposit_total'] == deposit_total
+        assert order['deposit_option'] == deposit_option
+        assert order['damage_waiver_amount'] == (float(waiver) if waiver else 0)
 
 
 def test_rental_days_matches_partial_day_rounding_rule():
@@ -655,6 +721,45 @@ def test_non_draft_order_can_be_edited_and_keeps_status_with_payment_recalculati
         assert items[0]['quantity'] == 1
         assert items[1]['custom_name'] == 'Admin edit fee'
         assert items[1]['unit_price'] == 75
+
+
+def test_edit_recalculates_security_deposit_inclusive_total_and_due(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    with app.app_context():
+        from app.db import get_db, now
+        db = get_db()
+        db.execute("INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, 200, 'cash', 'TEST-RECALC', 'paid', ?)", (order_id, now()))
+        db.commit()
+
+    saved = client.post(f'/orders/{order_id}/edit', data={
+        'customer_id': '1',
+        'product_id': ['1'],
+        'custom_name': [''],
+        'custom_unit_price': [''],
+        'custom_billing_mode': ['fixed'],
+        'quantity': ['2'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'security_deposit',
+        'damage_waiver_amount': '',
+    }, follow_redirects=True)
+
+    assert b'Order saved' in saved.data
+    assert b'R1900.00' in saved.data
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT total, due_total, deposit_total, damage_waiver_amount, payment_status FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order is not None
+        assert order['total'] == 1900
+        assert order['due_total'] == 1700
+        assert order['deposit_total'] == 1500
+        assert order['damage_waiver_amount'] == 0
+        assert order['payment_status'] == 'partially_paid'
 
 
 def test_canceled_and_archived_order_edit_is_rejected(client):
@@ -923,11 +1028,11 @@ def test_order_manual_payments_update_payment_status_and_history(client):
     assert b'Payment recorded' in partial.data
     assert b'Partially paid' in partial.data
     assert b'R500.00' in partial.data
-    assert b'R700.00' in partial.data
+    assert b'R2200.00' in partial.data
     assert b'CASH-001' in partial.data
 
     paid = client.post(f'/orders/{order_id}/payments', data={
-        'amount': '700',
+        'amount': '2200',
         'method': 'eft',
         'reference': 'EFT-001',
     }, follow_redirects=True)
@@ -993,7 +1098,7 @@ def test_reports_orders_csv_export(client):
     assert 'attachment; filename=orders.csv' in response.headers['Content-Disposition']
     body = response.data.decode()
     assert 'order_number,customer,status,payment_status,total,due_total' in body
-    assert 'ORD-00001,Order Customer,draft,payment_due,600.00,600.00' in body
+    assert 'ORD-00001,Order Customer,draft,payment_due,1350.00,1350.00' in body
 
 
 def test_app_store_functionality(client):

@@ -9,7 +9,7 @@
     <p>Thanks {{ order.customer_name }}. We created draft order <strong>{{ order.order_number }}</strong>. ABI Solutions will confirm availability and follow up with you.</p>
     <div class="two-col">
       <article><h2>Rental period</h2><p>Pickup: {{ order.start_at }}<br>Return: {{ order.end_at }}</p></article>
-      <article><h2>Estimated total</h2><p><strong>R{{ '%.2f'|format(order.total) }}</strong><br>Security deposit: R{{ '%.2f'|format(order.deposit_total) }}</p></article>
+      <article><h2>Estimated total{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} incl. refundable deposit{% endif %}</h2><p><strong>R{{ '%.2f'|format(order.total) }}</strong><br>Security deposit: R{{ '%.2f'|format(order.deposit_total) }}</p></article>
     </div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Total</th></tr></thead><tbody>{% for item in items %}<tr><td>{{ item.product_name or item.custom_name }}</td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>{% endfor %}</tbody></table></div>
   </section>

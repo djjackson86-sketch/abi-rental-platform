@@ -262,7 +262,7 @@ def _build_order_payload(form):
     except ValueError as exc:
         raise ValueError("Damage waiver amount must be a number") from exc
     deposit_total = round(deposit_total, 2) if deposit_option == "security_deposit" else 0
-    total = round(total + damage_waiver_amount, 2)
+    total = round(total + damage_waiver_amount + deposit_total, 2)
     return {
         "customer_id": customer_id,
         "booking_type": booking_type,
