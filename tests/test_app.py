@@ -778,6 +778,11 @@ def test_non_security_deposit_modes_do_not_add_security_deposit_to_total(client,
         assert order['deposit_option'] == deposit_option
         assert order['damage_waiver_amount'] == (float(waiver) if waiver else 0)
 
+    if deposit_option == 'damage_waiver':
+        assert b'R325.00' in res.data
+        assert b'Damage waiver' in res.data
+        assert b'incl. damage waiver' in client.get('/orders/1/edit').data
+
 
 def test_rental_days_matches_partial_day_rounding_rule():
     assert rental_days(datetime(2026, 7, 1, 9, 0), datetime(2026, 7, 1, 11, 0)) == 1
