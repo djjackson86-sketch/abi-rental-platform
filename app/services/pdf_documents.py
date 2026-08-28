@@ -6,7 +6,7 @@ from app.services.documents import label_for, printable_document
 from app.services.settings import get_company_settings
 
 
-INVOICE_LOGO_STATIC_PATH = 'img/sano-trailers-logo.jpg'
+DOCUMENT_LOGO_STATIC_PATH = 'img/sano-trailers-logo.jpg'
 
 
 def _escape_pdf_text(text):
@@ -32,8 +32,8 @@ def _jpeg_dimensions(image_bytes):
     raise ValueError('Unsupported JPEG logo dimensions')
 
 
-def _invoice_logo_bytes():
-    logo_path = Path(current_app.static_folder) / INVOICE_LOGO_STATIC_PATH
+def _document_logo_bytes():
+    logo_path = Path(current_app.static_folder) / DOCUMENT_LOGO_STATIC_PATH
     if not logo_path.exists():
         return None
     return logo_path.read_bytes()
@@ -131,7 +131,7 @@ def document_pdf_bytes(document_id):
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
     lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}', f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])
-    logo_bytes = _invoice_logo_bytes() if document['document_type'] == 'invoice' else None
+    logo_bytes = _document_logo_bytes()
     return _simple_pdf(lines, logo_bytes=logo_bytes)
 
 

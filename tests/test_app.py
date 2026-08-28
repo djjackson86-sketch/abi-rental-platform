@@ -1362,10 +1362,18 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
 
     quote = client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
     assert quote.status_code == 200
+    assert b'static/img/sano-trailers-logo.jpg' in quote.data
+    assert b'SANO Trailers logo' in quote.data
     assert b'ABI Fallback Co' in quote.data
     assert b'fallback@example.test' in quote.data
     assert b'Fallback Street' in quote.data
     assert b'Banking details' not in quote.data
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf = document_pdf_bytes(1)
+    assert b'/Subtype /Image' in pdf
+    assert b'/DCTDecode' in pdf
 
 
 def test_document_generation_list_and_printable_detail(client):
