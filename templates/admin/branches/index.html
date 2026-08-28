@@ -17,6 +17,13 @@
         <label>City<input name="city" value="{{ edit_branch.city if edit_branch else '' }}"></label>
         <label>Province<input name="province" value="{{ edit_branch.province if edit_branch else '' }}"></label>
         <label>Postal code<input name="postal_code" value="{{ edit_branch.postal_code if edit_branch else '' }}"></label>
+        <div class="span-2"><h3>Invoice / banking details</h3><p class="form-help">These details print on invoices for orders collected from this branch.</p></div>
+        <label>Bank name<input name="bank_name" value="{{ edit_branch.bank_name if edit_branch else '' }}"></label>
+        <label>Account holder<input name="bank_account_name" value="{{ edit_branch.bank_account_name if edit_branch else '' }}"></label>
+        <label>Account number<input name="bank_account_number" value="{{ edit_branch.bank_account_number if edit_branch else '' }}"></label>
+        <label>Branch code<input name="bank_branch_code" value="{{ edit_branch.bank_branch_code if edit_branch else '' }}"></label>
+        <label>Account type<input name="bank_account_type" value="{{ edit_branch.bank_account_type if edit_branch else '' }}"></label>
+        <label>Payment reference note<input name="bank_reference_note" value="{{ edit_branch.bank_reference_note if edit_branch else '' }}" placeholder="Use invoice number as reference"></label>
         <label class="switch"><input type="checkbox" name="active" value="1" {% if not edit_branch or edit_branch.active %}checked{% endif %}> Active</label>
       </div>
       <div class="form-actions"><button class="btn primary">Save branch</button>{% if edit_branch %}<a class="btn ghost" href="{{ url_for('branches.index') }}">Cancel</a>{% endif %}</div>
@@ -29,6 +36,6 @@
 </section>
 <section class="panel">
   <h2>Depot branches</h2>
-  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Code</th><th>Contact</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody>{% for branch in branches %}<tr><td><strong>{{ branch.name }}</strong><small>{{ branch.address_line1 or branch.city or '' }}</small></td><td>{{ branch.code or '—' }}</td><td>{{ branch.phone or branch.email or '—' }}</td><td>{{ branch.product_count }} item(s)</td><td>{{ 'Active' if branch.active else 'Inactive' }}</td><td><a class="btn ghost" href="{{ url_for('branches.index', edit=branch.id) }}">Edit</a></td></tr>{% endfor %}</tbody></table></div>
+  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Code</th><th>Contact</th><th>Stock</th><th>Status</th><th>Invoice bank</th><th></th></tr></thead><tbody>{% for branch in branches %}<tr><td><strong>{{ branch.name }}</strong><small>{{ branch.address_line1 or branch.city or '' }}</small></td><td>{{ branch.code or '—' }}</td><td>{{ branch.phone or branch.email or '—' }}</td><td>{{ branch.product_count }} item(s)</td><td>{{ 'Active' if branch.active else 'Inactive' }}</td><td>{{ branch.bank_name or '—' }}</td><td><a class="btn ghost" href="{{ url_for('branches.index', edit=branch.id) }}">Edit</a></td></tr>{% endfor %}</tbody></table></div>
 </section>
 {% endblock %}

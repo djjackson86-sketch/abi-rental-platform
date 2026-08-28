@@ -80,10 +80,17 @@ def get_document(document_id):
             o.subtotal, o.tax_total, o.deposit_total, o.deposit_option, o.total, o.due_total, o.notes,
             c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
-            c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country
+            c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
+            b.id AS branch_id, b.name AS branch_name, b.code AS branch_code, b.phone AS branch_phone, b.email AS branch_email,
+            b.address_line1 AS branch_address_line1, b.address_line2 AS branch_address_line2, b.city AS branch_city,
+            b.province AS branch_province, b.postal_code AS branch_postal_code,
+            b.bank_name AS branch_bank_name, b.bank_account_name AS branch_bank_account_name,
+            b.bank_account_number AS branch_bank_account_number, b.bank_branch_code AS branch_bank_branch_code,
+            b.bank_account_type AS branch_bank_account_type, b.bank_reference_note AS branch_bank_reference_note
         FROM documents d
         LEFT JOIN orders o ON o.id = d.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN branches b ON b.id = o.collect_branch_id
         WHERE d.id = ?""",
         (document_id,),
     ).fetchone()

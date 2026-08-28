@@ -32,6 +32,12 @@ def _clean(form):
         "city": (form.get("city") or "").strip(),
         "province": (form.get("province") or "").strip(),
         "postal_code": (form.get("postal_code") or "").strip(),
+        "bank_name": (form.get("bank_name") or "").strip(),
+        "bank_account_name": (form.get("bank_account_name") or "").strip(),
+        "bank_account_number": (form.get("bank_account_number") or "").strip(),
+        "bank_branch_code": (form.get("bank_branch_code") or "").strip(),
+        "bank_account_type": (form.get("bank_account_type") or "").strip(),
+        "bank_reference_note": (form.get("bank_reference_note") or "").strip(),
         "active": 1 if form.get("active") else 0,
     }
 
@@ -39,8 +45,8 @@ def _clean(form):
 def create_branch(form):
     data = _clean(form)
     ts = now()
-    cur = get_db().execute("""INSERT INTO branches (name, code, phone, email, address_line1, address_line2, city, province, postal_code, active, created_at, updated_at)
-        VALUES (:name, :code, :phone, :email, :address_line1, :address_line2, :city, :province, :postal_code, :active, :created_at, :updated_at)""", {**data, "created_at": ts, "updated_at": ts})
+    cur = get_db().execute("""INSERT INTO branches (name, code, phone, email, address_line1, address_line2, city, province, postal_code, bank_name, bank_account_name, bank_account_number, bank_branch_code, bank_account_type, bank_reference_note, active, created_at, updated_at)
+        VALUES (:name, :code, :phone, :email, :address_line1, :address_line2, :city, :province, :postal_code, :bank_name, :bank_account_name, :bank_account_number, :bank_branch_code, :bank_account_type, :bank_reference_note, :active, :created_at, :updated_at)""", {**data, "created_at": ts, "updated_at": ts})
     get_db().commit()
     return cur.lastrowid
 
@@ -48,7 +54,7 @@ def create_branch(form):
 def update_branch(branch_id, form):
     data = _clean(form)
     data.update({"id": branch_id, "updated_at": now()})
-    get_db().execute("""UPDATE branches SET name=:name, code=:code, phone=:phone, email=:email, address_line1=:address_line1, address_line2=:address_line2, city=:city, province=:province, postal_code=:postal_code, active=:active, updated_at=:updated_at WHERE id=:id""", data)
+    get_db().execute("""UPDATE branches SET name=:name, code=:code, phone=:phone, email=:email, address_line1=:address_line1, address_line2=:address_line2, city=:city, province=:province, postal_code=:postal_code, bank_name=:bank_name, bank_account_name=:bank_account_name, bank_account_number=:bank_account_number, bank_branch_code=:bank_branch_code, bank_account_type=:bank_account_type, bank_reference_note=:bank_reference_note, active=:active, updated_at=:updated_at WHERE id=:id""", data)
     get_db().commit()
 
 

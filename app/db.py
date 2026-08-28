@@ -104,6 +104,12 @@ CREATE TABLE IF NOT EXISTS branches (
     city TEXT NOT NULL DEFAULT '',
     province TEXT NOT NULL DEFAULT '',
     postal_code TEXT NOT NULL DEFAULT '',
+    bank_name TEXT NOT NULL DEFAULT '',
+    bank_account_name TEXT NOT NULL DEFAULT '',
+    bank_account_number TEXT NOT NULL DEFAULT '',
+    bank_branch_code TEXT NOT NULL DEFAULT '',
+    bank_account_type TEXT NOT NULL DEFAULT '',
+    bank_reference_note TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -307,6 +313,12 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "checkout_instructions", "TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.'")
     ensure_column(db, "company_settings", "store_contact_email", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "bank_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "bank_account_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "bank_account_number", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "bank_branch_code", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "bank_account_type", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "bank_reference_note", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "users", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "users", "can_view_all_branches", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "products", "tracking_method", "TEXT NOT NULL DEFAULT 'bulk'")

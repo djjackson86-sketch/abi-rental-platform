@@ -1,4 +1,5 @@
 from app.services.documents import label_for, printable_document
+from app.services.settings import get_company_settings
 
 
 def _escape_pdf_text(text):
@@ -42,7 +43,42 @@ def document_pdf_bytes(document_id):
     if not document:
         raise ValueError('Document not found')
     label = label_for(document['document_type'])
-    lines = [f'{label} {document["number"]}', f'Order: {document["order_number"]}', f'Customer: {document["customer_name"] or "-"}', f'Email: {document["customer_email"] or "-"}', f'Pickup: {document["start_at"] or "-"}', f'Return: {document["end_at"] or "-"}', '']
+    settings = get_company_settings()
+    issuer_name = document['branch_name'] or settings['company_name']
+    issuer_email = document['branch_email'] or settings['email']
+    issuer_phone = document['branch_phone'] or settings['phone']
+    issuer_address = [
+        document['branch_address_line1'] or settings['address_line1'],
+        document['branch_address_line2'] or settings['address_line2'],
+        document['branch_city'] or settings['city'],
+        ' '.join(part for part in [document['branch_province'] or settings['province'], document['branch_postal_code'] or settings['postcode']] if part),
+    ]
+    lines = [
+        f'{label} {document["number"]}',
+        f'Issuer: {issuer_name}',
+    ]
+    if issuer_email:
+        lines.append(f'Issuer email: {issuer_email}')
+    if issuer_phone:
+        lines.append(f'Issuer phone: {issuer_phone}')
+    lines.extend([line for line in issuer_address if line])
+    if document['document_type'] == 'invoice':
+        bank_lines = [
+            ('Bank', document['branch_bank_name']),
+            ('Account holder', document['branch_bank_account_name']),
+            ('Account number', document['branch_bank_account_number']),
+            ('Branch code', document['branch_bank_branch_code']),
+            ('Account type', document['branch_bank_account_type']),
+            ('Reference', document['branch_bank_reference_note']),
+        ]
+        added_heading = False
+        for key, value in bank_lines:
+            if value:
+                if not added_heading:
+                    lines.append('Banking details:')
+                    added_heading = True
+                lines.append(f'{key}: {value}')
+    lines.extend([f'Order: {document["order_number"]}', f'Customer: {document["customer_name"] or "-"}', f'Email: {document["customer_email"] or "-"}', f'Pickup: {document["start_at"] or "-"}', f'Return: {document["end_at"] or "-"}', ''])
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
     lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}', f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])

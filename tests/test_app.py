@@ -1251,6 +1251,121 @@ def test_reserve_prevents_overbooking(client):
     assert b'Draft' in second.data
 
 
+def test_branch_invoice_details_are_saved(client, app):
+    login(client)
+    saved = client.post('/branches', data={
+        'branch_id': '1',
+        'name': 'Midrand',
+        'code': 'MID',
+        'phone': '+27 11 100 2000',
+        'email': 'midrand@example.test',
+        'address_line1': '1 Midrand Road',
+        'address_line2': 'Unit 2',
+        'city': 'Midrand',
+        'province': 'Gauteng',
+        'postal_code': '1685',
+        'bank_name': 'Midrand Test Bank',
+        'bank_account_name': 'Midrand Pawcare Rentals',
+        'bank_account_number': '111222333',
+        'bank_branch_code': '250655',
+        'bank_account_type': 'Cheque',
+        'bank_reference_note': 'Use invoice number as payment reference',
+        'active': '1',
+    }, follow_redirects=True)
+
+    assert saved.status_code == 200
+    assert b'Branch saved' in saved.data
+    assert b'Midrand Test Bank' in saved.data
+    with app.app_context():
+        branch = get_db().execute('SELECT * FROM branches WHERE id = 1').fetchone()
+        assert branch['name'] == 'Midrand'
+        assert branch['email'] == 'midrand@example.test'
+        assert branch['address_line1'] == '1 Midrand Road'
+        assert branch['bank_name'] == 'Midrand Test Bank'
+        assert branch['bank_account_number'] == '111222333'
+        assert branch['bank_reference_note'] == 'Use invoice number as payment reference'
+
+
+def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/branches', data={
+        'branch_id': '2',
+        'name': 'Wonderboom',
+        'code': 'WON',
+        'phone': '+27 12 999 0000',
+        'email': 'wonderboom@example.test',
+        'address_line1': '22 Wonderboom Avenue',
+        'city': 'Pretoria',
+        'province': 'Gauteng',
+        'postal_code': '0182',
+        'bank_name': 'Wonderboom Test Bank',
+        'bank_account_name': 'Wonderboom Pawcare Rentals',
+        'bank_account_number': '444555666',
+        'bank_branch_code': '632005',
+        'bank_account_type': 'Business Current',
+        'bank_reference_note': 'Use INV number',
+        'active': '1',
+    }, follow_redirects=True)
+    with app.app_context():
+        get_db().execute('UPDATE products SET branch_id = 2 WHERE id = 1')
+        get_db().commit()
+
+    order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'collect_branch_id': '2',
+        'return_branch_id': '2',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '15:00',
+    }, follow_redirects=False)
+    assert order.status_code == 302
+    order_id = order.headers['Location'].rstrip('/').split('/')[-1]
+
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert invoice.status_code == 200
+    for expected in [
+        b'Wonderboom',
+        b'wonderboom@example.test',
+        b'+27 12 999 0000',
+        b'22 Wonderboom Avenue',
+        b'Wonderboom Test Bank',
+        b'Wonderboom Pawcare Rentals',
+        b'444555666',
+        b'632005',
+        b'Business Current',
+        b'Use INV number',
+    ]:
+        assert expected in invoice.data
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf = document_pdf_bytes(1)
+    for expected in [b'Issuer: Wonderboom', b'Issuer email: wonderboom@example.test', b'Wonderboom Test Bank', b'Account number: 444555666']:
+        assert expected in pdf
+
+
+def test_quote_without_collection_branch_falls_back_to_company_settings(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE company_settings SET company_name = 'ABI Fallback Co', email = 'fallback@example.test', phone = '+27 10 123 0000', address_line1 = 'Fallback Street', city = 'Johannesburg' WHERE id = 1")
+        db.execute('UPDATE orders SET collect_branch_id = NULL WHERE id = ?', (order_id,))
+        db.commit()
+
+    quote = client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
+    assert quote.status_code == 200
+    assert b'ABI Fallback Co' in quote.data
+    assert b'fallback@example.test' in quote.data
+    assert b'Fallback Street' in quote.data
+    assert b'Banking details' not in quote.data
+
+
 def test_document_generation_list_and_printable_detail(client):
     login(client)
     seed_customer_and_product(client)
