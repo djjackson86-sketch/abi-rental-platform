@@ -19,6 +19,11 @@
   {% set issuer_name = document.branch_name or settings.company_name %}
   {% set issuer_email = document.branch_email or settings.email %}
   {% set issuer_phone = document.branch_phone or settings.phone %}
+  {% if document.document_type == 'invoice' %}
+  <div class="invoice-logo-row">
+    <img class="invoice-logo" src="{{ url_for('static', filename='img/sano-trailers-logo.jpg') }}" alt="SANO Trailers logo">
+  </div>
+  {% endif %}
   <div class="document-head">
     <div><h2>{{ issuer_name }}</h2><p>{% if document.branch_name %}{{ document.branch_code or 'Branch' }} document details{% else %}Rental management document{% endif %}</p></div>
     <div><strong>{{ label }}</strong><span>{{ document.number }}</span></div>

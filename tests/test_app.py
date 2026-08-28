@@ -1338,13 +1338,15 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'632005',
         b'Business Current',
         b'Use INV number',
+        b'static/img/sano-trailers-logo.jpg',
+        b'SANO Trailers logo',
     ]:
         assert expected in invoice.data
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
         pdf = document_pdf_bytes(1)
-    for expected in [b'Issuer: Wonderboom', b'Issuer email: wonderboom@example.test', b'Wonderboom Test Bank', b'Account number: 444555666']:
+    for expected in [b'/Subtype /Image', b'/DCTDecode', b'Issuer: Wonderboom', b'Issuer email: wonderboom@example.test', b'Wonderboom Test Bank', b'Account number: 444555666']:
         assert expected in pdf
 
 

@@ -1,14 +1,58 @@
+from pathlib import Path
+
+from flask import current_app
+
 from app.services.documents import label_for, printable_document
 from app.services.settings import get_company_settings
+
+
+INVOICE_LOGO_STATIC_PATH = 'img/sano-trailers-logo.jpg'
 
 
 def _escape_pdf_text(text):
     return str(text or '').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
 
 
-def _simple_pdf(lines):
-    y = 800
-    stream_lines = ['BT', '/F1 12 Tf']
+def _jpeg_dimensions(image_bytes):
+    index = 2
+    while index < len(image_bytes) - 9:
+        if image_bytes[index] != 0xFF:
+            index += 1
+            continue
+        marker = image_bytes[index + 1]
+        index += 2
+        if marker in (0xD8, 0xD9):
+            continue
+        length = int.from_bytes(image_bytes[index:index + 2], 'big')
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3):
+            height = int.from_bytes(image_bytes[index + 3:index + 5], 'big')
+            width = int.from_bytes(image_bytes[index + 5:index + 7], 'big')
+            return width, height
+        index += length
+    raise ValueError('Unsupported JPEG logo dimensions')
+
+
+def _invoice_logo_bytes():
+    logo_path = Path(current_app.static_folder) / INVOICE_LOGO_STATIC_PATH
+    if not logo_path.exists():
+        return None
+    return logo_path.read_bytes()
+
+
+def _simple_pdf(lines, logo_bytes=None):
+    y = 680 if logo_bytes else 800
+    content_lines = []
+    image_object = None
+    if logo_bytes:
+        logo_width, logo_height = _jpeg_dimensions(logo_bytes)
+        display_width = 130
+        display_height = display_width * logo_height / logo_width
+        content_lines.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 50 {792 - display_height:.2f} cm /Im1 Do Q')
+        image_object = (
+            f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
+            f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
+        ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
+    stream_lines = content_lines + ['BT', '/F1 12 Tf']
     for line in lines:
         stream_lines.append(f'50 {y} Td ({_escape_pdf_text(line)}) Tj')
         stream_lines.append(f'-50 -18 Td')
@@ -20,9 +64,14 @@ def _simple_pdf(lines):
     objects = []
     objects.append(b'<< /Type /Catalog /Pages 2 0 R >>')
     objects.append(b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>')
-    objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>')
+    resources = b'/Font << /F1 4 0 R >>'
+    if image_object:
+        resources += b' /XObject << /Im1 6 0 R >>'
+    objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ' + resources + b' >> /Contents 5 0 R >>')
     objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
     objects.append(b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream')
+    if image_object:
+        objects.append(image_object)
     out = bytearray(b'%PDF-1.4\n')
     offsets = [0]
     for idx, obj in enumerate(objects, start=1):
@@ -82,7 +131,8 @@ def document_pdf_bytes(document_id):
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
     lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}', f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])
-    return _simple_pdf(lines)
+    logo_bytes = _invoice_logo_bytes() if document['document_type'] == 'invoice' else None
+    return _simple_pdf(lines, logo_bytes=logo_bytes)
 
 
 def document_pdf_filename(document):
