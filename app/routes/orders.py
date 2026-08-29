@@ -85,13 +85,24 @@ def edit(order_id):
         flash(str(exc), "error")
         return redirect(url_for("orders.detail", order_id=order_id))
     if request.method == "POST":
-        try:
-            update_draft_order(order_id, request.form)
-            flash("Order saved", "success")
-            return redirect(url_for("orders.detail", order_id=order_id))
-        except ValueError as exc:
-            flash(str(exc), "error")
-            form_data = None
+        if request.form.get("order_action") == "create_customer_continue":
+            try:
+                customer_id = create_customer(request.form)
+                get_db().execute("UPDATE orders SET customer_id = ? WHERE id = ?", (customer_id, order_id))
+                get_db().commit()
+                flash("Customer created and attached — continue editing the order", "success")
+                return redirect(url_for("orders.edit", order_id=order_id))
+            except ValueError as exc:
+                flash(str(exc), "error")
+                form_data = None
+        else:
+            try:
+                update_draft_order(order_id, request.form)
+                flash("Order saved", "success")
+                return redirect(url_for("orders.detail", order_id=order_id))
+            except ValueError as exc:
+                flash(str(exc), "error")
+                form_data = None
     if form_data is None:
         try:
             form_data = draft_order_form(order_id)

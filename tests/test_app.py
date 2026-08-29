@@ -941,6 +941,83 @@ def test_customerless_order_edit_keeps_picker_and_no_customer_copy(client):
     assert b'id="customer-search"' in edit_page.data
     assert b'name="customer_id" id="customer-id" value=""' in edit_page.data
     assert b'No customer yet \xe2\x80\x94 save draft' in edit_page.data
+    assert b'Add customer from order' in edit_page.data
+    assert b'name="order_action" value=""' in edit_page.data
+
+
+def test_edit_order_can_create_and_attach_inline_customer_without_changing_lines_or_status(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    created = client.post('/orders/new', data={
+        'customer_id': '',
+        'product_id': '1',
+        'quantity': '2',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'security_deposit',
+        'notes': 'Keep these order details',
+    }, follow_redirects=False)
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE orders SET status = 'reserved' WHERE id = ?", (order_id,))
+        db.commit()
+
+    res = client.post(f'/orders/{order_id}/edit', data={
+        'order_action': 'create_customer_continue',
+        'customer_type': 'individual',
+        'name': 'Edit Inline Customer',
+        'email': 'edit-inline@example.test',
+        'phone': '+27210000000',
+        'vehicle_details': 'Nissan Navara CA 123-456',
+        'alternative_contact': 'Backup +27210000001',
+    }, follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'Customer created and attached' in res.data
+    assert b'Attached customer details' in res.data
+    assert b'Edit Inline Customer' in res.data
+    assert b'edit-inline@example.test' in res.data
+    assert b'Nissan Navara CA 123-456' in res.data
+    assert b'name="customer_id" id="customer-id" value="2"' in res.data
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT customer_id, status, total, due_total, notes FROM orders WHERE id = ?', (order_id,)).fetchone()
+        item = db.execute('SELECT product_id, quantity FROM order_items WHERE order_id = ?', (order_id,)).fetchone()
+        customer_count = db.execute('SELECT COUNT(*) AS count FROM customers').fetchone()['count']
+        assert customer_count == 2
+        assert order['customer_id'] == 2
+        assert order['status'] == 'reserved'
+        assert order['total'] == 1900
+        assert order['due_total'] == 1900
+        assert order['notes'] == 'Keep these order details'
+        assert item['product_id'] == 1
+        assert item['quantity'] == 2
+
+
+def test_normal_edit_save_does_not_create_inline_customer(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    saved = client.post(f'/orders/{order_id}/edit', data={
+        **edit_order_payload(quantity='1'),
+        'name': 'Should Not Become Customer',
+        'email': 'no-create@example.test',
+    }, follow_redirects=True)
+
+    assert saved.status_code == 200
+    assert b'Order saved' in saved.data
+    with app.app_context():
+        db = get_db()
+        customers = db.execute('SELECT COUNT(*) AS count FROM customers').fetchone()['count']
+        matching = db.execute('SELECT COUNT(*) AS count FROM customers WHERE email = ?', ('no-create@example.test',)).fetchone()['count']
+        order = db.execute('SELECT customer_id FROM orders WHERE id = ?', (order_id,)).fetchone()
+        assert customers == 1
+        assert matching == 0
+        assert order['customer_id'] == 1
 
 
 def test_draft_order_can_be_edited_without_creating_new_order(client, app):

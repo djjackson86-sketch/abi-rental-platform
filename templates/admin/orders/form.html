@@ -42,7 +42,7 @@
     {% endif %}
   </section>
 
-  {% if not editing %}<section class="form-section inline-create">
+  <section class="form-section inline-create">
     <h2>Add customer from order</h2>
     <input type="hidden" name="order_action" value="">
     <div class="form-grid">
@@ -70,7 +70,7 @@
       </div>
     </div>
     <button class="btn ghost" type="submit" onclick="this.form.order_action.value='create_customer_continue'">Add customer and continue</button>
-  </section>{% endif %}
+  </section>
 
   <section class="form-section"><h2>Branch and trip type</h2><div class="form-grid"><label>Trip type<select name="booking_type" id="booking-type"><option value="return" {% if order_form.get('booking_type', 'return') == 'return' %}selected{% endif %}>Return booking</option><option value="oneway" {% if order_form.get('booking_type') == 'oneway' %}selected{% endif %}>One-way booking</option></select></label><label>Collection branch<select name="collect_branch_id" id="collect-branch" required>{% for branch in branches %}<option value="{{ branch.id }}" {% if (order_form.get('collect_branch_id') or default_branch_id)==branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label><label>Return branch<select name="return_branch_id" id="return-branch">{% for branch in branches %}<option value="{{ branch.id }}" {% if (order_form.get('return_branch_id') or default_branch_id)==branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label></div><p class="form-help">Return bookings use the same branch. One-way bookings move the product/trailer to the return branch when returned.</p></section>
 
