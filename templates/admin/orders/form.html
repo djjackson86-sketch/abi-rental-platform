@@ -55,15 +55,10 @@
     </div>
     <div class="customer-custom-fields">
       <h3>Custom customer details</h3>
-      <p class="form-help">Capture vehicle details, alternative contacts, licence/ID, or your own custom question for this customer.</p>
+      <p class="form-help">Capture vehicle details and alternative contacts for this customer.</p>
       <div class="form-grid">
         <label>Vehicle details<input name="vehicle_details" placeholder="Vehicle make/model, colour, registration"></label>
         <label>Alternative contact<input name="alternative_contact" placeholder="Name and phone number"></label>
-        <label>ID / licence detail<input name="id_or_license" placeholder="Driver licence / ID reference"></label>
-        <label>Custom question<input name="custom_question" placeholder="e.g. Has own insurance?"></label>
-        <label>Answer type<select name="custom_answer_type"><option value="text">Custom text</option><option value="yes_no">Yes / No</option><option value="vehicle_type">Vehicle type</option><option value="contact_method">Preferred contact method</option></select></label>
-        <label>Answer<input name="custom_answer" list="custom-answer-options" placeholder="Type or choose"></label>
-        <datalist id="custom-answer-options"><option value="Yes"><option value="No"><option value="Bakkie"><option value="SUV"><option value="Car"><option value="WhatsApp"><option value="Phone"><option value="Email"></datalist>
       </div>
     </div>
     <button class="btn ghost" type="submit" onclick="this.form.order_action.value='create_customer_continue'">Add customer and continue</button>

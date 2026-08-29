@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 from datetime import datetime
@@ -581,7 +582,7 @@ def test_archived_product_hidden_from_store(client):
     assert b'Hidden Trailer' not in store.data
 
 
-def test_customer_crud_search_and_detail(client):
+def test_customer_crud_search_and_detail(client, app):
     login(client)
     res = client.get('/customers')
     assert res.status_code == 200
@@ -596,6 +597,10 @@ def test_customer_crud_search_and_detail(client):
         'vat_number': '4123456789',
         'company_reg_no': '2024/123456/07',
         'vehicle_details': 'Bakkie CA 123',
+        'id_or_license': 'ID SHOULD NOT SAVE',
+        'custom_question': 'Should hidden custom question save?',
+        'custom_answer_type': 'yes_no',
+        'custom_answer': 'No',
     }, follow_redirects=True)
     assert res.status_code == 200
     assert b'Customer created' in res.data
@@ -614,6 +619,18 @@ def test_customer_crud_search_and_detail(client):
     assert b'value="4123456789"' in edit_page.data
     assert b'name="company_reg_no"' in edit_page.data
     assert b'value="2024/123456/07"' in edit_page.data
+    assert b'Vehicle details' in edit_page.data
+    assert b'Alternative contact' in edit_page.data
+    assert b'ID / licence detail' not in edit_page.data
+    assert b'Custom question' not in edit_page.data
+    with app.app_context():
+        stored = get_db().execute('SELECT custom_fields_json FROM customers WHERE id = 1').fetchone()
+        custom_fields = json.loads(stored['custom_fields_json'])
+        assert custom_fields['vehicle_details'] == 'Bakkie CA 123'
+        assert 'id_or_license' not in custom_fields
+        assert 'custom_question' not in custom_fields
+        assert 'custom_answer_type' not in custom_fields
+        assert 'custom_answer' not in custom_fields
 
     res = client.get('/customers?query=acme&customer_type=company&marketing=subscribed')
     assert b'Acme Rentals' in res.data
@@ -827,9 +844,10 @@ def test_edit_order_shows_attached_customer_standard_and_custom_fields(client, a
         'postal_code': '7405',
         'country': 'South Africa',
         'vehicle_details': 'Toyota Hilux CA 123-456',
-        'alternative_contact': 'Alt Contact +27000000001',
+        'alternative_contact': 'Alt Contact +270****0001',
         'id_or_license': 'ID 8001015009087',
         'custom_question': 'Has towbar fitted?',
+        'custom_answer_type': 'yes_no',
         'custom_answer': 'Yes',
     }, follow_redirects=True)
     order_id = create_order_for_status(client, quantity='1')
@@ -843,10 +861,11 @@ def test_edit_order_shows_attached_customer_standard_and_custom_fields(client, a
     assert b'+270****0000' in edit_page.data
     assert b'12 Trailer Street, Yard 4, Paarden Eiland, Cape Town, Western Cape, 7405, South Africa' in edit_page.data
     assert b'Toyota Hilux CA 123-456' in edit_page.data
-    assert b'Alt Contact +27000000001' in edit_page.data
-    assert b'ID 8001015009087' in edit_page.data
-    assert b'Has towbar fitted?' in edit_page.data
-    assert b'Yes' in edit_page.data
+    assert b'Alt Contact +270****0001' in edit_page.data
+    assert b'ID 8001015009087' not in edit_page.data
+    assert b'Has towbar fitted?' not in edit_page.data
+    assert b'ID / licence detail' not in edit_page.data
+    assert b'Custom question' not in edit_page.data
     assert b'href="/customers/1/edit"' in edit_page.data
     assert b'name="customer_id" id="customer-id" value="1"' in edit_page.data
 

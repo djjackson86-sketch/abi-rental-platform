@@ -3,6 +3,7 @@ import json
 from app.db import get_db, now
 
 VALID_TYPES = {"individual", "company"}
+HIDDEN_CUSTOM_FIELD_KEYS = {"id_or_license", "custom_question", "custom_answer_type", "custom_answer"}
 
 
 def list_customers(query="", customer_type="", marketing=""):
@@ -63,10 +64,6 @@ def _clean(form, existing_custom_fields=None):
     submitted_custom_fields = {
         "vehicle_details": form.get("vehicle_details", "").strip(),
         "alternative_contact": form.get("alternative_contact", "").strip(),
-        "id_or_license": form.get("id_or_license", "").strip(),
-        "custom_question": form.get("custom_question", "").strip(),
-        "custom_answer_type": form.get("custom_answer_type", "text").strip() or "text",
-        "custom_answer": form.get("custom_answer", "").strip(),
         "vat_number": form.get("vat_number", "").strip(),
         "company_reg_no": form.get("company_reg_no", "").strip(),
     }
@@ -111,7 +108,7 @@ def create_customer(form):
 
 
 def update_customer(customer_id, form):
-    data = _clean(form, existing_custom_fields=custom_fields_for(get_customer(customer_id)))
+    data = _clean(form, existing_custom_fields=raw_custom_fields_for(get_customer(customer_id)))
     data["id"] = customer_id
     get_db().execute(
         """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json WHERE id=:id""",
@@ -121,6 +118,10 @@ def update_customer(customer_id, form):
 
 
 def custom_fields_for(customer):
+    return {key: value for key, value in raw_custom_fields_for(customer).items() if key not in HIDDEN_CUSTOM_FIELD_KEYS}
+
+
+def raw_custom_fields_for(customer):
     if not customer:
         return {}
     try:
