@@ -588,6 +588,13 @@ def test_customer_crud_search_and_detail(client, app):
     assert res.status_code == 200
     assert b'Add your first customer' in res.data
 
+    new_page = client.get('/customers/new')
+    assert new_page.status_code == 200
+    assert b'data-company-details hidden' in new_page.data
+    assert b'name="vat_number"' in new_page.data
+    assert b'name="company_reg_no"' in new_page.data
+    assert b"companySection.hidden = !selected || selected.value !== 'company'" in new_page.data
+
     res = client.post('/customers/new', data={
         'customer_type': 'company',
         'name': 'Acme Rentals',
@@ -615,6 +622,7 @@ def test_customer_crud_search_and_detail(client, app):
     edit_page = client.get('/customers/1/edit')
     assert edit_page.status_code == 200
     assert b'data-company-details' in edit_page.data
+    assert b'data-company-details hidden' not in edit_page.data
     assert b'name="vat_number"' in edit_page.data
     assert b'value="4123456789"' in edit_page.data
     assert b'name="company_reg_no"' in edit_page.data
