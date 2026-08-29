@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
+from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
@@ -29,6 +30,20 @@ def _products():
         WHERE p.active = 1
         ORDER BY p.name
     """).fetchall()
+
+
+def _form_with_inline_customer(form):
+    """Create/attach the inline customer when saving an order draft directly."""
+    selected_customer_id = (form.get("customer_id") or "").strip()
+    if selected_customer_id:
+        return form
+    inline_customer_name = (form.get("name") or "").strip()
+    if not inline_customer_name:
+        return form
+    mutable_form = MultiDict(form)
+    customer_id = create_customer(mutable_form)
+    mutable_form["customer_id"] = str(customer_id)
+    return mutable_form
 
 
 def _time_options(increment=15):
@@ -67,7 +82,8 @@ def new():
                 flash(str(exc), "error")
         else:
             try:
-                order_id = create_order(request.form)
+                form = _form_with_inline_customer(request.form)
+                order_id = create_order(form)
                 flash("Draft order created", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
             except ValueError as exc:
@@ -97,7 +113,8 @@ def edit(order_id):
                 form_data = None
         else:
             try:
-                update_draft_order(order_id, request.form)
+                form = _form_with_inline_customer(request.form)
+                update_draft_order(order_id, form)
                 flash("Order saved", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
             except ValueError as exc:

@@ -755,7 +755,7 @@ def test_add_company_customer_from_order_captures_vat_fields(client, app):
         'customer_type': 'company',
         'name': 'Inline Company Pty Ltd',
         'email': 'accounts@inline.test',
-        'phone': '+27110000000',
+        'phone': '+271****0000',
         'vat_number': '4999999999',
         'company_reg_no': '2026/999999/07',
         'vehicle_details': 'Fleet bakkie',
@@ -775,6 +775,45 @@ def test_add_company_customer_from_order_captures_vat_fields(client, app):
         assert custom_fields['vat_number'] == '4999999999'
         assert custom_fields['company_reg_no'] == '2026/999999/07'
         assert custom_fields['vehicle_details'] == 'Fleet bakkie'
+
+
+def test_save_draft_with_inline_company_customer_creates_and_attaches_customer(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/orders/new', data={
+        'customer_type': 'company',
+        'name': 'Draft Inline Company Pty Ltd',
+        'email': 'draft-inline@example.test',
+        'phone': '+27122222222',
+        'vat_number': '4888888888',
+        'company_reg_no': '2026/888888/07',
+        'vehicle_details': 'Fleet trailer tow vehicle',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+    }, follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    assert b'Draft Inline Company Pty Ltd' in res.data
+    with app.app_context():
+        db = get_db()
+        customer = db.execute(
+            "SELECT id, customer_type, custom_fields_json FROM customers WHERE name = ?",
+            ('Draft Inline Company Pty Ltd',),
+        ).fetchone()
+        assert customer is not None
+        assert customer['customer_type'] == 'company'
+        custom_fields = json.loads(customer['custom_fields_json'])
+        assert custom_fields['vat_number'] == '4888888888'
+        assert custom_fields['company_reg_no'] == '2026/888888/07'
+        order = db.execute('SELECT customer_id FROM orders ORDER BY id DESC LIMIT 1').fetchone()
+        assert order['customer_id'] == customer['id']
+
 
 def test_security_deposit_is_in_order_total_and_due_but_stored_separately(client, app):
     login(client)
