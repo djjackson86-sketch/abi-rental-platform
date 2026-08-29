@@ -9,7 +9,6 @@ from app.services.orders import create_order, draft_order_form, get_order, list_
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
-from app.services.coupons import list_coupons
 from app.services.customers import create_customer, custom_fields_for
 from app.services.branches import branch_options, default_branch_id
 
@@ -89,7 +88,7 @@ def new():
             except ValueError as exc:
                 flash(str(exc), "error")
     slot = next_time_slot(increment_minutes=15)
-    return render_template("admin/orders/form.html", settings=settings, customers=_customers(), products=_products(), coupons=list_coupons(status="active"), selected_customer_id=selected_customer_id, default_start_date=slot.date().isoformat(), default_return_date=(slot + timedelta(days=1)).date().isoformat(), default_start_time=slot.strftime("%H:%M"), time_options=_time_options(15), branches=branch_options(), default_branch_id=default_branch_id(), form_mode="new", form_action=url_for("orders.new"))
+    return render_template("admin/orders/form.html", settings=settings, customers=_customers(), products=_products(), selected_customer_id=selected_customer_id, default_start_date=slot.date().isoformat(), default_return_date=(slot + timedelta(days=1)).date().isoformat(), default_start_time=slot.strftime("%H:%M"), time_options=_time_options(15), branches=branch_options(), default_branch_id=default_branch_id(), form_mode="new", form_action=url_for("orders.new"))
 
 
 @bp.route("/<int:order_id>/edit", methods=["GET", "POST"])
@@ -130,7 +129,6 @@ def edit(order_id):
         settings=get_company_settings(),
         customers=_customers(),
         products=_products(),
-        coupons=list_coupons(status="active"),
         selected_customer_id=form_data.get("selected_customer_id", ""),
         default_start_date=form_data.get("start_date", ""),
         default_return_date=form_data.get("end_date", ""),

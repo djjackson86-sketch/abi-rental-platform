@@ -2,7 +2,6 @@ from datetime import datetime, date, time, timedelta
 from math import ceil
 
 from app.db import get_db, now
-from app.services.coupons import calculate_discount, get_coupon_by_code
 
 STATUS_LABELS = {
     "draft": "Draft",
@@ -247,12 +246,12 @@ def _build_order_payload(form):
 
     subtotal = round(subtotal, 2)
     tax_total = round(tax_total, 2)
-    coupon_code = (form.get("coupon_code") or "").strip().upper()
-    coupon = get_coupon_by_code(coupon_code)
-    discount_total = calculate_discount(coupon, subtotal) if coupon_code else 0
-    if coupon_code and not coupon:
-        raise ValueError("Coupon code was not found or is inactive")
-    total = round(max(0, subtotal - discount_total) + tax_total, 2)
+    # Coupon entry has been retired from reachable staff/admin workflows.
+    # Keep the historical order columns/display intact, but do not apply
+    # submitted coupon codes to newly saved/recalculated orders.
+    coupon_code = ""
+    discount_total = 0
+    total = round(subtotal + tax_total, 2)
     deposit_option = form.get("deposit_option", "security_deposit")
     if deposit_option not in {"security_deposit", "damage_waiver", "no_deposit"}:
         deposit_option = "security_deposit"
@@ -271,7 +270,7 @@ def _build_order_payload(form):
         "end_at": end_dt.isoformat(timespec="minutes"),
         "subtotal": subtotal,
         "discount_total": discount_total,
-        "coupon_code": coupon_code if coupon else "",
+        "coupon_code": coupon_code,
         "tax_total": tax_total,
         "deposit_total": deposit_total,
         "deposit_option": deposit_option,

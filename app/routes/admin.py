@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, request, url_for, Response, flash
+from flask import Blueprint, render_template, redirect, request, url_for, Response, flash, abort
 import csv
 from io import StringIO
 from app.routes.auth import login_required
@@ -6,7 +6,6 @@ from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services.orders import dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
-from app.services.coupons import coupon_counts, create_coupon, format_discount, get_coupon, list_coupons, update_coupon
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 
 bp = Blueprint("admin", __name__)
@@ -49,47 +48,10 @@ def render_placeholder(name, title, description, primary_label=None):
 
 
 @bp.route("/coupons", methods=["GET", "POST"])
-@login_required
-def coupons():
-    if request.method == "POST":
-        try:
-            create_coupon(request.form)
-            flash("Coupon created", "success")
-            return redirect(url_for("admin.coupons"))
-        except ValueError as exc:
-            flash(str(exc), "error")
-    query = request.args.get("query", "").strip()
-    status = request.args.get("status", "")
-    return render_template(
-        "admin/coupons.html",
-        settings=get_company_settings(),
-        coupons=list_coupons(query=query, status=status),
-        counts=coupon_counts(),
-        filters={"query": query, "status": status},
-        format_discount=format_discount,
-    )
-
-
 @bp.route("/coupons/<int:coupon_id>/edit", methods=["GET", "POST"])
 @login_required
-def edit_coupon(coupon_id):
-    coupon = get_coupon(coupon_id)
-    if not coupon:
-        flash("Coupon not found", "error")
-        return redirect(url_for("admin.coupons"))
-    if request.method == "POST":
-        try:
-            update_coupon(coupon_id, request.form)
-            flash("Coupon updated", "success")
-            return redirect(url_for("admin.coupons"))
-        except ValueError as exc:
-            flash(str(exc), "error")
-    coupon = get_coupon(coupon_id)
-    return render_template(
-        "admin/coupon_form.html",
-        settings=get_company_settings(),
-        coupon=coupon,
-    )
+def coupons(coupon_id=None):
+    abort(404)
 
 
 @bp.route("/app-store", methods=["GET", "POST"])
