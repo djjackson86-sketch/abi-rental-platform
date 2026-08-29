@@ -49,9 +49,17 @@
       <label class="span-2">Name<input name="name" placeholder="Customer name"></label>
       <label>Email<input name="email" type="email"></label>
       <label>Phone<input name="phone"></label>
-      <label>Type<select name="customer_type"><option value="individual">Individual</option><option value="company">Company</option></select></label>
+      <label>Type<select name="customer_type" id="inline-customer-type"><option value="individual">Individual</option><option value="company">Company</option></select></label>
       <label>Address line 1<input name="address_line1"></label>
       <label>City<input name="city"></label>
+    </div>
+    <div class="customer-custom-fields" data-inline-company-details hidden>
+      <h3>Company details</h3>
+      <p class="form-help">VAT and registration numbers are only needed for company customers.</p>
+      <div class="form-grid">
+        <label>VAT No<input name="vat_number" placeholder="e.g. 4123456789"></label>
+        <label>Company Reg No<input name="company_reg_no" placeholder="e.g. 2024/123456/07"></label>
+      </div>
     </div>
     <div class="customer-custom-fields">
       <h3>Custom customer details</h3>
@@ -132,6 +140,10 @@
   const customerInput=document.getElementById('customer-search');
   const customerId=document.getElementById('customer-id');
   const customerSelect=document.getElementById('customer-select');
+  const inlineCustomerType=document.getElementById('inline-customer-type');
+  const inlineCompanyDetails=document.querySelector('[data-inline-company-details]');
+  function syncInlineCompanyDetails(){ if(inlineCompanyDetails){ inlineCompanyDetails.hidden = !inlineCustomerType || inlineCustomerType.value !== 'company'; } }
+  if(inlineCustomerType){ inlineCustomerType.addEventListener('change',syncInlineCompanyDetails); syncInlineCompanyDetails(); }
   const customerOptions=[...document.querySelectorAll('#customer-options option')];
   function syncCustomer(){ const match=customerOptions.find(o=>o.value===customerInput.value); if(match){ customerId.value=match.dataset.id; if(customerSelect) customerSelect.value=match.dataset.id; } }
   if(customerSelect){ customerSelect.addEventListener('change',()=>{customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text;}); if(customerSelect.value){customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text;}}

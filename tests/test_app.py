@@ -712,6 +712,11 @@ def test_order_draft_creation_and_totals(client):
     assert b'class="line-total-preview"' in res.data
     assert b'data-deposit="750.00"' in res.data
     assert b'data-tax-rate=' in res.data
+    assert b'data-inline-company-details hidden' in res.data
+    assert b'id="inline-customer-type"' in res.data
+    assert b'name="vat_number"' in res.data
+    assert b'name="company_reg_no"' in res.data
+    assert b"inlineCompanyDetails.hidden = !inlineCustomerType || inlineCustomerType.value !== 'company'" in res.data
 
     res = client.post('/orders/new', data={
         'customer_id': '1',
@@ -740,6 +745,36 @@ def test_order_draft_creation_and_totals(client):
     assert b'Total incl. deposit' in list_res.data
     assert b'built-in method items' not in list_res.data
 
+
+def test_add_company_customer_from_order_captures_vat_fields(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/orders/new', data={
+        'order_action': 'create_customer_continue',
+        'customer_type': 'company',
+        'name': 'Inline Company Pty Ltd',
+        'email': 'accounts@inline.test',
+        'phone': '+27110000000',
+        'vat_number': '4999999999',
+        'company_reg_no': '2026/999999/07',
+        'vehicle_details': 'Fleet bakkie',
+    }, follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'Customer created' in res.data
+    assert b'Inline Company Pty Ltd' in res.data
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT customer_type, custom_fields_json FROM customers WHERE name = ?",
+            ('Inline Company Pty Ltd',),
+        ).fetchone()
+        assert row is not None
+        assert row['customer_type'] == 'company'
+        custom_fields = json.loads(row['custom_fields_json'])
+        assert custom_fields['vat_number'] == '4999999999'
+        assert custom_fields['company_reg_no'] == '2026/999999/07'
+        assert custom_fields['vehicle_details'] == 'Fleet bakkie'
 
 def test_security_deposit_is_in_order_total_and_due_but_stored_separately(client, app):
     login(client)
