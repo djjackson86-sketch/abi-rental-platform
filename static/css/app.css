@@ -112,3 +112,14 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
 
 /* Product group inventory folders */
 .inventory-group-row td{background:#f3f6fb!important;color:var(--ink);border-top:2px solid #d5dfec;border-bottom:1px solid #d5dfec}.inventory-group-row strong{display:block;font-size:15px}.inventory-group-row small{display:block;color:var(--muted);margin-top:3px}.inventory-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+
+/* Invoice print/PDF-friendly portrait layout */
+@page invoice-portrait{size:A4 portrait;margin:14mm}
+@media print{
+  .document-type-invoice{page:invoice-portrait;width:100%;max-width:190mm;margin:0 auto;padding:0;border:0;box-shadow:none}
+  .document-type-invoice .document-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10mm;break-inside:avoid}
+  .document-type-invoice .table-wrap{overflow:visible;border-radius:0}
+  .document-type-invoice .data-table{min-width:0;width:100%;table-layout:fixed;font-size:10.5px}
+  .document-type-invoice .data-table th,.document-type-invoice .data-table td{padding:6px 7px;white-space:normal;overflow-wrap:anywhere}
+  .document-type-invoice .totals{max-width:72mm;margin-left:auto;break-inside:avoid}
+}

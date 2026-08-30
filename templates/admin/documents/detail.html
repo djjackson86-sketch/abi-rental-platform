@@ -15,7 +15,7 @@
     <div class="form-actions span-2"><button class="btn primary" type="submit">Send PDF email</button></div>
   </form>
 </section>
-<section class="document-page panel">
+<section class="document-page panel{% if document.document_type == 'invoice' %} document-type-invoice{% endif %}">
   {% set issuer_name = document.branch_name or settings.company_name %}
   {% set issuer_email = document.branch_email or settings.email %}
   {% set issuer_phone = document.branch_phone or settings.phone %}

@@ -1435,8 +1435,13 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'document details' not in invoice.data
     assert b'Rental management document' not in invoice.data
     assert b'class="document-head document-head-number-only"' in invoice.data
+    assert b'document-type-invoice' in invoice.data
     assert b'class="invoice-number-block"' in invoice.data
     assert b'class="invoice-date-line"' in invoice.data
+    css = client.get('/static/css/app.css')
+    assert css.status_code == 200
+    assert b'@page invoice-portrait' in css.data
+    assert b'size:A4 portrait' in css.data
     assert invoice.data.index(invoice_created_at.encode()) < invoice.data.index(b'Issuer')
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'Return:')
 
@@ -1446,6 +1451,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     for expected in [
         b'/Subtype /Image',
         b'/DCTDecode',
+        b'/MediaBox [0 0 595 842]',
         b'Issuer: Wonderboom',
         b'Issuer email: wonderboom@example.test',
         b'Invoice date: ' + invoice_created_at.encode(),
