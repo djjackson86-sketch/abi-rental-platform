@@ -102,21 +102,17 @@ def document_pdf_bytes(document_id):
         document['branch_city'] or settings['city'],
         ' '.join(part for part in [document['branch_province'] or settings['province'], document['branch_postal_code'] or settings['postcode']] if part),
     ]
-    lines = [
-        f'{label} {document["number"]}',
-        f'Issuer: {issuer_name}',
-    ]
+    lines = [f'{label} {document["number"]}']
+    if document['document_type'] == 'invoice':
+        lines.append(f'Invoice date: {document["created_at"] or "-"}')
+    lines.append(f'Issuer: {issuer_name}')
     if issuer_email:
         lines.append(f'Issuer email: {issuer_email}')
     if issuer_phone:
         lines.append(f'Issuer phone: {issuer_phone}')
     lines.extend([line for line in issuer_address if line])
+    lines.extend([f'Order: {document["order_number"]}', f'Pickup: {document["start_at"] or "-"}', f'Return: {document["end_at"] or "-"}'])
     if document['document_type'] == 'invoice':
-        lines.extend([
-            f'Invoice date: {document["created_at"] or "-"}',
-            f'Pickup date: {document["start_at"] or "-"}',
-            f'Return date: {document["end_at"] or "-"}',
-        ])
         bank_lines = [
             ('Bank', document['branch_bank_name']),
             ('Account holder', document['branch_bank_account_name']),
@@ -132,7 +128,7 @@ def document_pdf_bytes(document_id):
                     lines.append('Banking details:')
                     added_heading = True
                 lines.append(f'{key}: {value}')
-    lines.extend([f'Order: {document["order_number"]}', f'Customer: {document["customer_name"] or "-"}', f'Email: {document["customer_email"] or "-"}', f'Pickup: {document["start_at"] or "-"}', f'Return: {document["end_at"] or "-"}', ''])
+    lines.extend([f'Customer: {document["customer_name"] or "-"}', f'Email: {document["customer_email"] or "-"}', ''])
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
     lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}', f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])

@@ -1421,17 +1421,19 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'632005',
         b'Business Current',
         b'Use INV number',
-        b'Invoice dates',
         b'Invoice date:',
         invoice_created_at.encode(),
-        b'Pickup date:',
+        b'Pickup:',
         b'2026-07-01T09:00',
-        b'Return date:',
+        b'Return:',
         b'2026-07-02T15:00',
         b'static/img/sano-trailers-logo.jpg',
         b'SANO Trailers logo',
     ]:
         assert expected in invoice.data
+    assert b'Invoice dates' not in invoice.data
+    assert invoice.data.index(invoice_created_at.encode()) < invoice.data.index(b'Issuer')
+    assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'Return:')
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
@@ -1442,12 +1444,16 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Issuer: Wonderboom',
         b'Issuer email: wonderboom@example.test',
         b'Invoice date: ' + invoice_created_at.encode(),
-        b'Pickup date: 2026-07-01T09:00',
-        b'Return date: 2026-07-02T15:00',
+        b'Order: ORD-00001',
+        b'Pickup: 2026-07-01T09:00',
+        b'Return: 2026-07-02T15:00',
         b'Wonderboom Test Bank',
         b'Account number: 444555666',
     ]:
         assert expected in pdf
+    assert b'Pickup date:' not in pdf
+    assert pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_created_at.encode()) < pdf.index(b'Issuer: Wonderboom')
+    assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01T09:00') < pdf.index(b'Return: 2026-07-02T15:00')
 
 
 def test_quote_without_collection_branch_falls_back_to_company_settings(client, app):
