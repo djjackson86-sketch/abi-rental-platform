@@ -1406,6 +1406,10 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
 
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
+    with app.app_context():
+        invoice_row = get_db().execute('SELECT created_at FROM documents WHERE id = 1').fetchone()
+        assert invoice_row is not None
+        invoice_created_at = invoice_row['created_at']
     for expected in [
         b'Wonderboom',
         b'wonderboom@example.test',
@@ -1417,6 +1421,13 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'632005',
         b'Business Current',
         b'Use INV number',
+        b'Invoice dates',
+        b'Invoice date:',
+        invoice_created_at.encode(),
+        b'Pickup date:',
+        b'2026-07-01T09:00',
+        b'Return date:',
+        b'2026-07-02T15:00',
         b'static/img/sano-trailers-logo.jpg',
         b'SANO Trailers logo',
     ]:
@@ -1425,7 +1436,17 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
         pdf = document_pdf_bytes(1)
-    for expected in [b'/Subtype /Image', b'/DCTDecode', b'Issuer: Wonderboom', b'Issuer email: wonderboom@example.test', b'Wonderboom Test Bank', b'Account number: 444555666']:
+    for expected in [
+        b'/Subtype /Image',
+        b'/DCTDecode',
+        b'Issuer: Wonderboom',
+        b'Issuer email: wonderboom@example.test',
+        b'Invoice date: ' + invoice_created_at.encode(),
+        b'Pickup date: 2026-07-01T09:00',
+        b'Return date: 2026-07-02T15:00',
+        b'Wonderboom Test Bank',
+        b'Account number: 444555666',
+    ]:
         assert expected in pdf
 
 

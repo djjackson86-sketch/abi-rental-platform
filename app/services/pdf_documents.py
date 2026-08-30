@@ -112,6 +112,11 @@ def document_pdf_bytes(document_id):
         lines.append(f'Issuer phone: {issuer_phone}')
     lines.extend([line for line in issuer_address if line])
     if document['document_type'] == 'invoice':
+        lines.extend([
+            f'Invoice date: {document["created_at"] or "-"}',
+            f'Pickup date: {document["start_at"] or "-"}',
+            f'Return date: {document["end_at"] or "-"}',
+        ])
         bank_lines = [
             ('Bank', document['branch_bank_name']),
             ('Account holder', document['branch_bank_account_name']),
