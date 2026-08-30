@@ -1432,6 +1432,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     ]:
         assert expected in invoice.data
     assert b'Invoice dates' not in invoice.data
+    assert b'class="invoice-number-block"' in invoice.data
     assert invoice.data.index(invoice_created_at.encode()) < invoice.data.index(b'Issuer')
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'Return:')
 
