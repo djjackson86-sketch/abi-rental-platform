@@ -22,9 +22,8 @@
   <div class="invoice-logo-row">
     <img class="invoice-logo" src="{{ url_for('static', filename='img/sano-trailers-logo.jpg') }}" alt="SANO Trailers logo">
   </div>
-  <div class="document-head">
-    <div><h2>{{ issuer_name }}</h2><p>{% if document.branch_name %}{{ document.branch_code or 'Branch' }} document details{% else %}Rental management document{% endif %}</p></div>
-    <div{% if document.document_type == 'invoice' %} class="invoice-number-block"{% endif %}><strong>{{ label }}</strong><span>{{ document.number }}</span>{% if document.document_type == 'invoice' %}<br><small><strong>Invoice date:</strong> {{ document.created_at or '—' }}</small>{% endif %}</div>
+  <div class="document-head document-head-number-only">
+    <div{% if document.document_type == 'invoice' %} class="invoice-number-block"{% endif %}><strong>{{ label }}</strong><span>{{ document.number }}</span>{% if document.document_type == 'invoice' %}<br><small class="invoice-date-line"><strong>Invoice date:</strong> {{ document.created_at or '—' }}</small>{% endif %}</div>
   </div>
   <div class="two-col document-meta">
     <article><h3>Issuer</h3><p><strong>{{ issuer_name }}</strong>{% if issuer_email %}<br>{{ issuer_email }}{% endif %}{% if issuer_phone %}<br>{{ issuer_phone }}{% endif %}{% if document.branch_address_line1 or document.branch_city %}<br>{{ document.branch_address_line1 }}{% if document.branch_address_line2 %}<br>{{ document.branch_address_line2 }}{% endif %}{% if document.branch_city %}<br>{{ document.branch_city }}{% endif %}{% if document.branch_province or document.branch_postal_code %}<br>{{ document.branch_province }} {{ document.branch_postal_code }}{% endif %}{% elif settings.address_line1 or settings.city %}<br>{{ settings.address_line1 }}{% if settings.address_line2 %}<br>{{ settings.address_line2 }}{% endif %}{% if settings.city %}<br>{{ settings.city }}{% endif %}{% if settings.province or settings.postcode %}<br>{{ settings.province }} {{ settings.postcode }}{% endif %}{% endif %}</p></article>
