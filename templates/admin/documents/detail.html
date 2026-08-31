@@ -3,7 +3,7 @@
 {% block admin_body %}
 <header class="page-header">
   <div><p class="eyebrow">{{ label }}</p><h1>{{ document.number }}</h1><p>{{ document.order_number }} · {{ document.customer_name or 'No customer' }}</p></div>
-  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a><button class="btn primary" onclick="window.print()">Print</button></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a>{% if document.document_type == 'invoice' %}<a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=document.id) }}">Save PDF</a>{% endif %}<button class="btn primary" onclick="window.print()">Print</button></div>
 </header>
 <section class="panel settings-form">
   <h2>Email {{ label }}</h2>

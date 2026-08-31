@@ -1384,6 +1384,24 @@ def test_invoice_line_items_show_rental_days_instead_of_tax_column(client, app):
     assert b'Tax: R0.00' in pdf
 
 
+def test_invoice_can_be_saved_as_pdf(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert invoice.status_code == 200
+    assert b'Save PDF' in invoice.data
+    assert b'/documents/1/download.pdf' in invoice.data
+
+    download = client.get('/documents/1/download.pdf')
+    assert download.status_code == 200
+    assert download.mimetype == 'application/pdf'
+    assert download.headers['Content-Disposition'] == 'attachment; filename=INVOICE-INV-00001.pdf'
+    assert download.data.startswith(b'%PDF-')
+
+
+
 def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     login(client)
     seed_customer_and_product(client)

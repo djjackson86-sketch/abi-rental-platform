@@ -79,6 +79,21 @@ def detail(document_id):
     )
 
 
+@bp.route("/<int:document_id>/download.pdf")
+@login_required
+def download_pdf(document_id):
+    document = get_document(document_id)
+    if not document:
+        flash("Document not found", "error")
+        return redirect(url_for("documents.index"))
+    pdf_bytes = document_pdf_bytes(document_id)
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={document_pdf_filename(document)}"},
+    )
+
+
 @bp.post("/orders/<int:order_id>")
 @login_required
 def create_for_order(order_id):
