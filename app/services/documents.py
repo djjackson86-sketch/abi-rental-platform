@@ -81,6 +81,7 @@ def get_document(document_id):
             c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
+            c.custom_fields_json AS custom_fields_json,
             b.id AS branch_id, b.name AS branch_name, b.code AS branch_code, b.phone AS branch_phone, b.email AS branch_email,
             b.address_line1 AS branch_address_line1, b.address_line2 AS branch_address_line2, b.city AS branch_city,
             b.province AS branch_province, b.postal_code AS branch_postal_code,

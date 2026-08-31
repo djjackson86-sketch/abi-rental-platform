@@ -1407,6 +1407,21 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
     with app.app_context():
+        get_db().execute(
+            """UPDATE customers SET phone = ?, address_line1 = ?, address_line2 = ?, suburb = ?, city = ?, province = ?, postal_code = ?, country = ?, custom_fields_json = ? WHERE id = 1""",
+            (
+                '+27 82 555 1212',
+                '12 Pawcare Street',
+                'Unit 4',
+                'Parkwood',
+                'Johannesburg',
+                'Gauteng',
+                '2193',
+                'South Africa',
+                json.dumps({'alternative_contact': 'Jane Backup +27 82 000 1111', 'vehicle_details': 'Toyota Hilux CA 123-456'}),
+            ),
+        )
+        get_db().commit()
         invoice_row = get_db().execute('SELECT created_at FROM documents WHERE id = 1').fetchone()
         assert invoice_row is not None
         invoice_created_at = invoice_row['created_at']
@@ -1455,6 +1470,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Issuer: Wonderboom',
         b'Issuer email: wonderboom@example.test',
         b'Invoice date: ' + invoice_created_at.encode(),
+        b'Customer: Order Customer',
+        b'Email: order@example.com',
+        b'Phone: +27 82 555 1212',
+        b'Customer address: 12 Pawcare Street, Unit 4, Parkwood, Johannesburg, Gauteng 2193, South Africa',
+        b'Alternative contact: Jane Backup +27 82 000 1111',
+        b'Vehicle details: Toyota Hilux CA 123-456',
         b'Order: ORD-00001',
         b'Pickup: 2026-07-01T09:00',
         b'Return: 2026-07-02T15:00',

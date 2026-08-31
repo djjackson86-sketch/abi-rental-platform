@@ -3,6 +3,7 @@ from pathlib import Path
 from flask import current_app
 
 from app.services.documents import label_for, printable_document
+from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 
 
@@ -128,7 +129,27 @@ def document_pdf_bytes(document_id):
                     lines.append('Banking details:')
                     added_heading = True
                 lines.append(f'{key}: {value}')
-    lines.extend([f'Customer: {document["customer_name"] or "-"}', f'Email: {document["customer_email"] or "-"}', ''])
+    lines.extend([f'Customer: {document["customer_name"] or "-"}', f'Email: {document["customer_email"] or "-"}'])
+    if document['document_type'] == 'invoice':
+        if document['customer_phone']:
+            lines.append(f'Phone: {document["customer_phone"]}')
+        customer_address = [
+            document['customer_address_line1'],
+            document['customer_address_line2'],
+            document['customer_suburb'],
+            document['customer_city'],
+            ' '.join(part for part in [document['customer_province'], document['customer_postal_code']] if part),
+            document['customer_country'],
+        ]
+        compact_address = ', '.join(line for line in customer_address if line)
+        if compact_address:
+            lines.append(f'Customer address: {compact_address}')
+        custom_fields = custom_fields_for(document)
+        if custom_fields.get('alternative_contact'):
+            lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
+        if custom_fields.get('vehicle_details'):
+            lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
+    lines.append('')
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
     lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}', f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])
