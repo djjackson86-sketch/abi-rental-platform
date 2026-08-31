@@ -1567,6 +1567,26 @@ def test_document_type_validation(client):
     assert b'Receipt' not in bad.data
 
 
+def test_generated_document_pdfs_are_a4_portrait(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+
+    created_document_ids = []
+    for document_type in ('quote', 'contract', 'invoice', 'packing_slip'):
+        created = client.post(f'/orders/{order_id}/documents', data={'document_type': document_type}, follow_redirects=False)
+        assert created.status_code == 302
+        created_document_ids.append(int(created.headers['Location'].rstrip('/').split('/')[-1]))
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+
+        for document_id in created_document_ids:
+            pdf = document_pdf_bytes(document_id)
+            assert b'/MediaBox [0 0 595 842]' in pdf
+            assert b'/MediaBox [0 0 842 595]' not in pdf
+
+
 def test_public_store_checkout_creates_draft_order(client):
     login(client)
     seed_customer_and_product(client)

@@ -8,6 +8,9 @@ from app.services.settings import get_company_settings
 
 
 DOCUMENT_LOGO_STATIC_PATH = 'img/sano-trailers-logo.jpg'
+A4_PORTRAIT_WIDTH = 595
+A4_PORTRAIT_HEIGHT = 842
+A4_PORTRAIT_MEDIABOX = f'[0 0 {A4_PORTRAIT_WIDTH} {A4_PORTRAIT_HEIGHT}]'
 
 
 def _escape_pdf_text(text):
@@ -48,7 +51,7 @@ def _simple_pdf(lines, logo_bytes=None):
         logo_width, logo_height = _jpeg_dimensions(logo_bytes)
         display_width = 130
         display_height = display_width * logo_height / logo_width
-        content_lines.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 50 {792 - display_height:.2f} cm /Im1 Do Q')
+        content_lines.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 50 {A4_PORTRAIT_HEIGHT - 50 - display_height:.2f} cm /Im1 Do Q')
         image_object = (
             f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
@@ -68,7 +71,7 @@ def _simple_pdf(lines, logo_bytes=None):
     resources = b'/Font << /F1 4 0 R >>'
     if image_object:
         resources += b' /XObject << /Im1 6 0 R >>'
-    objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ' + resources + b' >> /Contents 5 0 R >>')
+    objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox ' + A4_PORTRAIT_MEDIABOX.encode() + b' /Resources << ' + resources + b' >> /Contents 5 0 R >>')
     objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
     objects.append(b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream')
     if image_object:
