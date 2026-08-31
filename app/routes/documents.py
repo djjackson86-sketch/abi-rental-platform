@@ -7,6 +7,7 @@ from app.services.documents import create_document, get_document, label_for, lis
 from app.services.settings import get_company_settings
 from app.services.email_delivery import email_configured, send_email_with_attachment
 from app.services.pdf_documents import document_pdf_bytes, document_pdf_filename
+from app.services.customers import custom_fields_for
 
 bp = Blueprint("documents", __name__, url_prefix="/documents")
 
@@ -72,6 +73,7 @@ def detail(document_id):
         document=document,
         items=items,
         label=label_for(document["document_type"]),
+        custom_fields=custom_fields_for(document),
         email_configured=email_configured(),
     )
 

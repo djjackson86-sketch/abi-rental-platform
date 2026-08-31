@@ -1425,6 +1425,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         invoice_row = get_db().execute('SELECT created_at FROM documents WHERE id = 1').fetchone()
         assert invoice_row is not None
         invoice_created_at = invoice_row['created_at']
+    invoice = client.get('/documents/1')
+    assert invoice.status_code == 200
     for expected in [
         b'Wonderboom',
         b'wonderboom@example.test',
@@ -1444,6 +1446,10 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'2026-07-02T15:00',
         b'static/img/sano-trailers-logo.jpg',
         b'SANO Trailers logo',
+        b'Alternative contact:',
+        b'Jane Backup +27 82 000 1111',
+        b'Vehicle details:',
+        b'Toyota Hilux CA 123-456',
     ]:
         assert expected in invoice.data
     assert b'Invoice dates' not in invoice.data
