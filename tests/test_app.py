@@ -1365,6 +1365,25 @@ def test_branch_invoice_details_are_saved(client, app):
         assert branch['bank_reference_note'] == 'Use invoice number as payment reference'
 
 
+def test_invoice_line_items_show_rental_days_instead_of_tax_column(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-01')
+
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert invoice.status_code == 200
+    assert b'<th>Rental days</th>' in invoice.data
+    assert b'<th>Tax</th>' not in invoice.data
+    assert b'1 Day Rental' in invoice.data
+    assert b'<span>Tax</span>' in invoice.data  # Accounting totals keep tax visible.
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf = document_pdf_bytes(1)
+    assert b'1 Day Rental' in pdf
+    assert b'Tax: R0.00' in pdf
+
+
 def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     login(client)
     seed_customer_and_product(client)
@@ -1450,6 +1469,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'2026-07-01T09:00',
         b'Return:',
         b'2026-07-02T15:00',
+        b'2 Days Rental',
         b'static/img/sano-trailers-logo.jpg',
         b'SANO Trailers logo',
         b'Alternative contact:',
@@ -1519,6 +1539,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Order: ORD-00001',
         b'Pickup: 2026-07-01T09:00',
         b'Return: 2026-07-02T15:00',
+        b'2 Days Rental',
         b'Wonderboom Test Bank',
         b'Account number: 444555666',
         b'Paid: R500.00',

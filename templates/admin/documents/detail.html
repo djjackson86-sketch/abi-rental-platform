@@ -50,10 +50,10 @@
   {% endif %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr></thead>
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Subtotal</th><th>{% if document.document_type == 'invoice' %}Rental days{% else %}Tax{% endif %}</th><th>Total</th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.unit_price) }}</td><td>R{{ '%.2f'|format(item.line_subtotal) }}</td><td>R{{ '%.2f'|format(item.line_tax) }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.unit_price) }}</td><td>R{{ '%.2f'|format(item.line_subtotal) }}</td><td>{% if document.document_type == 'invoice' %}{{ rental_days_label }}{% else %}R{{ '%.2f'|format(item.line_tax) }}{% endif %}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

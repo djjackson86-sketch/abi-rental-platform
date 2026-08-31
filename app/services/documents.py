@@ -1,5 +1,7 @@
+from datetime import datetime
+
 from app.db import get_db, now
-from app.services.orders import get_order, order_items
+from app.services.orders import get_order, order_items, rental_days
 
 DOCUMENT_TYPES = {
     "quote": {"label": "Quote", "prefix": "QUO"},
@@ -107,6 +109,31 @@ def documents_for_order(order_id):
 
 def label_for(document_type):
     return DOCUMENT_TYPES.get(document_type, {}).get("label", document_type.replace("_", " ").title())
+
+
+def _parse_document_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+
+
+def rental_days_for_document(document):
+    start_at = _parse_document_datetime(document['start_at'])
+    end_at = _parse_document_datetime(document['end_at'])
+    return rental_days(start_at, end_at)
+
+
+def rental_days_label(document):
+    days = rental_days_for_document(document)
+    return f"{days} {'Day' if days == 1 else 'Days'} Rental"
 
 
 def printable_document(document_id):

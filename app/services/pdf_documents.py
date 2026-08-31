@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import label_for, printable_document
+from app.services.documents import label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 
@@ -117,6 +117,7 @@ def document_pdf_bytes(document_id):
     lines.extend([line for line in issuer_address if line])
     lines.extend([f'Order: {document["order_number"]}', f'Pickup: {document["start_at"] or "-"}', f'Return: {document["end_at"] or "-"}'])
     if document['document_type'] == 'invoice':
+        lines.append(rental_days_label(document))
         bank_lines = [
             ('Bank', document['branch_bank_name']),
             ('Account holder', document['branch_bank_account_name']),
