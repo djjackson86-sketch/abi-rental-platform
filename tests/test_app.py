@@ -1455,15 +1455,39 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'Invoice dates' not in invoice.data
     assert b'document details' not in invoice.data
     assert b'Rental management document' not in invoice.data
-    assert b'class="document-head document-head-number-only"' in invoice.data
     assert b'document-type-invoice' in invoice.data
-    assert b'class="invoice-number-block"' in invoice.data
-    assert b'class="invoice-date-line"' in invoice.data
+    for expected_class in [
+        b'class="invoice-example-layout"',
+        b'class="invoice-top-grid"',
+        b'class="invoice-logo-address"',
+        b'class="invoice-branch-address"',
+        b'class="invoice-number-block"',
+        b'class="invoice-info-grid document-meta"',
+        b'class="invoice-customer-block"',
+        b'class="invoice-banking-block"',
+        b'class="invoice-order-block"',
+        b'class="invoice-date-line"',
+    ]:
+        assert expected_class in invoice.data
     css = client.get('/static/css/app.css')
     assert css.status_code == 200
-    assert b'@page invoice-portrait' in css.data
-    assert b'size:A4 portrait' in css.data
-    assert invoice.data.index(invoice_created_at.encode()) < invoice.data.index(b'Issuer')
+    for expected_css in [
+        b'@page invoice-portrait',
+        b'size:A4 portrait',
+        b'.invoice-top-grid',
+        b'.invoice-info-grid',
+        b'.invoice-banking-block{justify-self:center',
+        b'.invoice-order-block{justify-self:end;text-align:right',
+    ]:
+        assert expected_css in css.data
+    logo_pos = invoice.data.index(b'static/img/sano-trailers-logo.jpg')
+    address_pos = invoice.data.index(b'class="invoice-branch-address"')
+    customer_pos = invoice.data.index(b'class="invoice-customer-block"')
+    banking_pos = invoice.data.index(b'class="invoice-banking-block"')
+    order_pos = invoice.data.index(b'class="invoice-order-block"')
+    assert logo_pos < address_pos < customer_pos
+    assert customer_pos < banking_pos < order_pos
+    assert invoice.data.index(b'INV-00001') < invoice.data.index(invoice_created_at.encode())
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'Return:')
 
     with app.app_context():
