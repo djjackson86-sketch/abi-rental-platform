@@ -1406,6 +1406,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
 
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
+    payment = client.post(f'/orders/{order_id}/payments', data={
+        'amount': '500',
+        'method': 'eft',
+        'reference': 'INV-PARTIAL',
+    }, follow_redirects=True)
+    assert payment.status_code == 200
     with app.app_context():
         get_db().execute(
             """UPDATE customers SET phone = ?, address_line1 = ?, address_line2 = ?, suburb = ?, city = ?, province = ?, postal_code = ?, country = ?, custom_fields_json = ? WHERE id = 1""",
@@ -1450,6 +1456,10 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Jane Backup +27 82 000 1111',
         b'Vehicle details:',
         b'Toyota Hilux CA 123-456',
+        b'Paid',
+        b'R500.00',
+        b'Amount due',
+        b'R650.00',
     ]:
         assert expected in invoice.data
     assert b'Invoice dates' not in invoice.data
@@ -1511,6 +1521,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Return: 2026-07-02T15:00',
         b'Wonderboom Test Bank',
         b'Account number: 444555666',
+        b'Paid: R500.00',
+        b'Amount due: R650.00',
     ]:
         assert expected in pdf
     assert b'Pickup date:' not in pdf

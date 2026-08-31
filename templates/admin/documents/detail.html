@@ -63,6 +63,10 @@
     <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(document.tax_total or 0) }}</b></div>
     <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(document.deposit_total or 0) }}</b></div>
     <div class="list-row"><span>Total{% if (document.deposit_option or 'security_deposit') == 'security_deposit' and document.deposit_total %} incl. refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(document.total or 0) }}</b></div>
+    {% if document.document_type == 'invoice' %}
+    <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(document.paid_total or 0) }}</b></div>
+    <div class="list-row"><span>Amount due</span><b>R{{ '%.2f'|format(document.due_total or 0) }}</b></div>
+    {% endif %}
   </div>
 </section>
 {% endblock %}
