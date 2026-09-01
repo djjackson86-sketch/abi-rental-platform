@@ -186,7 +186,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         'Invoice',
         document['number'],
         f'Invoice date: {document_date(document["created_at"])}',
-    ], size=8.5, leading=14, font='F2')
+    ], size=8.5, leading=14)
 
     _add_pdf_lines(text_commands, detail_x, 705, [
         'Order',
@@ -194,7 +194,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         f'Pickup: {document_date(document["start_at"])}',
         f'Return: {document_date(document["end_at"])}',
         rent_label,
-    ], size=8.5, leading=14, font='F2')
+    ], size=8.5, leading=14)
 
     customer_lines = [
         'Bill To:',
