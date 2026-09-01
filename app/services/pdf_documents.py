@@ -180,7 +180,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         _compact_address([issuer_phone, issuer_email]),
     ], size=8.2, leading=12, max_lines=7)
 
-    # Top-right invoice, order and customer stack.
+    # Top-right invoice and order stack.
     detail_x = 382
     _add_pdf_lines(text_commands, detail_x, 760, [
         'Invoice',
@@ -208,7 +208,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         customer_lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
     if custom_fields.get('vehicle_details'):
         customer_lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
-    _add_pdf_lines(text_commands, detail_x, 620, customer_lines, size=8.5, leading=13, max_lines=12)
+    # Bill To block, aligned under the logo/brand on the left.
+    _add_pdf_lines(text_commands, 36, 625, customer_lines, size=8.5, leading=13, max_lines=12)
 
     # Invoice table and totals.
     table_y = 430
