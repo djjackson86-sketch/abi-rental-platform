@@ -1389,7 +1389,8 @@ def test_invoice_line_items_show_tax_column(client, app):
         from app.services.pdf_documents import document_pdf_bytes
         pdf = document_pdf_bytes(1)
     assert b'1 Day Rental' in pdf  # Order details keep rental dates/days visible.
-    assert b'Tax: R0.00' in pdf
+    assert b'Tax' in pdf
+    assert b'R0.00' in pdf
 
 
 def test_invoice_can_be_saved_as_pdf(client):
@@ -1522,9 +1523,9 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'class="invoice-header-grid"',
         b'class="invoice-logo-address"',
         b'class="invoice-branch-address"',
+        b'class="invoice-detail-stack"',
         b'class="invoice-order-block"',
         b'class="invoice-number-block"',
-        b'class="invoice-info-grid document-meta"',
         b'class="invoice-customer-block"',
         b'class="invoice-banking-block"',
         b'class="invoice-date-line"',
@@ -1536,11 +1537,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'@page invoice-portrait',
         b'size:A4 portrait',
         b'.invoice-header-grid',
-        b'.invoice-info-grid',
+        b'.invoice-detail-stack',
         b'.document-type-invoice .invoice-logo{width:118px;max-width:36vw;margin-left:-15px',
         b'.document-type-invoice .invoice-logo{width:30mm;margin-left:-4mm',
         b'.invoice-footer-grid{display:grid',
         b'.invoice-banking-block{justify-self:start',
+        b'.totals .list-row b{min-width:130px;text-align:right',
         b'.invoice-order-block{justify-self:start;text-align:left',
     ]:
         assert expected_css in css.data
@@ -1563,6 +1565,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     for expected in [
         b'/Subtype /Image',
         b'/DCTDecode',
+        b'/BaseFont /Helvetica-Bold',
         b'25 714.00 cm /Im1 Do Q',
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
@@ -1585,11 +1588,13 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'2 Days Rental',
         b'Wonderboom Test Bank',
         b'Account number: 444555666',
-        b'Paid: R500.00',
-        b'Amount due: R650.00',
+        b'Paid',
+        b'R500.00',
+        b'Amount due',
+        b'R650.00',
         b'Thank you for your business.',
-        b'q 0.86 0.94 1 rg 36.00 465.00 523.00 18.00 re f Q',
-        b'q 0.86 0.94 1 rg 382.00 323.00 177.00 88.00 re f Q',
+        b'q 0.86 0.94 1 rg 36.00 425.00 523.00 18.00 re f Q',
+        b'q 0.86 0.94 1 rg 382.00 283.00 177.00 88.00 re f Q',
     ]:
         assert expected in pdf
     for removed_label in [
@@ -1604,8 +1609,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'Return: 2026-07-02T15:00' not in pdf
     assert b'Invoice date: ' + invoice_created_at.encode() not in pdf
     assert b'Pickup date:' not in pdf
+    assert b'390.00 358.00 Tm (Subtotal)' in pdf
+    assert b'505.00 358.00 Tm (R400.00)' in pdf
+    assert b'390.00 344.00 Tm (Tax)' in pdf
+    assert b'505.00 344.00 Tm (R0.00)' in pdf
     assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'2 Days Rental')
-    assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode())
+    assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer') < pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
     assert pdf.index(b'12 Pawcare Street') < pdf.index(b'Unit 4') < pdf.index(b'Parkwood') < pdf.index(b'Johannesburg') < pdf.index(b'Gauteng 2193') < pdf.index(b'South Africa')
 

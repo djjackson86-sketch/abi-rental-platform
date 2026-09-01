@@ -68,12 +68,13 @@ def _simple_pdf(lines, logo_bytes=None):
     objects = []
     objects.append(b'<< /Type /Catalog /Pages 2 0 R >>')
     objects.append(b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>')
-    resources = b'/Font << /F1 4 0 R >>'
+    resources = b'/Font << /F1 4 0 R /F2 6 0 R >>'
     if image_object:
-        resources += b' /XObject << /Im1 6 0 R >>'
+        resources += b' /XObject << /Im1 7 0 R >>'
     objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox ' + A4_PORTRAIT_MEDIABOX.encode() + b' /Resources << ' + resources + b' >> /Contents 5 0 R >>')
     objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
     objects.append(b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream')
+    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>')
     if image_object:
         objects.append(image_object)
     out = bytearray(b'%PDF-1.4\n')
@@ -96,19 +97,19 @@ def _compact_address(parts):
     return ', '.join(str(part) for part in parts if part)
 
 
-def _pdf_text_command(x, y, text, size=9):
-    return f'/F1 {size} Tf 1 0 0 1 {x:.2f} {y:.2f} Tm ({_escape_pdf_text(text)}) Tj'
+def _pdf_text_command(x, y, text, size: int | float = 9, font='F1'):
+    return f'/{font} {size} Tf 1 0 0 1 {x:.2f} {y:.2f} Tm ({_escape_pdf_text(text)}) Tj'
 
 
 def _pdf_light_blue_rect(x, y, width, height):
     return f'q 0.86 0.94 1 rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f Q'
 
 
-def _add_pdf_lines(commands, x, y, lines, size=9, leading=14, max_lines=None):
+def _add_pdf_lines(commands, x, y, lines, size: int | float = 9, leading=14, max_lines=None, font='F1'):
     for index, line in enumerate([line for line in lines if line]):
         if max_lines is not None and index >= max_lines:
             break
-        commands.append(_pdf_text_command(x, y - (index * leading), line, size=size))
+        commands.append(_pdf_text_command(x, y - (index * leading), line, size=size, font=font))
 
 
 def _pdf_objects(stream, image_object=None):
@@ -116,12 +117,13 @@ def _pdf_objects(stream, image_object=None):
         b'<< /Type /Catalog /Pages 2 0 R >>',
         b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     ]
-    resources = b'/Font << /F1 4 0 R >>'
+    resources = b'/Font << /F1 4 0 R /F2 6 0 R >>'
     if image_object:
-        resources += b' /XObject << /Im1 6 0 R >>'
+        resources += b' /XObject << /Im1 7 0 R >>'
     objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox ' + A4_PORTRAIT_MEDIABOX.encode() + b' /Resources << ' + resources + b' >> /Contents 5 0 R >>')
     objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
     objects.append(b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream')
+    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>')
     if image_object:
         objects.append(image_object)
     out = bytearray(b'%PDF-1.4\n')
@@ -178,21 +180,22 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         _compact_address([issuer_phone, issuer_email]),
     ], size=8.2, leading=12, max_lines=7)
 
-    # Top-right order and invoice blocks.
-    _add_pdf_lines(text_commands, 320, 760, [
+    # Top-right invoice, order and customer stack.
+    detail_x = 382
+    _add_pdf_lines(text_commands, detail_x, 760, [
+        'Invoice',
+        document['number'],
+        f'Invoice date: {document_date(document["created_at"])}',
+    ], size=8.5, leading=14)
+
+    _add_pdf_lines(text_commands, detail_x, 705, [
         'Order',
         f'Order: {document["order_number"]}',
         f'Pickup: {document_date(document["start_at"])}',
         f'Return: {document_date(document["end_at"])}',
         rent_label,
     ], size=8.5, leading=14)
-    _add_pdf_lines(text_commands, 455, 760, [
-        'Invoice',
-        document['number'],
-        f'Invoice date: {document_date(document["created_at"])}',
-    ], size=8.5, leading=14)
 
-    # Middle row: Bill To, aligned below the header/detail blocks.
     customer_lines = [
         'Bill To:',
         document['customer_name'] or '-',
@@ -205,10 +208,10 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         customer_lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
     if custom_fields.get('vehicle_details'):
         customer_lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
-    _add_pdf_lines(text_commands, 320, 690, customer_lines, size=8.5, leading=13, max_lines=12)
+    _add_pdf_lines(text_commands, detail_x, 620, customer_lines, size=8.5, leading=13, max_lines=12)
 
     # Invoice table and totals.
-    table_y = 470
+    table_y = 430
     draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
     _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
     _add_pdf_lines(text_commands, 220, table_y, ['Qty'], size=7.5)
@@ -229,7 +232,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         y -= 36
 
     totals_y = max(130, y - 12)
-    bank_lines = ['Thank you for your business.', 'Banking details']
+    text_commands.append(_pdf_text_command(36, totals_y, 'Thank you for your business.', size=8.8, font='F2'))
+    bank_lines = ['Banking details']
     for key, value in [
         ('Bank', document['branch_bank_name']),
         ('Account holder', document['branch_bank_account_name']),
@@ -240,17 +244,20 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ]:
         if value:
             bank_lines.append(f'{key}: {value}')
-    _add_pdf_lines(text_commands, 36, totals_y, bank_lines, size=8.5, leading=13, max_lines=9)
+    _add_pdf_lines(text_commands, 36, totals_y - 18, bank_lines, size=8.5, leading=13, max_lines=8)
     totals = [
-        f'Subtotal: R{float(document["subtotal"] or 0):.2f}',
-        f'Tax: R{float(document["tax_total"] or 0):.2f}',
-        f'Security deposit: R{float(document["deposit_total"] or 0):.2f}',
-        f'Total: R{float(document["total"] or 0):.2f}',
-        f'Paid: R{float(document["paid_total"] or 0):.2f}',
-        f'Amount due: R{float(document["due_total"] or 0):.2f}',
+        ('Subtotal', f'R{float(document["subtotal"] or 0):.2f}'),
+        ('Tax', f'R{float(document["tax_total"] or 0):.2f}'),
+        ('Security deposit', f'R{float(document["deposit_total"] or 0):.2f}'),
+        ('Total', f'R{float(document["total"] or 0):.2f}'),
+        ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
+        ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
     ]
     draw_commands.append(_pdf_light_blue_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4))
-    _add_pdf_lines(text_commands, 390, totals_y, totals, size=8.8, leading=14)
+    for index, (label, amount) in enumerate(totals):
+        line_y = totals_y - (index * 14)
+        text_commands.append(_pdf_text_command(390, line_y, label, size=8.8))
+        text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8))
     text_commands.append('ET')
     stream = '\n'.join(draw_commands + text_commands).encode('latin-1', 'replace')
     return _pdf_objects(stream, image_object=image_object)
