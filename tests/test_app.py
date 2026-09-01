@@ -1559,6 +1559,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert customer_pos < table_pos < banking_pos
     assert invoice.data.index(b'INV-00001') < invoice.data.index(invoice_date.encode())
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'2 Days Rental')
+    assert b'+27 12 999 0000 | wonderboom@example.test' not in invoice.data
+    assert invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test')
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
