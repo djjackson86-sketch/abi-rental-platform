@@ -66,6 +66,13 @@ def test_protected_pages_redirect(client):
 
 def test_booqable_reference_navigation_pages_exist(client):
     login(client)
+    dashboard = client.get('/dashboard')
+    assert b'Continue setup' not in dashboard.data
+    assert b'Your trial workspace is active' not in dashboard.data
+    assert b'Choose a plan' not in dashboard.data
+    assert b'class="logo" href="/dashboard"' in dashboard.data
+    assert b'href="/setup">Setup</a>' not in dashboard.data
+    assert b'href="/dashboard">Dashboard</a>' in dashboard.data
     for path, expected in [
         ('/app-store', b'App store'),
         ('/ask-bo', b'Ask Bo'),
