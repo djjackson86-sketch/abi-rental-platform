@@ -48,7 +48,7 @@
         <div class="detail-row"><span>Company Reg No</span><b>{{ custom_fields.get('company_reg_no') or '—' }}</b></div>
       {% endif %}
       {% if custom_fields %}
-        {% for key, value in custom_fields.items() %}{% if key not in ['vat_number', 'company_reg_no'] %}<div class="detail-row"><span>{{ key.replace('_', ' ')|title }}</span><b>{{ value }}</b></div>{% endif %}{% endfor %}
+        {% for key, value in custom_fields.items() %}{% if key not in ['vat_number', 'company_reg_no'] %}<div class="detail-row"><span>{{ custom_field_label(key) }}</span><b>{{ value }}</b></div>{% endif %}{% endfor %}
       {% endif %}
     </div>
   </article>

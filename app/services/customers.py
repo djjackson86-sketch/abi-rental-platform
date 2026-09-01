@@ -4,6 +4,26 @@ from app.db import get_db, now
 
 VALID_TYPES = {"individual", "company"}
 HIDDEN_CUSTOM_FIELD_KEYS = {"id_or_license", "custom_question", "custom_answer_type", "custom_answer"}
+VISIBLE_CUSTOM_FIELD_LABELS = {
+    "vehicle_make": "Vehicle Make",
+    "vehicle_color": "Vehicle Color",
+    "vehicle_reg_no": "Veh Reg No",
+    "alternative_contact_name": "Alternative Contact Name",
+    "alternative_contact_number": "Alternative Contact Number",
+    "alternative_contact_relationship": "Alternative Contact Relationship",
+    "vat_number": "VAT No",
+    "company_reg_no": "Company Reg No",
+}
+VISIBLE_CUSTOM_FIELD_ORDER = [
+    "vehicle_make",
+    "vehicle_color",
+    "vehicle_reg_no",
+    "alternative_contact_name",
+    "alternative_contact_number",
+    "alternative_contact_relationship",
+    "vat_number",
+    "company_reg_no",
+]
 
 
 def list_customers(query="", customer_type="", marketing=""):
@@ -62,8 +82,12 @@ def _clean(form, existing_custom_fields=None):
         customer_type = "individual"
     custom_fields = dict(existing_custom_fields or {})
     submitted_custom_fields = {
-        "vehicle_details": form.get("vehicle_details", "").strip(),
-        "alternative_contact": form.get("alternative_contact", "").strip(),
+        "vehicle_make": form.get("vehicle_make", "").strip() or form.get("vehicle_details", "").strip(),
+        "vehicle_color": form.get("vehicle_color", "").strip(),
+        "vehicle_reg_no": form.get("vehicle_reg_no", "").strip(),
+        "alternative_contact_name": form.get("alternative_contact_name", "").strip() or form.get("alternative_contact", "").strip(),
+        "alternative_contact_number": form.get("alternative_contact_number", "").strip(),
+        "alternative_contact_relationship": form.get("alternative_contact_relationship", "").strip(),
         "vat_number": form.get("vat_number", "").strip(),
         "company_reg_no": form.get("company_reg_no", "").strip(),
     }
@@ -72,6 +96,8 @@ def _clean(form, existing_custom_fields=None):
             custom_fields[key] = value
         else:
             custom_fields.pop(key, None)
+    custom_fields.pop("vehicle_details", None)
+    custom_fields.pop("alternative_contact", None)
     return {
         "customer_type": customer_type,
         "name": name,
@@ -118,7 +144,27 @@ def update_customer(customer_id, form):
 
 
 def custom_fields_for(customer):
-    return {key: value for key, value in raw_custom_fields_for(customer).items() if key not in HIDDEN_CUSTOM_FIELD_KEYS}
+    raw = raw_custom_fields_for(customer)
+    visible = {key: value for key, value in raw.items() if key not in HIDDEN_CUSTOM_FIELD_KEYS}
+    if visible.get("vehicle_details") and not visible.get("vehicle_make"):
+        visible["vehicle_make"] = visible["vehicle_details"]
+    if visible.get("alternative_contact") and not visible.get("alternative_contact_name"):
+        visible["alternative_contact_name"] = visible["alternative_contact"]
+    visible.pop("vehicle_details", None)
+    visible.pop("alternative_contact", None)
+    ordered = {}
+    for key in VISIBLE_CUSTOM_FIELD_ORDER:
+        value = visible.get(key)
+        if value:
+            ordered[key] = value
+    for key, value in visible.items():
+        if key not in ordered and value:
+            ordered[key] = value
+    return ordered
+
+
+def custom_field_label(key):
+    return VISIBLE_CUSTOM_FIELD_LABELS.get(key, key.replace("_", " ").title())
 
 
 def raw_custom_fields_for(customer):

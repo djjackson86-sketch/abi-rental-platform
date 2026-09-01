@@ -204,12 +204,20 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     if document['customer_phone']:
         customer_lines.append(document['customer_phone'])
     customer_lines.extend([line for line in customer_address if line])
-    if custom_fields.get('alternative_contact'):
-        customer_lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
-    if custom_fields.get('vehicle_details'):
-        customer_lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
+    if custom_fields.get('vehicle_make'):
+        customer_lines.append(f'Vehicle Make: {custom_fields["vehicle_make"]}')
+    if custom_fields.get('vehicle_color'):
+        customer_lines.append(f'Vehicle Color: {custom_fields["vehicle_color"]}')
+    if custom_fields.get('vehicle_reg_no'):
+        customer_lines.append(f'Veh Reg No: {custom_fields["vehicle_reg_no"]}')
+    if custom_fields.get('alternative_contact_name'):
+        customer_lines.append(f'Alternative Contact Name: {custom_fields["alternative_contact_name"]}')
+    if custom_fields.get('alternative_contact_number'):
+        customer_lines.append(f'Alternative Contact Number: {custom_fields["alternative_contact_number"]}')
+    if custom_fields.get('alternative_contact_relationship'):
+        customer_lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
     # Bill To block, aligned under the logo/brand on the left.
-    _add_pdf_lines(text_commands, 36, 625, customer_lines, size=8.5, leading=13, max_lines=12)
+    _add_pdf_lines(text_commands, 36, 625, customer_lines, size=8.5, leading=13, max_lines=16)
 
     # Invoice table and totals.
     table_y = 430
@@ -330,10 +338,18 @@ def document_pdf_bytes(document_id):
         if compact_address:
             lines.append(f'Customer address: {compact_address}')
         custom_fields = custom_fields_for(document)
-        if custom_fields.get('alternative_contact'):
-            lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
-        if custom_fields.get('vehicle_details'):
-            lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
+        if custom_fields.get('vehicle_make'):
+            lines.append(f'Vehicle Make: {custom_fields["vehicle_make"]}')
+        if custom_fields.get('vehicle_color'):
+            lines.append(f'Vehicle Color: {custom_fields["vehicle_color"]}')
+        if custom_fields.get('vehicle_reg_no'):
+            lines.append(f'Veh Reg No: {custom_fields["vehicle_reg_no"]}')
+        if custom_fields.get('alternative_contact_name'):
+            lines.append(f'Alternative Contact Name: {custom_fields["alternative_contact_name"]}')
+        if custom_fields.get('alternative_contact_number'):
+            lines.append(f'Alternative Contact Number: {custom_fields["alternative_contact_number"]}')
+        if custom_fields.get('alternative_contact_relationship'):
+            lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
     lines.append('')
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')

@@ -23,7 +23,7 @@
               <div class="detail-row"><span>Phone</span><b>{{ customer_summary.phone }}</b></div>
               <div class="detail-row"><span>Address</span><b>{{ customer_summary.address }}</b></div>
               {% for key, value in customer_summary.custom_fields.items() if value %}
-                <div class="detail-row"><span>{{ key.replace('_', ' ')|title }}</span><b>{{ value }}</b></div>
+                <div class="detail-row"><span>{{ custom_field_label(key) }}</span><b>{{ value }}</b></div>
               {% endfor %}
             </div>
             <p class="form-help">These saved customer fields are shown here for checking while editing this order. Use Edit customer to change the customer record.</p>
@@ -65,8 +65,12 @@
       <h3>Custom customer details</h3>
       <p class="form-help">Capture vehicle details and alternative contacts for this customer.</p>
       <div class="form-grid">
-        <label>Vehicle details<input name="vehicle_details" placeholder="Vehicle make/model, colour, registration"></label>
-        <label>Alternative contact<input name="alternative_contact" placeholder="Name and phone number"></label>
+        <label>Vehicle Make<input name="vehicle_make" placeholder="Toyota Hilux"></label>
+        <label>Vehicle Color<input name="vehicle_color" placeholder="White"></label>
+        <label>Veh Reg No<input name="vehicle_reg_no" placeholder="CA 123-456"></label>
+        <label>Alternative Contact Name<input name="alternative_contact_name" placeholder="Jane Smith"></label>
+        <label>Alternative Contact Number<input name="alternative_contact_number" placeholder="+27..."></label>
+        <label>Alternative Contact Relationship<input name="alternative_contact_relationship" placeholder="Sister"></label>
       </div>
     </div>
     <button class="btn ghost" type="submit" onclick="this.form.order_action.value='create_customer_continue'">Add customer and continue</button>

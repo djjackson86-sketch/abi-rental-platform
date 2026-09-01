@@ -511,7 +511,12 @@ def test_customer_crud_search_and_detail(client, app):
         'marketing_opt_in': '1',
         'vat_number': '4123456789',
         'company_reg_no': '2024/123456/07',
-        'vehicle_details': 'Bakkie CA 123',
+        'vehicle_make': 'Toyota Hilux',
+        'vehicle_color': 'White',
+        'vehicle_reg_no': 'CA 123',
+        'alternative_contact_name': 'Jane Backup',
+        'alternative_contact_number': '+2700000001',
+        'alternative_contact_relationship': 'Sister',
         'id_or_license': 'ID SHOULD NOT SAVE',
         'custom_question': 'Should hidden custom question save?',
         'custom_answer_type': 'yes_no',
@@ -525,7 +530,10 @@ def test_customer_crud_search_and_detail(client, app):
     assert b'4123456789' in res.data
     assert b'Company Reg No' in res.data
     assert b'2024/123456/07' in res.data
-    assert b'Bakkie CA 123' in res.data
+    assert b'Toyota Hilux' in res.data
+    assert b'White' in res.data
+    assert b'CA 123' in res.data
+    assert b'Jane Backup' in res.data
 
     edit_page = client.get('/customers/1/edit')
     assert edit_page.status_code == 200
@@ -535,14 +543,23 @@ def test_customer_crud_search_and_detail(client, app):
     assert b'value="4123456789"' in edit_page.data
     assert b'name="company_reg_no"' in edit_page.data
     assert b'value="2024/123456/07"' in edit_page.data
-    assert b'Vehicle details' in edit_page.data
-    assert b'Alternative contact' in edit_page.data
+    assert b'Vehicle Make' in edit_page.data
+    assert b'Vehicle Color' in edit_page.data
+    assert b'Veh Reg No' in edit_page.data
+    assert b'Alternative Contact Name' in edit_page.data
+    assert b'Alternative Contact Number' in edit_page.data
+    assert b'Alternative Contact Relationship' in edit_page.data
     assert b'ID / licence detail' not in edit_page.data
     assert b'Custom question' not in edit_page.data
     with app.app_context():
         stored = get_db().execute('SELECT custom_fields_json FROM customers WHERE id = 1').fetchone()
         custom_fields = json.loads(stored['custom_fields_json'])
-        assert custom_fields['vehicle_details'] == 'Bakkie CA 123'
+        assert custom_fields['vehicle_make'] == 'Toyota Hilux'
+        assert custom_fields['vehicle_color'] == 'White'
+        assert custom_fields['vehicle_reg_no'] == 'CA 123'
+        assert custom_fields['alternative_contact_name'] == 'Jane Backup'
+        assert custom_fields['alternative_contact_number'] == '+2700000001'
+        assert custom_fields['alternative_contact_relationship'] == 'Sister'
         assert 'id_or_license' not in custom_fields
         assert 'custom_question' not in custom_fields
         assert 'custom_answer_type' not in custom_fields
@@ -567,7 +584,7 @@ def test_customer_crud_search_and_detail(client, app):
     assert b'4123456789' not in res.data
     assert b'Company Reg No' not in res.data
     assert b'2024/123456/07' not in res.data
-    assert b'Bakkie CA 123' not in res.data
+    assert b'Toyota Hilux' not in res.data
 
 
 def test_setup_marks_customer_complete(client):
@@ -666,7 +683,7 @@ def test_add_company_customer_from_order_captures_vat_fields(client, app):
         'phone': '+271****0000',
         'vat_number': '4999999999',
         'company_reg_no': '2026/999999/07',
-        'vehicle_details': 'Fleet bakkie',
+        'vehicle_make': 'Fleet bakkie',
     }, follow_redirects=True)
 
     assert res.status_code == 200
@@ -682,7 +699,7 @@ def test_add_company_customer_from_order_captures_vat_fields(client, app):
         custom_fields = json.loads(row['custom_fields_json'])
         assert custom_fields['vat_number'] == '4999999999'
         assert custom_fields['company_reg_no'] == '2026/999999/07'
-        assert custom_fields['vehicle_details'] == 'Fleet bakkie'
+        assert custom_fields['vehicle_make'] == 'Fleet bakkie'
 
 
 def test_save_draft_with_inline_company_customer_creates_and_attaches_customer(client, app):
@@ -696,7 +713,7 @@ def test_save_draft_with_inline_company_customer_creates_and_attaches_customer(c
         'phone': '+27122222222',
         'vat_number': '4888888888',
         'company_reg_no': '2026/888888/07',
-        'vehicle_details': 'Fleet trailer tow vehicle',
+        'vehicle_make': 'Fleet trailer tow vehicle',
         'product_id': '1',
         'quantity': '1',
         'start_date': '2026-07-01',
@@ -833,8 +850,12 @@ def test_edit_order_shows_attached_customer_standard_and_custom_fields(client, a
         'province': 'Western Cape',
         'postal_code': '7405',
         'country': 'South Africa',
-        'vehicle_details': 'Toyota Hilux CA 123-456',
-        'alternative_contact': 'Alt Contact +270****0001',
+        'vehicle_make': 'Toyota Hilux',
+        'vehicle_color': 'White',
+        'vehicle_reg_no': 'CA 123-456',
+        'alternative_contact_name': 'Alt Contact',
+        'alternative_contact_number': '+270****0001',
+        'alternative_contact_relationship': 'Brother',
         'id_or_license': 'ID 8001015009087',
         'custom_question': 'Has towbar fitted?',
         'custom_answer_type': 'yes_no',
@@ -850,8 +871,18 @@ def test_edit_order_shows_attached_customer_standard_and_custom_fields(client, a
     assert b'order@example.com' in edit_page.data
     assert b'+270****0000' in edit_page.data
     assert b'12 Trailer Street, Yard 4, Paarden Eiland, Cape Town, Western Cape, 7405, South Africa' in edit_page.data
-    assert b'Toyota Hilux CA 123-456' in edit_page.data
-    assert b'Alt Contact +270****0001' in edit_page.data
+    assert b'Vehicle Make' in edit_page.data
+    assert b'Toyota Hilux' in edit_page.data
+    assert b'Vehicle Color' in edit_page.data
+    assert b'White' in edit_page.data
+    assert b'Veh Reg No' in edit_page.data
+    assert b'CA 123-456' in edit_page.data
+    assert b'Alternative Contact Name' in edit_page.data
+    assert b'Alt Contact' in edit_page.data
+    assert b'Alternative Contact Number' in edit_page.data
+    assert b'+270****0001' in edit_page.data
+    assert b'Alternative Contact Relationship' in edit_page.data
+    assert b'Brother' in edit_page.data
     assert b'ID 8001015009087' not in edit_page.data
     assert b'Has towbar fitted?' not in edit_page.data
     assert b'ID / licence detail' not in edit_page.data
@@ -918,8 +949,12 @@ def test_edit_order_can_create_and_attach_inline_customer_without_changing_lines
         'name': 'Edit Inline Customer',
         'email': 'edit-inline@example.test',
         'phone': '+27210000000',
-        'vehicle_details': 'Nissan Navara CA 123-456',
-        'alternative_contact': 'Backup +27210000001',
+        'vehicle_make': 'Nissan Navara',
+        'vehicle_color': 'Grey',
+        'vehicle_reg_no': 'CA 123-456',
+        'alternative_contact_name': 'Backup',
+        'alternative_contact_number': '+272****0001',
+        'alternative_contact_relationship': 'Friend',
     }, follow_redirects=True)
 
     assert res.status_code == 200
@@ -927,7 +962,11 @@ def test_edit_order_can_create_and_attach_inline_customer_without_changing_lines
     assert b'Attached customer details' in res.data
     assert b'Edit Inline Customer' in res.data
     assert b'edit-inline@example.test' in res.data
-    assert b'Nissan Navara CA 123-456' in res.data
+    assert b'Nissan Navara' in res.data
+    assert b'Grey' in res.data
+    assert b'CA 123-456' in res.data
+    assert b'Backup' in res.data
+    assert b'Friend' in res.data
     assert b'name="customer_id" id="customer-id" value="2"' in res.data
     with app.app_context():
         db = get_db()
@@ -1470,7 +1509,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
                 'Gauteng',
                 '2193',
                 'South Africa',
-                json.dumps({'alternative_contact': 'Jane Backup +27 82 000 1111', 'vehicle_details': 'Toyota Hilux CA 123-456'}),
+                json.dumps({'vehicle_make': 'Toyota Hilux', 'vehicle_color': 'White', 'vehicle_reg_no': 'CA 123-456', 'alternative_contact_name': 'Jane Backup', 'alternative_contact_number': '+27 82 000 1111', 'alternative_contact_relationship': 'Sister'}),
             ),
         )
         get_db().commit()
@@ -1501,10 +1540,18 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Bill To:',
         b'static/img/sano-trailers-logo.jpg',
         b'SANO Trailers logo',
-        b'Alternative contact:',
-        b'Jane Backup +27 82 000 1111',
-        b'Vehicle details:',
-        b'Toyota Hilux CA 123-456',
+        b'Vehicle Make:',
+        b'Toyota Hilux',
+        b'Vehicle Color:',
+        b'White',
+        b'Veh Reg No:',
+        b'CA 123-456',
+        b'Alternative Contact Name:',
+        b'Jane Backup',
+        b'Alternative Contact Number:',
+        b'+27 82 000 1111',
+        b'Alternative Contact Relationship:',
+        b'Sister',
         b'Paid',
         b'R500.00',
         b'Amount due',
@@ -1587,8 +1634,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Johannesburg',
         b'Gauteng 2193',
         b'South Africa',
-        b'Alternative contact: Jane Backup +27 82 000 1111',
-        b'Vehicle details: Toyota Hilux CA 123-456',
+        b'Vehicle Make: Toyota Hilux',
+        b'Vehicle Color: White',
+        b'Veh Reg No: CA 123-456',
+        b'Alternative Contact Name: Jane Backup',
+        b'Alternative Contact Number: +27 82 000 1111',
+        b'Alternative Contact Relationship: Sister',
         b'Order: ORD-00001',
         b'Pickup: 2026-07-01',
         b'Return: 2026-07-02',

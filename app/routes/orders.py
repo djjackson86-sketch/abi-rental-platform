@@ -9,7 +9,7 @@ from app.services.orders import create_order, draft_order_form, get_order, list_
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
-from app.services.customers import create_customer, custom_fields_for
+from app.services.customers import create_customer, custom_field_label, custom_fields_for
 from app.services.branches import branch_options, default_branch_id
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
@@ -139,6 +139,7 @@ def edit(order_id):
         default_branch_id=form_data.get("collect_branch_id") or default_branch_id(),
         form_mode="edit",
         form_action=url_for("orders.edit", order_id=order_id),
+        custom_field_label=custom_field_label,
         order_form=form_data,
     )
 
