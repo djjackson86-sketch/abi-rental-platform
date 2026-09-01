@@ -3,7 +3,7 @@ import csv
 from io import StringIO
 
 from app.routes.auth import login_required
-from app.services.documents import create_document, get_document, label_for, list_documents, printable_document, document_filter_counts, mark_document_email, rental_days_label
+from app.services.documents import create_document, document_date, get_document, label_for, list_documents, printable_document, document_filter_counts, mark_document_email, rental_days_label
 from app.services.settings import get_company_settings
 from app.services.email_delivery import email_configured, send_email_with_attachment
 from app.services.pdf_documents import document_pdf_bytes, document_pdf_filename
@@ -74,6 +74,7 @@ def detail(document_id):
         items=items,
         label=label_for(document["document_type"]),
         custom_fields=custom_fields_for(document),
+        document_date=document_date,
         rental_days_label=rental_days_label(document),
         email_configured=email_configured(),
     )

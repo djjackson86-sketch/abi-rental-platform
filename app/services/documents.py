@@ -125,6 +125,16 @@ def _parse_document_datetime(value):
         return None
 
 
+def document_date(value):
+    parsed = _parse_document_datetime(value)
+    if parsed:
+        return parsed.date().isoformat()
+    text = str(value or '').strip()
+    if not text:
+        return '—'
+    return text[:10]
+
+
 def rental_days_for_document(document):
     start_at = _parse_document_datetime(document['start_at'])
     end_at = _parse_document_datetime(document['end_at'])

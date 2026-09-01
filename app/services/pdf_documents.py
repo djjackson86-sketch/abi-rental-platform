@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import label_for, printable_document, rental_days_label
+from app.services.documents import document_date, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 
@@ -158,7 +158,9 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         logo_width, logo_height = _jpeg_dimensions(logo_bytes)
         display_width = 86
         display_height = display_width * logo_height / logo_width
-        draw_commands.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 36 {A4_PORTRAIT_HEIGHT - 42 - display_height:.2f} cm /Im1 Do Q')
+        # The source logo image has built-in white padding. Shift the image left so
+        # the visible logo artwork aligns with the issuer/address wording below.
+        draw_commands.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 25 {A4_PORTRAIT_HEIGHT - 42 - display_height:.2f} cm /Im1 Do Q')
         image_object = (
             f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
@@ -176,14 +178,14 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     _add_pdf_lines(text_commands, 320, 760, [
         'Order',
         f'Order: {document["order_number"]}',
-        f'Pickup: {document["start_at"] or "-"}',
-        f'Return: {document["end_at"] or "-"}',
+        f'Pickup: {document_date(document["start_at"])}',
+        f'Return: {document_date(document["end_at"])}',
         rent_label,
     ], size=8.5, leading=14)
     _add_pdf_lines(text_commands, 455, 760, [
         'Invoice',
         document['number'],
-        f'Invoice date: {document["created_at"] or "-"}',
+        f'Invoice date: {document_date(document["created_at"])}',
     ], size=8.5, leading=14)
 
     # Middle row: Bill To and banking details.

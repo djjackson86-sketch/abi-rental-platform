@@ -1475,6 +1475,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         invoice_row = get_db().execute('SELECT created_at FROM documents WHERE id = 1').fetchone()
         assert invoice_row is not None
         invoice_created_at = invoice_row['created_at']
+        invoice_date = invoice_created_at[:10]
     invoice = client.get('/documents/1')
     assert invoice.status_code == 200
     for expected in [
@@ -1489,11 +1490,11 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Business Current',
         b'Use INV number',
         b'Invoice date:',
-        invoice_created_at.encode(),
+        invoice_date.encode(),
         b'Pickup:',
-        b'2026-07-01T09:00',
+        b'2026-07-01',
         b'Return:',
-        b'2026-07-02T15:00',
+        b'2026-07-02',
         b'2 Days Rental',
         b'Bill To:',
         b'static/img/sano-trailers-logo.jpg',
@@ -1509,6 +1510,9 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     ]:
         assert expected in invoice.data
     assert b'Invoice dates' not in invoice.data
+    assert b'2026-07-01T09:00' not in invoice.data
+    assert b'2026-07-02T15:00' not in invoice.data
+    assert invoice_created_at.encode() not in invoice.data
     assert b'document details' not in invoice.data
     assert b'Rental management document' not in invoice.data
     assert b'document-type-invoice' in invoice.data
@@ -1532,7 +1536,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'size:A4 portrait',
         b'.invoice-header-grid',
         b'.invoice-info-grid',
-        b'.document-type-invoice .invoice-logo{width:118px',
+        b'.document-type-invoice .invoice-logo{width:118px;max-width:36vw;margin-left:-15px',
+        b'.document-type-invoice .invoice-logo{width:30mm;margin-left:-4mm',
         b'.invoice-banking-block{justify-self:center',
         b'.invoice-order-block{justify-self:start;text-align:left',
     ]:
@@ -1547,8 +1552,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert logo_pos < address_pos < customer_pos < table_pos
     assert address_pos < order_pos < invoice_number_pos < customer_pos
     assert customer_pos < banking_pos < table_pos
-    assert invoice.data.index(b'INV-00001') < invoice.data.index(invoice_created_at.encode())
-    assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'Return:') < invoice.data.index(b'2 Days Rental')
+    assert invoice.data.index(b'INV-00001') < invoice.data.index(invoice_date.encode())
+    assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'2 Days Rental')
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
@@ -1556,9 +1561,10 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     for expected in [
         b'/Subtype /Image',
         b'/DCTDecode',
+        b'25 714.00 cm /Im1 Do Q',
         b'/MediaBox [0 0 595 842]',
         b'Issuer: Wonderboom',
-        b'Invoice date: ' + invoice_created_at.encode(),
+        b'Invoice date: ' + invoice_date.encode(),
         b'Bill To:',
         b'Customer: Order Customer',
         b'Email: order@example.com',
@@ -1567,8 +1573,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Alternative contact: Jane Backup +27 82 000 1111',
         b'Vehicle details: Toyota Hilux CA 123-456',
         b'Order: ORD-00001',
-        b'Pickup: 2026-07-01T09:00',
-        b'Return: 2026-07-02T15:00',
+        b'Pickup: 2026-07-01',
+        b'Return: 2026-07-02',
         b'2 Days Rental',
         b'Wonderboom Test Bank',
         b'Account number: 444555666',
@@ -1576,9 +1582,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Amount due: R650.00',
     ]:
         assert expected in pdf
+    assert b'Pickup: 2026-07-01T09:00' not in pdf
+    assert b'Return: 2026-07-02T15:00' not in pdf
+    assert b'Invoice date: ' + invoice_created_at.encode() not in pdf
     assert b'Pickup date:' not in pdf
-    assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01T09:00') < pdf.index(b'Return: 2026-07-02T15:00') < pdf.index(b'2 Days Rental')
-    assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_created_at.encode())
+    assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'2 Days Rental')
+    assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode())
     assert pdf.index(b'Bill To:') < pdf.index(b'Customer: Order Customer') < pdf.index(b'Banking details')
 
 
