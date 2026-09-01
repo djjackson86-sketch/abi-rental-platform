@@ -1592,7 +1592,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'.totals .list-row b{min-width:130px;text-align:right',
         b'.invoice-customer-block{margin-top:4px;justify-self:start;text-align:left',
         b'.total-row{background:var(--brand-soft)',
-        b'.document-type-invoice .table-wrap{margin-top:18px}',
+        b'.invoice-logo-address{display:grid;justify-items:start;gap:18px}',
+        b'.document-type-invoice .table-wrap{margin-top:28px}',
         b'.invoice-detail-stack{grid-column:3;display:grid;gap:28px;justify-self:end;max-width:225px}',
         b'.invoice-number-block{text-align:left;min-width:190px;justify-self:end}',
         b'.invoice-order-block{justify-self:end;text-align:left;max-width:225px;margin-top:82px',
@@ -1713,7 +1714,7 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     css = client.get('/static/css/app.css')
     assert css.status_code == 200
     assert b'.document-type-quote .document-meta{margin-bottom:56px}' in css.data
-    assert b'.document-type-quote .table-wrap{margin-top:14px}' in css.data
+    assert b'.document-type-quote .table-wrap{margin-top:24px}' in css.data
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
