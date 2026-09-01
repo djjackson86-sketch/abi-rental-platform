@@ -1592,7 +1592,10 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'.totals .list-row b{min-width:130px;text-align:right',
         b'.invoice-customer-block{margin-top:4px;justify-self:start;text-align:left',
         b'.total-row{background:var(--brand-soft)',
-        b'.invoice-order-block{justify-self:end;text-align:left;max-width:185px;margin-top:82px',
+        b'.document-type-invoice .table-wrap{margin-top:18px}',
+        b'.invoice-detail-stack{grid-column:3;display:grid;gap:28px;justify-self:end;max-width:225px}',
+        b'.invoice-number-block{text-align:left;min-width:190px;justify-self:end}',
+        b'.invoice-order-block{justify-self:end;text-align:left;max-width:225px;margin-top:82px',
     ]:
         assert expected_css in css.data
     logo_pos = invoice.data.index(b'static/img/sano-trailers-logo.jpg')
@@ -1622,8 +1625,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
         b'Invoice date: ' + invoice_date.encode(),
-        b'430.00 760.00 Tm (Invoice)',
-        b'430.00 625.00 Tm (Order)',
+        b'455.00 760.00 Tm (Invoice)',
+        b'455.00 625.00 Tm (Order)',
         b'Bill To:',
         b'Order Customer',
         b'order@example.com',
@@ -1679,7 +1682,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
-    assert pdf.index(b'430.00 760.00 Tm (Invoice)') < pdf.index(b'430.00 625.00 Tm (Order)')
+    assert pdf.index(b'455.00 760.00 Tm (Invoice)') < pdf.index(b'455.00 625.00 Tm (Order)')
     assert pdf.index(b'Subtotal') < pdf.index(b'Tax') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
     assert pdf.index(b'/F2 8.8 Tf 1 0 0 1 390.00 316.00 Tm (Total) Tj') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
     assert pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
@@ -1709,7 +1712,8 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
 
     css = client.get('/static/css/app.css')
     assert css.status_code == 200
-    assert b'.document-type-quote .document-meta{margin-bottom:32px}' in css.data
+    assert b'.document-type-quote .document-meta{margin-bottom:56px}' in css.data
+    assert b'.document-type-quote .table-wrap{margin-top:14px}' in css.data
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
