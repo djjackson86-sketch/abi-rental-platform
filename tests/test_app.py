@@ -1563,13 +1563,18 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/DCTDecode',
         b'25 714.00 cm /Im1 Do Q',
         b'/MediaBox [0 0 595 842]',
-        b'Issuer: Wonderboom',
+        b'Wonderboom',
         b'Invoice date: ' + invoice_date.encode(),
         b'Bill To:',
-        b'Customer: Order Customer',
-        b'Email: order@example.com',
-        b'Phone: +27 82 555 1212',
-        b'Customer address: 12 Pawcare Street, Unit 4, Parkwood, Johannesburg, Gauteng 2193, South Africa',
+        b'Order Customer',
+        b'order@example.com',
+        b'+27 82 555 1212',
+        b'12 Pawcare Street',
+        b'Unit 4',
+        b'Parkwood',
+        b'Johannesburg',
+        b'Gauteng 2193',
+        b'South Africa',
         b'Alternative contact: Jane Backup +27 82 000 1111',
         b'Vehicle details: Toyota Hilux CA 123-456',
         b'Order: ORD-00001',
@@ -1580,15 +1585,26 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Account number: 444555666',
         b'Paid: R500.00',
         b'Amount due: R650.00',
+        b'q 0.86 0.94 1 rg 36.00 465.00 523.00 18.00 re f Q',
+        b'q 0.86 0.94 1 rg 382.00 323.00 177.00 88.00 re f Q',
     ]:
         assert expected in pdf
+    for removed_label in [
+        b'Issuer: Wonderboom',
+        b'Customer: Order Customer',
+        b'Email: order@example.com',
+        b'Phone: +27 82 555 1212',
+        b'Customer address:',
+    ]:
+        assert removed_label not in pdf
     assert b'Pickup: 2026-07-01T09:00' not in pdf
     assert b'Return: 2026-07-02T15:00' not in pdf
     assert b'Invoice date: ' + invoice_created_at.encode() not in pdf
     assert b'Pickup date:' not in pdf
     assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'2 Days Rental')
     assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode())
-    assert pdf.index(b'Bill To:') < pdf.index(b'Customer: Order Customer') < pdf.index(b'Banking details')
+    assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer') < pdf.index(b'Banking details')
+    assert pdf.index(b'12 Pawcare Street') < pdf.index(b'Unit 4') < pdf.index(b'Parkwood') < pdf.index(b'Johannesburg') < pdf.index(b'Gauteng 2193') < pdf.index(b'South Africa')
 
 
 def test_quote_without_collection_branch_falls_back_to_company_settings(client, app):

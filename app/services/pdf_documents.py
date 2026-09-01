@@ -100,6 +100,10 @@ def _pdf_text_command(x, y, text, size=9):
     return f'/F1 {size} Tf 1 0 0 1 {x:.2f} {y:.2f} Tm ({_escape_pdf_text(text)}) Tj'
 
 
+def _pdf_light_blue_rect(x, y, width, height):
+    return f'q 0.86 0.94 1 rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f Q'
+
+
 def _add_pdf_lines(commands, x, y, lines, size=9, leading=14, max_lines=None):
     for index, line in enumerate([line for line in lines if line]):
         if max_lines is not None and index >= max_lines:
@@ -169,7 +173,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     text_commands = ['BT']
     # Top-left brand/address, matching the supplied template.
     _add_pdf_lines(text_commands, 36, 715, [
-        f'Issuer: {issuer_name}',
+        issuer_name,
         *[line for line in issuer_address if line],
         _compact_address([issuer_phone, issuer_email]),
     ], size=8.2, leading=12, max_lines=7)
@@ -191,19 +195,17 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Middle row: Bill To and banking details.
     customer_lines = [
         'Bill To:',
-        f'Customer: {document["customer_name"] or "-"}',
-        f'Email: {document["customer_email"] or "-"}',
+        document['customer_name'] or '-',
+        document['customer_email'] or '-',
     ]
     if document['customer_phone']:
-        customer_lines.append(f'Phone: {document["customer_phone"]}')
-    compact_customer_address = _compact_address(customer_address)
-    if compact_customer_address:
-        customer_lines.append(f'Customer address: {compact_customer_address}')
+        customer_lines.append(document['customer_phone'])
+    customer_lines.extend([line for line in customer_address if line])
     if custom_fields.get('alternative_contact'):
         customer_lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
     if custom_fields.get('vehicle_details'):
         customer_lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
-    _add_pdf_lines(text_commands, 36, 625, customer_lines, size=8.5, leading=13, max_lines=8)
+    _add_pdf_lines(text_commands, 36, 625, customer_lines, size=8.5, leading=13, max_lines=12)
 
     bank_lines = ['Banking details']
     for key, value in [
@@ -220,6 +222,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 
     # Invoice table and totals.
     table_y = 470
+    draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
     _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
     _add_pdf_lines(text_commands, 220, table_y, ['Qty'], size=7.5)
     _add_pdf_lines(text_commands, 270, table_y, ['Unit'], size=7.5)
@@ -238,6 +241,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         _add_pdf_lines(text_commands, 510, y, [f'R{float(item["line_total"] or 0):.2f}'], size=8)
         y -= 36
 
+    totals_y = max(130, y - 12)
     totals = [
         f'Subtotal: R{float(document["subtotal"] or 0):.2f}',
         f'Tax: R{float(document["tax_total"] or 0):.2f}',
@@ -246,7 +250,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         f'Paid: R{float(document["paid_total"] or 0):.2f}',
         f'Amount due: R{float(document["due_total"] or 0):.2f}',
     ]
-    _add_pdf_lines(text_commands, 390, max(130, y - 12), totals, size=8.8, leading=14)
+    draw_commands.append(_pdf_light_blue_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4))
+    _add_pdf_lines(text_commands, 390, totals_y, totals, size=8.8, leading=14)
     text_commands.append('ET')
     stream = '\n'.join(draw_commands + text_commands).encode('latin-1', 'replace')
     return _pdf_objects(stream, image_object=image_object)
