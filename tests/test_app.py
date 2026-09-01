@@ -1543,8 +1543,9 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'.invoice-footer-grid{display:grid',
         b'.invoice-banking-block{justify-self:start',
         b'.totals .list-row b{min-width:130px;text-align:right',
-        b'.invoice-order-block{justify-self:start;text-align:left',
         b'.invoice-customer-block{margin-top:4px;justify-self:start;text-align:left',
+        b'.total-row{background:var(--brand-soft)',
+        b'.invoice-order-block{justify-self:end;text-align:left;max-width:185px;margin-top:82px',
     ]:
         assert expected_css in css.data
     logo_pos = invoice.data.index(b'static/img/sano-trailers-logo.jpg')
@@ -1554,13 +1555,14 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     customer_pos = invoice.data.index(b'class="invoice-customer-block"')
     banking_pos = invoice.data.index(b'class="invoice-banking-block"')
     table_pos = invoice.data.index(b'<thead>')
-    assert logo_pos < address_pos < invoice_number_pos < order_pos < customer_pos < table_pos
-    assert order_pos < customer_pos
-    assert customer_pos < table_pos < banking_pos
+    assert logo_pos < address_pos < customer_pos < invoice_number_pos < order_pos < table_pos
+    assert address_pos < customer_pos
+    totals_pos = invoice.data.index(b'class="totals"')
+    assert customer_pos < table_pos < totals_pos < banking_pos
     assert invoice.data.index(b'INV-00001') < invoice.data.index(invoice_date.encode())
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'2 Days Rental')
     assert b'+27 12 999 0000 | wonderboom@example.test' not in invoice.data
-    assert invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test')
+    assert invoice.data.index(b'Wonderboom') < invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test') < invoice.data.index(b'22 Wonderboom Avenue')
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
@@ -1573,6 +1575,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
         b'Invoice date: ' + invoice_date.encode(),
+        b'410.00 760.00 Tm (Invoice)',
+        b'410.00 625.00 Tm (Order)',
         b'Bill To:',
         b'Order Customer',
         b'order@example.com',
@@ -1598,6 +1602,10 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Thank you for your business.',
         b'q 0.86 0.94 1 rg 36.00 425.00 523.00 18.00 re f Q',
         b'q 0.86 0.94 1 rg 382.00 283.00 177.00 88.00 re f Q',
+        b'/F2 8.8 Tf 1 0 0 1 390.00 316.00 Tm (Total) Tj',
+        b'/F2 8.8 Tf 1 0 0 1 505.00 316.00 Tm (R1150.00) Tj',
+        b'/F2 8.8 Tf 1 0 0 1 36.00 266.00 Tm (Thank you for your business.) Tj',
+        b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj',
     ]:
         assert expected in pdf
     for removed_label in [
@@ -1618,7 +1626,13 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'505.00 344.00 Tm (R0.00)' in pdf
     assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'2 Days Rental')
     assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
-    assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer') < pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
+    assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
+    assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
+    assert pdf.index(b'410.00 760.00 Tm (Invoice)') < pdf.index(b'410.00 625.00 Tm (Order)')
+    assert pdf.index(b'Subtotal') < pdf.index(b'Tax') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
+    assert pdf.index(b'/F2 8.8 Tf 1 0 0 1 390.00 316.00 Tm (Total) Tj') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
+    assert pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
+    assert b'0.08 0.39 1 rg' in pdf
     assert pdf.index(b'12 Pawcare Street') < pdf.index(b'Unit 4') < pdf.index(b'Parkwood') < pdf.index(b'Johannesburg') < pdf.index(b'Gauteng 2193') < pdf.index(b'South Africa')
 
 

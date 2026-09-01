@@ -176,19 +176,19 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Top-left brand/address, matching the supplied template.
     _add_pdf_lines(text_commands, 36, 715, [
         issuer_name,
+        *[line for line in [issuer_phone, issuer_email] if line],
         *[line for line in issuer_address if line],
-        _compact_address([issuer_phone, issuer_email]),
     ], size=8.2, leading=12, max_lines=7)
 
     # Top-right invoice and order stack.
-    detail_x = 382
+    detail_x = 410
     _add_pdf_lines(text_commands, detail_x, 760, [
         'Invoice',
         document['number'],
         f'Invoice date: {document_date(document["created_at"])}',
     ], size=8.5, leading=14)
 
-    _add_pdf_lines(text_commands, detail_x, 705, [
+    _add_pdf_lines(text_commands, detail_x, 625, [
         'Order',
         f'Order: {document["order_number"]}',
         f'Pickup: {document_date(document["start_at"])}',
@@ -232,8 +232,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         _add_pdf_lines(text_commands, 510, y, [f'R{float(item["line_total"] or 0):.2f}'], size=8)
         y -= 36
 
-    totals_y = max(130, y - 12)
-    text_commands.append(_pdf_text_command(36, totals_y, 'Thank you for your business.', size=8.8, font='F2'))
+    totals_y = max(170, y - 12)
     bank_lines = ['Banking details']
     for key, value in [
         ('Bank', document['branch_bank_name']),
@@ -245,7 +244,6 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ]:
         if value:
             bank_lines.append(f'{key}: {value}')
-    _add_pdf_lines(text_commands, 36, totals_y - 18, bank_lines, size=8.5, leading=13, max_lines=8)
     totals = [
         ('Subtotal', f'R{float(document["subtotal"] or 0):.2f}'),
         ('Tax', f'R{float(document["tax_total"] or 0):.2f}'),
@@ -257,8 +255,18 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     draw_commands.append(_pdf_light_blue_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4))
     for index, (label, amount) in enumerate(totals):
         line_y = totals_y - (index * 14)
-        text_commands.append(_pdf_text_command(390, line_y, label, size=8.8))
-        text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8))
+        if label == 'Total':
+            draw_commands.append(_pdf_light_blue_rect(386, line_y - 5, 169, 16))
+            text_commands.append('0.08 0.39 1 rg')
+            text_commands.append(_pdf_text_command(390, line_y, label, size=8.8, font='F2'))
+            text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8, font='F2'))
+            text_commands.append('0 0 0 rg')
+        else:
+            text_commands.append(_pdf_text_command(390, line_y, label, size=8.8))
+            text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8))
+    bank_y = totals_y - (len(totals) * 14) - 26
+    text_commands.append(_pdf_text_command(36, bank_y + 18, 'Thank you for your business.', size=8.8, font='F2'))
+    _add_pdf_lines(text_commands, 36, bank_y, bank_lines, size=8.5, leading=13, max_lines=8)
     text_commands.append('ET')
     stream = '\n'.join(draw_commands + text_commands).encode('latin-1', 'replace')
     return _pdf_objects(stream, image_object=image_object)
