@@ -208,7 +208,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         customer_lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
     if custom_fields.get('vehicle_details'):
         customer_lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
-    _add_pdf_lines(text_commands, detail_x, 620, customer_lines, size=8.5, leading=13, max_lines=12)
+    _add_pdf_lines(text_commands, detail_x, 620, customer_lines, size=8.5, leading=13, max_lines=12, font='F2')
 
     # Invoice table and totals.
     table_y = 430
