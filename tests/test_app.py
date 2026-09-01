@@ -1372,22 +1372,23 @@ def test_branch_invoice_details_are_saved(client, app):
         assert branch['bank_reference_note'] == 'Use invoice number as payment reference'
 
 
-def test_invoice_line_items_show_rental_days_instead_of_tax_column(client, app):
+def test_invoice_line_items_show_tax_column(client, app):
     login(client)
     seed_customer_and_product(client)
     order_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-01')
 
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
-    assert b'<th>Rental days</th>' in invoice.data
-    assert b'<th>Tax</th>' not in invoice.data
-    assert b'1 Day Rental' in invoice.data
+    assert b'<th>Tax</th>' in invoice.data
+    assert b'<th>Rental days</th>' not in invoice.data
+    assert b'1 Day Rental' in invoice.data  # Order details keep rental dates/days visible.
+    assert b'R0.00' in invoice.data
     assert b'<span>Tax</span>' in invoice.data  # Accounting totals keep tax visible.
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
         pdf = document_pdf_bytes(1)
-    assert b'1 Day Rental' in pdf
+    assert b'1 Day Rental' in pdf  # Order details keep rental dates/days visible.
     assert b'Tax: R0.00' in pdf
 
 
@@ -1538,7 +1539,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'.invoice-info-grid',
         b'.document-type-invoice .invoice-logo{width:118px;max-width:36vw;margin-left:-15px',
         b'.document-type-invoice .invoice-logo{width:30mm;margin-left:-4mm',
-        b'.invoice-banking-block{justify-self:center',
+        b'.invoice-footer-grid{display:grid',
+        b'.invoice-banking-block{justify-self:start',
         b'.invoice-order-block{justify-self:start;text-align:left',
     ]:
         assert expected_css in css.data
@@ -1549,9 +1551,9 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     customer_pos = invoice.data.index(b'class="invoice-customer-block"')
     banking_pos = invoice.data.index(b'class="invoice-banking-block"')
     table_pos = invoice.data.index(b'<thead>')
-    assert logo_pos < address_pos < customer_pos < table_pos
-    assert address_pos < order_pos < invoice_number_pos < customer_pos
-    assert customer_pos < banking_pos < table_pos
+    assert logo_pos < address_pos < invoice_number_pos < order_pos < customer_pos < table_pos
+    assert order_pos < customer_pos
+    assert customer_pos < table_pos < banking_pos
     assert invoice.data.index(b'INV-00001') < invoice.data.index(invoice_date.encode())
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'2 Days Rental')
 
@@ -1585,6 +1587,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Account number: 444555666',
         b'Paid: R500.00',
         b'Amount due: R650.00',
+        b'Thank you for your business.',
         b'q 0.86 0.94 1 rg 36.00 465.00 523.00 18.00 re f Q',
         b'q 0.86 0.94 1 rg 382.00 323.00 177.00 88.00 re f Q',
     ]:
@@ -1603,7 +1606,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'Pickup date:' not in pdf
     assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'2 Days Rental')
     assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode())
-    assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer') < pdf.index(b'Banking details')
+    assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer') < pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
     assert pdf.index(b'12 Pawcare Street') < pdf.index(b'Unit 4') < pdf.index(b'Parkwood') < pdf.index(b'Johannesburg') < pdf.index(b'Gauteng 2193') < pdf.index(b'South Africa')
 
 

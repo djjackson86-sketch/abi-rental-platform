@@ -192,7 +192,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         f'Invoice date: {document_date(document["created_at"])}',
     ], size=8.5, leading=14)
 
-    # Middle row: Bill To and banking details.
+    # Middle row: Bill To, aligned below the header/detail blocks.
     customer_lines = [
         'Bill To:',
         document['customer_name'] or '-',
@@ -205,9 +205,31 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         customer_lines.append(f'Alternative contact: {custom_fields["alternative_contact"]}')
     if custom_fields.get('vehicle_details'):
         customer_lines.append(f'Vehicle details: {custom_fields["vehicle_details"]}')
-    _add_pdf_lines(text_commands, 36, 625, customer_lines, size=8.5, leading=13, max_lines=12)
+    _add_pdf_lines(text_commands, 320, 690, customer_lines, size=8.5, leading=13, max_lines=12)
 
-    bank_lines = ['Banking details']
+    # Invoice table and totals.
+    table_y = 470
+    draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
+    _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
+    _add_pdf_lines(text_commands, 220, table_y, ['Qty'], size=7.5)
+    _add_pdf_lines(text_commands, 270, table_y, ['Unit'], size=7.5)
+    _add_pdf_lines(text_commands, 335, table_y, ['Subtotal'], size=7.5)
+    _add_pdf_lines(text_commands, 415, table_y, ['Tax'], size=7.5)
+    _add_pdf_lines(text_commands, 510, table_y, ['Total'], size=7.5)
+    y = table_y - 24
+    for item in items[:8]:
+        name = item['product_name'] or item['custom_name'] or 'Item'
+        sku = item['product_sku'] or ''
+        _add_pdf_lines(text_commands, 36, y, [name, sku], size=8, leading=11, max_lines=2)
+        _add_pdf_lines(text_commands, 220, y, [str(item['quantity'])], size=8)
+        _add_pdf_lines(text_commands, 270, y, [f'R{float(item["unit_price"] or 0):.2f}'], size=8)
+        _add_pdf_lines(text_commands, 335, y, [f'R{float(item["line_subtotal"] or 0):.2f}'], size=8)
+        _add_pdf_lines(text_commands, 415, y, [f'R{float(item["line_tax"] or 0):.2f}'], size=8)
+        _add_pdf_lines(text_commands, 510, y, [f'R{float(item["line_total"] or 0):.2f}'], size=8)
+        y -= 36
+
+    totals_y = max(130, y - 12)
+    bank_lines = ['Thank you for your business.', 'Banking details']
     for key, value in [
         ('Bank', document['branch_bank_name']),
         ('Account holder', document['branch_bank_account_name']),
@@ -218,30 +240,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ]:
         if value:
             bank_lines.append(f'{key}: {value}')
-    _add_pdf_lines(text_commands, 320, 625, bank_lines, size=8.5, leading=13, max_lines=8)
-
-    # Invoice table and totals.
-    table_y = 470
-    draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
-    _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
-    _add_pdf_lines(text_commands, 220, table_y, ['Qty'], size=7.5)
-    _add_pdf_lines(text_commands, 270, table_y, ['Unit'], size=7.5)
-    _add_pdf_lines(text_commands, 335, table_y, ['Subtotal'], size=7.5)
-    _add_pdf_lines(text_commands, 415, table_y, ['Rental days'], size=7.5)
-    _add_pdf_lines(text_commands, 510, table_y, ['Total'], size=7.5)
-    y = table_y - 24
-    for item in items[:8]:
-        name = item['product_name'] or item['custom_name'] or 'Item'
-        sku = item['product_sku'] or ''
-        _add_pdf_lines(text_commands, 36, y, [name, sku], size=8, leading=11, max_lines=2)
-        _add_pdf_lines(text_commands, 220, y, [str(item['quantity'])], size=8)
-        _add_pdf_lines(text_commands, 270, y, [f'R{float(item["unit_price"] or 0):.2f}'], size=8)
-        _add_pdf_lines(text_commands, 335, y, [f'R{float(item["line_subtotal"] or 0):.2f}'], size=8)
-        _add_pdf_lines(text_commands, 415, y, [rent_label], size=8)
-        _add_pdf_lines(text_commands, 510, y, [f'R{float(item["line_total"] or 0):.2f}'], size=8)
-        y -= 36
-
-    totals_y = max(130, y - 12)
+    _add_pdf_lines(text_commands, 36, totals_y, bank_lines, size=8.5, leading=13, max_lines=9)
     totals = [
         f'Subtotal: R{float(document["subtotal"] or 0):.2f}',
         f'Tax: R{float(document["tax_total"] or 0):.2f}',
