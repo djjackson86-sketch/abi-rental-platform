@@ -181,7 +181,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ], size=8.2, leading=12, max_lines=7)
 
     # Top-right invoice and order stack.
-    detail_x = 410
+    detail_x = 430
     _add_pdf_lines(text_commands, detail_x, 760, [
         'Invoice',
         document['number'],

@@ -1622,8 +1622,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
         b'Invoice date: ' + invoice_date.encode(),
-        b'410.00 760.00 Tm (Invoice)',
-        b'410.00 625.00 Tm (Order)',
+        b'430.00 760.00 Tm (Invoice)',
+        b'430.00 625.00 Tm (Order)',
         b'Bill To:',
         b'Order Customer',
         b'order@example.com',
@@ -1679,7 +1679,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
-    assert pdf.index(b'410.00 760.00 Tm (Invoice)') < pdf.index(b'410.00 625.00 Tm (Order)')
+    assert pdf.index(b'430.00 760.00 Tm (Invoice)') < pdf.index(b'430.00 625.00 Tm (Order)')
     assert pdf.index(b'Subtotal') < pdf.index(b'Tax') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
     assert pdf.index(b'/F2 8.8 Tf 1 0 0 1 390.00 316.00 Tm (Total) Tj') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
     assert pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
@@ -1705,6 +1705,11 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     assert b'fallback@example.test' in quote.data
     assert b'Fallback Street' in quote.data
     assert b'Banking details' not in quote.data
+    assert b'document-type-quote' in quote.data
+
+    css = client.get('/static/css/app.css')
+    assert css.status_code == 200
+    assert b'.document-type-quote .document-meta{margin-bottom:32px}' in css.data
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
