@@ -1544,6 +1544,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'.invoice-banking-block{justify-self:start',
         b'.totals .list-row b{min-width:130px;text-align:right',
         b'.invoice-order-block{justify-self:start;text-align:left',
+        b'.invoice-customer-block{margin-top:4px;justify-self:start;text-align:left',
     ]:
         assert expected_css in css.data
     logo_pos = invoice.data.index(b'static/img/sano-trailers-logo.jpg')
