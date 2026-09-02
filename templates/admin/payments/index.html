@@ -8,10 +8,11 @@
   {% if payments %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Order</th><th>Customer</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr></thead>
+      <thead><tr><th>Payment date</th><th>Order</th><th>Customer</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr></thead>
       <tbody>
       {% for payment in payments %}
         <tr>
+          <td>{{ display_payment_date(payment) }}</td>
           <td>{{ payment.order_number or '—' }}</td>
           <td>{{ payment.customer_name or '—' }}</td>
           <td><strong>R{{ '%.2f'|format(payment.amount) }}</strong></td>

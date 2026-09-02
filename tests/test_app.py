@@ -1892,7 +1892,7 @@ def test_public_checkout_validates_required_fields(client):
     assert b'Book Order Trailer' in response.data
 
 
-def test_order_manual_payments_update_payment_status_and_history(client):
+def test_order_manual_payments_update_payment_status_and_history(client, app):
     login(client)
     seed_customer_and_product(client)
     order_id = create_order_for_status(client)
@@ -1906,17 +1906,21 @@ def test_order_manual_payments_update_payment_status_and_history(client):
         'amount': '500',
         'method': 'cash',
         'reference': 'CASH-001',
+        'payment_date': '2026-07-05T14:30',
     }, follow_redirects=True)
     assert b'Payment recorded' in partial.data
     assert b'Partially paid' in partial.data
     assert b'R500.00' in partial.data
     assert b'R2200.00' in partial.data
     assert b'CASH-001' in partial.data
+    assert b'Payment date' in partial.data
+    assert b'2026-07-05 14:30' in partial.data
 
     paid = client.post(f'/orders/{order_id}/payments', data={
         'amount': '2200',
         'method': 'eft',
         'reference': 'EFT-001',
+        'payment_date': '2026-07-06T08:15',
     }, follow_redirects=True)
     assert b'Paid' in paid.data
     assert b'R1200.00' in paid.data
@@ -1926,8 +1930,55 @@ def test_order_manual_payments_update_payment_status_and_history(client):
     assert ledger.status_code == 200
     assert b'Payments' in ledger.data
     assert b'ORD-00001' in ledger.data
+    assert b'Payment date' in ledger.data
+    assert b'2026-07-05 14:30' in ledger.data
+    assert b'2026-07-06 08:15' in ledger.data
     assert b'CASH-001' in ledger.data
     assert b'EFT-001' in ledger.data
+    assert ledger.data.index(b'2026-07-06 08:15') < ledger.data.index(b'2026-07-05 14:30')
+    with app.app_context():
+        saved = get_db().execute("SELECT reference, payment_date FROM payments ORDER BY payment_date, id").fetchall()
+        assert saved[0]['reference'] == 'CASH-001'
+        assert saved[0]['payment_date'] == '2026-07-05T14:30:00'
+        assert saved[1]['reference'] == 'EFT-001'
+        assert saved[1]['payment_date'] == '2026-07-06T08:15:00'
+
+
+def test_manual_payment_invalid_date_is_rejected(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+
+    response = client.post(f'/orders/{order_id}/payments', data={
+        'amount': '100',
+        'method': 'cash',
+        'reference': 'BAD-DATE',
+        'payment_date': 'not-a-date',
+    }, follow_redirects=True)
+    assert b'Payment date must be a valid date and time' in response.data
+    assert b'BAD-DATE' not in response.data
+    with app.app_context():
+        count = get_db().execute('SELECT COUNT(*) AS count FROM payments').fetchone()['count']
+        assert count == 0
+
+
+def test_manual_payment_without_payment_date_displays_created_at_fallback(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+    with app.app_context():
+        get_db().execute(
+            "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, 150, 'cash', 'OLD-PAYMENT', 'paid', '2026-06-01T10:45:00')",
+            (order_id,),
+        )
+        get_db().commit()
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'OLD-PAYMENT' in detail.data
+    assert b'2026-06-01 10:45' in detail.data
+    ledger = client.get('/payments')
+    assert b'OLD-PAYMENT' in ledger.data
+    assert b'2026-06-01 10:45' in ledger.data
 
 
 def test_payment_validation_rejects_non_positive_amount(client):

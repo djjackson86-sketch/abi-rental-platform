@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.db import get_db, now
 from app.services.orders import get_order
 
@@ -9,9 +11,25 @@ PAYMENT_LABELS = {
 }
 
 
+def parse_payment_date(value):
+    value = (value or "").strip()
+    if not value:
+        return now()
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("Payment date must be a valid date and time") from exc
+    return parsed.isoformat(timespec="seconds")
+
+
+def display_payment_date(payment):
+    return (payment["payment_date"] or payment["created_at"] or "")[:16].replace("T", " ")
+
+
 def payments_for_order(order_id):
     return get_db().execute(
-        "SELECT * FROM payments WHERE order_id = ? ORDER BY created_at DESC, id DESC",
+        """SELECT * FROM payments WHERE order_id = ?
+        ORDER BY COALESCE(NULLIF(payment_date, ''), created_at) DESC, created_at DESC, id DESC""",
         (order_id,),
     ).fetchall()
 
@@ -67,11 +85,13 @@ def record_payment(order_id, form):
         raise ValueError("Payment amount must be greater than zero")
     method = form.get("method", "manual").strip() or "manual"
     reference = form.get("reference", "").strip()
+    payment_date = parse_payment_date(form.get("payment_date"))
+    created_at = now()
     db = get_db()
     db.execute(
-        """INSERT INTO payments (order_id, amount, method, reference, status, created_at)
-        VALUES (?, ?, ?, ?, 'paid', ?)""",
-        (order_id, round(amount, 2), method, reference, now()),
+        """INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
+        VALUES (?, ?, ?, ?, 'paid', ?, ?)""",
+        (order_id, round(amount, 2), method, reference, payment_date, created_at),
     )
     db.commit()
     return recalculate_order_payment(order_id)
@@ -83,7 +103,7 @@ def list_payments():
         FROM payments p
         LEFT JOIN orders o ON o.id = p.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
-        ORDER BY p.created_at DESC, p.id DESC"""
+        ORDER BY COALESCE(NULLIF(p.payment_date, ''), p.created_at) DESC, p.created_at DESC, p.id DESC"""
     ).fetchall()
 
 

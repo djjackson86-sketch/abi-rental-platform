@@ -7,7 +7,7 @@ from app.routes.auth import login_required
 from app.db import get_db
 from app.services.orders import create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order, update_draft_order
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
-from app.services.payments import label_for as payment_label_for, payment_summary, payments_for_order, record_payment
+from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, custom_field_label, custom_fields_for
 from app.services.branches import branch_options, default_branch_id
@@ -163,7 +163,9 @@ def detail(order_id):
         payments=payments_for_order(order_id),
         payment_summary=payment_summary(order_id),
         payment_label_for=payment_label_for,
+        display_payment_date=display_payment_date,
         customer_custom_fields=custom_fields_for(order),
+        default_payment_date=datetime.utcnow().isoformat(timespec="minutes"),
         default_deposit_processed_at=(order["deposit_processed_at"] or datetime.utcnow().isoformat(timespec="minutes"))[:16],
     )
 

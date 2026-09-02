@@ -223,6 +223,7 @@ CREATE TABLE IF NOT EXISTS payments (
     method TEXT NOT NULL DEFAULT 'manual',
     reference TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'paid',
+    payment_date TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -345,6 +346,7 @@ def run_migrations(db):
     ensure_column(db, "customers", "country", "TEXT NOT NULL DEFAULT 'South Africa'")
     ensure_column(db, "customers", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
+    ensure_column(db, "payments", "payment_date", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "sent_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "sent_to", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "email_status", "TEXT NOT NULL DEFAULT 'not_sent'")
