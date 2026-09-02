@@ -55,14 +55,15 @@ def index():
     query = request.args.get("query", "").strip()
     status = request.args.get("status", "")
     payment_status = request.args.get("payment_status", "")
-    orders = list_orders(query=query, status=status, payment_status=payment_status)
+    return_status = request.args.get("return_status", "")
+    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status)
     return render_template(
         "admin/orders/index.html",
         settings=get_company_settings(),
         orders=orders,
         counts=order_counts(),
         filter_counts=order_filter_counts(),
-        filters={"query": query, "status": status, "payment_status": payment_status},
+        filters={"query": query, "status": status, "payment_status": payment_status, "return_status": return_status},
     )
 
 

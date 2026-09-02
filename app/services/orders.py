@@ -38,7 +38,7 @@ def _process_deposit_clause(alias="o"):
     )
 
 
-def list_orders(query="", status="", payment_status=""):
+def list_orders(query="", status="", payment_status="", return_status=""):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
@@ -52,6 +52,9 @@ def list_orders(query="", status="", payment_status=""):
     if status:
         sql += " AND o.status = ?"
         params.append(status)
+    if return_status == "late":
+        sql += " AND o.status = 'started' AND o.end_at < ?"
+        params.append(now())
     if payment_status == "process_deposit":
         sql += f" AND {_process_deposit_clause('o')}"
     elif payment_status:
@@ -72,11 +75,13 @@ def order_filter_counts():
     status_rows = db.execute("SELECT status, COUNT(*) count FROM orders GROUP BY status").fetchall()
     payment_rows = db.execute("SELECT payment_status, COUNT(*) count FROM orders GROUP BY payment_status").fetchall()
     process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders WHERE {_process_deposit_clause('')}").fetchone()
+    late_return_row = db.execute("SELECT COUNT(*) AS count FROM orders WHERE status = 'started' AND end_at < ?", (now(),)).fetchone()
     payment_counts = {row["payment_status"]: row["count"] for row in payment_rows}
     payment_counts["process_deposit"] = process_deposit_row["count"] if process_deposit_row else 0
     return {
         "status": {row["status"]: row["count"] for row in status_rows},
         "payment_status": payment_counts,
+        "return_status": {"late": late_return_row["count"] if late_return_row else 0},
     }
 
 

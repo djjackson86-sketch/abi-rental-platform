@@ -14,6 +14,7 @@
     <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search orders">
     {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
     {% if filters.payment_status %}<input type="hidden" name="payment_status" value="{{ filters.payment_status }}">{% endif %}
+    {% if filters.return_status %}<input type="hidden" name="return_status" value="{{ filters.return_status }}">{% endif %}
   </form>
   <a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>
 </header>
@@ -22,6 +23,7 @@
   <aside class="orders-filter-rail panel">
     <form method="get" class="orders-filter-form">
       {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
+      {% if filters.return_status %}<input type="hidden" name="return_status" value="{{ filters.return_status }}">{% endif %}
       <div class="filter-group">
         <div class="filter-group-head"><strong>Status</strong><span>⌃</span></div>
         {% for s,label in [('draft','Draft'),('reserved','Reserved'),('started','Started'),('returned','Returned'),('archived','Archived'),('canceled','Canceled')] %}
@@ -31,7 +33,7 @@
             <em>({{ filter_counts.status.get(s, 0) }})</em>
           </label>
         {% endfor %}
-        {% if filters.status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, payment_status=filters.payment_status) }}">Clear status</a>{% endif %}
+        {% if filters.status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, payment_status=filters.payment_status, return_status=filters.return_status) }}">Clear status</a>{% endif %}
       </div>
 
       <div class="filter-group">
@@ -48,7 +50,17 @@
           <span>Process deposit</span>
           <em>({{ filter_counts.payment_status.get('process_deposit', 0) }})</em>
         </label>
-        {% if filters.payment_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status) }}">Clear payment</a>{% endif %}
+        {% if filters.payment_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, return_status=filters.return_status) }}">Clear payment</a>{% endif %}
+      </div>
+
+      <div class="filter-group compact">
+        <div class="filter-group-head"><strong>Return status</strong><span>⌃</span></div>
+        <label class="filter-check">
+          <input type="radio" name="return_status" value="late" {% if filters.return_status=='late' %}checked{% endif %} onchange="this.form.submit()">
+          <span>Late</span>
+          <em>({{ filter_counts.return_status.get('late', 0) }})</em>
+        </label>
+        {% if filters.return_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status) }}">Clear return status</a>{% endif %}
       </div>
 
       <div class="filter-group compact">
@@ -63,9 +75,9 @@
   <main class="orders-workspace">
     <div class="orders-tabs-row">
       <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
-        <a class="active" href="{{ url_for('orders.index') }}">All</a>
+        <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index') }}">All</a>
         <a href="#">Upcoming</a>
-        <a href="#">Late</a>
+        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late') }}">Late</a>
         <a href="#">With shortage</a>
       </nav>
       <button class="btn ghost metrics-toggle" type="button" aria-disabled="true">Hide metrics⌃</button>
@@ -79,7 +91,7 @@
     </section>
 
     <section class="panel orders-list-panel">
-      {% if filters.query or filters.status or filters.payment_status %}
+      {% if filters.query or filters.status or filters.payment_status or filters.return_status %}
         <div class="active-filter-line">
           <span>Showing filtered orders</span>
           <a href="{{ url_for('orders.index') }}">Clear all filters</a>

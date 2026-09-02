@@ -72,7 +72,7 @@
       <div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>
     {% endif %}
     </div>
-    <div class="movement-foot"><a href="{{ url_for('orders.index') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>
+    <div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>
   </article>
 </section>
 {% endblock %}

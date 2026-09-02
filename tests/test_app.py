@@ -1362,6 +1362,29 @@ def test_order_status_workflow_and_calendar(client):
     assert b'Archive order' in returned.data
 
 
+def test_dashboard_view_late_filters_only_started_overdue_returns(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    late_started_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-02')
+    future_started_id = create_order_for_status(client, quantity='1', start_date='2099-07-01', end_date='2099-07-02')
+    returned_late_id = create_order_for_status(client, quantity='1', start_date='2026-07-03', end_date='2026-07-04')
+    for order_id in (late_started_id, future_started_id, returned_late_id):
+        assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
+    assert b'Order returned' in client.post(f'/orders/{returned_late_id}/return', follow_redirects=True).data
+
+    dashboard = client.get('/dashboard')
+    assert b'href="/orders?status=started&amp;return_status=late"' in dashboard.data
+
+    late_orders = client.get('/orders?status=started&return_status=late')
+    assert late_orders.status_code == 200
+    assert b'ORD-00001' in late_orders.data
+    assert b'ORD-00002' not in late_orders.data
+    assert b'ORD-00003' not in late_orders.data
+    assert b'name="return_status" value="late" checked' in late_orders.data
+    assert b'href="/orders?status=started&amp;return_status=late">Late</a>' in late_orders.data
+
+
 def test_reserve_prevents_overbooking(client):
     login(client)
     seed_customer_and_product(client)
