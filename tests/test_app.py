@@ -1344,6 +1344,8 @@ def test_order_status_workflow_and_calendar(client):
     assert b'ORD-00001' in dashboard.data
     assert b'Going out' in dashboard.data
     assert b'Coming back' in dashboard.data
+    assert b'<span><b>Order Customer</b><small>ORD-00001 \xc2\xb7 Order Trailer</small></span>' in dashboard.data
+    assert b'<span><b>ORD-00001</b><small>Order Trailer</small></span>' not in dashboard.data
 
     calendar = client.get('/calendar')
     assert calendar.status_code == 200
@@ -1375,6 +1377,8 @@ def test_dashboard_view_late_filters_only_started_overdue_returns(client):
 
     dashboard = client.get('/dashboard')
     assert b'href="/orders?status=started&amp;return_status=late"' in dashboard.data
+    assert b'<span><b>Order Customer</b><small>ORD-00001 \xc2\xb7 Order Trailer</small></span>' in dashboard.data
+    assert b'<span><b>ORD-00001</b><small>Order Trailer</small></span>' not in dashboard.data
 
     late_orders = client.get('/orders?status=started&return_status=late')
     assert late_orders.status_code == 200

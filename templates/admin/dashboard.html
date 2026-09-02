@@ -63,7 +63,7 @@
       <div class="schedule-list">
       {% for order in schedule.coming_back %}
         <a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
-          <span><b>{{ order.order_number }}</b><small>{{ order.product_names or 'No items' }}</small></span>
+          <span><b>{{ order.customer_name or 'No customer' }}</b><small>{{ order.order_number }} · {{ order.product_names or 'No items' }}</small></span>
           <span><small>Return</small><b>{{ order.end_at }}</b></span>
         </a>
       {% endfor %}
