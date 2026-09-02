@@ -53,6 +53,72 @@
         <p class="empty">No active reservations yet. Reserve an order to see it on the calendar.</p>
       {% endif %}
     </section>
+
+    <section class="panel calendar-availability-panel">
+      <div class="panel-title">
+        <div>
+          <h2>Trailer group availability</h2>
+          <p class="form-help">Booked and available rental stock for {{ availability.start_date }} to {{ availability.end_date }}.</p>
+        </div>
+      </div>
+      {% if availability.groups %}
+        <div class="calendar-group-list">
+          {% for group in availability.groups %}
+          <article class="calendar-group-card">
+            <div class="calendar-group-head">
+              <div>
+                <h3>{{ group.name }}</h3>
+                <small>{{ group.products|length }} trailer{{ '' if group.products|length == 1 else 's' }}</small>
+              </div>
+              <div class="availability-totals" aria-label="{{ group.name }} totals">
+                <span>Total <b>{{ group.total_quantity }}</b></span>
+                <span>Booked <b>{{ group.booked_quantity }}</b></span>
+                <span>Available <b>{{ group.available_quantity }}</b></span>
+              </div>
+            </div>
+            <div class="table-wrap calendar-availability-wrap">
+              <table class="data-table calendar-availability-table">
+                <thead>
+                  <tr>
+                    <th>Trailer</th>
+                    <th>SKU</th>
+                    <th>Total</th>
+                    <th>Booked</th>
+                    <th>Available</th>
+                    <th>Active reservations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                {% for product in group.products %}
+                  <tr>
+                    <td><strong>{{ product.name }}</strong><small>{{ product.tracking_method|replace('_', ' ')|title }}</small></td>
+                    <td>{{ product.sku or '—' }}</td>
+                    <td>{{ product.total_quantity }}</td>
+                    <td>{{ product.booked_quantity }}</td>
+                    <td><strong>{{ product.available_quantity }}</strong></td>
+                    <td>
+                      {% if product.reservations %}
+                        <div class="reservation-link-list">
+                        {% for reservation in product.reservations %}
+                          <a href="{{ url_for('orders.detail', order_id=reservation.id) }}">{{ reservation.order_number }} · {{ reservation.quantity }} booked</a>
+                        {% endfor %}
+                        </div>
+                      {% else %}
+                        <span class="muted">None</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty">No active rental trailers found in inventory.</p>
+      {% endif %}
+    </section>
   </main>
 </section>
 {% endblock %}

@@ -1376,6 +1376,58 @@ def test_reserve_prevents_overbooking(client):
     assert b'Draft' in second.data
 
 
+def test_calendar_shows_grouped_trailer_availability_for_selected_range(client, app):
+    login(client)
+    client.post('/inventory/groups/new', data={'name': 'Box trailers', 'sort_order': '1', 'active': '1'}, follow_redirects=True)
+    seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE products SET product_group_id = 1 WHERE id = 1')
+        db.execute(
+            """INSERT INTO products (name, product_type, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, product_group_id, quantity, tracking_method, branch_id, created_at)
+            VALUES ('Flatbed Trailer', 'rental', '', 'FLAT-001', 1, 1, 300, 'day', 500, 1, 1, 2, 'bulk', 1, '2026-06-01T00:00:00')"""
+        )
+        db.execute(
+            """INSERT INTO products (name, product_type, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, product_group_id, quantity, tracking_method, branch_id, created_at)
+            VALUES ('Loose Trailer', 'rental', '', 'LOOSE-001', 1, 1, 200, 'day', 500, 1, NULL, 5, 'bulk', 1, '2026-06-01T00:00:00')"""
+        )
+        db.commit()
+
+    first_id = create_order_for_status(client, quantity='2', start_date='2026-06-30', end_date='2026-07-02')
+    second_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-01')
+    custom_only = client.post('/orders/new', data={
+        'customer_id': '1',
+        'custom_name': 'Delivery labour',
+        'custom_unit_price': '150',
+        'custom_billing_mode': 'fixed',
+        'quantity': '4',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-01',
+        'end_time': '15:00',
+    }, follow_redirects=False)
+    assert custom_only.status_code == 302
+    assert b'Order reserved' in client.post(f'/orders/{first_id}/reserve', follow_redirects=True).data
+    assert b'Order started' in client.post(f'/orders/{second_id}/start', follow_redirects=True).data
+
+    calendar = client.get('/calendar?start_date=2026-07-01&end_date=2026-07-01')
+    assert calendar.status_code == 200
+    body = calendar.data
+    assert b'Trailer group availability' in body
+    assert b'Booked and available rental stock for 2026-07-01 to 2026-07-01' in body
+    assert b'Box trailers' in body
+    assert b'Order Trailer' in body
+    assert b'Flatbed Trailer' in body
+    assert b'Ungrouped trailers' in body
+    assert b'Loose Trailer' in body
+    assert 'ORD-00001 · 2 booked'.encode() in body
+    assert 'ORD-00002 · 1 booked'.encode() in body
+    assert b'Delivery labour' not in body
+    assert b'<span>Total <b>6</b></span>' in body
+    assert b'<span>Booked <b>3</b></span>' in body
+    assert b'<span>Available <b>3</b></span>' in body
+
+
 def test_branch_invoice_details_are_saved(client, app):
     login(client)
     saved = client.post('/branches', data={

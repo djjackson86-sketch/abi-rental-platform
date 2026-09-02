@@ -551,6 +551,107 @@ def settle_return_deposit(order_id, form):
     return f"Deposit refund marked: R{deposit_refund:.2f}"
 
 
+def _calendar_range(start_date=None, end_date=None):
+    today = date.today()
+    if start_date:
+        range_start_date = date.fromisoformat(start_date)
+    elif end_date:
+        range_start_date = date.fromisoformat(end_date)
+    else:
+        range_start_date = today
+
+    if end_date:
+        range_end_date = date.fromisoformat(end_date)
+    elif start_date:
+        range_end_date = date.fromisoformat(start_date)
+    else:
+        range_end_date = range_start_date
+
+    if range_end_date < range_start_date:
+        range_start_date, range_end_date = range_end_date, range_start_date
+
+    range_start = datetime.combine(range_start_date, time.min)
+    range_end = datetime.combine(range_end_date + timedelta(days=1), time.min)
+    return range_start, range_end
+
+
+def calendar_group_availability(start_date=None, end_date=None):
+    range_start, range_end = _calendar_range(start_date, end_date)
+    db = get_db()
+    products = db.execute(
+        """SELECT p.id, p.name, p.sku, p.quantity, p.tracking_method,
+               COALESCE(pg.id, 0) AS group_id,
+               COALESCE(pg.name, 'Ungrouped trailers') AS group_name
+        FROM products p
+        LEFT JOIN product_groups pg ON pg.id = p.product_group_id AND pg.active = 1
+        WHERE p.active = 1 AND p.product_type = 'rental'
+        ORDER BY CASE WHEN pg.id IS NULL THEN 1 ELSE 0 END, pg.sort_order, pg.name, p.name"""
+    ).fetchall()
+
+    groups = []
+    groups_by_id = {}
+    for product in products:
+        group_id = product["group_id"]
+        group = groups_by_id.get(group_id)
+        if not group:
+            group = {
+                "id": group_id,
+                "name": product["group_name"],
+                "products": [],
+                "total_quantity": 0,
+                "booked_quantity": 0,
+                "available_quantity": 0,
+            }
+            groups_by_id[group_id] = group
+            groups.append(group)
+
+        booked = db.execute(
+            """SELECT COALESCE(SUM(oi.quantity), 0) AS booked
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            WHERE oi.product_id = ?
+              AND o.status IN ('reserved', 'started')
+              AND o.start_at < ?
+              AND o.end_at > ?""",
+            (product["id"], range_end.isoformat(timespec="seconds"), range_start.isoformat(timespec="seconds")),
+        ).fetchone()["booked"] or 0
+        reservations = db.execute(
+            """SELECT o.id, o.order_number, o.status, o.start_at, o.end_at, oi.quantity
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            WHERE oi.product_id = ?
+              AND o.status IN ('reserved', 'started')
+              AND o.start_at < ?
+              AND o.end_at > ?
+            ORDER BY o.start_at, o.id""",
+            (product["id"], range_end.isoformat(timespec="seconds"), range_start.isoformat(timespec="seconds")),
+        ).fetchall()
+
+        total = int(product["quantity"] or 0)
+        booked = int(booked or 0)
+        available = max(total - booked, 0)
+        product_row = {
+            "id": product["id"],
+            "name": product["name"],
+            "sku": product["sku"],
+            "tracking_method": product["tracking_method"],
+            "total_quantity": total,
+            "booked_quantity": booked,
+            "available_quantity": available,
+            "reservations": reservations,
+        }
+        group["products"].append(product_row)
+        group["total_quantity"] += total
+        group["booked_quantity"] += booked
+        group["available_quantity"] += available
+
+    return {
+        "start_date": range_start.date().isoformat(),
+        "end_date": (range_end.date() - timedelta(days=1)).isoformat(),
+        "groups": groups,
+    }
+
+
 def scheduled_events(limit=50, start_date=None, end_date=None):
     db = get_db()
     sql = """SELECT o.*, c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,

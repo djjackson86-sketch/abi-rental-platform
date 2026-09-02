@@ -4,7 +4,7 @@ from io import StringIO
 from app.routes.auth import login_required
 from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
-from app.services.orders import dashboard_schedule, scheduled_events
+from app.services.orders import calendar_group_availability, dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 
@@ -111,6 +111,7 @@ def calendar():
         "admin/calendar.html",
         settings=get_company_settings(),
         events=scheduled_events(start_date=start_date or None, end_date=end_date or None),
+        availability=calendar_group_availability(start_date=start_date or None, end_date=end_date or None),
         filters={"start_date": start_date, "end_date": end_date},
     )
 
