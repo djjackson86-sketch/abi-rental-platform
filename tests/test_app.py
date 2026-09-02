@@ -1914,7 +1914,8 @@ def test_order_manual_payments_update_payment_status_and_history(client, app):
     assert b'R2200.00' in partial.data
     assert b'CASH-001' in partial.data
     assert b'Payment date' in partial.data
-    assert b'2026-07-05 14:30' in partial.data
+    assert b'2026-07-05' in partial.data
+    assert b'2026-07-05 14:30' not in partial.data
 
     paid = client.post(f'/orders/{order_id}/payments', data={
         'amount': '2200',
@@ -1931,11 +1932,13 @@ def test_order_manual_payments_update_payment_status_and_history(client, app):
     assert b'Payments' in ledger.data
     assert b'ORD-00001' in ledger.data
     assert b'Payment date' in ledger.data
-    assert b'2026-07-05 14:30' in ledger.data
-    assert b'2026-07-06 08:15' in ledger.data
+    assert b'2026-07-05' in ledger.data
+    assert b'2026-07-06' in ledger.data
+    assert b'2026-07-05 14:30' not in ledger.data
+    assert b'2026-07-06 08:15' not in ledger.data
     assert b'CASH-001' in ledger.data
     assert b'EFT-001' in ledger.data
-    assert ledger.data.index(b'2026-07-06 08:15') < ledger.data.index(b'2026-07-05 14:30')
+    assert ledger.data.index(b'2026-07-06') < ledger.data.index(b'2026-07-05')
     with app.app_context():
         saved = get_db().execute("SELECT reference, payment_date FROM payments ORDER BY payment_date, id").fetchall()
         assert saved[0]['reference'] == 'CASH-001'
@@ -1975,10 +1978,12 @@ def test_manual_payment_without_payment_date_displays_created_at_fallback(client
 
     detail = client.get(f'/orders/{order_id}')
     assert b'OLD-PAYMENT' in detail.data
-    assert b'2026-06-01 10:45' in detail.data
+    assert b'2026-06-01' in detail.data
+    assert b'2026-06-01 10:45' not in detail.data
     ledger = client.get('/payments')
     assert b'OLD-PAYMENT' in ledger.data
-    assert b'2026-06-01 10:45' in ledger.data
+    assert b'2026-06-01' in ledger.data
+    assert b'2026-06-01 10:45' not in ledger.data
 
 
 def test_payment_validation_rejects_non_positive_amount(client):

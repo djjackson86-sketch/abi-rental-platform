@@ -23,7 +23,7 @@ def parse_payment_date(value):
 
 
 def display_payment_date(payment):
-    return (payment["payment_date"] or payment["created_at"] or "")[:16].replace("T", " ")
+    return (payment["payment_date"] or payment["created_at"] or "")[:10]
 
 
 def payments_for_order(order_id):
