@@ -68,7 +68,7 @@
     {% if documents %}
       <div class="schedule-list document-list">
       {% for document in documents %}
-        <a class="schedule-row" href="{{ url_for('documents.detail', document_id=document.id) }}"><span><b>{{ document.number }}</b><small>{{ label_for(document.document_type) }}</small></span><span><small>Status</small><b>{{ document.status|title }}</b></span></a>
+        <a class="schedule-row" href="{{ url_for('documents.detail', document_id=document.id) }}"><span><b>{{ document.number or 'Unnumbered' }}</b><small>{% if document.document_type == 'invoice' and document.status == 'draft' and not document.number %}Proforma Invoice{% else %}{{ label_for(document.document_type) }}{% endif %}</small></span><span><small>Status</small><b>{{ document.status|title }}</b></span></a>
       {% endfor %}
       </div>
     {% else %}

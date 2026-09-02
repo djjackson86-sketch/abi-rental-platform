@@ -114,9 +114,9 @@
             <tbody>
               {% for d in documents %}
                 <tr>
-                  <td><input type="checkbox" disabled aria-label="Select {{ d.number }}"></td>
-                  <td><strong>{{ d.number }}</strong></td>
-                  <td>{{ label_for(d.document_type) }}</td>
+                  <td><input type="checkbox" disabled aria-label="Select {{ d.number or 'Unnumbered' }}"></td>
+                  <td><strong>{{ d.number or 'Unnumbered' }}</strong></td>
+                  <td>{% if d.document_type == 'invoice' and d.status == 'draft' and not d.number %}Proforma Invoice{% else %}{{ label_for(d.document_type) }}{% endif %}</td>
                   <td>{{ d.order_number or '—' }}</td>
                   <td>{{ d.customer_name or '—' }}</td>
                   <td><span class="pill">{{ d.status|title }}</span></td>

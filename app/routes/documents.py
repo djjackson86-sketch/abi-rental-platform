@@ -3,7 +3,7 @@ import csv
 from io import StringIO
 
 from app.routes.auth import login_required
-from app.services.documents import create_document, document_date, get_document, label_for, list_documents, printable_document, document_filter_counts, mark_document_email, rental_days_label
+from app.services.documents import create_document, display_document_label, display_document_number, document_date, document_filter_counts, finalize_document, get_document, label_for, list_documents, mark_document_email, printable_document, rental_days_label
 from app.services.settings import get_company_settings
 from app.services.email_delivery import email_configured, send_email_with_attachment
 from app.services.pdf_documents import document_pdf_bytes, document_pdf_filename
@@ -73,6 +73,8 @@ def detail(document_id):
         document=document,
         items=items,
         label=label_for(document["document_type"]),
+        display_label=display_document_label(document),
+        display_number=display_document_number(document),
         custom_fields=custom_fields_for(document),
         document_date=document_date,
         rental_days_label=rental_days_label(document),
@@ -106,6 +108,17 @@ def create_for_order(order_id):
         flash(str(exc), "error")
         return redirect(url_for("orders.detail", order_id=order_id))
 
+
+@bp.post("/<int:document_id>/finalize")
+@login_required
+def finalize(document_id):
+    try:
+        finalize_document(document_id)
+        flash("Invoice finalized and numbered", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("documents.detail", document_id=document_id))
+
 @bp.post("/<int:document_id>/send-email")
 @login_required
 def send_document_email(document_id):
@@ -120,9 +133,10 @@ def send_document_email(document_id):
     try:
         pdf_bytes = document_pdf_bytes(document_id)
         filename = document_pdf_filename(document)
-        label = label_for(document["document_type"])
-        subject = f"{label} {document['number']} for order {document['order_number']}"
-        body = request.form.get("message") or f"Please find attached {label.lower()} {document['number']}."
+        label = display_document_label(document)
+        number = display_document_number(document)
+        subject = f"{label} {number} for order {document['order_number']}"
+        body = request.form.get("message") or f"Please find attached {label.lower()} {number}."
         send_email_with_attachment(to_email, subject, body, pdf_bytes, filename)
         mark_document_email(document_id, to_email, "sent")
         flash("Document emailed", "success")

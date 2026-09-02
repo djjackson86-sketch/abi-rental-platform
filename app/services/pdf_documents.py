@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import document_date, label_for, printable_document, rental_days_label
+from app.services.documents import display_document_label, display_document_number, document_date, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 
@@ -142,6 +142,8 @@ def _pdf_objects(stream, image_object=None):
 
 
 def _invoice_template_pdf(document, items, settings, logo_bytes=None):
+    display_label = display_document_label(document)
+    display_number = display_document_number(document)
     issuer_name = document['branch_name'] or settings['company_name']
     issuer_email = document['branch_email'] or settings['email']
     issuer_phone = document['branch_phone'] or settings['phone']
@@ -182,9 +184,9 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 
     # Top-right invoice and order stack.
     detail_x = 455
-    text_commands.append(_pdf_text_command(detail_x, 760, 'Invoice', size=8.5, font='F2'))
+    text_commands.append(_pdf_text_command(detail_x, 760, display_label, size=8.5, font='F2'))
     _add_pdf_lines(text_commands, detail_x, 746, [
-        document['number'],
+        display_number,
         f'Invoice date: {document_date(document["created_at"])}',
     ], size=8.5, leading=14)
 
@@ -290,6 +292,8 @@ def document_pdf_bytes(document_id):
     if not document:
         raise ValueError('Document not found')
     label = label_for(document['document_type'])
+    display_label = display_document_label(document)
+    display_number = display_document_number(document)
     settings = get_company_settings()
     issuer_name = document['branch_name'] or settings['company_name']
     issuer_email = document['branch_email'] or settings['email']
@@ -300,7 +304,7 @@ def document_pdf_bytes(document_id):
         document['branch_city'] or settings['city'],
         ' '.join(part for part in [document['branch_province'] or settings['province'], document['branch_postal_code'] or settings['postcode']] if part),
     ]
-    lines = [f'{label} {document["number"]}']
+    lines = [f'{display_label} {display_number}']
     if document['document_type'] == 'invoice':
         lines.append(f'Invoice date: {document["created_at"] or "-"}')
     lines.append(f'Issuer: {issuer_name}')
@@ -369,4 +373,5 @@ def document_pdf_bytes(document_id):
 
 def document_pdf_filename(document):
     prefix = label_for(document['document_type']).upper().replace(' ', '-')
-    return f'{prefix}-{document["number"]}.pdf'
+    number = (document['number'] or '').strip() or 'PROFORMA'
+    return f'{prefix}-{number}.pdf'

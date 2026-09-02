@@ -17,8 +17,12 @@ def document_type_options():
 
 def _next_document_number(document_type):
     prefix = DOCUMENT_TYPES[document_type]["prefix"]
-    row = get_db().execute("SELECT COUNT(*) c FROM documents WHERE document_type = ?", (document_type,)).fetchone()
-    return f"{prefix}-{(row['c'] or 0) + 1:05d}"
+    row = get_db().execute(
+        """SELECT COALESCE(MAX(CAST(SUBSTR(number, ?) AS INTEGER)), 0) m
+        FROM documents WHERE document_type = ? AND number != ''""",
+        (len(prefix) + 2, document_type),
+    ).fetchone() or {'m': 0}
+    return f"{prefix}-{int(row['m'] or 0) + 1:05d}"
 
 
 def create_document(order_id, document_type):
@@ -28,7 +32,7 @@ def create_document(order_id, document_type):
     if not order:
         raise ValueError("Order not found")
     db = get_db()
-    number = _next_document_number(document_type)
+    number = '' if document_type == 'invoice' else _next_document_number(document_type)
     cur = db.execute(
         """INSERT INTO documents (order_id, document_type, status, number, pdf_path, created_at)
         VALUES (?, ?, 'draft', ?, '', ?)""",
@@ -36,6 +40,38 @@ def create_document(order_id, document_type):
     )
     db.commit()
     return cur.lastrowid
+
+
+def is_proforma_invoice(document):
+    return bool(document) and document['document_type'] == 'invoice' and document['status'] == 'draft' and not (document['number'] or '').strip()
+
+
+def display_document_label(document):
+    if is_proforma_invoice(document):
+        return 'Proforma Invoice'
+    return label_for(document['document_type'])
+
+
+def display_document_number(document):
+    return (document['number'] or '').strip() or 'Unnumbered'
+
+
+def finalize_document(document_id):
+    db = get_db()
+    document = get_document(document_id)
+    if not document:
+        raise ValueError('Document not found')
+    if document['status'] == 'finalized':
+        return document_id
+    number = (document['number'] or '').strip()
+    if document['document_type'] == 'invoice' and not number:
+        number = _next_document_number('invoice')
+    db.execute(
+        "UPDATE documents SET status = 'finalized', number = ? WHERE id = ?",
+        (number, document_id),
+    )
+    db.commit()
+    return document_id
 
 
 def list_documents(query="", document_type="", status="", start_date="", end_date=""):

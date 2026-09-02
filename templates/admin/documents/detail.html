@@ -1,17 +1,17 @@
 {% extends "admin/layout.html" %}
-{% set title=document.number %}
+{% set title=display_number %}
 {% block admin_body %}
 <header class="page-header">
-  <div><p class="eyebrow">{{ label }}</p><h1>{{ document.number }}</h1><p>{{ document.order_number }} · {{ document.customer_name or 'No customer' }}</p></div>
-  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a>{% if document.document_type == 'invoice' %}<a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=document.id) }}">Save PDF</a>{% endif %}<button class="btn primary" onclick="window.print()">Print</button></div>
+  <div><p class="eyebrow">{{ display_label }}</p><h1>{{ display_number }}</h1><p>{{ document.order_number }} · {{ document.customer_name or 'No customer' }}</p></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a>{% if document.document_type == 'invoice' %}<a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=document.id) }}">Save PDF</a>{% if document.status == 'draft' %}<form method="post" action="{{ url_for('documents.finalize', document_id=document.id) }}" class="inline-form"><button class="btn ghost" type="submit">Finalize invoice</button></form>{% endif %}{% endif %}<button class="btn primary" onclick="window.print()">Print</button></div>
 </header>
 <section class="panel settings-form">
-  <h2>Email {{ label }}</h2>
+  <h2>Email {{ display_label }}</h2>
   {% if document.email_status != 'not_sent' %}<p class="form-help">Last email status: {{ document.email_status|title }}{% if document.sent_to %} to {{ document.sent_to }}{% endif %}{% if document.sent_at %} at {{ document.sent_at }}{% endif %}{% if document.email_error %}. Error: {{ document.email_error }}{% endif %}</p>{% endif %}
   {% if not email_configured %}<p class="flash info">Email provider not configured. PDF generation is ready, but sending will work after SMTP settings are added.</p>{% endif %}
   <form method="post" action="{{ url_for('documents.send_document_email', document_id=document.id) }}" class="form-grid">
     <label>Send to<input type="email" name="to_email" value="{{ document.customer_email or '' }}" placeholder="customer@example.com"></label>
-    <label class="span-2">Message<textarea name="message" rows="2">Please find attached {{ label|lower }} {{ document.number }}.</textarea></label>
+    <label class="span-2">Message<textarea name="message" rows="2">Please find attached {{ display_label|lower }} {{ display_number }}.</textarea></label>
     <div class="form-actions span-2"><button class="btn primary" type="submit">Send PDF email</button></div>
   </form>
 </section>
@@ -29,7 +29,7 @@
         <article class="invoice-customer-block"><h3>Bill To:</h3><p><strong>{{ document.customer_name or '—' }}</strong><br>{{ document.customer_email or '' }}<br>{{ document.customer_phone or '' }}{% if document.customer_address_line1 or document.customer_city %}<br>{{ document.customer_address_line1 }}{% if document.customer_address_line2 %}<br>{{ document.customer_address_line2 }}{% endif %}{% if document.customer_suburb %}<br>{{ document.customer_suburb }}{% endif %}{% if document.customer_city %}<br>{{ document.customer_city }}{% endif %}{% if document.customer_province or document.customer_postal_code %}<br>{{ document.customer_province }} {{ document.customer_postal_code }}{% endif %}{% if document.customer_country %}<br>{{ document.customer_country }}{% endif %}{% endif %}{% if custom_fields.get('vehicle_make') %}<br><strong>Vehicle Make:</strong> {{ custom_fields.get('vehicle_make') }}{% endif %}{% if custom_fields.get('vehicle_color') %}<br><strong>Vehicle Color:</strong> {{ custom_fields.get('vehicle_color') }}{% endif %}{% if custom_fields.get('vehicle_reg_no') %}<br><strong>Veh Reg No:</strong> {{ custom_fields.get('vehicle_reg_no') }}{% endif %}{% if custom_fields.get('alternative_contact_name') %}<br><strong>Alternative Contact Name:</strong> {{ custom_fields.get('alternative_contact_name') }}{% endif %}{% if custom_fields.get('alternative_contact_number') %}<br><strong>Alternative Contact Number:</strong> {{ custom_fields.get('alternative_contact_number') }}{% endif %}{% if custom_fields.get('alternative_contact_relationship') %}<br><strong>Alternative Contact Relationship:</strong> {{ custom_fields.get('alternative_contact_relationship') }}{% endif %}</p></article>
       </div>
       <div class="invoice-detail-stack">
-        <div class="invoice-number-block"><strong>{{ label }}</strong><span>{{ document.number }}</span><br><small class="invoice-date-line"><strong>Invoice date:</strong> {{ document_date(document.created_at) }}</small></div>
+        <div class="invoice-number-block"><strong>{{ display_label }}</strong><span>{{ display_number }}</span><br><small class="invoice-date-line"><strong>Invoice date:</strong> {{ document_date(document.created_at) }}</small></div>
         <article class="invoice-order-block"><h3>Order</h3><p><strong>{{ document.order_number }}</strong><br>Pickup: {{ document_date(document.start_at) }}<br>Return: {{ document_date(document.end_at) }}<br><strong>{{ rental_days_label }}</strong></p></article>
       </div>
     </div>
@@ -39,7 +39,7 @@
     <img class="invoice-logo" src="{{ url_for('static', filename='img/sano-trailers-logo.jpg') }}" alt="SANO Trailers logo">
   </div>
   <div class="document-head document-head-number-only">
-    <div><strong>{{ label }}</strong><span>{{ document.number }}</span></div>
+    <div><strong>{{ display_label }}</strong><span>{{ display_number }}</span></div>
   </div>
   <div class="two-col document-meta">
     <article><h3>Issuer</h3><p><strong>{{ issuer_name }}</strong>{% if issuer_phone %}<br>{{ issuer_phone }}{% endif %}{% if issuer_email %}<br>{{ issuer_email }}{% endif %}{% if document.branch_address_line1 or document.branch_city %}<br>{{ document.branch_address_line1 }}{% if document.branch_address_line2 %}<br>{{ document.branch_address_line2 }}{% endif %}{% if document.branch_city %}<br>{{ document.branch_city }}{% endif %}{% if document.branch_province or document.branch_postal_code %}<br>{{ document.branch_province }} {{ document.branch_postal_code }}{% endif %}{% elif settings.address_line1 or settings.city %}<br>{{ settings.address_line1 }}{% if settings.address_line2 %}<br>{{ settings.address_line2 }}{% endif %}{% if settings.city %}<br>{{ settings.city }}{% endif %}{% if settings.province or settings.postcode %}<br>{{ settings.province }} {{ settings.postcode }}{% endif %}{% endif %}</p></article>

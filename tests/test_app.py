@@ -1418,6 +1418,9 @@ def test_invoice_line_items_show_tax_column(client, app):
 
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
+    assert b'Proforma Invoice' in invoice.data
+    assert b'Unnumbered' in invoice.data
+    assert b'Finalize invoice' in invoice.data
     assert b'<th>Tax</th>' in invoice.data
     assert b'<th>Rental days</th>' not in invoice.data
     assert b'1 Day Rental' in invoice.data  # Order details keep rental dates/days visible.
@@ -1427,6 +1430,8 @@ def test_invoice_line_items_show_tax_column(client, app):
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
         pdf = document_pdf_bytes(1)
+    assert b'Proforma Invoice' in pdf
+    assert b'Unnumbered' in pdf
     assert b'1 Day Rental' in pdf  # Order details keep rental dates/days visible.
     assert b'Tax' in pdf
     assert b'R0.00' in pdf
@@ -1445,8 +1450,35 @@ def test_invoice_can_be_saved_as_pdf(client):
     download = client.get('/documents/1/download.pdf')
     assert download.status_code == 200
     assert download.mimetype == 'application/pdf'
-    assert download.headers['Content-Disposition'] == 'attachment; filename=INVOICE-INV-00001.pdf'
+    assert download.headers['Content-Disposition'] == 'attachment; filename=INVOICE-PROFORMA.pdf'
     assert download.data.startswith(b'%PDF-')
+
+
+def test_invoice_finalize_assigns_number_once(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert created.status_code == 200
+    assert b'Proforma Invoice' in created.data
+    assert b'Unnumbered' in created.data
+
+    finalized = client.post('/documents/1/finalize', follow_redirects=True)
+    assert finalized.status_code == 200
+    assert b'Invoice finalized and numbered' in finalized.data
+    assert b'Finalize invoice' not in finalized.data
+    assert b'Invoice' in finalized.data
+    assert b'INV-00001' in finalized.data
+
+    again = client.post('/documents/1/finalize', follow_redirects=True)
+    assert again.status_code == 200
+    assert b'INV-00001' in again.data
+
+    with app.app_context():
+        row = get_db().execute('SELECT status, number FROM documents WHERE id = 1').fetchone()
+        assert row['status'] == 'finalized'
+        assert row['number'] == 'INV-00001'
 
 
 
@@ -1530,6 +1562,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'632005',
         b'Business Current',
         b'Use INV number',
+        b'Proforma Invoice',
+        b'Unnumbered',
         b'Invoice date:',
         invoice_date.encode(),
         b'Pickup:',
@@ -1610,13 +1644,15 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert address_pos < customer_pos
     totals_pos = invoice.data.index(b'class="totals"')
     assert customer_pos < table_pos < totals_pos < banking_pos
-    assert invoice.data.index(b'INV-00001') < invoice.data.index(invoice_date.encode())
+    assert invoice.data.index(b'Unnumbered') < invoice.data.index(invoice_date.encode())
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'2 Days Rental')
     assert b'+27 12 999 0000 | wonderboom@example.test' not in invoice.data
     assert invoice.data.index(b'Wonderboom') < invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test') < invoice.data.index(b'22 Wonderboom Avenue')
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
+        finalized = client.post('/documents/1/finalize', follow_redirects=True)
+        assert finalized.status_code == 200
         pdf = document_pdf_bytes(1)
     for expected in [
         b'/Subtype /Image',
@@ -1625,6 +1661,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'25 714.00 cm /Im1 Do Q',
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
+        b'INV-00001',
         b'Invoice date: ' + invoice_date.encode(),
         b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj',
         b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj',
@@ -1752,6 +1789,19 @@ def test_document_generation_list_and_printable_detail(client):
     assert b'Documents' in documents.data
     assert b'QUO-00001' in documents.data
     assert b'ORD-00001' in documents.data
+
+    invoice_created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert invoice_created.status_code == 200
+    assert b'Proforma Invoice' in invoice_created.data
+    assert b'Unnumbered' in invoice_created.data
+
+    order_detail = client.get(f'/orders/{order_id}')
+    assert b'Unnumbered' in order_detail.data
+    assert b'Proforma Invoice' in order_detail.data
+
+    documents = client.get('/documents')
+    assert b'Unnumbered' in documents.data
+    assert b'Proforma Invoice' in documents.data
 
     export = client.get('/documents/export.csv')
     assert export.status_code == 200
