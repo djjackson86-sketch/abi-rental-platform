@@ -117,6 +117,20 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
 /* Product group inventory folders */
 .inventory-group-row td{background:#f3f6fb!important;color:var(--ink);border-top:2px solid #d5dfec;border-bottom:1px solid #d5dfec}.inventory-group-row strong{display:block;font-size:15px}.inventory-group-row small{display:block;color:var(--muted);margin-top:3px}.inventory-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
 
+/* ABI typography pass: Inter Regular for text, Semi-Bold for headings, Medium/Semi-Bold for numbers and amounts. */
+body{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",ui-sans-serif,system-ui,sans-serif;font-weight:400}
+h1,h2,h3,h4,h5,h6,
+.page-header h1,.panel h2,.panel h3,.setup-card h2,.promo-card h3,.feature-grid h3,
+.store-hero h1,.product-card h2,.empty-state h1,.empty-state h2,.movement-head h2,
+.calendar-group-head h3,.customer-help-card h3,.filter-group-head strong,
+.document-head strong,.invoice-number-block strong,.invoice-order-block strong,.invoice-banking-block strong{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",ui-sans-serif,system-ui,sans-serif;font-weight:600}
+input[type="number"],input[type="date"],input[type="datetime-local"],input[type="time"],
+.metrics b,.metric-card b,.metric-row b,.totals b,.total-row b,.line-total-preview,
+.estimate-grid strong,.availability-totals b,.calendar-availability-table b,
+.data-table td:first-child strong,.orders-table td:first-child strong,
+.invoice-number-block span,.invoice-date-line,.badge,.pill{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",ui-sans-serif,system-ui,sans-serif;font-weight:500}
+.total-row b,.estimate-grand-total strong,.metrics b,.document-type-invoice .totals .total-row b{font-weight:600}
+
 /* Invoice print/PDF-friendly portrait layout */
 @page invoice-portrait{size:A4 portrait;margin:14mm}
 @media print{
