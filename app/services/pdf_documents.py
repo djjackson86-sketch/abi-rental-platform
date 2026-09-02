@@ -182,14 +182,14 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 
     # Top-right invoice and order stack.
     detail_x = 455
-    _add_pdf_lines(text_commands, detail_x, 760, [
-        'Invoice',
+    text_commands.append(_pdf_text_command(detail_x, 760, 'Invoice', size=8.5, font='F2'))
+    _add_pdf_lines(text_commands, detail_x, 746, [
         document['number'],
         f'Invoice date: {document_date(document["created_at"])}',
     ], size=8.5, leading=14)
 
-    _add_pdf_lines(text_commands, detail_x, 625, [
-        'Order',
+    text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
+    _add_pdf_lines(text_commands, detail_x, 611, [
         f'Order: {document["order_number"]}',
         f'Pickup: {document_date(document["start_at"])}',
         f'Return: {document_date(document["end_at"])}',
@@ -216,11 +216,15 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         customer_lines.append(f'Alternative Contact Number: {custom_fields["alternative_contact_number"]}')
     if custom_fields.get('alternative_contact_relationship'):
         customer_lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
+    visible_customer_lines = [line for line in customer_lines if line][:16]
     # Bill To block, aligned under the logo/brand on the left.
-    _add_pdf_lines(text_commands, 36, 625, customer_lines, size=8.5, leading=13, max_lines=16)
+    if visible_customer_lines:
+        text_commands.append(_pdf_text_command(36, 625, visible_customer_lines[0], size=8.5, font='F2'))
+        _add_pdf_lines(text_commands, 36, 612, visible_customer_lines[1:], size=8.5, leading=13)
+    customer_bottom_y = 625 - ((len(visible_customer_lines) - 1) * 13 if visible_customer_lines else 0)
 
     # Invoice table and totals.
-    table_y = 430
+    table_y = min(430, customer_bottom_y - 26)
     draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
     _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
     _add_pdf_lines(text_commands, 220, table_y, ['Qty'], size=7.5)
@@ -274,7 +278,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8))
     bank_y = totals_y - (len(totals) * 14) - 26
     text_commands.append(_pdf_text_command(36, bank_y + 18, 'Thank you for your business.', size=8.8, font='F2'))
-    _add_pdf_lines(text_commands, 36, bank_y, bank_lines, size=8.5, leading=13, max_lines=8)
+    text_commands.append(_pdf_text_command(36, bank_y, 'Banking details', size=8.5, font='F2'))
+    _add_pdf_lines(text_commands, 36, bank_y - 13, bank_lines[1:], size=8.5, leading=13, max_lines=7)
     text_commands.append('ET')
     stream = '\n'.join(draw_commands + text_commands).encode('latin-1', 'replace')
     return _pdf_objects(stream, image_object=image_object)

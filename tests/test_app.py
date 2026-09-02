@@ -1626,8 +1626,9 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
         b'Invoice date: ' + invoice_date.encode(),
-        b'455.00 760.00 Tm (Invoice)',
-        b'455.00 625.00 Tm (Order)',
+        b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj',
+        b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj',
+        b'/F2 8.5 Tf 1 0 0 1 36.00 625.00 Tm (Bill To:) Tj',
         b'Bill To:',
         b'Order Customer',
         b'order@example.com',
@@ -1655,12 +1656,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Amount due',
         b'R650.00',
         b'Thank you for your business.',
-        b'q 0.86 0.94 1 rg 36.00 425.00 523.00 18.00 re f Q',
-        b'q 0.86 0.94 1 rg 382.00 283.00 177.00 88.00 re f Q',
-        b'/F2 8.8 Tf 1 0 0 1 390.00 316.00 Tm (Total) Tj',
-        b'/F2 8.8 Tf 1 0 0 1 505.00 316.00 Tm (R1150.00) Tj',
-        b'/F2 8.8 Tf 1 0 0 1 36.00 266.00 Tm (Thank you for your business.) Tj',
-        b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj',
+        b'q 0.86 0.94 1 rg 36.00 399.00 523.00 18.00 re f Q',
+        b'q 0.86 0.94 1 rg 382.00 257.00 177.00 88.00 re f Q',
+        b'/F2 8.8 Tf 1 0 0 1 390.00 290.00 Tm (Total) Tj',
+        b'/F2 8.8 Tf 1 0 0 1 505.00 290.00 Tm (R1150.00) Tj',
+        b'/F2 8.8 Tf 1 0 0 1 36.00 240.00 Tm (Thank you for your business.) Tj',
+        b'/F2 8.5 Tf 1 0 0 1 36.00 222.00 Tm (Banking details) Tj',
     ]:
         assert expected in pdf
     for removed_label in [
@@ -1675,17 +1676,17 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'Return: 2026-07-02T15:00' not in pdf
     assert b'Invoice date: ' + invoice_created_at.encode() not in pdf
     assert b'Pickup date:' not in pdf
-    assert b'390.00 358.00 Tm (Subtotal)' in pdf
-    assert b'505.00 358.00 Tm (R400.00)' in pdf
-    assert b'390.00 344.00 Tm (Tax)' in pdf
-    assert b'505.00 344.00 Tm (R0.00)' in pdf
+    assert b'390.00 332.00 Tm (Subtotal)' in pdf
+    assert b'505.00 332.00 Tm (R400.00)' in pdf
+    assert b'390.00 318.00 Tm (Tax)' in pdf
+    assert b'505.00 318.00 Tm (R0.00)' in pdf
     assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'2 Days Rental')
     assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
-    assert pdf.index(b'455.00 760.00 Tm (Invoice)') < pdf.index(b'455.00 625.00 Tm (Order)')
-    assert pdf.index(b'Subtotal') < pdf.index(b'Tax') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
-    assert pdf.index(b'/F2 8.8 Tf 1 0 0 1 390.00 316.00 Tm (Total) Tj') < pdf.index(b'/F1 8.5 Tf 1 0 0 1 36.00 248.00 Tm (Banking details) Tj')
+    assert pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj')
+    assert pdf.index(b'Subtotal') < pdf.index(b'Tax') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 36.00 222.00 Tm (Banking details) Tj')
+    assert pdf.index(b'/F2 8.8 Tf 1 0 0 1 390.00 290.00 Tm (Total) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 36.00 222.00 Tm (Banking details) Tj')
     assert pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
     assert b'0.08 0.39 1 rg' in pdf
     assert pdf.index(b'12 Pawcare Street') < pdf.index(b'Unit 4') < pdf.index(b'Parkwood') < pdf.index(b'Johannesburg') < pdf.index(b'Gauteng 2193') < pdf.index(b'South Africa')
