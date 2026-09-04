@@ -836,7 +836,7 @@ def edit_order_payload(quantity='3', custom_price='50', start_date='2026-07-02',
 
 
 
-def test_new_order_preselected_saved_customer_shows_details_before_save(client):
+def test_new_order_preselected_saved_customer_shows_editable_details_before_save(client):
     login(client)
     seed_customer_and_product(client)
     client.post('/customers/1/edit', data={
@@ -863,14 +863,236 @@ def test_new_order_preselected_saved_customer_shows_details_before_save(client):
 
     assert res.status_code == 200
     assert b'Attached customer details' in res.data
-    assert b'Preselected Customer' in res.data
-    assert b'preselected@example.com' in res.data
-    assert b'+270****1234' in res.data
-    assert b'44 Saved Road, Unit 8, Milnerton, Cape Town, Western Cape, 7441, South Africa' in res.data
-    assert b'Ford Ranger' in res.data
-    assert b'Draft Backup' in res.data
+    assert b'id="customer-edit-fields"' in res.data
+    assert b'name="customer_edit_active" value="1"' in res.data
+    # Editable inputs prefilled with the saved customer details.
+    assert b'name="name" data-customer-field="name"' in res.data
+    assert b'value="Preselected Customer"' in res.data
+    assert b'name="email" type="email" data-customer-field="email"' in res.data
+    assert b'value="preselected@example.com"' in res.data
+    assert b'name="phone" data-customer-field="phone"' in res.data
+    assert b'value="+270****1234"' in res.data
+    assert b'name="address_line1" data-customer-field="address_line1"' in res.data
+    assert b'value="44 Saved Road"' in res.data
+    assert b'name="city" data-customer-field="city"' in res.data
+    assert b'value="Cape Town"' in res.data
+    assert b'name="vehicle_make" data-customer-field="vehicle_make"' in res.data
+    assert b'value="Ford Ranger"' in res.data
+    assert b'name="alternative_contact_name" data-customer-field="alternative_contact_name"' in res.data
+    assert b'value="Draft Backup"' in res.data
+    # The add-customer-from-order section is hidden while a saved customer is attached.
+    assert b'id="inline-customer-section" hidden' in res.data
+    # Read-only summary rows are only used on the edit page.
+    assert b'id="customer-summary-details"' not in res.data
     assert b'data-summary=' in res.data
     assert b'name="customer_id" id="customer-id" value="1"' in res.data
+    assert b'Edits update the saved customer record' in res.data
+
+
+def test_new_order_no_customer_keeps_inline_create_and_disabled_card(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.get('/orders/new')
+
+    assert res.status_code == 200
+    assert b'id="customer-edit-fields"' in res.data
+    assert b'id="customer-summary-card" hidden' in res.data
+    assert b'id="inline-customer-section"' in res.data
+    assert b'id="inline-customer-section" hidden' not in res.data
+    # Card inputs must be disabled so their blank values never shadow inline-create fields.
+    assert b'name="customer_edit_active" value="1" disabled' in res.data
+
+
+def draft_customer_payload(overrides=None):
+    payload = {
+        'customer_id': '1',
+        'customer_edit_active': '1',
+        'customer_type': 'individual',
+        'name': 'Order Customer',
+        'email': 'order@example.com',
+        'phone': '+270****0000',
+        'marketing_opt_in': '1',
+        'address_line1': '12 Trailer Street',
+        'address_line2': 'Yard 4',
+        'suburb': 'Paarden Eiland',
+        'city': 'Cape Town',
+        'province': 'Western Cape',
+        'postal_code': '7405',
+        'country': 'South Africa',
+        'vehicle_make': 'Toyota Hilux',
+        'vehicle_color': 'White',
+        'vehicle_reg_no': 'CA 123-456',
+        'alternative_contact_name': 'Alt Contact',
+        'alternative_contact_number': '+270****0001',
+        'alternative_contact_relationship': 'Brother',
+        'vat_number': '',
+        'company_reg_no': '',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'security_deposit',
+    }
+    payload.update(overrides or {})
+    return payload
+
+
+def stored_customer_snapshot(app, customer_id=1):
+    with app.app_context():
+        row = get_db().execute('SELECT * FROM customers WHERE id = ?', (customer_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def test_editing_attached_customer_on_new_draft_updates_saved_record(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/customers/1/edit', data={
+        'customer_type': 'individual',
+        'name': 'Order Customer',
+        'email': 'order@example.com',
+        'phone': '+270****0000',
+        'marketing_opt_in': '1',
+        'address_line1': '12 Trailer Street',
+        'city': 'Cape Town',
+        'vehicle_make': 'Toyota Hilux',
+        'vehicle_reg_no': 'CA 123-456',
+    }, follow_redirects=True)
+
+    res = client.post('/orders/new', data=draft_customer_payload({
+        'name': 'Order Customer Updated',
+        'email': 'updated@example.com',
+        'phone': '+271****1111',
+        'city': 'Stellenbosch',
+        'vehicle_reg_no': 'CY 999-888',
+    }), follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    assert b'Order Customer Updated' in res.data
+    assert b'updated@example.com' in res.data
+    assert b'+271****1111' in res.data
+    assert b'Stellenbosch' in res.data
+    assert b'CY 999-888' in res.data
+    with app.app_context():
+        customer = get_db().execute('SELECT * FROM customers WHERE id = 1').fetchone()
+        assert customer['name'] == 'Order Customer Updated'
+        assert customer['email'] == 'updated@example.com'
+        assert customer['phone'] == '+271****1111'
+        assert customer['city'] == 'Stellenbosch'
+        custom = json.loads(customer['custom_fields_json'] or '{}')
+        assert custom['vehicle_reg_no'] == 'CY 999-888'
+        order = get_db().execute('SELECT * FROM orders WHERE customer_id = 1').fetchone()
+        assert order is not None
+        assert order['status'] == 'draft'
+
+
+def test_unchanged_customer_card_still_saves_draft_without_rewrite(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/customers/1/edit', data={
+        'customer_type': 'individual',
+        'name': 'Order Customer',
+        'email': 'order@example.com',
+        'phone': '+270****0000',
+        'marketing_opt_in': '1',
+        'address_line1': '12 Trailer Street',
+        'address_line2': 'Yard 4',
+        'suburb': 'Paarden Eiland',
+        'city': 'Cape Town',
+        'province': 'Western Cape',
+        'postal_code': '7405',
+        'country': 'South Africa',
+        'vehicle_make': 'Toyota Hilux',
+        'vehicle_color': 'White',
+        'vehicle_reg_no': 'CA 123-456',
+        'alternative_contact_name': 'Alt Contact',
+        'alternative_contact_number': '+270****0001',
+        'alternative_contact_relationship': 'Brother',
+    }, follow_redirects=True)
+    before = stored_customer_snapshot(app)
+
+    res = client.post('/orders/new', data=draft_customer_payload(), follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    after = stored_customer_snapshot(app)
+    for key in ('customer_type', 'name', 'email', 'phone', 'marketing_opt_in',
+                'address_line1', 'address_line2', 'suburb', 'city', 'province',
+                'postal_code', 'country', 'custom_fields_json'):
+        assert before[key] == after[key], key
+    with app.app_context():
+        order = get_db().execute('SELECT * FROM orders WHERE customer_id = 1').fetchone()
+        assert order is not None
+        assert order['customer_id'] == 1
+
+
+def test_blank_customer_name_blocks_draft_and_keeps_customer(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    before = stored_customer_snapshot(app)
+
+    res = client.post('/orders/new', data=draft_customer_payload({'name': ''}))
+
+    assert res.status_code == 200
+    assert b'Customer name is required' in res.data
+    with app.app_context():
+        count = get_db().execute('SELECT COUNT(*) AS c FROM orders').fetchone()['c']
+        assert count == 0
+    after = stored_customer_snapshot(app)
+    assert before['name'] == after['name']
+    assert before['custom_fields_json'] == after['custom_fields_json']
+
+
+def test_invalid_order_does_not_update_attached_customer(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    before = stored_customer_snapshot(app)
+
+    res = client.post('/orders/new', data=draft_customer_payload({
+        'phone': '+271****9999',
+        'end_date': '2026-06-30',  # return before pickup -> invalid order
+    }))
+
+    assert res.status_code == 200
+    assert b'Return must be after pickup' in res.data
+    # Submitted customer edits are preserved on the re-rendered form.
+    assert b'value="+271****9999"' in res.data
+    assert b'name="customer_id" id="customer-id" value="1"' in res.data
+    with app.app_context():
+        count = get_db().execute('SELECT COUNT(*) AS c FROM orders').fetchone()['c']
+        assert count == 0
+    after = stored_customer_snapshot(app)
+    assert before['phone'] == after['phone']
+
+
+def test_no_js_fallback_save_with_selected_customer_does_not_touch_record(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    before = stored_customer_snapshot(app)
+
+    # No customer_edit_active: simulates a no-JS fallback-select save.
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'security_deposit',
+    }, follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    with app.app_context():
+        count = get_db().execute('SELECT COUNT(*) AS c FROM orders').fetchone()['c']
+        assert count == 1
+    after = stored_customer_snapshot(app)
+    assert before['name'] == after['name']
+    assert before['phone'] == after['phone']
 
 
 def test_saved_draft_with_existing_customer_shows_details_on_detail_and_edit(client):

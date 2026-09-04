@@ -13,8 +13,11 @@
       </label>
       <input type="hidden" name="customer_id" id="customer-id" value="{{ selected_customer_id or '' }}">
       {% set customer_summary = order_form.get('customer_summary') if editing else selected_customer_summary %}
+      {% set customer_values = customer_values or (customer_summary.form if customer_summary else {}) %}
+      {% set card_inactive = '' if customer_summary else 'disabled' %}
       <div class="customer-summary-card soft-card" id="customer-summary-card" {% if not customer_summary %}hidden{% endif %}>
         <div class="panel-title"><h3>Attached customer details</h3><a id="customer-summary-edit" href="{{ url_for('customers.edit', customer_id=customer_summary.id) if customer_summary else '#' }}">Edit customer</a></div>
+        {% if editing %}
         <div class="detail-list" id="customer-summary-details">
           {% if customer_summary %}
             <div class="detail-row"><span>Name</span><b>{{ customer_summary.name }}</b></div>
@@ -26,7 +29,53 @@
             {% endfor %}
           {% endif %}
         </div>
-        <p class="form-help">These saved customer fields are shown here for checking on this {{ 'order' if editing else 'draft' }}. Use Edit customer to change the customer record.</p>
+        <p class="form-help">These saved customer fields are shown here for checking on this order. Use Edit customer to change the customer record.</p>
+        {% else %}
+        <div class="customer-edit-fields" id="customer-edit-fields">
+          <input type="hidden" name="customer_edit_active" value="1" {{ card_inactive }}>
+          <div class="option-grid two-options">
+            {% for value,label,help in [('individual','Individual','A person renting or buying from ABI.'),('company','Company','A business or organisation contact.')] %}
+            <label class="choice-card"><input type="radio" name="customer_type" data-customer-field="customer_type" value="{{ value }}" {% if (customer_values.get('customer_type') or 'individual') == value %}checked{% endif %} {{ card_inactive }}><strong>{{ label }}</strong><span>{{ help }}</span></label>
+            {% endfor %}
+          </div>
+          <div class="form-grid">
+            <label class="span-2">Name<input name="name" data-customer-field="name" {{ card_inactive }} value="{{ customer_values.get('name','') }}" placeholder="Customer name"></label>
+            <label>Email<input name="email" type="email" data-customer-field="email" {{ card_inactive }} value="{{ customer_values.get('email','') }}" placeholder="customer@example.com"></label>
+            <label>Phone<input name="phone" data-customer-field="phone" {{ card_inactive }} value="{{ customer_values.get('phone','') }}" placeholder="+27..."></label>
+            <label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" data-customer-field="marketing_opt_in" {% if customer_values.get('marketing_opt_in') %}checked{% endif %} {{ card_inactive }}> Subscribed to marketing emails</label>
+          </div>
+          <div class="customer-custom-fields" data-edit-company-details {% if (customer_values.get('customer_type') or 'individual') != 'company' %}hidden{% endif %}>
+            <h3>Company details</h3>
+            <div class="form-grid">
+              <label>VAT No<input name="vat_number" data-customer-field="vat_number" {{ card_inactive }} value="{{ customer_values.get('vat_number','') }}" placeholder="e.g. 4123456789"></label>
+              <label>Company Reg No<input name="company_reg_no" data-customer-field="company_reg_no" {{ card_inactive }} value="{{ customer_values.get('company_reg_no','') }}" placeholder="e.g. 2024/123456/07"></label>
+            </div>
+          </div>
+          <div class="customer-custom-fields"><h3>Address</h3>
+            <div class="form-grid">
+              <label class="span-2">Address line 1<input name="address_line1" data-customer-field="address_line1" {{ card_inactive }} value="{{ customer_values.get('address_line1','') }}" placeholder="Street address"></label>
+              <label class="span-2">Address line 2<input name="address_line2" data-customer-field="address_line2" {{ card_inactive }} value="{{ customer_values.get('address_line2','') }}" placeholder="Unit, complex or building"></label>
+              <label>Suburb<input name="suburb" data-customer-field="suburb" {{ card_inactive }} value="{{ customer_values.get('suburb','') }}"></label>
+              <label>City<input name="city" data-customer-field="city" {{ card_inactive }} value="{{ customer_values.get('city','') }}"></label>
+              <label>Province<input name="province" data-customer-field="province" {{ card_inactive }} value="{{ customer_values.get('province','') }}"></label>
+              <label>Postal code<input name="postal_code" data-customer-field="postal_code" {{ card_inactive }} value="{{ customer_values.get('postal_code','') }}"></label>
+              <label class="span-2">Country<input name="country" data-customer-field="country" {{ card_inactive }} value="{{ customer_values.get('country','South Africa') }}"></label>
+            </div>
+          </div>
+          <div class="customer-custom-fields"><h3>Custom customer details</h3>
+            <p class="form-help">Capture vehicle details and alternative contacts for this customer.</p>
+            <div class="form-grid">
+              <label>Vehicle Make<input name="vehicle_make" data-customer-field="vehicle_make" {{ card_inactive }} value="{{ customer_values.get('vehicle_make','') }}" placeholder="Toyota Hilux"></label>
+              <label>Vehicle Color<input name="vehicle_color" data-customer-field="vehicle_color" {{ card_inactive }} value="{{ customer_values.get('vehicle_color','') }}" placeholder="White"></label>
+              <label>Veh Reg No<input name="vehicle_reg_no" data-customer-field="vehicle_reg_no" {{ card_inactive }} value="{{ customer_values.get('vehicle_reg_no','') }}" placeholder="CA 123-456"></label>
+              <label>Alternative Contact Name<input name="alternative_contact_name" data-customer-field="alternative_contact_name" {{ card_inactive }} value="{{ customer_values.get('alternative_contact_name','') }}" placeholder="Jane Smith"></label>
+              <label>Alternative Contact Number<input name="alternative_contact_number" data-customer-field="alternative_contact_number" {{ card_inactive }} value="{{ customer_values.get('alternative_contact_number','') }}" placeholder="+27..."></label>
+              <label>Alternative Contact Relationship<input name="alternative_contact_relationship" data-customer-field="alternative_contact_relationship" {{ card_inactive }} value="{{ customer_values.get('alternative_contact_relationship','') }}" placeholder="Sister"></label>
+            </div>
+          </div>
+          <p class="form-help"><strong>Edits update the saved customer record</strong> when you save this draft.</p>
+        </div>
+        {% endif %}
       </div>
       <div class="empty-state" id="customer-empty-state" {% if customer_summary %}hidden{% endif %}><p>No customer yet. Search above to attach customer details before reserving or pickup.</p></div>
       <datalist id="customer-options">
@@ -39,7 +88,7 @@
     {% endif %}
   </section>
 
-  <section class="form-section inline-create">
+  <section class="form-section inline-create" id="inline-customer-section" {% if not editing and customer_summary %}hidden{% endif %}>
     <h2>Add customer from order</h2>
     <input type="hidden" name="order_action" value="">
     <div class="form-grid">
@@ -149,14 +198,22 @@
   const customerSummaryDetails=document.getElementById('customer-summary-details');
   const customerSummaryEdit=document.getElementById('customer-summary-edit');
   const customerEmptyState=document.getElementById('customer-empty-state');
+  const customerEditFields=document.getElementById('customer-edit-fields');
+  const inlineCustomerSection=document.getElementById('inline-customer-section');
+  const customerEditCompany=document.querySelector('[data-edit-company-details]');
   const customerLabels={vehicle_make:'Vehicle Make',vehicle_color:'Vehicle Color',vehicle_reg_no:'Veh Reg No',alternative_contact_name:'Alternative Contact Name',alternative_contact_number:'Alternative Contact Number',alternative_contact_relationship:'Alternative Contact Relationship',vat_number:'VAT No',company_reg_no:'Company Reg No'};
   function customerLabel(key){ return customerLabels[key] || key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
   function textRow(label,value){ const row=document.createElement('div'); row.className='detail-row'; const span=document.createElement('span'); span.textContent=label; const bold=document.createElement('b'); bold.textContent=value||'—'; row.append(span,bold); return row; }
   function optionSummary(option){ if(!option||!option.dataset.summary) return null; try{return JSON.parse(option.dataset.summary);}catch(e){return null;} }
+  function syncEditCompanyDetails(){ if(!customerEditCompany) return; const checked=customerEditFields&&customerEditFields.querySelector('input[name="customer_type"]:checked'); customerEditCompany.hidden=!(checked&&checked.value==='company'); }
+  function setEditableFields(active){ if(!customerEditFields) return; customerEditFields.querySelectorAll('input,select').forEach(el=>{ el.disabled=!active; }); }
+  function fillEditableFields(summary){ if(!customerEditFields) return; const fv=(summary&&summary.form)||{}; customerEditFields.querySelectorAll('[data-customer-field]').forEach(el=>{ const raw=fv[el.dataset.customerField]; if(el.type==='checkbox'){ el.checked=!!(raw&&raw!=='0'); } else if(el.type==='radio'){ el.checked=(el.value===String(raw==null?'individual':raw)); } else { el.value=(raw==null?'':String(raw)); } }); }
   function renderCustomerSummary(summary){ if(!customerSummaryCard||!customerSummaryDetails) return; if(!summary){ customerSummaryCard.hidden=true; if(customerEmptyState) customerEmptyState.hidden=false; return; } customerSummaryDetails.innerHTML=''; customerSummaryDetails.append(textRow('Name',summary.name),textRow('Email',summary.email),textRow('Phone',summary.phone),textRow('Address',summary.address)); Object.entries(summary.custom_fields||{}).forEach(([key,value])=>{ if(value) customerSummaryDetails.append(textRow(customerLabel(key),value)); }); if(customerSummaryEdit) customerSummaryEdit.href='/customers/'+summary.id+'/edit'; customerSummaryCard.hidden=false; if(customerEmptyState) customerEmptyState.hidden=true; }
-  function syncCustomer(){ const match=customerOptions.find(o=>o.value===customerInput.value); if(match){ customerId.value=match.dataset.id; if(customerSelect) customerSelect.value=match.dataset.id; renderCustomerSummary(optionSummary(match)); } else if(customerInput && !customerInput.value){ customerId.value=''; if(customerSelect) customerSelect.value=''; renderCustomerSummary(null); } }
-  if(customerSelect){ customerSelect.addEventListener('change',()=>{customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); const dataOpt=customerOptions.find(o=>o.dataset.id===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text; renderCustomerSummary(optionSummary(dataOpt));}); if(customerSelect.value){customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text;}}
+  function presentCustomerSummary(summary){ if(!customerSummaryCard) return; if(!summary){ customerSummaryCard.hidden=true; if(customerEmptyState) customerEmptyState.hidden=false; if(customerEditFields) setEditableFields(false); if(inlineCustomerSection) inlineCustomerSection.hidden=false; return; } if(customerEditFields){ fillEditableFields(summary); setEditableFields(true); syncEditCompanyDetails(); if(customerSummaryEdit) customerSummaryEdit.href='/customers/'+summary.id+'/edit'; customerSummaryCard.hidden=false; if(customerEmptyState) customerEmptyState.hidden=true; if(inlineCustomerSection) inlineCustomerSection.hidden=true; return; } renderCustomerSummary(summary); }
+  function syncCustomer(){ const match=customerOptions.find(o=>o.value===customerInput.value); if(match){ customerId.value=match.dataset.id; if(customerSelect) customerSelect.value=match.dataset.id; presentCustomerSummary(optionSummary(match)); } else if(customerInput && !customerInput.value){ customerId.value=''; if(customerSelect) customerSelect.value=''; presentCustomerSummary(null); } }
+  if(customerSelect){ customerSelect.addEventListener('change',()=>{customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); const dataOpt=customerOptions.find(o=>o.dataset.id===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text; presentCustomerSummary(optionSummary(dataOpt));}); if(customerSelect.value){customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text;}}
   if(customerInput){customerInput.addEventListener('change',syncCustomer); customerInput.addEventListener('input',syncCustomer);}
+  if(customerEditFields){ customerEditFields.querySelectorAll('input[name="customer_type"]').forEach(radio=>radio.addEventListener('change',syncEditCompanyDetails)); syncEditCompanyDetails(); }
   const bookingType=document.getElementById('booking-type'); const collectBranch=document.getElementById('collect-branch'); const returnBranch=document.getElementById('return-branch'); function syncReturnBranch(){ if(bookingType && collectBranch && returnBranch && bookingType.value==='return'){ returnBranch.value=collectBranch.value; }} if(bookingType) bookingType.addEventListener('change',syncReturnBranch); if(collectBranch) collectBranch.addEventListener('change',syncReturnBranch); syncReturnBranch();
   const startDate=document.getElementById('start-date'); const endDate=document.getElementById('end-date'); const startTime=document.getElementById('start-time'); const endTime=document.getElementById('end-time');
   const rentalDaysCount=document.getElementById('rental-days-count'); const rentalDaysHelp=document.getElementById('rental-days-help');

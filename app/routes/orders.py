@@ -5,19 +5,33 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order, update_draft_order
+from app.services.orders import _build_order_payload, create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order, update_draft_order
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
-from app.services.customers import create_customer, customer_summary_for, custom_field_label, custom_fields_for
+from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_options, default_branch_id
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
+# Flat names of the editable attached-customer fields on the new-order form.
+CUSTOMER_EDIT_FIELD_KEYS = [
+    "customer_type", "name", "email", "phone", "marketing_opt_in",
+    "address_line1", "address_line2", "suburb", "city", "province", "postal_code", "country",
+    "vehicle_make", "vehicle_color", "vehicle_reg_no",
+    "alternative_contact_name", "alternative_contact_number", "alternative_contact_relationship",
+    "vat_number", "company_reg_no",
+]
+
+
+def _submitted_customer_values(form):
+    return {key: (form.get(key) or "") for key in CUSTOMER_EDIT_FIELD_KEYS}
+
 
 def _customers():
     rows = get_db().execute("""
-        SELECT id, customer_type, name, email, phone, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json
+        SELECT id, customer_type, name, email, phone, marketing_opt_in,
+               address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json
         FROM customers
         ORDER BY name
     """).fetchall()
@@ -87,7 +101,9 @@ def index():
 def new():
     settings = get_company_settings()
     selected_customer_id = request.args.get("customer_id", "")
+    submitted_customer_values = None
     if request.method == "POST":
+        selected_customer_id = (request.form.get("customer_id") or "").strip()
         if request.form.get("order_action") == "create_customer_continue":
             try:
                 customer_id = create_customer(request.form)
@@ -95,23 +111,49 @@ def new():
                 return redirect(url_for("orders.new", customer_id=customer_id))
             except ValueError as exc:
                 flash(str(exc), "error")
+                submitted_customer_values = _submitted_customer_values(request.form)
         else:
             try:
+                # When a saved customer is attached and its editable card was
+                # submitted (customer_edit_active), persist any changed customer
+                # fields to the saved record before creating the draft so the
+                # draft joins fresh values. customer_edit_active is only present
+                # when the card was actually enabled, so no-JS fallback-select
+                # saves and plain customerless drafts are untouched.
+                if selected_customer_id and request.form.get("customer_edit_active"):
+                    try:
+                        wanted = int(selected_customer_id)
+                    except (TypeError, ValueError):
+                        wanted = None
+                    stored = get_customer(wanted) if wanted else None
+                    if stored:
+                        # Validate order fields first so a failing draft does not
+                        # silently rewrite the saved customer record.
+                        _build_order_payload(request.form)
+                        if customer_fields_changed(stored, request.form):
+                            update_customer(stored["id"], request.form)
                 form = _form_with_inline_customer(request.form)
                 order_id = create_order(form)
                 flash("Draft order created", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
             except ValueError as exc:
                 flash(str(exc), "error")
+                submitted_customer_values = _submitted_customer_values(request.form)
     slot = next_time_slot(increment_minutes=15)
     customers = _customers()
+    selected_customer_summary = _selected_customer_summary(customers, selected_customer_id)
+    # On POST errors keep the typed customer card values; otherwise the template
+    # falls back to the stored summary's own form values for GET rendering.
+    if request.method != "POST" or submitted_customer_values is None:
+        submitted_customer_values = {}
     return render_template(
         "admin/orders/form.html",
         settings=settings,
         customers=customers,
         products=_products(),
         selected_customer_id=selected_customer_id,
-        selected_customer_summary=_selected_customer_summary(customers, selected_customer_id),
+        selected_customer_summary=selected_customer_summary,
+        customer_values=submitted_customer_values if selected_customer_summary else {},
         default_start_date=slot.date().isoformat(),
         default_return_date=(slot + timedelta(days=1)).date().isoformat(),
         default_start_time=slot.strftime("%H:%M"),
