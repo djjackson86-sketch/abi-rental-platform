@@ -12,30 +12,27 @@
         <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') }}">
       </label>
       <input type="hidden" name="customer_id" id="customer-id" value="{{ selected_customer_id or '' }}">
-      {% if editing %}
-        {% set customer_summary = order_form.get('customer_summary') %}
-        {% if customer_summary %}
-          <div class="customer-summary-card soft-card">
-            <div class="panel-title"><h3>Attached customer details</h3><a href="{{ url_for('customers.edit', customer_id=customer_summary.id) }}">Edit customer</a></div>
-            <div class="detail-list">
-              <div class="detail-row"><span>Name</span><b>{{ customer_summary.name }}</b></div>
-              <div class="detail-row"><span>Email</span><b>{{ customer_summary.email }}</b></div>
-              <div class="detail-row"><span>Phone</span><b>{{ customer_summary.phone }}</b></div>
-              <div class="detail-row"><span>Address</span><b>{{ customer_summary.address }}</b></div>
-              {% for key, value in customer_summary.custom_fields.items() if value %}
-                <div class="detail-row"><span>{{ custom_field_label(key) }}</span><b>{{ value }}</b></div>
-              {% endfor %}
-            </div>
-            <p class="form-help">These saved customer fields are shown here for checking while editing this order. Use Edit customer to change the customer record.</p>
-          </div>
-        {% else %}
-          <div class="empty-state"><p>No customer yet. Search above to attach customer details before reserving or pickup.</p></div>
-        {% endif %}
-      {% endif %}
+      {% set customer_summary = order_form.get('customer_summary') if editing else selected_customer_summary %}
+      <div class="customer-summary-card soft-card" id="customer-summary-card" {% if not customer_summary %}hidden{% endif %}>
+        <div class="panel-title"><h3>Attached customer details</h3><a id="customer-summary-edit" href="{{ url_for('customers.edit', customer_id=customer_summary.id) if customer_summary else '#' }}">Edit customer</a></div>
+        <div class="detail-list" id="customer-summary-details">
+          {% if customer_summary %}
+            <div class="detail-row"><span>Name</span><b>{{ customer_summary.name }}</b></div>
+            <div class="detail-row"><span>Email</span><b>{{ customer_summary.email }}</b></div>
+            <div class="detail-row"><span>Phone</span><b>{{ customer_summary.phone }}</b></div>
+            <div class="detail-row"><span>Address</span><b>{{ customer_summary.address }}</b></div>
+            {% for key, value in customer_summary.custom_fields.items() if value %}
+              <div class="detail-row"><span>{{ custom_field_label(key) }}</span><b>{{ value }}</b></div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <p class="form-help">These saved customer fields are shown here for checking on this {{ 'order' if editing else 'draft' }}. Use Edit customer to change the customer record.</p>
+      </div>
+      <div class="empty-state" id="customer-empty-state" {% if customer_summary %}hidden{% endif %}><p>No customer yet. Search above to attach customer details before reserving or pickup.</p></div>
       <datalist id="customer-options">
-        {% for c in customers %}<option data-id="{{ c.id }}" value="{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}">{% if c.email %}{{ c.email }}{% endif %}</option>{% endfor %}
+        {% for c in customers %}<option data-id="{{ c.id }}" data-summary='{{ c|tojson }}' value="{{ c.display }}">{% if c.email != '—' %}{{ c.email }}{% endif %}</option>{% endfor %}
       </datalist>
-      <label class="fallback-select">Customer<select id="customer-select"><option value="">No customer yet — save draft</option>{% for c in customers %}<option value="{{ c.id }}" {% if selected_customer_id and selected_customer_id|int == c.id %}selected{% endif %}>{{ c.name }}{% if c.email %} — {{ c.email }}{% endif %}</option>{% endfor %}</select></label>
+      <label class="fallback-select">Customer<select id="customer-select"><option value="">No customer yet — save draft</option>{% for c in customers %}<option value="{{ c.id }}" {% if selected_customer_id and selected_customer_id|int == c.id %}selected{% endif %}>{{ c.display }}</option>{% endfor %}</select></label>
       <p class="form-help">Customer is optional for saving a draft. Add customer details before reserving or pickup.</p>
     {% else %}
       <div class="empty-state"><p>No customers yet. You can still save a draft and add customer details later before reserving or pickup.</p></div>
@@ -148,8 +145,17 @@
   function syncInlineCompanyDetails(){ if(inlineCompanyDetails){ inlineCompanyDetails.hidden = !inlineCustomerType || inlineCustomerType.value !== 'company'; } }
   if(inlineCustomerType){ inlineCustomerType.addEventListener('change',syncInlineCompanyDetails); syncInlineCompanyDetails(); }
   const customerOptions=[...document.querySelectorAll('#customer-options option')];
-  function syncCustomer(){ const match=customerOptions.find(o=>o.value===customerInput.value); if(match){ customerId.value=match.dataset.id; if(customerSelect) customerSelect.value=match.dataset.id; } }
-  if(customerSelect){ customerSelect.addEventListener('change',()=>{customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text;}); if(customerSelect.value){customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text;}}
+  const customerSummaryCard=document.getElementById('customer-summary-card');
+  const customerSummaryDetails=document.getElementById('customer-summary-details');
+  const customerSummaryEdit=document.getElementById('customer-summary-edit');
+  const customerEmptyState=document.getElementById('customer-empty-state');
+  const customerLabels={vehicle_make:'Vehicle Make',vehicle_color:'Vehicle Color',vehicle_reg_no:'Veh Reg No',alternative_contact_name:'Alternative Contact Name',alternative_contact_number:'Alternative Contact Number',alternative_contact_relationship:'Alternative Contact Relationship',vat_number:'VAT No',company_reg_no:'Company Reg No'};
+  function customerLabel(key){ return customerLabels[key] || key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+  function textRow(label,value){ const row=document.createElement('div'); row.className='detail-row'; const span=document.createElement('span'); span.textContent=label; const bold=document.createElement('b'); bold.textContent=value||'—'; row.append(span,bold); return row; }
+  function optionSummary(option){ if(!option||!option.dataset.summary) return null; try{return JSON.parse(option.dataset.summary);}catch(e){return null;} }
+  function renderCustomerSummary(summary){ if(!customerSummaryCard||!customerSummaryDetails) return; if(!summary){ customerSummaryCard.hidden=true; if(customerEmptyState) customerEmptyState.hidden=false; return; } customerSummaryDetails.innerHTML=''; customerSummaryDetails.append(textRow('Name',summary.name),textRow('Email',summary.email),textRow('Phone',summary.phone),textRow('Address',summary.address)); Object.entries(summary.custom_fields||{}).forEach(([key,value])=>{ if(value) customerSummaryDetails.append(textRow(customerLabel(key),value)); }); if(customerSummaryEdit) customerSummaryEdit.href='/customers/'+summary.id+'/edit'; customerSummaryCard.hidden=false; if(customerEmptyState) customerEmptyState.hidden=true; }
+  function syncCustomer(){ const match=customerOptions.find(o=>o.value===customerInput.value); if(match){ customerId.value=match.dataset.id; if(customerSelect) customerSelect.value=match.dataset.id; renderCustomerSummary(optionSummary(match)); } else if(customerInput && !customerInput.value){ customerId.value=''; if(customerSelect) customerSelect.value=''; renderCustomerSummary(null); } }
+  if(customerSelect){ customerSelect.addEventListener('change',()=>{customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); const dataOpt=customerOptions.find(o=>o.dataset.id===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text; renderCustomerSummary(optionSummary(dataOpt));}); if(customerSelect.value){customerId.value=customerSelect.value; const opt=[...customerSelect.options].find(o=>o.value===customerSelect.value); if(opt&&customerInput) customerInput.value=opt.text;}}
   if(customerInput){customerInput.addEventListener('change',syncCustomer); customerInput.addEventListener('input',syncCustomer);}
   const bookingType=document.getElementById('booking-type'); const collectBranch=document.getElementById('collect-branch'); const returnBranch=document.getElementById('return-branch'); function syncReturnBranch(){ if(bookingType && collectBranch && returnBranch && bookingType.value==='return'){ returnBranch.value=collectBranch.value; }} if(bookingType) bookingType.addEventListener('change',syncReturnBranch); if(collectBranch) collectBranch.addEventListener('change',syncReturnBranch); syncReturnBranch();
   const startDate=document.getElementById('start-date'); const endDate=document.getElementById('end-date'); const startTime=document.getElementById('start-time'); const endTime=document.getElementById('end-time');

@@ -143,6 +143,34 @@ def update_customer(customer_id, form):
     get_db().commit()
 
 
+
+def customer_summary_for(customer):
+    if not customer:
+        return None
+    address_parts = [
+        customer["address_line1"],
+        customer["address_line2"],
+        customer["suburb"],
+        customer["city"],
+        customer["province"],
+        customer["postal_code"],
+        customer["country"],
+    ]
+    email = customer["email"] or ""
+    display = customer["name"] or ""
+    if email:
+        display += f" — {email}"
+    return {
+        "id": customer["id"],
+        "customer_type": customer["customer_type"] or "individual",
+        "name": customer["name"] or "—",
+        "email": email or "—",
+        "phone": customer["phone"] or "—",
+        "address": ", ".join(str(part).strip() for part in address_parts if part and str(part).strip()) or "—",
+        "custom_fields": custom_fields_for(customer),
+        "display": display,
+    }
+
 def custom_fields_for(customer):
     raw = raw_custom_fields_for(customer)
     visible = {key: value for key, value in raw.items() if key not in HIDDEN_CUSTOM_FIELD_KEYS}

@@ -358,28 +358,26 @@ def draft_order_form(order_id):
         raise ValueError("Order not found")
     if not can_edit_order_status(order["status"]):
         raise ValueError(BLOCKED_EDIT_MESSAGE)
-    from app.services.customers import custom_fields_for
+    from app.services.customers import customer_summary_for
     start_at = datetime.fromisoformat(order["start_at"]) if order["start_at"] else None
     end_at = datetime.fromisoformat(order["end_at"]) if order["end_at"] else None
-    address_parts = [
-        order["customer_address_line1"],
-        order["customer_address_line2"],
-        order["customer_suburb"],
-        order["customer_city"],
-        order["customer_province"],
-        order["customer_postal_code"],
-        order["customer_country"],
-    ]
     customer_summary = None
     if order["customer_id"]:
-        customer_summary = {
+        customer_summary = customer_summary_for({
             "id": order["customer_id"],
-            "name": order["customer_name"] or "—",
-            "email": order["customer_email"] or "—",
-            "phone": order["customer_phone"] or "—",
-            "address": ", ".join(str(part).strip() for part in address_parts if part and str(part).strip()) or "—",
-            "custom_fields": custom_fields_for(order),
-        }
+            "customer_type": "individual",
+            "name": order["customer_name"],
+            "email": order["customer_email"],
+            "phone": order["customer_phone"],
+            "address_line1": order["customer_address_line1"],
+            "address_line2": order["customer_address_line2"],
+            "suburb": order["customer_suburb"],
+            "city": order["customer_city"],
+            "province": order["customer_province"],
+            "postal_code": order["customer_postal_code"],
+            "country": order["customer_country"],
+            "custom_fields_json": order["custom_fields_json"],
+        })
     lines = []
     for item in order_items(order_id):
         product_display = ""

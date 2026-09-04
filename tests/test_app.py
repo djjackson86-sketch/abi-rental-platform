@@ -835,6 +835,85 @@ def edit_order_payload(quantity='3', custom_price='50', start_date='2026-07-02',
     }
 
 
+
+def test_new_order_preselected_saved_customer_shows_details_before_save(client):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/customers/1/edit', data={
+        'customer_type': 'individual',
+        'name': 'Preselected Customer',
+        'email': 'preselected@example.com',
+        'phone': '+270****1234',
+        'address_line1': '44 Saved Road',
+        'address_line2': 'Unit 8',
+        'suburb': 'Milnerton',
+        'city': 'Cape Town',
+        'province': 'Western Cape',
+        'postal_code': '7441',
+        'country': 'South Africa',
+        'vehicle_make': 'Ford Ranger',
+        'vehicle_color': 'Blue',
+        'vehicle_reg_no': 'CY 987-654',
+        'alternative_contact_name': 'Draft Backup',
+        'alternative_contact_number': '+270****5678',
+        'alternative_contact_relationship': 'Spouse',
+    }, follow_redirects=True)
+
+    res = client.get('/orders/new?customer_id=1')
+
+    assert res.status_code == 200
+    assert b'Attached customer details' in res.data
+    assert b'Preselected Customer' in res.data
+    assert b'preselected@example.com' in res.data
+    assert b'+270****1234' in res.data
+    assert b'44 Saved Road, Unit 8, Milnerton, Cape Town, Western Cape, 7441, South Africa' in res.data
+    assert b'Ford Ranger' in res.data
+    assert b'Draft Backup' in res.data
+    assert b'data-summary=' in res.data
+    assert b'name="customer_id" id="customer-id" value="1"' in res.data
+
+
+def test_saved_draft_with_existing_customer_shows_details_on_detail_and_edit(client):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/customers/1/edit', data={
+        'customer_type': 'individual',
+        'name': 'Draft Detail Customer',
+        'email': 'draft-detail@example.com',
+        'phone': '+271****1234',
+        'address_line1': '55 Detail Road',
+        'city': 'Cape Town',
+        'province': 'Western Cape',
+        'postal_code': '8001',
+        'country': 'South Africa',
+        'vehicle_make': 'Isuzu D-Max',
+        'alternative_contact_name': 'Detail Backup',
+    }, follow_redirects=True)
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'security_deposit',
+    }, follow_redirects=True)
+
+    assert created.status_code == 200
+    assert b'Draft Detail Customer' in created.data
+    assert b'draft-detail@example.com' in created.data
+    assert b'+271****1234' in created.data
+    assert b'55 Detail Road' in created.data
+    assert b'Isuzu D-Max' in created.data
+    assert b'Detail Backup' in created.data
+
+    order_id = created.request.path.rstrip('/').split('/')[-1]
+    edit_page = client.get(f'/orders/{order_id}/edit')
+    assert b'Attached customer details' in edit_page.data
+    assert b'Draft Detail Customer' in edit_page.data
+    assert b'Isuzu D-Max' in edit_page.data
+
 def test_edit_order_shows_attached_customer_standard_and_custom_fields(client, app):
     login(client)
     seed_customer_and_product(client)

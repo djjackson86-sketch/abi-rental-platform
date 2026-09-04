@@ -9,14 +9,29 @@ from app.services.orders import create_order, draft_order_form, get_order, list_
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
-from app.services.customers import create_customer, custom_field_label, custom_fields_for
+from app.services.customers import create_customer, customer_summary_for, custom_field_label, custom_fields_for
 from app.services.branches import branch_options, default_branch_id
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
 
 def _customers():
-    return get_db().execute("SELECT id, name, email FROM customers ORDER BY name").fetchall()
+    rows = get_db().execute("""
+        SELECT id, customer_type, name, email, phone, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json
+        FROM customers
+        ORDER BY name
+    """).fetchall()
+    return [customer_summary_for(row) for row in rows]
+
+
+def _selected_customer_summary(customers, selected_customer_id):
+    if not selected_customer_id:
+        return None
+    try:
+        wanted = int(selected_customer_id)
+    except (TypeError, ValueError):
+        return None
+    return next((customer for customer in customers if customer["id"] == wanted), None)
 
 
 def _products():
@@ -89,7 +104,24 @@ def new():
             except ValueError as exc:
                 flash(str(exc), "error")
     slot = next_time_slot(increment_minutes=15)
-    return render_template("admin/orders/form.html", settings=settings, customers=_customers(), products=_products(), selected_customer_id=selected_customer_id, default_start_date=slot.date().isoformat(), default_return_date=(slot + timedelta(days=1)).date().isoformat(), default_start_time=slot.strftime("%H:%M"), time_options=_time_options(15), branches=branch_options(), default_branch_id=default_branch_id(), form_mode="new", form_action=url_for("orders.new"))
+    customers = _customers()
+    return render_template(
+        "admin/orders/form.html",
+        settings=settings,
+        customers=customers,
+        products=_products(),
+        selected_customer_id=selected_customer_id,
+        selected_customer_summary=_selected_customer_summary(customers, selected_customer_id),
+        default_start_date=slot.date().isoformat(),
+        default_return_date=(slot + timedelta(days=1)).date().isoformat(),
+        default_start_time=slot.strftime("%H:%M"),
+        time_options=_time_options(15),
+        branches=branch_options(),
+        default_branch_id=default_branch_id(),
+        form_mode="new",
+        form_action=url_for("orders.new"),
+        custom_field_label=custom_field_label,
+    )
 
 
 @bp.route("/<int:order_id>/edit", methods=["GET", "POST"])
