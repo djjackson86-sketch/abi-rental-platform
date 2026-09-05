@@ -5,7 +5,7 @@ from io import StringIO
 from app.routes.auth import login_required
 from app.services.documents import create_document, display_document_label, display_document_number, document_date, document_filter_counts, finalize_document, get_document, label_for, list_documents, mark_document_email, printable_document, rental_days_label
 from app.services.settings import get_company_settings
-from app.services.email_delivery import email_configured, send_email_with_attachment
+from app.services.email_delivery import build_invoice_email_subject, build_outlook_draft_eml, render_email_template
 from app.services.pdf_documents import document_pdf_bytes, document_pdf_filename
 from app.services.customers import custom_fields_for
 
@@ -67,9 +67,23 @@ def detail(document_id):
     if not document:
         flash("Document not found", "error")
         return redirect(url_for("documents.index"))
+    settings = get_company_settings()
+    if not settings:
+        flash("Company settings not found", "error")
+        return redirect(url_for("documents.index"))
+    email_message = render_email_template(
+        settings['invoice_email_message'],
+        {
+            'customer_name': document['customer_name'] or 'Customer',
+            'document_label': display_document_label(document),
+            'document_number': display_document_number(document),
+            'order_number': document['order_number'],
+            'company_name': settings['company_name'],
+        },
+    )
     return render_template(
         "admin/documents/detail.html",
-        settings=get_company_settings(),
+        settings=settings,
         document=document,
         items=items,
         label=label_for(document["document_type"]),
@@ -78,7 +92,7 @@ def detail(document_id):
         custom_fields=custom_fields_for(document),
         document_date=document_date,
         rental_days_label=rental_days_label(document),
-        email_configured=email_configured(),
+        email_message=email_message,
     )
 
 
@@ -126,21 +140,38 @@ def send_document_email(document_id):
     if not document:
         flash("Document not found", "error")
         return redirect(url_for("documents.index"))
+    if document['document_type'] != 'invoice':
+        flash("Email draft is available for invoices only", "error")
+        return redirect(url_for("documents.detail", document_id=document_id))
     to_email = (request.form.get("to_email") or document["customer_email"] or "").strip()
     if not to_email:
-        flash("Customer email is required before sending", "error")
+        flash("Customer email is required before preparing the email", "error")
         return redirect(url_for("documents.detail", document_id=document_id))
-    try:
-        pdf_bytes = document_pdf_bytes(document_id)
-        filename = document_pdf_filename(document)
-        label = display_document_label(document)
-        number = display_document_number(document)
-        subject = f"{label} {number} for order {document['order_number']}"
-        body = request.form.get("message") or f"Please find attached {label.lower()} {number}."
-        send_email_with_attachment(to_email, subject, body, pdf_bytes, filename)
-        mark_document_email(document_id, to_email, "sent")
-        flash("Document emailed", "success")
-    except Exception as exc:
-        mark_document_email(document_id, to_email, "failed", str(exc))
-        flash(str(exc), "error")
-    return redirect(url_for("documents.detail", document_id=document_id))
+
+    settings = get_company_settings()
+    if not settings:
+        flash("Company settings not found", "error")
+        return redirect(url_for("documents.detail", document_id=document_id))
+    label = display_document_label(document)
+    number = display_document_number(document)
+    subject = build_invoice_email_subject(label, number, document['order_number'])
+    body = request.form.get("message") or render_email_template(
+        settings['invoice_email_message'],
+        {
+            'customer_name': document['customer_name'] or 'Customer',
+            'document_label': label,
+            'document_number': number,
+            'order_number': document['order_number'],
+            'company_name': settings['company_name'],
+        },
+    )
+    pdf_bytes = document_pdf_bytes(document_id)
+    pdf_filename = document_pdf_filename(document)
+    eml_bytes = build_outlook_draft_eml(to_email, subject, body, pdf_bytes, pdf_filename, settings['email'])
+    mark_document_email(document_id, to_email, "prepared")
+    eml_name = f"EMAIL-{pdf_filename.rsplit('.', 1)[0]}.eml"
+    return Response(
+        eml_bytes,
+        mimetype="message/rfc822",
+        headers={"Content-Disposition": f"attachment; filename={eml_name}"},
+    )

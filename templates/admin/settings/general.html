@@ -20,6 +20,11 @@
     <label>Units<select name="units"><option value="metric" {% if settings.units=='metric' %}selected{% endif %}>Metric</option><option value="imperial" {% if settings.units=='imperial' %}selected{% endif %}>Imperial</option></select></label>
     <label>First day<input name="first_day_of_week" value="{{ settings.first_day_of_week }}"></label>
   </div>
+  <section class="panel-subsection span-2">
+    <h2>Default invoice email</h2>
+    <p class="form-help">This message is used when an invoice email draft is opened for Outlook. Available placeholders: <code>{customer_name}</code>, <code>{document_label}</code>, <code>{document_number}</code>, <code>{order_number}</code>, <code>{company_name}</code>.</p>
+    <label class="span-2">Default invoice email message<textarea name="invoice_email_message" rows="7">{{ settings.invoice_email_message }}</textarea></label>
+  </section>
   {% include "admin/settings/hidden_defaults.html" %}
   <button class="btn primary">Save</button>
 </form>

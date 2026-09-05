@@ -1834,6 +1834,81 @@ def test_invoice_can_be_saved_as_pdf(client):
     assert download.data.startswith(b'%PDF-')
 
 
+def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert invoice.status_code == 200
+    assert b'Send Email' in invoice.data
+    assert b'Outlook-compatible email draft' in invoice.data
+    assert b'Dear Order Customer' in invoice.data
+    assert b'name="invoice_email_message"' not in invoice.data
+
+    draft = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=False)
+    assert draft.status_code == 200
+    assert draft.mimetype == 'message/rfc822'
+    assert draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-INVOICE-PROFORMA.eml'
+    assert b'Content-Type: application/pdf' in draft.data
+    assert b'filename="INVOICE-PROFORMA.pdf"' in draft.data
+    assert b'To: order@example.com' in draft.data
+    assert b'Subject: Proforma Invoice Unnumbered for order ORD-00001' in draft.data
+    assert b'Please find attached Proforma Invoice Unnumbered for order ORD-00001.' in draft.data
+    from email import policy
+    from email.parser import BytesParser
+    parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
+    pdf_parts = [part for part in parsed.iter_attachments() if part.get_filename() == 'INVOICE-PROFORMA.pdf']
+    assert len(pdf_parts) == 1
+    assert pdf_parts[0].get_payload(decode=True).startswith(b'%PDF-')
+
+    with app.app_context():
+        row = get_db().execute('SELECT email_status, sent_to, sent_at FROM documents WHERE id = 1').fetchone()
+        assert row['email_status'] == 'prepared'
+        assert row['sent_to'] == 'order@example.com'
+        assert row['sent_at'] == ''
+
+
+def test_invoice_email_default_message_can_be_configured(client):
+    login(client)
+    saved = client.post('/settings/general', data={
+        'company_name': 'ABI Rentals',
+        'email': 'accounts@abi.test',
+        'phone': '+27 11 555 0100',
+        'website': 'https://abi.test',
+        'country': 'South Africa',
+        'city': 'Pretoria',
+        'province': 'Gauteng',
+        'postcode': '0001',
+        'address_line1': '1 Main Road',
+        'address_line2': '',
+        'timezone': 'Africa/Johannesburg',
+        'date_format': 'dd-mm-yyyy',
+        'units': 'metric',
+        'first_day_of_week': 'Monday',
+        'currency': 'ZAR',
+        'currency_symbol': 'R',
+        'currency_position': 'before',
+        'tax_mode': 'exclusive',
+        'default_pickup_time': '09:00',
+        'default_return_time': '15:00',
+        'time_increment_minutes': '60',
+        'deposit_mode': 'product_specific',
+        'deposit_value': '0',
+        'pricing_enabled': '1',
+        'enable_time_selection': '1',
+        'invoice_email_message': 'Hello {customer_name}, please review {document_label} {document_number} for {order_number}. Regards {company_name}',
+    }, follow_redirects=True)
+    assert saved.status_code == 200
+    assert b'Default invoice email' in saved.data
+    assert b'Hello {customer_name}, please review' in saved.data
+
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'Hello Order Customer, please review Proforma Invoice Unnumbered for ORD-00001. Regards ABI Rentals' in invoice.data
+
+
 def test_invoice_finalize_assigns_number_once(client, app):
     login(client)
     seed_customer_and_product(client)
@@ -2679,13 +2754,22 @@ def test_return_deposit_settlement_rejects_invalid_method(client):
     assert b'Deposit process method must be EFT, Card, or Cash' in response.data
 
 
-def test_document_email_requires_provider_but_generates_pdf_status(client):
+def test_document_email_prepares_outlook_draft_without_smtp_provider(client, app):
     login(client)
     seed_customer_and_product(client)
     order_id = create_order_for_status(client)
     client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     detail = client.get('/documents/1')
-    assert b'Send PDF email' in detail.data
-    response = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=True)
-    assert b'Email provider not configured' in response.data
-    assert b'Failed' in response.data
+    assert b'Send Email' in detail.data
+    assert b'Outlook-compatible email draft' in detail.data
+    assert b'Email provider not configured' not in detail.data
+
+    response = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=False)
+    assert response.status_code == 200
+    assert response.mimetype == 'message/rfc822'
+    assert b'Content-Type: application/pdf' in response.data
+
+    with app.app_context():
+        row = get_db().execute('SELECT email_status, sent_to FROM documents WHERE id = 1').fetchone()
+        assert row['email_status'] == 'prepared'
+        assert row['sent_to'] == 'order@example.com'

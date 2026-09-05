@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS company_settings (
     checkout_instructions TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.',
     store_contact_email TEXT NOT NULL DEFAULT '',
     store_contact_phone TEXT NOT NULL DEFAULT '',
+    invoice_email_message TEXT NOT NULL DEFAULT 'Dear {customer_name},
+
+Please find attached {document_label} {document_number} for order {order_number}.
+
+Kind regards,
+{company_name}',
     updated_at TEXT NOT NULL
 );
 
@@ -314,6 +320,7 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "checkout_instructions", "TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.'")
     ensure_column(db, "company_settings", "store_contact_email", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "company_settings", "invoice_email_message", "TEXT NOT NULL DEFAULT 'Dear {customer_name}\n\nPlease find attached {document_label} {document_number} for order {order_number}.\n\nKind regards,\n{company_name}'")
     ensure_column(db, "branches", "bank_name", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "branches", "bank_account_name", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "branches", "bank_account_number", "TEXT NOT NULL DEFAULT ''")
