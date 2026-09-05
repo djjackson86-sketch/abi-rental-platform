@@ -9,11 +9,11 @@
 <section class="panel settings-form">
   <h2>Email {{ display_label }}</h2>
   {% if document.email_status != 'not_sent' %}<p class="form-help">Last email status: {{ document.email_status|replace('_', ' ')|title }}{% if document.sent_to %} for {{ document.sent_to }}{% endif %}{% if document.sent_at %} at {{ document.sent_at }}{% endif %}{% if document.email_error %}. Error: {{ document.email_error }}{% endif %}</p>{% endif %}
-  <p class="form-help">Click <strong>Send Email</strong> to download an Outlook-compatible email draft. Open the .eml file on the office PC to review the message and send it from Outlook. The PDF invoice is attached automatically.</p>
+  <p class="form-help">Click <strong>Generate Email</strong> to download an Outlook-compatible email draft. Open the .eml file on the office PC to review the message and send it from Outlook. The PDF invoice is attached automatically.</p>
   <form method="post" action="{{ url_for('documents.send_document_email', document_id=document.id) }}" class="form-grid">
     <label>Send to<input type="email" name="to_email" value="{{ document.customer_email or '' }}" placeholder="customer@example.com"></label>
     <label class="span-2">Message<textarea name="message" rows="6">{{ email_message }}</textarea></label>
-    <div class="form-actions span-2"><button class="btn primary" type="submit">Send Email</button></div>
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Generate Email</button></div>
   </form>
 </section>
 {% endif %}

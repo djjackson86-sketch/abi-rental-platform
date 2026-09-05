@@ -1841,7 +1841,8 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
 
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
-    assert b'Send Email' in invoice.data
+    assert b'Generate Email' in invoice.data
+    assert b'Send Email' not in invoice.data
     assert b'Outlook-compatible email draft' in invoice.data
     assert b'Dear Order Customer' in invoice.data
     assert b'name="invoice_email_message"' not in invoice.data
@@ -2760,7 +2761,8 @@ def test_document_email_prepares_outlook_draft_without_smtp_provider(client, app
     order_id = create_order_for_status(client)
     client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     detail = client.get('/documents/1')
-    assert b'Send Email' in detail.data
+    assert b'Generate Email' in detail.data
+    assert b'Send Email' not in detail.data
     assert b'Outlook-compatible email draft' in detail.data
     assert b'Email provider not configured' not in detail.data
 

@@ -5,6 +5,22 @@ def get_company_settings():
     return get_db().execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
 
 
+def _row_has_key(row, key):
+    if not row:
+        return False
+    if hasattr(row, 'keys'):
+        return key in row.keys()
+    if hasattr(row, '_fields'):
+        return key in row._fields
+    if hasattr(row, 'asdict'):
+        return key in row.asdict()
+    return False
+
+
+def _row_value(row, key, default=''):
+    return row[key] if _row_has_key(row, key) else default
+
+
 def update_company_settings(form):
     fields = [
         "company_name", "email", "phone", "website", "country", "address_line1", "address_line2",
@@ -14,7 +30,7 @@ def update_company_settings(form):
         "invoice_email_message"
     ]
     current = get_company_settings()
-    values = {f: form.get(f, current[f] if current and f in current.keys() else "") for f in fields}
+    values = {f: form.get(f, _row_value(current, f, "")) for f in fields}
     values["use_ampm"] = 1 if form.get("use_ampm") else 0
     values["pricing_enabled"] = 1 if form.get("pricing_enabled") else 0
     values["enable_time_selection"] = 1 if form.get("enable_time_selection") else 0
