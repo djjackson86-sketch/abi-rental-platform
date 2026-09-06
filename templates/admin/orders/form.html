@@ -9,7 +9,7 @@
     <h2>Customer</h2>
     {% if customers %}
       <label>Search customer
-        <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') }}">
+        <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') or (selected_customer_summary.display if selected_customer_summary else '') }}">
       </label>
       <input type="hidden" name="customer_id" id="customer-id" value="{{ selected_customer_id or '' }}">
       {% set customer_summary = order_form.get('customer_summary') if editing else selected_customer_summary %}
@@ -81,7 +81,6 @@
       <datalist id="customer-options">
         {% for c in customers %}<option data-id="{{ c.id }}" data-summary='{{ c|tojson }}' value="{{ c.display }}">{% if c.email != '—' %}{{ c.email }}{% endif %}</option>{% endfor %}
       </datalist>
-      <label class="fallback-select">Customer<select id="customer-select"><option value="">No customer yet — save draft</option>{% for c in customers %}<option value="{{ c.id }}" {% if selected_customer_id and selected_customer_id|int == c.id %}selected{% endif %}>{{ c.display }}</option>{% endfor %}</select></label>
       <p class="form-help">Customer is optional for saving a draft. Add customer details before reserving or pickup.</p>
     {% else %}
       <div class="empty-state"><p>No customers yet. You can still save a draft and add customer details later before reserving or pickup.</p></div>

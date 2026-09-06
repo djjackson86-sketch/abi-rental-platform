@@ -1218,7 +1218,7 @@ def test_customerless_order_edit_keeps_picker_and_no_customer_copy(client):
     assert b'No customer yet. Search above to attach customer details before reserving or pickup.' in edit_page.data
     assert b'id="customer-search"' in edit_page.data
     assert b'name="customer_id" id="customer-id" value=""' in edit_page.data
-    assert b'No customer yet \xe2\x80\x94 save draft' in edit_page.data
+    assert b'id="customer-select"' not in edit_page.data
     assert b'Add customer from order' in edit_page.data
     assert b'name="order_action" value=""' in edit_page.data
 
