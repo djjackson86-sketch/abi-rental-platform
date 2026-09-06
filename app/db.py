@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import datetime
+from app.services.timezone import local_now_iso
 from flask import current_app, g
 from werkzeug.security import generate_password_hash
 
@@ -256,7 +257,7 @@ CREATE TABLE IF NOT EXISTS documents (
 
 
 def now():
-    return datetime.utcnow().isoformat(timespec="seconds")
+    return local_now_iso(timespec="seconds")
 
 
 def get_db():

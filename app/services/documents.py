@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.db import get_db, now
+from app.services.timezone import display_local_date, display_local_datetime, parse_iso_datetime
 from app.services.orders import get_order, order_items, rental_days
 
 DOCUMENT_TYPES = {
@@ -53,6 +54,8 @@ def display_document_label(document):
 
 
 def display_document_number(document):
+    if is_proforma_invoice(document):
+        return ''
     return (document['number'] or '').strip() or 'Unnumbered'
 
 
@@ -148,37 +151,18 @@ def label_for(document_type):
 
 
 def _parse_document_datetime(value):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value
-    text = str(value).strip()
-    if not text:
-        return None
     try:
-        return datetime.fromisoformat(text.replace('Z', '+00:00'))
+        return parse_iso_datetime(value)
     except ValueError:
         return None
 
 
 def document_date(value):
-    parsed = _parse_document_datetime(value)
-    if parsed:
-        return parsed.date().isoformat()
-    text = str(value or '').strip()
-    if not text:
-        return '—'
-    return text[:10]
+    return display_local_date(value)
 
 
 def document_datetime(value):
-    parsed = _parse_document_datetime(value)
-    if parsed:
-        return parsed.strftime('%Y-%m-%d  %H:%M')
-    text = str(value or '').strip()
-    if not text:
-        return '—'
-    return text.replace('T', '  ')
+    return display_local_datetime(value)
 
 
 def rental_days_for_document(document):

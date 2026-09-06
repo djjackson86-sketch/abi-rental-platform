@@ -68,7 +68,7 @@
     {% if documents %}
       <div class="schedule-list document-list">
       {% for document in documents %}
-        <a class="schedule-row" href="{{ url_for('documents.detail', document_id=document.id) }}"><span><b>{{ document.number or 'Unnumbered' }}</b><small>{% if document.document_type == 'invoice' and document.status == 'draft' and not document.number %}Proforma Invoice{% else %}{{ label_for(document.document_type) }}{% endif %}</small></span><span><small>Status</small><b>{{ document.status|title }}</b></span></a>
+        <a class="schedule-row" href="{{ url_for('documents.detail', document_id=document.id) }}"><span><b>{{ document.number or '' }}</b><small>{% if document.document_type == 'invoice' and document.status == 'draft' and not document.number %}Proforma Invoice{% else %}{{ label_for(document.document_type) }}{% endif %}</small></span><span><small>Status</small><b>{{ document.status|title }}</b></span></a>
       {% endfor %}
       </div>
     {% else %}
@@ -90,8 +90,8 @@
   </div>
   <div class="totals">
     <style>
-      .totals .discount-row{flex-wrap:nowrap;align-items:center;gap:8px}
-      .totals .discount-form{display:inline-flex;align-items:center;gap:4px;margin-left:8px;margin-right:auto}
+      .totals .discount-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(130px,auto);align-items:center;gap:8px}
+      .totals .discount-form{display:inline-flex;align-items:center;gap:4px;margin-left:8px}
       .totals .discount-form select,.totals .discount-form input{min-height:32px;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:inherit;font-family:inherit;font-size:13px}
       .totals .discount-form select{width:56px}
       .totals .discount-form input{width:88px;min-width:0}
@@ -120,7 +120,7 @@
     {% if order.extra_hours %}<div class="list-row"><span>Extra hours</span><b>{{ order.extra_hours }} hrs</b></div>{% endif %}
     {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
     {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not processed</b></div>{% endif %}
-    {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }} UTC</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
+    {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
     <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
   </div>
 </section>

@@ -2,6 +2,7 @@ from datetime import datetime, date, time, timedelta
 from math import ceil
 
 from app.db import get_db, now
+from app.services.timezone import local_now, local_now_iso
 
 STATUS_LABELS = {
     "draft": "Draft",
@@ -37,7 +38,7 @@ def _process_deposit_clause(alias="o"):
     )
 
 
-def list_orders(query="", status="", payment_status="", return_status=""):
+def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
@@ -59,14 +60,64 @@ def list_orders(query="", status="", payment_status="", return_status=""):
     elif payment_status:
         sql += " AND o.payment_status = ?"
         params.append(payment_status)
+    if start_date:
+        sql += " AND DATE(o.start_at) >= ?"
+        params.append(start_date)
+    if end_date:
+        sql += " AND DATE(o.start_at) <= ?"
+        params.append(end_date)
     sql += " ORDER BY o.created_at DESC, o.id DESC"
     return get_db().execute(sql, params).fetchall()
 
 
-def order_counts():
-    row = get_db().execute("SELECT COUNT(*) total, COALESCE(SUM(total),0) revenue, COALESCE(SUM(due_total),0) due FROM orders").fetchone()
-    item_row = get_db().execute("SELECT COALESCE(SUM(quantity),0) items FROM order_items").fetchone()
+def _order_filter_where(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
+    clauses = ["1=1"]
+    params = []
+    if query:
+        clauses.append("(LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ?)")
+        needle = f"%{query.lower()}%"
+        params.extend([needle, needle, needle])
+    if status:
+        clauses.append("o.status = ?")
+        params.append(status)
+    if return_status == "late":
+        clauses.append("o.status = 'started' AND o.end_at < ?")
+        params.append(now())
+    if payment_status == "process_deposit":
+        clauses.append(_process_deposit_clause('o'))
+    elif payment_status:
+        clauses.append("o.payment_status = ?")
+        params.append(payment_status)
+    if start_date:
+        clauses.append("DATE(o.start_at) >= ?")
+        params.append(start_date)
+    if end_date:
+        clauses.append("DATE(o.start_at) <= ?")
+        params.append(end_date)
+    return " AND ".join(clauses), params
+
+
+def order_counts(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
+    where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date)
+    db = get_db()
+    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM(o.total),0) revenue, COALESCE(SUM(o.due_total),0) due
+        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
+    item_row = db.execute(f"""SELECT COALESCE(SUM(oi.quantity),0) items FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
     return {"total": row["total"] or 0, "revenue": row["revenue"] or 0, "due": row["due"] or 0, "items": item_row["items"] or 0}
+
+
+def deposit_to_process_amount(order):
+    if not order or float(order["deposit_total"] or 0) <= 0:
+        return 0
+    if (order["deposit_process_method"] or "") or (order["deposit_processed_at"] or ""):
+        return 0
+    status = (order["status"] or "").lower()
+    if status not in {"returned", "canceled", "cancelled"}:
+        return 0
+    if float(order["deposit_applied_amount"] or 0) or float(order["deposit_refund_amount"] or 0):
+        return round(max(float(order["deposit_refund_amount"] or 0), 0), 2)
+    return round(float(order["deposit_total"] or 0), 2)
 
 
 def order_filter_counts():
@@ -622,7 +673,7 @@ def _parse_deposit_processed_at(value):
         processed_at = datetime.fromisoformat(value)
     except ValueError as exc:
         raise ValueError("Deposit refund date must be a valid date and time") from exc
-    if processed_at > datetime.utcnow().replace(microsecond=0):
+    if processed_at > local_now().replace(microsecond=0):
         raise ValueError("Deposit refund date cannot be in the future")
     return processed_at.isoformat(timespec="seconds")
 

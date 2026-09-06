@@ -192,10 +192,11 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Top-right invoice and order stack.
     detail_x = 455
     text_commands.append(_pdf_text_command(detail_x, 760, display_label, size=8.5, font='F2'))
-    _add_pdf_lines(text_commands, detail_x, 746, [
-        display_number,
-        f'{display_label} date: {document_datetime(document["created_at"])}',
-    ], size=8.5, leading=14)
+    invoice_lines = []
+    if display_number:
+        invoice_lines.append(display_number)
+    invoice_lines.extend([f'{display_label} date:', document_datetime(document["created_at"])])
+    _add_pdf_lines(text_commands, detail_x, 746, invoice_lines, size=8.5, leading=14)
 
     text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
     _add_pdf_lines(text_commands, detail_x, 611, [

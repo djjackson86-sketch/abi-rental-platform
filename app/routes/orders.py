@@ -1,16 +1,17 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, return_charge_defaults, settle_return_deposit, status_actions, transition_order, update_draft_order, use_return_deposit
+from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, return_charge_defaults, settle_return_deposit, status_actions, transition_order, update_draft_order, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_options, default_branch_id
+from app.services.timezone import local_now_iso
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -85,14 +86,17 @@ def index():
     status = request.args.get("status", "")
     payment_status = request.args.get("payment_status", "")
     return_status = request.args.get("return_status", "")
-    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status)
+    start_date = request.args.get("start_date", "").strip()
+    end_date = request.args.get("end_date", "").strip()
+    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date)
     return render_template(
         "admin/orders/index.html",
         settings=get_company_settings(),
         orders=orders,
-        counts=order_counts(),
+        counts=order_counts(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date),
         filter_counts=order_filter_counts(),
-        filters={"query": query, "status": status, "payment_status": payment_status, "return_status": return_status},
+        filters={"query": query, "status": status, "payment_status": payment_status, "return_status": return_status, "start_date": start_date, "end_date": end_date},
+        deposit_to_process_amount=deposit_to_process_amount,
     )
 
 
@@ -242,8 +246,8 @@ def detail(order_id):
         customer_custom_fields=custom_fields_for(order),
         return_charge_defaults=return_charge_defaults(order_id),
         can_process_return_deposit=can_process_return_deposit(order),
-        default_payment_date=datetime.utcnow().isoformat(timespec="minutes"),
-        default_deposit_processed_at=(order["deposit_processed_at"] or datetime.utcnow().isoformat(timespec="minutes"))[:16],
+        default_payment_date=local_now_iso(timespec="minutes"),
+        default_deposit_processed_at=(order["deposit_processed_at"] or local_now_iso(timespec="minutes"))[:16],
     )
 
 

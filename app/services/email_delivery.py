@@ -41,7 +41,8 @@ def render_email_template(template, context):
 
 
 def build_invoice_email_subject(document_label, document_number, order_number):
-    return f"{document_label} {document_number} for order {order_number}"
+    number_part = f" {document_number}" if document_number else ""
+    return f"{document_label}{number_part} for order {order_number}"
 
 
 def combine_email_body(body, signature=''):
