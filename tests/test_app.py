@@ -670,6 +670,60 @@ def test_order_draft_creation_and_totals(client):
     assert b'built-in method items' not in list_res.data
 
 
+def test_new_order_form_starts_with_one_line_and_add_line_control(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.get('/orders/new')
+    assert res.status_code == 200
+    body = res.data.decode()
+    rows_section = body[body.find('id="order-lines-body"'):]
+    # One visible blank line plus the hidden clone template = 2 enhanced-line rows.
+    assert rows_section.count('class="enhanced-line"') == 2
+    assert 'id="order-line-template"' in rows_section
+    assert 'id="add-product-line"' in rows_section
+    assert b'+ Add product line' in res.data
+    # Old behaviour of four hard-coded blank lines is gone.
+    assert 'range(1, 5)' not in body
+
+
+def test_order_with_more_than_four_lines_saves_every_line(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': ['1', '', '', '', '', ''],
+        'custom_name': ['', 'Rope tie-downs', 'Side boards', 'Cover', 'Spare wheel', 'Towing mirrors'],
+        'custom_unit_price': ['', '50', '120', '90', '200', '60'],
+        'custom_billing_mode': ['fixed'] * 6,
+        'quantity': ['1'] * 6,
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+    }, follow_redirects=False)
+    assert created.status_code == 302
+    order_id = int(created.headers['Location'].rstrip('/').split('/')[-1])
+
+    with app.app_context():
+        items = get_db().execute(
+            'SELECT product_id, custom_name, unit_price FROM order_items WHERE order_id = ? ORDER BY id',
+            (order_id,),
+        ).fetchall()
+        assert len(items) == 6
+        assert items[0]['product_id'] == 1
+        assert items[0]['custom_name'] == ''
+        for index, name in enumerate(['Rope tie-downs', 'Side boards', 'Cover', 'Spare wheel', 'Towing mirrors'], start=1):
+            assert items[index]['product_id'] is None
+            assert items[index]['custom_name'] == name
+
+    detail = client.get(f'/orders/{order_id}')
+    assert detail.status_code == 200
+    assert b'Rope tie-downs' in detail.data
+    assert b'Towing mirrors' in detail.data
+
+
 def test_add_company_customer_from_order_captures_vat_fields(client, app):
     login(client)
     seed_customer_and_product(client)

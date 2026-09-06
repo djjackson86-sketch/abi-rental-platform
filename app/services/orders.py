@@ -393,7 +393,7 @@ def draft_order_form(order_id):
             "custom_unit_price": item["unit_price"] if not item["product_id"] else "",
             "quantity": item["quantity"] or 1,
         })
-    while len(lines) < 4:
+    if not lines:
         lines.append({"product_id": "", "product_display": "", "custom_name": "", "custom_billing_mode": "fixed", "custom_unit_price": "", "quantity": 1})
     return {
         "order": order,

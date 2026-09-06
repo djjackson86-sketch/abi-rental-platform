@@ -131,32 +131,47 @@
     <div class="table-wrap order-lines-wrap">
       <table class="data-table order-lines-table">
         <thead><tr><th>ITEM NO.</th><th>DESCRIPTION</th><th>BILLING</th><th>UNIT</th><th>QTY</th><th>LINE TOTAL</th></tr></thead>
-        <tbody>
-        {% for line in order_form.get('lines', []) if editing %}
+        <tbody id="order-lines-body">
+        {% for line in order_form.get('lines', []) %}
           <tr class="enhanced-line">
-            <td>{{ loop.index }}</td>
+            <td class="item-no-cell"><span class="item-no">{{ loop.index }}</span><button type="button" class="line-remove-row" title="Remove this line">×</button></td>
             <td><input list="product-options" class="product-search" placeholder="Search product/SKU" value="{{ line.product_display }}"><input type="hidden" name="product_id" class="product-id" value="{{ line.product_id }}"><input name="custom_name" class="custom-name" placeholder="Or custom product/service" value="{{ line.custom_name }}"></td>
-            <td><select name="custom_billing_mode"><option value="fixed" {% if line.custom_billing_mode == 'fixed' %}selected{% endif %}>Fixed price</option><option value="rental_day" {% if line.custom_billing_mode == 'rental_day' %}selected{% endif %}>Multiply by rental days</option></select></td>
+            <td><select name="custom_billing_mode"><option value="fixed" {% if line.custom_billing_mode != 'rental_day' %}selected{% endif %}>Fixed price</option><option value="rental_day" {% if line.custom_billing_mode == 'rental_day' %}selected{% endif %}>Multiply by rental days</option></select></td>
             <td><input type="number" step="0.01" min="0" name="custom_unit_price" class="custom-unit-price" placeholder="Auto from inventory" value="{{ line.custom_unit_price }}"></td>
             <td><input type="number" name="quantity" min="1" value="{{ line.quantity or 1 }}"></td>
-            <td><output class="line-total-preview">R0.00</output></td>
+            <td class="line-total-cell"><output class="line-total-preview">R0.00</output></td>
           </tr>
         {% else %}
-          {% for line_no in range(1, 5) %}
           <tr class="enhanced-line">
-            <td>{{ line_no }}</td>
+            <td class="item-no-cell"><span class="item-no">1</span></td>
             <td><input list="product-options" class="product-search" placeholder="Search product/SKU"><input type="hidden" name="product_id" class="product-id"><input name="custom_name" class="custom-name" placeholder="Or custom product/service"></td>
             <td><select name="custom_billing_mode"><option value="fixed">Fixed price</option><option value="rental_day">Multiply by rental days</option></select></td>
             <td><input type="number" step="0.01" min="0" name="custom_unit_price" class="custom-unit-price" placeholder="Auto from inventory"></td>
             <td><input type="number" name="quantity" min="1" value="1"></td>
-            <td><output class="line-total-preview">R0.00</output></td>
+            <td class="line-total-cell"><output class="line-total-preview">R0.00</output></td>
           </tr>
-          {% endfor %}
         {% endfor %}
+        <tr class="enhanced-line" id="order-line-template" hidden>
+          <td class="item-no-cell"><span class="item-no">1</span><button type="button" class="line-remove-row" title="Remove this line">×</button></td>
+          <td><input list="product-options" class="product-search" placeholder="Search product/SKU"><input type="hidden" name="product_id" class="product-id"><input name="custom_name" class="custom-name" placeholder="Or custom product/service"></td>
+          <td><select name="custom_billing_mode"><option value="fixed">Fixed price</option><option value="rental_day">Multiply by rental days</option></select></td>
+          <td><input type="number" step="0.01" min="0" name="custom_unit_price" class="custom-unit-price" placeholder="Auto from inventory"></td>
+          <td><input type="number" name="quantity" min="1" value="1"></td>
+          <td class="line-total-cell"><output class="line-total-preview">R0.00</output></td>
+        </tr>
         </tbody>
       </table>
     </div>
     <p class="form-help">Catalogue products automatically use the inventory rental price. Only fill unit price for custom lines.</p>
+    <p class="form-help add-line-help"><button type="button" id="add-product-line" class="btn ghost">+ Add product line</button></p>
+    <style>
+      .order-lines-wrap .enhanced-line .line-remove-row{display:none;min-height:28px;height:28px;padding:0 9px;margin-top:6px;border-radius:8px;background:var(--danger-soft,#fff0ee);color:var(--danger,#d92d20);border:1px solid #ffd2cc;font-size:13px;line-height:1}
+      .order-lines-wrap .enhanced-line .line-remove-row:focus{outline:2px solid #bcd2ff}
+      .order-lines-wrap .enhanced-line.can-remove .line-remove-row{display:inline-flex}
+      .order-lines-wrap .add-line-help{margin:10px 2px 0}
+      .order-lines-wrap .add-line-help .btn{min-height:36px;height:36px;padding:6px 14px;box-shadow:none}
+      .order-lines-wrap #order-line-template{display:none}
+    </style>
   </section>
 
   <section class="form-section">
@@ -237,7 +252,15 @@
     else if(customName.trim()){ multiplier=billing==='rental_day'?days:1; active=true; }
     const base=active?unit*qty*multiplier:0; const taxMode=(estimatePanel&&estimatePanel.dataset.taxMode)||'exclusive'; const tax=taxMode==='inclusive'&&taxRate?base-(base/(1+taxRate)):base*taxRate; const subtotal=taxMode==='inclusive'&&taxRate?base-tax:base; const total=taxMode==='inclusive'&&taxRate?base:subtotal+tax; return {active,subtotal,tax,total,deposit}; }
   function updateEstimate(){ if(!estimatePanel) return; let subtotal=0,tax=0,lineTotal=0,deposit=0; document.querySelectorAll('.enhanced-line').forEach(row=>{ const est=lineEstimate(row); subtotal+=est.subtotal; tax+=est.tax; lineTotal+=est.total; deposit+=est.deposit; const out=row.querySelector('.line-total-preview'); if(out) out.textContent=fmt(est.total); }); const discount=0; const useSecurity=depositOption&&!['damage_waiver','no_deposit'].includes(depositOption.value); const depositTotal=useSecurity?deposit:0; const waiverTotal=depositOption&&depositOption.value==='damage_waiver'?amount(waiver&&waiver.value):0; const estimatedTotal=subtotal+tax+waiverTotal+depositTotal; productTotalEl.textContent=fmt(lineTotal); discountEl.textContent=fmt(discount); taxEl.textContent=fmt(tax); depositEl.textContent=fmt(depositTotal); waiverEl.textContent=fmt(waiverTotal); orderTotalEl.textContent=fmt(estimatedTotal); if(orderTotalLabel) orderTotalLabel.textContent='Estimated order total'+(useSecurity?' incl. refundable deposit':(waiverTotal>0?' incl. damage waiver':'')); }
-  document.querySelectorAll('.enhanced-line').forEach(row=>{ const input=row.querySelector('.product-search'); const hidden=row.querySelector('.product-id'); const price=row.querySelector('.custom-unit-price'); const custom=row.querySelector('.custom-name'); function sync(){ const match=productOptions.find(o=>o.value===input.value); if(match){ hidden.value=match.dataset.id||''; price.value=match.dataset.price||''; price.placeholder='From inventory'; custom.value=''; } else if(!input.value){ hidden.value=''; price.value=''; price.placeholder='Custom only'; } updateEstimate(); } input.addEventListener('input',sync); input.addEventListener('change',sync); row.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',updateEstimate)); row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',updateEstimate)); sync(); });
+  function bindLineRow(row){ if(!row || row.id==='order-line-template') return; const input=row.querySelector('.product-search'); const hidden=row.querySelector('.product-id'); const price=row.querySelector('.custom-unit-price'); const custom=row.querySelector('.custom-name'); function sync(){ const match=productOptions.find(o=>o.value===input.value); if(match){ hidden.value=match.dataset.id||''; price.value=match.dataset.price||''; price.placeholder='From inventory'; custom.value=''; } else if(!input.value){ hidden.value=''; price.value=''; price.placeholder='Custom only'; } updateEstimate(); } input.addEventListener('input',sync); input.addEventListener('change',sync); row.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',updateEstimate)); row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',updateEstimate)); sync(); }
+  const lineRows=()=>[...document.querySelectorAll('#order-lines-body .enhanced-line')].filter(row=>row.id!=='order-line-template');
+  function renumberLines(){ const rows=lineRows(); const showRemove=rows.length>1; rows.forEach((row,index)=>{ const no=row.querySelector('.item-no'); if(no) no.textContent=String(index+1); row.classList.toggle('can-remove',showRemove&&index>0); }); }
+  window.orderLines={addLine:function(){ const template=document.getElementById('order-line-template'); if(!template) return; const row=template.cloneNode(true); row.id=''; row.removeAttribute('hidden'); row.classList.remove('can-remove'); row.querySelectorAll('input').forEach(el=>{ if(el.type!=='hidden') el.value=''; }); const qty=row.querySelector('input[name="quantity"]'); if(qty) qty.value='1'; const price=row.querySelector('.custom-unit-price'); if(price) price.placeholder='Auto from inventory'; template.parentNode.insertBefore(row,template); bindLineRow(row); renumberLines(); updateEstimate(); }, removeLine:function(button){ const row=button&&button.closest?button.closest('.enhanced-line'):null; if(!row) return; if(lineRows().length<=1) return; row.parentNode.removeChild(row); renumberLines(); updateEstimate(); }};
+  const linesBody=document.getElementById('order-lines-body');
+  if(linesBody){ linesBody.addEventListener('click',function(ev){ const btn=ev.target&&ev.target.closest?ev.target.closest('.line-remove-row'):null; if(!btn) return; ev.preventDefault(); if(window.orderLines) window.orderLines.removeLine(btn); }); }
+  const addLineBtn=document.getElementById('add-product-line');
+  if(addLineBtn){ addLineBtn.addEventListener('click',function(){ if(window.orderLines) window.orderLines.addLine(); }); }
+  document.querySelectorAll('.enhanced-line').forEach(bindLineRow); renumberLines();
   function syncWaiver(){ if(!depositOption||!waiver) return; waiver.disabled=depositOption.value!=='damage_waiver'; if(waiver.disabled) waiver.value=''; updateEstimate(); } if(depositOption) depositOption.addEventListener('change',syncWaiver); if(waiver) waiver.addEventListener('input',updateEstimate); syncWaiver(); updateRentalDays();
 })();
 </script>
