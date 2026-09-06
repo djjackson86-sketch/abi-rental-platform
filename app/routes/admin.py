@@ -16,20 +16,7 @@ def health():
 
 @bp.route("/")
 def index():
-    return redirect(url_for("admin.setup"))
-
-@bp.route("/setup")
-@login_required
-def setup():
-    db = get_db()
-    counts = {
-        "products": db.execute("SELECT COUNT(*) c FROM products").fetchone()[ "c"],
-        "customers": db.execute("SELECT COUNT(*) c FROM customers").fetchone()[ "c"],
-        "orders": db.execute("SELECT COUNT(*) c FROM orders").fetchone()[ "c"],
-        "tax_profiles": db.execute("SELECT COUNT(*) c FROM tax_profiles WHERE active = 1").fetchone()[ "c"],
-    }
-    completed = sum([counts["tax_profiles"] > 0, counts["products"] > 0, counts["customers"] > 0, counts["orders"] > 0])
-    return render_template("admin/setup.html", settings=get_company_settings(), counts=counts, completed=completed)
+    return redirect(url_for("admin.dashboard"))
 
 @bp.route("/dashboard")
 @login_required
@@ -42,10 +29,6 @@ def dashboard():
         "revenue": db.execute("SELECT COALESCE(SUM(total),0) s FROM orders").fetchone()[ "s"],
     }
     return render_template("admin/dashboard.html", settings=get_company_settings(), metrics=metrics, schedule=dashboard_schedule())
-
-def render_placeholder(name, title, description, primary_label=None):
-    return render_template("admin/placeholder.html", settings=get_company_settings(), name=name, title=title, description=description, primary_label=primary_label)
-
 
 @bp.route("/coupons", methods=["GET", "POST"])
 @bp.route("/coupons/<int:coupon_id>/edit", methods=["GET", "POST"])
@@ -73,12 +56,6 @@ def app_store():
     return render_template("admin/app_store.html", items=items)
 
 
-@bp.route("/ask-bo")
-@login_required
-def ask_bo():
-    return render_placeholder("Ask Bo", "Ask Bo", "Ask operational questions about rentals, inventory, orders and reports. AI assistant functionality is planned.")
-
-
 @bp.route("/scan-barcode", methods=["GET", "POST"])
 @login_required
 def scan_barcode():
@@ -95,12 +72,6 @@ def scan_barcode():
             flash(f"No active product found with barcode '{barcode}'", "error")
             return redirect(url_for("admin.scan_barcode"))
     return render_template("admin/scan_barcode.html", settings=get_company_settings())
-
-
-@bp.route("/help")
-@login_required
-def help_page():
-    return render_placeholder("Help", "Help", "Find setup guidance, workflow help and support resources for the rental platform.")
 
 @bp.route("/calendar")
 @login_required

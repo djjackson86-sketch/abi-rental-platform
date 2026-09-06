@@ -51,11 +51,12 @@ def test_production_requires_non_default_secrets(monkeypatch, tmp_path):
     assert 'ADMIN_PASSWORD must be set' in message
 
 
-def test_login_and_setup(client):
+def test_login_opens_dashboard(client):
     res = login(client)
     assert res.status_code == 200
-    assert b'Welcome, follow these steps' in res.data
-    assert b'Create a tax profile' in res.data
+    assert b'Dashboard' in res.data
+    assert b'Welcome, follow these steps' not in res.data
+    assert b'Create a tax profile' not in res.data
 
 
 def test_protected_pages_redirect(client):
@@ -64,7 +65,7 @@ def test_protected_pages_redirect(client):
     assert '/login' in res.headers['Location']
 
 
-def test_booqable_reference_navigation_pages_exist(client):
+def test_admin_navigation_excludes_removed_pages(client):
     login(client)
     dashboard = client.get('/dashboard')
     assert b'Continue setup' not in dashboard.data
@@ -72,16 +73,25 @@ def test_booqable_reference_navigation_pages_exist(client):
     assert b'Choose a plan' not in dashboard.data
     assert b'class="logo" href="/dashboard"' in dashboard.data
     assert b'href="/setup">Setup</a>' not in dashboard.data
+    assert b'href="/ask-bo"' not in dashboard.data
+    assert b'>Ask Bo<' not in dashboard.data
+    assert b'href="/help"' not in dashboard.data
+    assert b'>Help<' not in dashboard.data
     assert b'href="/dashboard">Dashboard</a>' in dashboard.data
     for path, expected in [
         ('/app-store', b'App store'),
-        ('/ask-bo', b'Ask Bo'),
         ('/scan-barcode', b'Scan a barcode'),
-        ('/help', b'Help'),
     ]:
         res = client.get(path)
         assert res.status_code == 200
         assert expected in res.data
+
+
+def test_removed_setup_ask_bo_and_help_routes_are_disabled(client):
+    login(client)
+    assert client.get('/setup').status_code == 404
+    assert client.get('/ask-bo').status_code == 404
+    assert client.get('/help').status_code == 404
 
 
 def test_coupon_options_are_removed_from_reachable_admin_workflows(client):
@@ -585,17 +595,6 @@ def test_customer_crud_search_and_detail(client, app):
     assert b'Company Reg No' not in res.data
     assert b'2024/123456/07' not in res.data
     assert b'Toyota Hilux' not in res.data
-
-
-def test_setup_marks_customer_complete(client):
-    login(client)
-    before = client.get('/setup')
-    assert b'Create an order' in before.data
-    client.post('/customers/new', data={'customer_type': 'individual', 'name': 'Setup Customer', 'email': '', 'phone': ''}, follow_redirects=True)
-    after = client.get('/setup')
-    assert b'Setup Customer' not in after.data
-    # Setup completion count should now include seeded tax profile and this customer.
-    assert b'2/14 completed' in after.data
 
 
 def seed_customer_and_product(client):
