@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS customers (
     country TEXT NOT NULL DEFAULT 'South Africa',
     custom_fields_json TEXT NOT NULL DEFAULT '{}',
     balance_due REAL NOT NULL DEFAULT 0,
+    standard_discount_percent REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 
@@ -209,6 +210,9 @@ CREATE TABLE IF NOT EXISTS orders (
     deposit_process_method TEXT NOT NULL DEFAULT '',
     deposit_processed_at TEXT NOT NULL DEFAULT '',
     deposit_note TEXT NOT NULL DEFAULT '',
+    no_damages INTEGER NOT NULL DEFAULT 0,
+    no_revision_required INTEGER NOT NULL DEFAULT 0,
+    return_revised_at TEXT NOT NULL DEFAULT '',
     total REAL NOT NULL DEFAULT 0,
     due_total REAL NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
@@ -251,6 +255,9 @@ CREATE TABLE IF NOT EXISTS documents (
     sent_to TEXT NOT NULL DEFAULT '',
     email_status TEXT NOT NULL DEFAULT 'not_sent',
     email_error TEXT NOT NULL DEFAULT '',
+    revision_of_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    revision_number INTEGER NOT NULL DEFAULT 0,
+    revised_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 """
@@ -354,6 +361,9 @@ def run_migrations(db):
     ensure_column(db, "orders", "deposit_process_method", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "deposit_processed_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "deposit_note", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "no_damages", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "no_revision_required", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "return_revised_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "discount_mode", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "discount_value", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
@@ -364,6 +374,7 @@ def run_migrations(db):
     ensure_column(db, "customers", "postal_code", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "country", "TEXT NOT NULL DEFAULT 'South Africa'")
     ensure_column(db, "customers", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
+    ensure_column(db, "customers", "standard_discount_percent", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
     ensure_column(db, "payments", "payment_date", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "payments", "deleted_at", "TEXT NOT NULL DEFAULT ''")
@@ -371,6 +382,9 @@ def run_migrations(db):
     ensure_column(db, "documents", "sent_to", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "email_status", "TEXT NOT NULL DEFAULT 'not_sent'")
     ensure_column(db, "documents", "email_error", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "documents", "revision_of_id", "INTEGER REFERENCES documents(id) ON DELETE SET NULL")
+    ensure_column(db, "documents", "revision_number", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(db, "documents", "revised_at", "TEXT NOT NULL DEFAULT ''")
     db.execute("""CREATE TABLE IF NOT EXISTS app_store_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,

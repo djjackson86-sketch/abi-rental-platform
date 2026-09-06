@@ -33,11 +33,23 @@ def create_document(order_id, document_type):
     if not order:
         raise ValueError("Order not found")
     db = get_db()
+    revision_of_id = None
+    revision_number = 0
     number = '' if document_type == 'invoice' else _next_document_number(document_type)
+    if document_type == 'invoice':
+        draft = db.execute("SELECT id FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'draft' ORDER BY id DESC LIMIT 1", (order_id,)).fetchone()
+        if draft:
+            raise ValueError("A proforma invoice already exists for this order")
+        finalized = db.execute("SELECT id, number FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'finalized' ORDER BY id DESC LIMIT 1", (order_id,)).fetchone()
+        if finalized:
+            revision_of_id = finalized["id"]
+            number = finalized["number"] or _next_document_number('invoice')
+            rev_row = db.execute("SELECT COALESCE(MAX(revision_number), 0) AS rev FROM documents WHERE revision_of_id = ? OR id = ?", (revision_of_id, revision_of_id)).fetchone()
+            revision_number = int(rev_row["rev"] or 0) + 1
     cur = db.execute(
-        """INSERT INTO documents (order_id, document_type, status, number, pdf_path, created_at)
-        VALUES (?, ?, 'draft', ?, '', ?)""",
-        (order_id, document_type, number, now()),
+        """INSERT INTO documents (order_id, document_type, status, number, pdf_path, revision_of_id, revision_number, revised_at, created_at)
+        VALUES (?, ?, 'draft', ?, '', ?, ?, ?, ?)""",
+        (order_id, document_type, number, revision_of_id, revision_number, now() if revision_of_id else '', now()),
     )
     db.commit()
     return cur.lastrowid

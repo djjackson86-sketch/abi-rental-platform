@@ -44,7 +44,15 @@
     <div class="list-row"><span>Status</span><b>{{ order.status|title }}</b></div>
     <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>
     <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
-    <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(payment_summary.due_total) }}</b></div>
+    <div class="list-row"><span>Due</span><b>{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
+    {% if payment_summary.due_total < 0 %}
+    <form method="post" action="{{ url_for('orders.refund_order', order_id=order.id) }}" class="payment-form refund-form">
+      <h3>Refund credit</h3>
+      <div class="form-grid compact"><label>Refund amount<input type="number" step="0.01" min="0.01" max="{{ '%.2f'|format(0 - payment_summary.due_total) }}" name="refund_amount" value="{{ '%.2f'|format(0 - payment_summary.due_total) }}" required></label><label>Refund method<select name="refund_method" required><option value="eft">EFT</option><option value="card">Card</option><option value="cash">Cash</option></select></label><label>Refund date<input type="datetime-local" name="refund_date" value="{{ default_payment_date }}" required></label></div>
+      <label>Reference<input name="reference" value="Customer credit refund"></label>
+      <button class="btn primary" type="submit">Refund customer</button>
+    </form>
+    {% endif %}
     <form method="post" action="{{ url_for('orders.record_order_payment', order_id=order.id) }}" class="payment-form">
       <h3>Record payment</h3>
       <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method"><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option></select></label><label>Payment date<input type="datetime-local" name="payment_date" value="{{ default_payment_date }}" required></label></div>
@@ -83,10 +91,10 @@
   <h2>Items</h2>
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Product</th><th>Qty</th><th>Unit</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr></thead>
+      <thead><tr><th>Product</th><th>Days</th><th>Qty</th><th>Unit</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.unit_price) }}</td><td>R{{ '%.2f'|format(item.line_subtotal) }}</td><td>R{{ '%.2f'|format(item.line_tax) }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{% if item.product_type == 'rental' %}{{ order_rental_days }}{% else %}—{% endif %}</td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.unit_price) }}</td><td>R{{ '%.2f'|format(item.line_subtotal) }}</td><td>R{{ '%.2f'|format(item.line_tax) }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -126,7 +134,7 @@
     {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
     <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
     <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
-    <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(payment_summary.due_total) }}</b></div>
+    <div class="list-row"><span>Due</span><b>{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
   </div>
 </section>
 <section class="panel settings-form">
@@ -135,22 +143,24 @@
   {% if order.status == 'started' %}
   <form method="post" action="{{ url_for('orders.revise_return', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
-      <label>Actual return date<input type="date" name="end_date" value="{{ order.end_at[:10] if order.end_at else '' }}" required></label>
-      <label>Actual return time<input type="time" name="end_time" value="{{ order.end_at[11:16] if order.end_at else '' }}" required></label>
+      <label>Actual return date<input type="date" id="actual-return-date" name="end_date" value="{{ order.end_at[:10] if order.end_at else '' }}" required></label>
+      <label>Actual return time<input type="time" id="actual-return-time" name="end_time" value="{{ order.end_at[11:16] if order.end_at else '' }}" required></label>
+      <label class="switch"><input type="checkbox" name="no_revision_required" value="1" {% if order.no_revision_required %}checked{% endif %}> No Revision Required</label>
     </div>
-    <p class="form-help">Adjust before pressing Return order. Billing recalculates full 24-hour rental days from pickup plus extra hours after the pickup time.</p>
+    <p class="form-help" id="actual-return-breakdown" data-start-at="{{ order.start_at[:16] if order.start_at else '' }}">Live extra days/hours will appear here.</p>
+    <p class="form-help">Adjust before pressing Return order, or tick No Revision Required if the planned return is still correct. Billing recalculates full 24-hour rental days from pickup plus extra hours after the pickup time.</p>
     <button class="btn primary" type="submit">Revise return date/time and invoice</button>
   </form>
   {% endif %}
   <form method="post" action="{{ url_for('orders.add_charges', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
-      <label>Extra hours<input type="number" step="0.25" min="0" name="extra_hours" value="{{ order.extra_hours or 0 }}"></label>
-      <label>Hourly extra rate<input type="number" step="0.01" min="0" name="extra_hourly_rate" value="{{ '%.2f'|format(return_charge_defaults.hourly_rate) }}" placeholder="0.00"></label>
       <label>Damage Charge<input type="number" step="0.01" min="0" name="damage_charge" placeholder="0.00"></label>
+      <label class="switch"><input type="checkbox" name="no_damages" value="1" {% if order.no_damages %}checked{% endif %}> No Damages</label>
     </div>
-    <p class="form-help">Hourly extra rate is filled from the trailer inventory item on this order. Add Charges creates return charge line items in the Items section above.</p>
+    <p class="form-help">Damage Charge creates a return charge line item in the Items section above. Extra hours are calculated from the actual return date/time and taxed with the trailer tax profile.</p>
     <button class="btn ghost" type="submit">Add Charges</button>
   </form>
+  <form method="post" action="{{ url_for('orders.return_checklist', order_id=order.id) }}" class="payment-form"><div class="form-grid compact"><label class="switch"><input type="checkbox" name="no_damages" value="1" {% if order.no_damages %}checked{% endif %}> No Damages</label><label class="switch"><input type="checkbox" name="no_revision_required" value="1" {% if order.no_revision_required %}checked{% endif %}> No Revision Required</label></div><button class="btn ghost" type="submit">Save return checklist</button></form>
   <form method="post" action="{{ url_for('orders.use_deposit', order_id=order.id) }}" class="payment-form">
     <label>Use-deposit note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Balance or damage note"></label>
     <p class="form-help">Use Deposit applies the available security deposit to outstanding charges first and records any remaining refund for processing below.</p>
@@ -169,4 +179,13 @@
   <p class="form-help">Return and deposit settlement unlock after the order is picked up or canceled.</p>
   {% endif %}
 </section>
+
+<script>
+(function(){
+  const dateInput=document.getElementById('actual-return-date'); const timeInput=document.getElementById('actual-return-time'); const out=document.getElementById('actual-return-breakdown');
+  function parse(dt, tm){ if(!dt) return null; const d=dt.split('-').map(Number); const t=(tm||'00:00').split(':').map(Number); if(d.length!==3||!d[0]) return null; return new Date(d[0], d[1]-1, d[2], t[0]||0, t[1]||0); }
+  function update(){ if(!out) return; const startRaw=out.dataset.startAt||''; const parts=startRaw.split('T'); const start=parse(parts[0], parts[1]); const end=parse(dateInput&&dateInput.value, timeInput&&timeInput.value); if(!start||!end||end<=start){ out.textContent='Live calculated extra days/hours: 0 rental days + 0 extra hours'; return; } const hours=(end-start)/(60*60*1000); const days=Math.max(1, Math.floor(hours/24)); const extra=Math.max(0, Math.round((hours-(days*24))*100)/100); out.textContent='Live calculated extra days/hours: '+days+' rental day'+(days===1?'':'s')+' + '+extra+' extra hour'+(extra===1?'':'s'); }
+  if(dateInput) dateInput.addEventListener('input', update); if(timeInput) timeInput.addEventListener('input', update); update();
+})();
+</script>
 {% endblock %}

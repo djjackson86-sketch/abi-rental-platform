@@ -133,7 +133,7 @@
                   <td>{{ o.start_at[:10] if o.start_at else '—' }} → {{ o.end_at[:10] if o.end_at else '—' }}</td>
                   <td>{{ o.item_count }}</td>
                   <td>R{{ '%.2f'|format(o.total) }}</td>
-                  <td>R{{ '%.2f'|format(o.due_total) }}</td>
+                  <td>{% if o.due_total < 0 %}<strong class="balance-credit">-R{{ '%.2f'|format(0 - o.due_total) }}</strong>{% else %}R{{ '%.2f'|format(o.due_total) }}{% endif %}</td>
                   {% set deposit_due = deposit_to_process_amount(o) %}<td>{% if deposit_due %}<strong>R{{ '%.2f'|format(deposit_due) }}</strong>{% elif o.deposit_total %}<small>Done</small>{% else %}<small>—</small>{% endif %}</td>
                   <td><a class="btn ghost" href="{{ url_for('orders.detail', order_id=o.id) }}">Open</a></td>
                 </tr>

@@ -1,13 +1,13 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, return_charge_defaults, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, use_return_deposit
+from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
-from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment
+from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_options, default_branch_id
@@ -21,7 +21,7 @@ CUSTOMER_EDIT_FIELD_KEYS = [
     "address_line1", "address_line2", "suburb", "city", "province", "postal_code", "country",
     "vehicle_make", "vehicle_color", "vehicle_reg_no",
     "alternative_contact_name", "alternative_contact_number", "alternative_contact_relationship",
-    "vat_number", "company_reg_no",
+    "vat_number", "company_reg_no", "standard_discount_percent",
 ]
 
 
@@ -32,7 +32,9 @@ def _submitted_customer_values(form):
 def _customers():
     rows = get_db().execute("""
         SELECT id, customer_type, name, email, phone, marketing_opt_in,
-               address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json
+               address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
+               (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
+                FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance
         FROM customers
         ORDER BY name
     """).fetchall()
@@ -52,7 +54,7 @@ def _selected_customer_summary(customers, selected_customer_id):
 def _products():
     return get_db().execute("""
         SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
-               p.security_deposit, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
+               p.security_deposit, p.hourly_extra_rate, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
         FROM products p
         LEFT JOIN branches b ON b.id = p.branch_id
         LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
@@ -230,6 +232,10 @@ def detail(order_id):
     if not order:
         flash("Order not found", "error")
         return redirect(url_for("orders.index"))
+    try:
+        order_rental_days = rental_days(datetime.fromisoformat(order["start_at"]), datetime.fromisoformat(order["end_at"])) if order["start_at"] and order["end_at"] else 1
+    except ValueError:
+        order_rental_days = 1
     return render_template(
         "admin/orders/detail.html",
         settings=get_company_settings(),
@@ -245,6 +251,8 @@ def detail(order_id):
         display_payment_date=display_payment_date,
         customer_custom_fields=custom_fields_for(order),
         return_charge_defaults=return_charge_defaults(order_id),
+        return_damage_total=return_damage_total(order_id),
+        order_rental_days=order_rental_days,
         can_process_return_deposit=can_process_return_deposit(order),
         default_payment_date=local_now_iso(timespec="minutes"),
         default_deposit_processed_at=(order["deposit_processed_at"] or local_now_iso(timespec="minutes"))[:16],
@@ -290,6 +298,28 @@ def use_deposit(order_id):
     try:
         message = use_return_deposit(order_id, request.form)
         flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))
+
+
+@bp.post("/<int:order_id>/return-checklist")
+@login_required
+def return_checklist(order_id):
+    try:
+        message = update_return_checklist(order_id, request.form)
+        flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))
+
+
+@bp.post("/<int:order_id>/refund")
+@login_required
+def refund_order(order_id):
+    try:
+        record_refund(order_id, request.form)
+        flash("Refund recorded", "success")
     except ValueError as exc:
         flash(str(exc), "error")
     return redirect(url_for("orders.detail", order_id=order_id))

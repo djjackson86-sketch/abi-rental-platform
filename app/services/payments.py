@@ -72,9 +72,9 @@ def recalculate_order_payment(order_id):
     due_total = round(float(order["total"] or 0) - paid_total, 2)
     status = status_for(order["total"], paid_total)
     db = get_db()
-    db.execute("UPDATE orders SET payment_status = ?, due_total = ? WHERE id = ?", (status, max(due_total, 0), order_id))
+    db.execute("UPDATE orders SET payment_status = ?, due_total = ? WHERE id = ?", (status, due_total, order_id))
     db.commit()
-    return {"paid_total": round(paid_total, 2), "due_total": round(max(due_total, 0), 2), "payment_status": status}
+    return {"paid_total": round(paid_total, 2), "due_total": due_total, "payment_status": status}
 
 
 def payment_summary(order_id):
@@ -82,7 +82,7 @@ def payment_summary(order_id):
     if not order:
         return {"paid_total": 0, "due_total": 0, "payment_status": "payment_due"}
     paid_total = payment_total(order_id)
-    due_total = max(round(float(order["total"] or 0) - paid_total, 2), 0)
+    due_total = round(float(order["total"] or 0) - paid_total, 2)
     return {"paid_total": round(paid_total, 2), "due_total": due_total, "payment_status": status_for(order["total"], paid_total)}
 
 
@@ -156,3 +156,29 @@ def list_payments(include_archived=False):
 
 def label_for(payment_status):
     return PAYMENT_LABELS.get(payment_status, payment_status.replace("_", " ").title())
+
+
+def record_refund(order_id, form):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    paid_total = payment_total(order_id)
+    credit = round(paid_total - float(order["total"] or 0), 2)
+    if credit <= 0:
+        raise ValueError("This order does not have a credit to refund")
+    try:
+        amount = round(float(form.get("refund_amount") or credit), 2)
+    except ValueError as exc:
+        raise ValueError("Refund amount must be a number") from exc
+    if amount <= 0 or amount > credit:
+        raise ValueError("Refund amount must be greater than zero and not more than the credit")
+    method = (form.get("refund_method") or form.get("deposit_process_method") or "").strip().lower()
+    if method not in {"eft", "card", "cash"}:
+        raise ValueError("Refund method must be EFT, Card, or Cash")
+    payment_date = parse_payment_date(form.get("refund_date") or form.get("deposit_processed_at"))
+    reference = (form.get("reference") or "Customer refund").strip()
+    db = get_db()
+    db.execute("""INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
+        VALUES (?, ?, ?, ?, 'paid', ?, ?)""", (order_id, -amount, method, reference, payment_date, now()))
+    db.commit()
+    return recalculate_order_payment(order_id)

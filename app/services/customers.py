@@ -99,6 +99,10 @@ def _clean(form, existing_custom_fields=None):
             custom_fields.pop(key, None)
     custom_fields.pop("vehicle_details", None)
     custom_fields.pop("alternative_contact", None)
+    try:
+        standard_discount_percent = max(0, min(100, float(form.get("standard_discount_percent") or 0)))
+    except ValueError as exc:
+        raise ValueError("Standard discount must be a percentage between 0 and 100") from exc
     return {
         "customer_type": customer_type,
         "name": name,
@@ -113,6 +117,7 @@ def _clean(form, existing_custom_fields=None):
         "postal_code": form.get("postal_code", "").strip(),
         "country": form.get("country", "South Africa").strip() or "South Africa",
         "custom_fields_json": json.dumps(custom_fields, ensure_ascii=False),
+        "standard_discount_percent": standard_discount_percent,
     }
 
 
@@ -120,8 +125,8 @@ def create_customer(form):
     data = _clean(form)
     db = get_db()
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :created_at)""",
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -138,7 +143,7 @@ def update_customer(customer_id, form):
     data = _clean(form, existing_custom_fields=raw_custom_fields_for(get_customer(customer_id)))
     data["id"] = customer_id
     get_db().execute(
-        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json WHERE id=:id""",
+        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json, standard_discount_percent=:standard_discount_percent WHERE id=:id""",
         data,
     )
     get_db().commit()
@@ -170,6 +175,8 @@ def customer_summary_for(customer):
         "address": ", ".join(str(part).strip() for part in address_parts if part and str(part).strip()) or "—",
         "custom_fields": custom_fields_for(customer),
         "form": customer_form_values_for(customer),
+        "standard_discount_percent": float(_customer_row_value(customer, "standard_discount_percent", 0) or 0),
+        "previous_orders_balance": round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2),
         "display": display,
     }
 
@@ -206,6 +213,7 @@ def customer_form_values_for(customer):
         "province": _customer_row_value(customer, "province") or "",
         "postal_code": _customer_row_value(customer, "postal_code") or "",
         "country": _customer_row_value(customer, "country") or "South Africa",
+        "standard_discount_percent": _customer_row_value(customer, "standard_discount_percent", 0) or 0,
     }
     for key in CUSTOM_FIELD_FORM_KEYS:
         values[key] = raw.get(key) or ""

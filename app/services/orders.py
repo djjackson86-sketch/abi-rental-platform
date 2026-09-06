@@ -140,7 +140,7 @@ def get_order(order_id):
         """SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
-            c.custom_fields_json AS custom_fields_json,
+            c.custom_fields_json AS custom_fields_json, c.standard_discount_percent AS customer_standard_discount_percent,
             cb.name AS collect_branch_name, rb.name AS return_branch_name
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
         LEFT JOIN branches cb ON cb.id = o.collect_branch_id
@@ -188,9 +188,10 @@ def rental_days(start_at, end_at):
 
 
 def calculate_line(product, quantity, days, tax_mode="exclusive"):
-    qty = max(1, int(quantity or 1))
+    product_type = product["product_type"] or "rental"
+    qty = 1 if product_type == "service" else max(1, int(quantity or 1))
     base = float(product["price_amount"] or 0) * qty
-    if product["price_unit"] in {"day", "week", "month", "hour"}:
+    if product_type == "rental" and product["price_unit"] in {"day", "week", "month", "hour"}:
         # v1 pricing is day-equivalent for all duration units; advanced structures come later.
         base *= days
     tax_rate = float(product["tax_rate"] or 0) / 100
@@ -202,7 +203,7 @@ def calculate_line(product, quantity, days, tax_mode="exclusive"):
         line_subtotal = base
         line_tax = base * tax_rate
         line_total = line_subtotal + line_tax
-    deposit = float(product["security_deposit"] or 0) * qty
+    deposit = 0 if product_type == "service" else float(product["security_deposit"] or 0) * qty
     return {"quantity": qty, "line_subtotal": round(line_subtotal, 2), "line_tax": round(line_tax, 2), "line_total": round(line_total, 2), "deposit": round(deposit, 2)}
 
 
@@ -324,18 +325,19 @@ def _build_order_payload(form):
 
     subtotal = round(subtotal, 2)
     tax_total = round(tax_total, 2)
+    standard_discount_percent = 0.0
+    if customer_id:
+        customer_discount_row = db.execute("SELECT standard_discount_percent FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        if customer_discount_row:
+            standard_discount_percent = float(customer_discount_row["standard_discount_percent"] or 0)
     # Coupon entry has been retired from reachable staff/admin workflows.
     # Keep the historical order columns/display intact, but do not apply
     # submitted coupon codes to newly saved/recalculated orders.
     coupon_code = ""
-    discount_total = 0
-    # Discounts are applied later on the saved order page (staff order
-    # discount), not on the new/edit form. These keys keep the create/update
-    # statements explicit; update_draft_order carries a stored discount
-    # forward when the form submits no discount fields.
-    discount_mode = ""
-    discount_value = 0
-    total = round(subtotal + tax_total, 2)
+    discount_mode = "percent" if standard_discount_percent > 0 else ""
+    discount_value = standard_discount_percent if standard_discount_percent > 0 else 0
+    discount_total = computed_discount(discount_mode, discount_value, subtotal, tax_total) if discount_mode else 0
+    total = round(subtotal + tax_total - discount_total, 2)
     deposit_option = form.get("deposit_option", "security_deposit")
     if deposit_option not in {"security_deposit", "damage_waiver", "no_deposit"}:
         deposit_option = "security_deposit"
@@ -594,9 +596,11 @@ def availability_errors(order_id):
     for item in order_items(order_id):
         if not item["product_id"]:
             continue
-        product = db.execute("SELECT name, quantity, branch_id FROM products WHERE id = ?", (item["product_id"],)).fetchone()
+        product = db.execute("SELECT name, quantity, branch_id, product_type FROM products WHERE id = ?", (item["product_id"],)).fetchone()
         if not product:
             errors.append("One of the products on this order is no longer available")
+            continue
+        if (product["product_type"] or "") == "service":
             continue
         branch_clause = "" if product["branch_id"] is None else "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)"
         params = [item["product_id"], order_id]
@@ -629,6 +633,8 @@ def transition_order(order_id, action):
     transition = TRANSITIONS[action]
     if order["status"] not in transition["from"]:
         raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
+    if action == "return":
+        validate_return_ready(order_id)
     if action in {"reserve", "start"}:
         if not order["customer_id"]:
             raise ValueError("Add customer details before reserving or pickup")
@@ -686,6 +692,33 @@ def _parse_deposit_processed_at(value):
 RETURN_CHARGE_NAMES = {"Extra hours", "Damage charge"}
 
 
+def return_damage_total(order_id):
+    row = get_db().execute("SELECT COALESCE(SUM(line_total), 0) AS total FROM order_items WHERE order_id = ? AND custom_name = 'Damage charge'", (order_id,)).fetchone()
+    return round(float(row["total"] or 0), 2) if row else 0.0
+
+
+def validate_return_ready(order_id):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    damage_ok = bool(order["no_damages"]) or return_damage_total(order_id) > 0
+    revision_ok = bool(order["no_revision_required"]) or bool(order["return_revised_at"] or "")
+    if not damage_ok or not revision_ok:
+        raise ValueError("Before returning, tick No Damages or record a damage charge, and tick No Revision Required or revise the actual return date/time")
+
+
+def update_return_checklist(order_id, form):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    _require_return_deposit_allowed(order)
+    no_damages = 1 if form.get("no_damages") else 0
+    no_revision_required = 1 if form.get("no_revision_required") else 0
+    get_db().execute("UPDATE orders SET no_damages = ?, no_revision_required = ? WHERE id = ?", (no_damages, no_revision_required, order_id))
+    get_db().commit()
+    return "Return checklist saved"
+
+
 def late_return_breakdown(start_at, actual_return_at):
     """Return billable full 24h rental days plus extra hours after pickup time.
 
@@ -723,12 +756,29 @@ def _line_recalc(item, days, tax_mode):
     return round(subtotal, 2), round(tax, 2), round(total, 2)
 
 
+def _return_charge_tax(order_id, amount, settings):
+    row = get_db().execute("""SELECT COALESCE(t.rate, 0) AS tax_rate FROM order_items oi
+        LEFT JOIN products p ON p.id = oi.product_id
+        LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
+        WHERE oi.order_id = ? AND oi.product_id IS NOT NULL ORDER BY oi.id LIMIT 1""", (order_id,)).fetchone()
+    rate = float(row["tax_rate"] or 0) / 100 if row else 0
+    amount = round(float(amount or 0), 2)
+    if settings["tax_mode"] == "inclusive" and rate:
+        tax = amount - (amount / (1 + rate))
+        return round(amount - tax, 2), round(tax, 2), amount
+    return amount, round(amount * rate, 2), round(amount + (amount * rate), 2)
+
+
 def revise_started_return(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
     if order["status"] != "started":
         raise ValueError("Return date and time can only be revised after pickup and before return")
+    if form.get("no_revision_required"):
+        get_db().execute("UPDATE orders SET no_revision_required = 1 WHERE id = ?", (order_id,))
+        get_db().commit()
+        return "No revision required saved"
     start_at = datetime.fromisoformat(order["start_at"])
     settings = get_db().execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
     actual_return_at = _parse_dt(form.get("end_date"), form.get("end_time"), settings["default_return_time"])
@@ -766,18 +816,20 @@ def revise_started_return(order_id, form):
     hourly_rate = return_charge_defaults(order_id)["hourly_rate"]
     extra_charge = round(extra_hours * hourly_rate, 2)
     if extra_charge > 0:
+        extra_subtotal, extra_tax, extra_total = _return_charge_tax(order_id, extra_charge, settings)
         db.execute(
             """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
-            VALUES (?, NULL, 'Extra hours', ?, ?, ?, 0, ?, 'fixed')""",
-            (order_id, extra_hours, hourly_rate, extra_charge, extra_charge),
+            VALUES (?, NULL, 'Extra hours', ?, ?, ?, ?, ?, 'fixed')""",
+            (order_id, extra_hours, hourly_rate, extra_subtotal, extra_tax, extra_total),
         )
-        subtotal += extra_charge
-        line_total += extra_charge
+        subtotal += extra_subtotal
+        tax_total += extra_tax
+        line_total += extra_total
     discount_total = computed_discount(order["discount_mode"], order["discount_value"], subtotal, tax_total) if (order["discount_mode"] or "") in {"percent", "amount"} else float(order["discount_total"] or 0)
     total = round(line_total - discount_total + float(order["deposit_total"] or 0) + float(order["damage_waiver_amount"] or 0), 2)
     db.execute(
-        """UPDATE orders SET end_at = ?, extra_hours = ?, subtotal = ?, tax_total = ?, discount_total = ?, total = ? WHERE id = ?""",
-        (actual_return_at.isoformat(timespec="minutes"), extra_hours, round(subtotal, 2), round(tax_total, 2), round(discount_total, 2), total, order_id),
+        """UPDATE orders SET end_at = ?, extra_hours = ?, subtotal = ?, tax_total = ?, discount_total = ?, total = ?, no_revision_required = 0, return_revised_at = ? WHERE id = ?""",
+        (actual_return_at.isoformat(timespec="minutes"), extra_hours, round(subtotal, 2), round(tax_total, 2), round(discount_total, 2), total, now(), order_id),
     )
     db.commit()
     from app.services.payments import recalculate_order_payment
@@ -800,44 +852,50 @@ def add_return_charges(order_id, form):
         raise ValueError("Order not found")
     _require_return_deposit_allowed(order)
     try:
-        extra_hours = max(0, float(form.get("extra_hours") or 0))
-        hourly_rate = max(0, float(form.get("extra_hourly_rate") or 0))
+        extra_hours = 0
+        hourly_rate = 0
         damage_charge = max(0, float(form.get("damage_charge") or 0))
     except ValueError as exc:
         raise ValueError("Extra hours, hourly rate and damage charge must be numbers") from exc
     extra_charge = round(extra_hours * hourly_rate, 2)
     damage_charge = round(damage_charge, 2)
-    if extra_charge <= 0 and damage_charge <= 0:
-        raise ValueError("Enter extra hours or a damage charge before adding charges")
+    no_damages = 1 if form.get("no_damages") else 0
+    if extra_charge <= 0 and damage_charge <= 0 and not no_damages:
+        raise ValueError("Enter a damage charge or tick No Damages before saving damage settlement")
     db = get_db()
     existing_rows = db.execute(
-        "SELECT id, line_subtotal, line_tax, line_total FROM order_items WHERE order_id = ? AND custom_name IN ('Extra hours', 'Damage charge')",
+        "SELECT id, line_subtotal, line_tax, line_total FROM order_items WHERE order_id = ? AND custom_name = 'Damage charge'",
         (order_id,),
     ).fetchall()
     removed_subtotal = round(sum(float(row["line_subtotal"] or 0) for row in existing_rows), 2)
     removed_tax = round(sum(float(row["line_tax"] or 0) for row in existing_rows), 2)
     removed_total = round(sum(float(row["line_total"] or 0) for row in existing_rows), 2)
     if existing_rows:
-        db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name IN ('Extra hours', 'Damage charge')", (order_id,))
+        db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name = 'Damage charge'", (order_id,))
     if extra_charge > 0:
         db.execute(
             """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
             VALUES (?, NULL, 'Extra hours', ?, ?, ?, 0, ?, 'fixed')""",
             (order_id, extra_hours, hourly_rate, extra_charge, extra_charge),
         )
+    added_subtotal = added_tax = added_line_total = 0.0
+    settings = db.execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
     if damage_charge > 0:
+        damage_subtotal, damage_tax, damage_total = _return_charge_tax(order_id, damage_charge, settings)
         db.execute(
             """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
-            VALUES (?, NULL, 'Damage charge', 1, ?, ?, 0, ?, 'fixed')""",
-            (order_id, damage_charge, damage_charge, damage_charge),
+            VALUES (?, NULL, 'Damage charge', 1, ?, ?, ?, ?, 'fixed')""",
+            (order_id, damage_charge, damage_subtotal, damage_tax, damage_total),
         )
-    added_total = round(extra_charge + damage_charge, 2)
-    new_subtotal = round(float(order["subtotal"] or 0) - removed_subtotal + added_total, 2)
-    new_tax = round(float(order["tax_total"] or 0) - removed_tax, 2)
-    new_total = round(float(order["total"] or 0) - removed_total + added_total, 2)
+        added_subtotal += damage_subtotal
+        added_tax += damage_tax
+        added_line_total += damage_total
+    new_subtotal = round(float(order["subtotal"] or 0) - removed_subtotal + added_subtotal, 2)
+    new_tax = round(float(order["tax_total"] or 0) - removed_tax + added_tax, 2)
+    new_total = round(float(order["total"] or 0) - removed_total + added_line_total, 2)
     db.execute(
-        "UPDATE orders SET extra_hours = ?, subtotal = ?, tax_total = ?, total = ? WHERE id = ?",
-        (extra_hours, new_subtotal, new_tax, new_total, order_id),
+        "UPDATE orders SET extra_hours = ?, subtotal = ?, tax_total = ?, total = ?, no_damages = ? WHERE id = ?",
+        (extra_hours, new_subtotal, new_tax, new_total, no_damages if no_damages else 0, order_id),
     )
     db.commit()
     from app.services.payments import recalculate_order_payment

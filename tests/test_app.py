@@ -677,7 +677,7 @@ def test_orders_date_range_filters_metrics_and_shows_deposit_to_process(client, 
     august_order = create_order_for_status(client, quantity='2', start_date='2026-08-05', end_date='2026-08-06')
     client.post(f'/orders/{july_order}/reserve', follow_redirects=True)
     client.post(f'/orders/{july_order}/start', follow_redirects=True)
-    client.post(f'/orders/{july_order}/return', follow_redirects=True)
+    return_order_ready(client, july_order)
 
     filtered = client.get('/orders?start_date=2026-07-01&end_date=2026-07-31')
     assert filtered.status_code == 200
@@ -1823,7 +1823,7 @@ def test_canceled_and_archived_order_edit_is_rejected(client):
     archived_id = create_order_for_status(client, start_date='2026-08-01', end_date='2026-08-03')
     client.post(f'/orders/{archived_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{archived_id}/start', follow_redirects=True)
-    client.post(f'/orders/{archived_id}/return', follow_redirects=True)
+    return_order_ready(client, archived_id)
     client.post(f'/orders/{archived_id}/archive', follow_redirects=True)
     for method in ('get', 'post'):
         response = getattr(client, method)(f'/orders/{archived_id}/edit', data=edit_order_payload(start_date='2026-08-02', end_date='2026-08-03'), follow_redirects=True)
@@ -2002,6 +2002,12 @@ def create_order_for_status(client, quantity='2', start_date='2026-07-01', end_d
     return res.headers['Location'].rstrip('/').split('/')[-1]
 
 
+
+
+def return_order_ready(client, order_id):
+    client.post(f'/orders/{order_id}/return-checklist', data={'no_damages': '1', 'no_revision_required': '1'}, follow_redirects=True)
+    return client.post(f'/orders/{order_id}/return', follow_redirects=True)
+
 def test_order_status_workflow_and_calendar(client):
     login(client)
     seed_customer_and_product(client)
@@ -2034,7 +2040,7 @@ def test_order_status_workflow_and_calendar(client):
     assert b'Started' in start.data
     assert b'Return order' in start.data
 
-    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    returned = return_order_ready(client, order_id)
     assert b'Order returned' in returned.data
     assert b'Returned' in returned.data
     assert b'Archive order' in returned.data
@@ -2049,7 +2055,7 @@ def test_dashboard_view_late_filters_only_started_overdue_returns(client):
     returned_late_id = create_order_for_status(client, quantity='1', start_date='2026-07-03', end_date='2026-07-04')
     for order_id in (late_started_id, future_started_id, returned_late_id):
         assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
-    assert b'Order returned' in client.post(f'/orders/{returned_late_id}/return', follow_redirects=True).data
+    assert b'Order returned' in return_order_ready(client, returned_late_id).data
 
     dashboard = client.get('/dashboard')
     assert b'href="/orders?status=started&amp;return_status=late"' in dashboard.data
@@ -3130,7 +3136,7 @@ def test_branch_one_way_return_moves_product_to_return_branch(client, app):
         db.commit()
     assert b'Order reserved' in client.post(f'/orders/{order_id}/reserve', follow_redirects=True).data
     assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
-    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    returned = return_order_ready(client, order_id)
     assert b'Order returned' in returned.data
     inventory = client.get('/inventory')
     assert b'North Depot' in inventory.data
@@ -3142,32 +3148,29 @@ def test_return_charges_create_order_items_and_use_deposit_applies_balance(clien
     order_id = create_order_for_status(client, quantity='1')
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    return_order_ready(client, order_id)
 
     detail = client.get(f'/orders/{order_id}')
     assert b'Damage Charge' in detail.data
     assert b'Add Charges' in detail.data
     assert b'Refund Deposit' in detail.data
     assert b'Use Deposit' in detail.data
-    assert b'value="200.00"' in detail.data
+    assert b'Hourly extra rate' not in detail.data
 
     charged = client.post(f'/orders/{order_id}/add-return-charges', data={
-        'extra_hours': '2',
-        'extra_hourly_rate': '200',
         'damage_charge': '150',
     }, follow_redirects=True)
     assert b'Return charges added to order items' in charged.data
-    assert b'Extra hours' in charged.data
     assert b'Damage charge' in charged.data
     with app.app_context():
         db = get_db()
         order = db.execute('SELECT subtotal, total, due_total, extra_hours FROM orders WHERE id=?', (order_id,)).fetchone()
         items = db.execute('SELECT custom_name, quantity, unit_price, line_total FROM order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
-        assert order['extra_hours'] == 2
-        assert order['subtotal'] == 1150
-        assert order['total'] == 1900
-        assert order['due_total'] == 1900
-        assert any(item['custom_name'] == 'Extra hours' and item['line_total'] == 400 for item in items)
+        assert order['extra_hours'] == 0
+        assert order['subtotal'] == 750
+        assert order['total'] == 1500
+        assert order['due_total'] == 1500
+        assert not any(item['custom_name'] == 'Extra hours' for item in items)
         assert any(item['custom_name'] == 'Damage charge' and item['line_total'] == 150 for item in items)
 
     used = client.post(f'/orders/{order_id}/use-deposit', data={'deposit_note': 'Use balance after return'}, follow_redirects=True)
@@ -3178,7 +3181,7 @@ def test_return_charges_create_order_items_and_use_deposit_applies_balance(clien
         payment = db.execute("SELECT amount, method, reference, status, deleted_at FROM payments WHERE order_id=? AND method='deposit_applied'", (order_id,)).fetchone()
         assert order['deposit_applied_amount'] == 750
         assert order['deposit_refund_amount'] == 0
-        assert order['due_total'] == 1150
+        assert order['due_total'] == 750
         assert payment['amount'] == 750
         assert payment['status'] == 'paid'
         assert payment['deleted_at'] == ''
@@ -3190,7 +3193,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
     order_id = create_order_for_status(client, quantity='1')
     assert b'Order reserved' in client.post(f'/orders/{order_id}/reserve', follow_redirects=True).data
     assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
-    assert b'Order returned' in client.post(f'/orders/{order_id}/return', follow_redirects=True).data
+    assert b'Order returned' in return_order_ready(client, order_id).data
     client.post(f'/orders/{order_id}/payments', data={'amount': '1350', 'method': 'cash', 'reference': 'paid before refund'}, follow_redirects=True)
 
     due_before = client.get('/orders?payment_status=process_deposit')
@@ -3228,7 +3231,7 @@ def test_return_deposit_settlement_records_manual_refund_date(client, app):
     order_id = create_order_for_status(client, quantity='1')
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    return_order_ready(client, order_id)
     client.post(f'/orders/{order_id}/payments', data={'amount': '1350', 'method': 'cash', 'reference': 'paid before refund'}, follow_redirects=True)
 
     settled = client.post(f'/orders/{order_id}/settle-return', data={
@@ -3255,7 +3258,7 @@ def test_return_deposit_settlement_rejects_invalid_refund_date_without_overwrite
     order_id = create_order_for_status(client, quantity='1')
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    return_order_ready(client, order_id)
     with app.app_context():
         db = __import__('app.db', fromlist=['get_db']).get_db()
         db.execute("""UPDATE orders SET deposit_refund_amount=1000, deposit_process_method='eft',
@@ -3285,7 +3288,7 @@ def test_historical_refunded_deposit_is_not_in_process_deposit_filter(client, ap
     order_id = create_order_for_status(client, quantity='1')
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    return_order_ready(client, order_id)
     with app.app_context():
         db = __import__('app.db', fromlist=['get_db']).get_db()
         db.execute('UPDATE orders SET deposit_refund_amount=1000, deposit_process_method="", deposit_processed_at="" WHERE id=?', (order_id,))
@@ -3306,7 +3309,7 @@ def test_return_deposit_settlement_rejects_invalid_method(client):
     order_id = create_order_for_status(client, quantity='1')
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    return_order_ready(client, order_id)
     response = client.post(f'/orders/{order_id}/settle-return', data={
         'extra_hours': '0',
         'extra_hourly_rate': '0',
@@ -3337,8 +3340,8 @@ def test_inventory_hourly_extra_rate_feeds_return_charges_and_schema(client, app
     order_id = order.headers['Location'].rstrip('/').split('/')[-1]
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
-    assert b'value="85.50"' in returned.data
+    returned = return_order_ready(client, order_id)
+    assert b'Hourly extra rate' not in returned.data
 
 
 def test_return_deposit_controls_are_gated_until_returned_or_canceled(client):
@@ -3361,7 +3364,7 @@ def test_use_deposit_records_unprocessed_remaining_refund_then_method_processes_
     order_id = create_order_for_status(client, quantity='1')
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    return_order_ready(client, order_id)
     client.post(f'/orders/{order_id}/payments', data={'amount': '900', 'method': 'cash', 'reference': 'rental paid'}, follow_redirects=True)
     used = client.post(f'/orders/{order_id}/use-deposit', data={'deposit_note': 'apply balance'}, follow_redirects=True)
     assert b'Security deposit used: R450.00; refund R300.00' in used.data
@@ -3520,3 +3523,86 @@ def test_unassigned_product_can_be_booked_from_any_branch(client, app):
         db.commit()
     started = client.post(f'/orders/{order_id}/start', follow_redirects=True)
     assert b'Order started' in started.data
+
+
+
+def test_ticket_341952905_customer_discount_balance_service_and_refund(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/customers/1/edit', data={
+        'customer_type': 'individual', 'name': 'Order Customer', 'email': 'customer@example.com',
+        'phone': '+27000000000', 'address_line1': '1 Main', 'city': 'Cape Town', 'country': 'South Africa',
+        'standard_discount_percent': '10',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Setup Service', 'sku': 'SVC', 'product_type': 'service', 'quantity': '99',
+        'price_amount': '40', 'price_unit': 'day', 'security_deposit': '100', 'tax_profile_id': '1',
+        'active': '1', 'public_visible': '1',
+    }, follow_redirects=True)
+    page = client.get('/orders/new?customer_id=1')
+    assert b'Previous Orders Balance' in page.data
+    assert b'Standard discount %' in page.data
+    created = client.post('/orders/new', data={
+        'customer_id': '1', 'product_id': ['1', '2'], 'quantity': ['1', '5'],
+        'start_date': '2026-07-01', 'start_time': '09:00', 'end_date': '2026-07-02', 'end_time': '09:00',
+        'deposit_option': 'security_deposit',
+    }, follow_redirects=False)
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT discount_mode, discount_value, discount_total FROM orders WHERE id=?', (order_id,)).fetchone()
+        service = db.execute('SELECT quantity FROM order_items WHERE order_id=? AND product_id=2', (order_id,)).fetchone()
+        assert order['discount_mode'] == 'percent'
+        assert order['discount_value'] == 10
+        assert order['discount_total'] > 0
+        assert service['quantity'] == 1
+    client.post(f'/orders/{order_id}/payments', data={'amount': '1000', 'method': 'cash'}, follow_redirects=True)
+    detail = client.get(f'/orders/{order_id}')
+    assert b'Refund customer' in detail.data
+    assert b'-R' in detail.data
+    client.post(f'/orders/{order_id}/refund', data={'refund_amount': '5', 'refund_method': 'cash', 'refund_date': '2026-07-02T12:00'}, follow_redirects=True)
+    with app.app_context():
+        refund = get_db().execute('SELECT amount, method FROM payments WHERE order_id=? AND amount < 0', (order_id,)).fetchone()
+        assert refund['amount'] == -5
+        assert refund['method'] == 'cash'
+
+
+def test_ticket_341952905_return_validation_taxed_extra_and_invoice_revision(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE tax_profiles SET rate=15 WHERE id=1')
+        db.execute('UPDATE products SET hourly_extra_rate=20 WHERE id=1')
+        db.commit()
+    order_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-02')
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    blocked = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'Before returning' in blocked.data
+    detail = client.get(f'/orders/{order_id}')
+    assert b'No Damages' in detail.data
+    assert b'No Revision Required' in detail.data
+    assert b'Live calculated extra days/hours' in detail.data
+    assert b'Hourly extra rate' not in detail.data
+    client.post(f'/orders/{order_id}/revise-return', data={'end_date': '2026-07-02', 'end_time': '11:00'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/add-return-charges', data={'damage_charge': '30'}, follow_redirects=True)
+    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'Order returned' in returned.data
+    with app.app_context():
+        extra = get_db().execute("SELECT line_tax, line_total FROM order_items WHERE order_id=? AND custom_name='Extra hours'", (order_id,)).fetchone()
+        assert round(extra['line_tax'], 2) == 6.0
+        assert round(extra['line_total'], 2) == 46.0
+    created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'Proforma Invoice' in created.data
+    duplicate = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'already exists' in duplicate.data
+    with app.app_context():
+        doc_id = get_db().execute("SELECT id FROM documents WHERE order_id=? AND document_type='invoice'", (order_id,)).fetchone()['id']
+    client.post(f'/documents/{doc_id}/finalize', follow_redirects=True)
+    revised = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'Invoice' in revised.data
+    with app.app_context():
+        rows = get_db().execute("SELECT id, number, revision_of_id, revision_number FROM documents WHERE order_id=? AND document_type='invoice' ORDER BY id", (order_id,)).fetchall()
+        assert rows[0]['number'] == rows[1]['number']
+        assert rows[1]['revision_of_id'] == rows[0]['id']
+        assert rows[1]['revision_number'] == 1
