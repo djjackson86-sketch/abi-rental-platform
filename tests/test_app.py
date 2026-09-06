@@ -2228,7 +2228,39 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     assert b'fallback@example.test' in quote.data
     assert b'Fallback Street' in quote.data
     assert b'Banking details' not in quote.data
+    assert b'document-type-invoice' in quote.data
     assert b'document-type-quote' in quote.data
+    assert b'class="invoice-example-layout invoice-template-layout"' in quote.data
+    assert b'class="invoice-header-grid"' in quote.data
+    assert b'class="invoice-customer-block"' in quote.data
+    assert b'Quote date:' in quote.data
+    assert b'Save PDF' in quote.data
+    assert b'/documents/1/download.pdf' in quote.data
+    assert b'Generate Email' in quote.data
+    assert b'Outlook-compatible email draft' in quote.data
+    assert b'Finalize invoice' not in quote.data
+
+    download = client.get('/documents/1/download.pdf')
+    assert download.status_code == 200
+    assert download.mimetype == 'application/pdf'
+    assert download.headers['Content-Disposition'] == 'attachment; filename=QUOTE-QUO-00001.pdf'
+    assert download.data.startswith(b'%PDF-')
+
+    draft = client.post('/documents/1/send-email', data={'to_email': 'quote@example.com'}, follow_redirects=False)
+    assert draft.status_code == 200
+    assert draft.mimetype == 'message/rfc822'
+    assert draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-QUOTE-QUO-00001.eml'
+    assert b'To: quote@example.com' in draft.data
+    assert b'Subject: Quote QUO-00001 for order ORD-00001' in draft.data
+    assert b'Please find attached Quote QUO-00001 for order ORD-00001.' in draft.data
+    from email import policy
+    from email.parser import BytesParser
+    parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
+    pdf_parts = [part for part in parsed.iter_attachments() if part.get_filename() == 'QUOTE-QUO-00001.pdf']
+    assert len(pdf_parts) == 1
+    quote_pdf_payload = pdf_parts[0].get_payload(decode=True)
+    assert isinstance(quote_pdf_payload, bytes)
+    assert quote_pdf_payload.startswith(b'%PDF-')
 
     css = client.get('/static/css/app.css')
     assert css.status_code == 200

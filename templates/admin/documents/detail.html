@@ -3,13 +3,13 @@
 {% block admin_body %}
 <header class="page-header">
   <div><p class="eyebrow">{{ display_label }}</p><h1>{{ display_number }}</h1><p>{{ document.order_number }} · {{ document.customer_name or 'No customer' }}</p></div>
-  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a>{% if document.document_type == 'invoice' %}<a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=document.id) }}">Save PDF</a>{% if document.status == 'draft' %}<form method="post" action="{{ url_for('documents.finalize', document_id=document.id) }}" class="inline-form"><button class="btn ghost" type="submit">Finalize invoice</button></form>{% endif %}{% endif %}<button class="btn primary" onclick="window.print()">Print</button></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a>{% if document.document_type in ['invoice', 'quote'] %}<a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=document.id) }}">Save PDF</a>{% if document.document_type == 'invoice' and document.status == 'draft' %}<form method="post" action="{{ url_for('documents.finalize', document_id=document.id) }}" class="inline-form"><button class="btn ghost" type="submit">Finalize invoice</button></form>{% endif %}{% endif %}<button class="btn primary" onclick="window.print()">Print</button></div>
 </header>
-{% if document.document_type == 'invoice' %}
+{% if document.document_type in ['invoice', 'quote'] %}
 <section class="panel settings-form">
   <h2>Email {{ display_label }}</h2>
   {% if document.email_status != 'not_sent' %}<p class="form-help">Last email status: {{ document.email_status|replace('_', ' ')|title }}{% if document.sent_to %} for {{ document.sent_to }}{% endif %}{% if document.sent_at %} at {{ document.sent_at }}{% endif %}{% if document.email_error %}. Error: {{ document.email_error }}{% endif %}</p>{% endif %}
-  <p class="form-help">Click <strong>Generate Email</strong> to download an Outlook-compatible email draft. Open the .eml file on the office PC to review the message and send it from Outlook. The PDF invoice is attached automatically.</p>
+  <p class="form-help">Click <strong>Generate Email</strong> to download an Outlook-compatible email draft. Open the .eml file on the office PC to review the message and send it from Outlook. The PDF {{ display_label|lower }} is attached automatically.</p>
   <form method="post" action="{{ url_for('documents.send_document_email', document_id=document.id) }}" class="form-grid">
     <label>Send to<input type="email" name="to_email" value="{{ document.customer_email or '' }}" placeholder="customer@example.com"></label>
     <label class="span-2">Message<textarea name="message" rows="6">{{ email_message }}</textarea></label>
@@ -18,12 +18,12 @@
   </form>
 </section>
 {% endif %}
-<section class="document-page panel{% if document.document_type == 'invoice' %} document-type-invoice{% elif document.document_type == 'quote' %} document-type-quote{% endif %}">
+<section class="document-page panel{% if document.document_type in ['invoice', 'quote'] %} document-type-invoice{% endif %}{% if document.document_type == 'quote' %} document-type-quote{% endif %}">
   {% set issuer_name = document.branch_name or settings.company_name %}
   {% set issuer_email = document.branch_email or settings.email %}
   {% set issuer_phone = document.branch_phone or settings.phone %}
-  {% set has_invoice_bank_details = document.branch_bank_name or document.branch_bank_account_name or document.branch_bank_account_number or document.branch_bank_branch_code or document.branch_bank_account_type or document.branch_bank_reference_note %}
-  {% if document.document_type == 'invoice' %}
+  {% set has_bank_details = document.branch_bank_name or document.branch_bank_account_name or document.branch_bank_account_number or document.branch_bank_branch_code or document.branch_bank_account_type or document.branch_bank_reference_note %}
+  {% if document.document_type in ['invoice', 'quote'] %}
   <div class="invoice-example-layout invoice-template-layout">
     <div class="invoice-header-grid">
       <div class="invoice-logo-address">
@@ -32,7 +32,7 @@
         <article class="invoice-customer-block"><h3>Bill To:</h3><p><strong>{{ document.customer_name or '—' }}</strong><br>{{ document.customer_email or '' }}<br>{{ document.customer_phone or '' }}{% if document.customer_address_line1 or document.customer_city %}<br>{{ document.customer_address_line1 }}{% if document.customer_address_line2 %}<br>{{ document.customer_address_line2 }}{% endif %}{% if document.customer_suburb %}<br>{{ document.customer_suburb }}{% endif %}{% if document.customer_city %}<br>{{ document.customer_city }}{% endif %}{% if document.customer_province or document.customer_postal_code %}<br>{{ document.customer_province }} {{ document.customer_postal_code }}{% endif %}{% if document.customer_country %}<br>{{ document.customer_country }}{% endif %}{% endif %}{% if custom_fields.get('vehicle_make') %}<br><strong>Vehicle Make:</strong> {{ custom_fields.get('vehicle_make') }}{% endif %}{% if custom_fields.get('vehicle_color') %}<br><strong>Vehicle Color:</strong> {{ custom_fields.get('vehicle_color') }}{% endif %}{% if custom_fields.get('vehicle_reg_no') %}<br><strong>Veh Reg No:</strong> {{ custom_fields.get('vehicle_reg_no') }}{% endif %}{% if custom_fields.get('alternative_contact_name') %}<br><strong>Alternative Contact Name:</strong> {{ custom_fields.get('alternative_contact_name') }}{% endif %}{% if custom_fields.get('alternative_contact_number') %}<br><strong>Alternative Contact Number:</strong> {{ custom_fields.get('alternative_contact_number') }}{% endif %}{% if custom_fields.get('alternative_contact_relationship') %}<br><strong>Alternative Contact Relationship:</strong> {{ custom_fields.get('alternative_contact_relationship') }}{% endif %}</p></article>
       </div>
       <div class="invoice-detail-stack">
-        <div class="invoice-number-block"><strong>{{ display_label }}</strong><span>{{ display_number }}</span><br><small class="invoice-date-line"><strong>Invoice date:</strong> {{ document_date(document.created_at) }}</small></div>
+        <div class="invoice-number-block"><strong>{{ display_label }}</strong><span>{{ display_number }}</span><br><small class="invoice-date-line"><strong>{{ display_label }} date:</strong> {{ document_date(document.created_at) }}</small></div>
         <article class="invoice-order-block"><h3>Order</h3><p><strong>{{ document.order_number }}</strong><br>Pickup: {{ document_date(document.start_at) }}<br>Return: {{ document_date(document.end_at) }}<br><strong>{{ rental_days_label }}</strong></p></article>
       </div>
     </div>
@@ -66,12 +66,10 @@
       <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(document.tax_total or 0) }}</b></div>
       <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(document.deposit_total or 0) }}</b></div>
       <div class="list-row total-row"><span>Total{% if (document.deposit_option or 'security_deposit') == 'security_deposit' and document.deposit_total %} incl. refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(document.total or 0) }}</b></div>
-      {% if document.document_type == 'invoice' %}
       <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(document.paid_total or 0) }}</b></div>
       <div class="list-row"><span>Amount due</span><b>R{{ '%.2f'|format(document.due_total or 0) }}</b></div>
-      {% endif %}
     </div>
-    {% if document.document_type == 'invoice' and has_invoice_bank_details %}<article class="invoice-banking-block"><p class="invoice-thank-you"><strong>Thank you for your business.</strong></p><h3>Banking details</h3><p>{% if document.branch_bank_name %}<strong>{{ document.branch_bank_name }}</strong>{% endif %}{% if document.branch_bank_account_name %}<br>Account holder: {{ document.branch_bank_account_name }}{% endif %}{% if document.branch_bank_account_number %}<br>Account number: {{ document.branch_bank_account_number }}{% endif %}{% if document.branch_bank_branch_code %}<br>Branch code: {{ document.branch_bank_branch_code }}{% endif %}{% if document.branch_bank_account_type %}<br>Account type: {{ document.branch_bank_account_type }}{% endif %}{% if document.branch_bank_reference_note %}<br>{{ document.branch_bank_reference_note }}{% endif %}</p></article>{% endif %}
+    {% if document.document_type in ['invoice', 'quote'] and has_bank_details %}<article class="invoice-banking-block"><p class="invoice-thank-you"><strong>Thank you for your business.</strong></p><h3>Banking details</h3><p>{% if document.branch_bank_name %}<strong>{{ document.branch_bank_name }}</strong>{% endif %}{% if document.branch_bank_account_name %}<br>Account holder: {{ document.branch_bank_account_name }}{% endif %}{% if document.branch_bank_account_number %}<br>Account number: {{ document.branch_bank_account_number }}{% endif %}{% if document.branch_bank_branch_code %}<br>Branch code: {{ document.branch_bank_branch_code }}{% endif %}{% if document.branch_bank_account_type %}<br>Account type: {{ document.branch_bank_account_type }}{% endif %}{% if document.branch_bank_reference_note %}<br>{{ document.branch_bank_reference_note }}{% endif %}</p></article>{% endif %}
   </div>
 </section>
 {% endblock %}

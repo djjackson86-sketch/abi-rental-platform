@@ -12,6 +12,8 @@ from app.services.customers import custom_fields_for
 
 bp = Blueprint("documents", __name__, url_prefix="/documents")
 
+EMAIL_DRAFT_DOCUMENT_TYPES = {'invoice', 'quote'}
+
 
 def _email_context(document, settings, label=None, number=None):
     return {
@@ -157,8 +159,8 @@ def send_document_email(document_id):
     if not document:
         flash("Document not found", "error")
         return redirect(url_for("documents.index"))
-    if document['document_type'] != 'invoice':
-        flash("Email draft is available for invoices only", "error")
+    if document['document_type'] not in EMAIL_DRAFT_DOCUMENT_TYPES:
+        flash("Email draft is available for invoices and quotes only", "error")
         return redirect(url_for("documents.detail", document_id=document_id))
     to_email = (request.form.get("to_email") or document["customer_email"] or "").strip()
     if not to_email:

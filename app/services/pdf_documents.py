@@ -187,7 +187,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     text_commands.append(_pdf_text_command(detail_x, 760, display_label, size=8.5, font='F2'))
     _add_pdf_lines(text_commands, detail_x, 746, [
         display_number,
-        f'Invoice date: {document_date(document["created_at"])}',
+        f'{display_label} date: {document_date(document["created_at"])}',
     ], size=8.5, leading=14)
 
     text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
@@ -366,7 +366,7 @@ def document_pdf_bytes(document_id):
     if document['document_type'] == 'invoice':
         lines.extend([f'Paid: R{float(document["paid_total"] or 0):.2f}', f'Amount due: R{float(document["due_total"] or 0):.2f}'])
     logo_bytes = _document_logo_bytes()
-    if document['document_type'] == 'invoice':
+    if document['document_type'] in {'invoice', 'quote'}:
         return _invoice_template_pdf(document, items, settings, logo_bytes=logo_bytes)
     return _simple_pdf(lines, logo_bytes=logo_bytes)
 
