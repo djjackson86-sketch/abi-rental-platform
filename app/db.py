@@ -393,7 +393,6 @@ def init_db():
         db.execute("INSERT OR IGNORE INTO branches (name, code, created_at, updated_at) VALUES (?, ?, ?, ?)", (branch_name, code, ts, ts))
     default_branch = db.execute("SELECT id FROM branches ORDER BY id LIMIT 1").fetchone()
     if default_branch:
-        db.execute("UPDATE products SET branch_id = COALESCE(branch_id, ?) WHERE branch_id IS NULL", (default_branch['id'],))
         db.execute("UPDATE orders SET collect_branch_id = COALESCE(collect_branch_id, ?), return_branch_id = COALESCE(return_branch_id, ?) WHERE collect_branch_id IS NULL OR return_branch_id IS NULL", (default_branch['id'], default_branch['id']))
     for day in range(7):
         db.execute("INSERT OR IGNORE INTO operating_hours (day_of_week, open_time, close_time, closed) VALUES (?, '09:00', '17:00', ?)", (day, 1 if day in (0,6) else 0))

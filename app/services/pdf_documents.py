@@ -195,7 +195,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     invoice_lines = []
     if display_number:
         invoice_lines.append(display_number)
-    invoice_lines.extend([f'{display_label} date:', document_datetime(document["created_at"])])
+    invoice_lines.extend([f'{display_label} date:', document_date(document["created_at"])])
     _add_pdf_lines(text_commands, detail_x, 746, invoice_lines, size=8.5, leading=14)
 
     text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
@@ -330,7 +330,7 @@ def document_pdf_bytes(document_id):
     ]
     lines = [f'{display_label} {display_number}']
     if document['document_type'] == 'invoice':
-        lines.append(f'Invoice date: {document["created_at"] or "-"}')
+        lines.append(f'Invoice date: {document_date(document["created_at"])}')
     lines.append(f'Issuer: {issuer_name}')
     if issuer_email:
         lines.append(f'Issuer email: {issuer_email}')

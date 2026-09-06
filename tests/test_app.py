@@ -3136,7 +3136,6 @@ def test_branch_one_way_return_moves_product_to_return_branch(client, app):
     assert b'North Depot' in inventory.data
 
 
-
 def test_return_charges_create_order_items_and_use_deposit_applies_balance(client, app):
     login(client)
     seed_customer_and_product(client)
@@ -3192,6 +3191,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
     assert b'Order reserved' in client.post(f'/orders/{order_id}/reserve', follow_redirects=True).data
     assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
     assert b'Order returned' in client.post(f'/orders/{order_id}/return', follow_redirects=True).data
+    client.post(f'/orders/{order_id}/payments', data={'amount': '1350', 'method': 'cash', 'reference': 'paid before refund'}, follow_redirects=True)
 
     due_before = client.get('/orders?payment_status=process_deposit')
     assert b'ORD-00001' in due_before.data
@@ -3229,6 +3229,7 @@ def test_return_deposit_settlement_records_manual_refund_date(client, app):
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
     client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    client.post(f'/orders/{order_id}/payments', data={'amount': '1350', 'method': 'cash', 'reference': 'paid before refund'}, follow_redirects=True)
 
     settled = client.post(f'/orders/{order_id}/settle-return', data={
         'extra_hours': '0',
@@ -3346,11 +3347,12 @@ def test_return_deposit_controls_are_gated_until_returned_or_canceled(client):
     order_id = create_order_for_status(client, quantity='1')
     draft = client.get(f'/orders/{order_id}')
     assert b'Refund Deposit' not in draft.data
-    assert b'Return and deposit settlement unlock after the order is returned or canceled.' in draft.data
+    assert b'Return and deposit settlement unlock after the order is picked up or canceled.' in draft.data
     blocked = client.post(f'/orders/{order_id}/use-deposit', data={'deposit_note': 'too early'}, follow_redirects=True)
-    assert b'Return and deposit settlement are only available after the order is returned or canceled' in blocked.data
-    canceled = client.post(f'/orders/{order_id}/cancel', follow_redirects=True)
-    assert b'Refund Deposit' in canceled.data
+    assert b'Return and deposit settlement is available after pickup or cancelation' in blocked.data
+    started = client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    assert b'Refund Deposit' in started.data
+    assert b'Revise return date/time and invoice' in started.data
 
 
 def test_use_deposit_records_unprocessed_remaining_refund_then_method_processes_it(client, app):
@@ -3374,7 +3376,7 @@ def test_use_deposit_records_unprocessed_remaining_refund_then_method_processes_
     process_deposit = client.get('/orders?payment_status=process_deposit')
     assert b'ORD-00001' in process_deposit.data
     processed = client.post(f'/orders/{order_id}/settle-return', data={'deposit_process_method': 'eft', 'deposit_processed_at': '2026-08-20T14:45'}, follow_redirects=True)
-    assert b'Deposit refund processed: R300.00' in processed.data
+    assert b'Deposit settled: R450.00 used; R300.00 refunded' in processed.data
     assert b'EFT' in processed.data
     after = client.get('/orders?payment_status=process_deposit')
     assert b'ORD-00001' not in after.data
@@ -3419,3 +3421,102 @@ def test_document_email_prepares_outlook_draft_without_smtp_provider(client, app
         row = get_db().execute('SELECT email_status, sent_to FROM documents WHERE id = 1').fetchone()
         assert row['email_status'] == 'prepared'
         assert row['sent_to'] == 'order@example.com'
+
+
+
+def test_late_return_breakdown_examples_and_started_revision_reprices_order(client, app):
+    from app.services.orders import late_return_breakdown
+    assert late_return_breakdown(datetime(2026, 9, 6, 8, 0), datetime(2026, 9, 7, 10, 0)) == {'days': 1, 'extra_hours': 2.0}
+    assert late_return_breakdown(datetime(2026, 9, 6, 8, 0), datetime(2026, 9, 9, 10, 0)) == {'days': 3, 'extra_hours': 2.0}
+    login(client)
+    seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE products SET hourly_extra_rate=50 WHERE id=1')
+        db.commit()
+    res = client.post('/orders/new', data={
+        'customer_id': '1', 'product_id': '1', 'quantity': '1',
+        'start_date': '2026-09-06', 'start_time': '08:00',
+        'end_date': '2026-09-07', 'end_time': '08:00',
+    }, follow_redirects=False)
+    assert res.status_code == 302
+    order_id = res.headers['Location'].rstrip('/').split('/')[-1]
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    revised = client.post(f'/orders/{order_id}/revise-return', data={'end_date': '2026-09-09', 'end_time': '10:00'}, follow_redirects=True)
+    assert b'Return revised: 3 rental days + 2 extra hours' in revised.data
+    assert b'Extra hours' in revised.data
+    assert b'R100.00' in revised.data
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT end_at, extra_hours, subtotal, total, due_total FROM orders WHERE id=?', (order_id,)).fetchone()
+        items = db.execute('SELECT custom_name, quantity, unit_price, line_total FROM order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
+        assert order['end_at'] == '2026-09-09T10:00'
+        assert order['extra_hours'] == 2
+        assert order['subtotal'] == 700  # 3 rental days * R200 + 2h * R50
+        assert order['total'] == 1450  # subtotal + R750 refundable deposit
+        assert order['due_total'] == 1450
+        assert any(item['custom_name'] == 'Extra hours' and item['quantity'] == 2 and item['line_total'] == 100 for item in items)
+
+
+def test_settle_deposit_uses_balance_before_refund_and_shows_money_payout(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    # This order total is R1350. Paying R900 leaves R450 due, so only R300 may be refunded.
+    client.post(f'/orders/{order_id}/payments', data={'amount': '900', 'method': 'cash', 'reference': 'partial'}, follow_redirects=True)
+    settled = client.post(f'/orders/{order_id}/settle-return', data={'deposit_process_method': 'eft', 'deposit_processed_at': '2026-09-06T12:00'}, follow_redirects=True)
+    assert b'Deposit settled: R450.00 used; R300.00 refunded' in settled.data
+    assert b'Money payout' in settled.data
+    assert b'-R300.00' in settled.data
+    assert b'value="R0.00"' in settled.data
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT deposit_applied_amount, deposit_refund_amount, due_total, payment_status FROM orders WHERE id=?', (order_id,)).fetchone()
+        applied = db.execute("SELECT amount FROM payments WHERE order_id=? AND method='deposit_applied' AND status='paid'", (order_id,)).fetchone()
+        assert order['deposit_applied_amount'] == 450
+        assert order['deposit_refund_amount'] == 300
+        assert order['due_total'] == 0
+        assert order['payment_status'] == 'paid'
+        assert applied['amount'] == 450
+
+
+def test_inventory_service_hides_quantity_and_unassigned_branch_persists(client, app):
+    login(client)
+    new_page = client.get('/inventory/new')
+    assert new_page.data.index(b'Product type') < new_page.data.index(b'General information')
+    assert b'data-stock-field' in new_page.data
+    assert b'Unassigned (all branches)' in new_page.data
+    created = client.post('/inventory/new', data={
+        'name': 'Setup Service', 'sku': 'SERV-SET', 'quantity': '7', 'description': 'Service line.',
+        'product_type': 'service', 'price_amount': '150', 'price_unit': 'fixed', 'security_deposit': '0',
+        'tax_profile_id': '1', 'active': '1', 'public_visible': '1', 'branch_id': '',
+    }, follow_redirects=True)
+    assert b'Product created' in created.data
+    with app.app_context():
+        product = get_db().execute('SELECT product_type, quantity, branch_id FROM products WHERE sku=?', ('SERV-SET',)).fetchone()
+        assert product['product_type'] == 'service'
+        assert product['quantity'] == 0
+        assert product['branch_id'] is None
+    # init_db migrations must not coerce unassigned products to Branch 1 on app startup.
+    with app.app_context():
+        from app.db import init_db
+        init_db()
+        product = get_db().execute('SELECT branch_id FROM products WHERE sku=?', ('SERV-SET',)).fetchone()
+        assert product['branch_id'] is None
+
+
+def test_unassigned_product_can_be_booked_from_any_branch(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE products SET branch_id=NULL, quantity=1 WHERE id=1')
+        db.commit()
+    order_id = create_order_for_status(client, quantity='1')
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE orders SET collect_branch_id=2, return_branch_id=2 WHERE id=?', (order_id,))
+        db.commit()
+    started = client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    assert b'Order started' in started.data

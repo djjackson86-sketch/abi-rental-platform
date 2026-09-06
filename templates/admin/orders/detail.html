@@ -51,11 +51,14 @@
       <label>Reference<input name="reference" placeholder="Payment reference or note"></label>
       <button class="btn primary" type="submit">Record payment</button>
     </form>
-    {% if payments %}
+    {% if payments or (order.deposit_refund_amount and (order.deposit_process_method or order.deposit_processed_at)) %}
       <div class="schedule-list payment-list">
       {% for payment in payments %}
         <div class="schedule-row"><span><b>R{{ '%.2f'|format(payment.amount) }}</b><small>{{ payment.method|title }}</small></span><span><small>Payment date</small><b>{{ display_payment_date(payment) }}</b></span><span><small>Reference</small><b>{{ payment.reference or '—' }}</b></span><span class="payment-actions"><a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a><form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form></span></div>
       {% endfor %}
+      {% if order.deposit_refund_amount and (order.deposit_process_method or order.deposit_processed_at) %}
+        <div class="schedule-row money-payout"><span><b>-R{{ '%.2f'|format(order.deposit_refund_amount) }}</b><small>Money payout</small></span><span><small>Payout date</small><b>{{ order.deposit_processed_at[:10] if order.deposit_processed_at else '—' }}</b></span><span><small>Reference</small><b>Refunded deposit{% if order.deposit_process_method %} · {{ order.deposit_process_method|upper }}{% endif %}</b></span><span></span></div>
+      {% endif %}
       </div>
     {% endif %}
     <h2>Documents</h2>
@@ -122,11 +125,23 @@
     {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not processed</b></div>{% endif %}
     {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
     <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
+    <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
+    <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(payment_summary.due_total) }}</b></div>
   </div>
 </section>
 <section class="panel settings-form">
   <h2>Return / deposit settlement</h2>
   {% if can_process_return_deposit %}
+  {% if order.status == 'started' %}
+  <form method="post" action="{{ url_for('orders.revise_return', order_id=order.id) }}" class="payment-form">
+    <div class="form-grid compact">
+      <label>Actual return date<input type="date" name="end_date" value="{{ order.end_at[:10] if order.end_at else '' }}" required></label>
+      <label>Actual return time<input type="time" name="end_time" value="{{ order.end_at[11:16] if order.end_at else '' }}" required></label>
+    </div>
+    <p class="form-help">Adjust before pressing Return order. Billing recalculates full 24-hour rental days from pickup plus extra hours after the pickup time.</p>
+    <button class="btn primary" type="submit">Revise return date/time and invoice</button>
+  </form>
+  {% endif %}
   <form method="post" action="{{ url_for('orders.add_charges', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
       <label>Extra hours<input type="number" step="0.25" min="0" name="extra_hours" value="{{ order.extra_hours or 0 }}"></label>
@@ -143,7 +158,7 @@
   </form>
   <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
-      <label>Remaining deposit<input type="text" readonly value="R{{ '%.2f'|format((order.deposit_refund_amount if (order.deposit_applied_amount or order.deposit_refund_amount) else order.deposit_total) or 0) }}"></label>
+      <label>Remaining deposit<input type="text" readonly value="R{{ '%.2f'|format(0 if (order.deposit_process_method or order.deposit_processed_at) else ((order.deposit_refund_amount if (order.deposit_applied_amount or order.deposit_refund_amount) else order.deposit_total) or 0)) }}"></label>
       <label>Deposit method<select name="deposit_process_method" required><option value="">Choose method</option>{% for value,label in [('eft','EFT'),('card','Card'),('cash','Cash')] %}<option value="{{ value }}" {% if order.deposit_process_method==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label>Deposit date<input type="datetime-local" name="deposit_processed_at" value="{{ default_deposit_processed_at }}"></label>
     </div>
@@ -151,7 +166,7 @@
     <button class="btn primary" type="submit">Refund Deposit</button>
   </form>
   {% else %}
-  <p class="form-help">Return and deposit settlement unlock after the order is returned or canceled.</p>
+  <p class="form-help">Return and deposit settlement unlock after the order is picked up or canceled.</p>
   {% endif %}
 </section>
 {% endblock %}

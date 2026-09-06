@@ -30,7 +30,7 @@ def _process_deposit_clause(alias="o"):
     """
     prefix = f"{alias}." if alias else ""
     return (
-        f"{prefix}status = 'returned' "
+        f"{prefix}status IN ('started', 'returned', 'canceled', 'cancelled') "
         f"AND COALESCE({prefix}deposit_total, 0) > 0 "
         f"AND COALESCE({prefix}deposit_processed_at, '') = '' "
         f"AND COALESCE({prefix}deposit_process_method, '') = '' "
@@ -171,7 +171,7 @@ def _parse_dt(date_value, time_value, fallback_time):
 
 
 def next_time_slot(now_dt=None, increment_minutes=15):
-    now_dt = now_dt or datetime.now()
+    now_dt = now_dt or local_now()
     if increment_minutes <= 0:
         increment_minutes = 15
     minute = now_dt.minute
@@ -598,16 +598,21 @@ def availability_errors(order_id):
         if not product:
             errors.append("One of the products on this order is no longer available")
             continue
+        branch_clause = "" if product["branch_id"] is None else "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)"
+        params = [item["product_id"], order_id]
+        if product["branch_id"] is not None:
+            params.append(order["collect_branch_id"])
+        params.extend([order["end_at"], order["start_at"]])
         booked = db.execute(
-            """SELECT COALESCE(SUM(oi.quantity), 0) AS booked
+            f"""SELECT COALESCE(SUM(oi.quantity), 0) AS booked
             FROM order_items oi JOIN orders o ON o.id = oi.order_id
             WHERE oi.product_id = ?
               AND o.id != ?
               AND o.status IN ('reserved', 'started')
-              AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)
+              {branch_clause}
               AND o.start_at < ?
               AND o.end_at > ?""",
-            (item["product_id"], order_id, order["collect_branch_id"], order["end_at"], order["start_at"]),
+            params,
         ).fetchone()["booked"] or 0
         available = int(product["quantity"] or 0) - int(booked)
         if item["quantity"] > available:
@@ -657,12 +662,12 @@ def status_actions(status):
 
 
 def can_process_return_deposit(order):
-    return bool(order) and order["status"] in {"returned", "canceled", "cancelled"}
+    return bool(order) and order["status"] in {"started", "returned", "canceled", "cancelled"}
 
 
 def _require_return_deposit_allowed(order):
     if not can_process_return_deposit(order):
-        raise ValueError("Return and deposit settlement are only available after the order is returned or canceled")
+        raise ValueError("Return and deposit settlement is available after pickup or cancelation")
 
 
 def _parse_deposit_processed_at(value):
@@ -679,6 +684,105 @@ def _parse_deposit_processed_at(value):
 
 
 RETURN_CHARGE_NAMES = {"Extra hours", "Damage charge"}
+
+
+def late_return_breakdown(start_at, actual_return_at):
+    """Return billable full 24h rental days plus extra hours after pickup time.
+
+    ABI rents in 24-hour blocks. Once the actual return passes the original
+    pickup time on a later date, the completed 24h blocks are full rental days
+    and only the remainder is extra hours (06 08:00 -> 09 10:00 = 3d + 2h).
+    """
+    if not start_at or not actual_return_at or actual_return_at <= start_at:
+        return {"days": 1, "extra_hours": 0.0}
+    total_hours = (actual_return_at - start_at).total_seconds() / 3600
+    days = max(1, int(total_hours // 24))
+    extra_hours = round(total_hours - (days * 24), 2)
+    if extra_hours < 0.01:
+        extra_hours = 0.0
+    return {"days": days, "extra_hours": extra_hours}
+
+
+def _line_recalc(item, days, tax_mode):
+    qty = max(1, int(item["quantity"] or 1))
+    unit_price = float(item["unit_price"] or 0)
+    billing_mode = item["billing_mode"] or "catalog"
+    product_type = item["product_type"] or ""
+    price_unit = item["price_unit"] or ""
+    multiplier = days if (billing_mode == "rental_day" or (billing_mode == "catalog" and product_type == "rental" and price_unit in {"day", "week", "month", "hour"})) else 1
+    base = unit_price * qty * multiplier
+    tax_rate = float(item["tax_rate"] or 0) / 100
+    if tax_mode == "inclusive" and tax_rate:
+        tax = base - (base / (1 + tax_rate))
+        total = base
+        subtotal = base - tax
+    else:
+        subtotal = base
+        tax = base * tax_rate
+        total = subtotal + tax
+    return round(subtotal, 2), round(tax, 2), round(total, 2)
+
+
+def revise_started_return(order_id, form):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    if order["status"] != "started":
+        raise ValueError("Return date and time can only be revised after pickup and before return")
+    start_at = datetime.fromisoformat(order["start_at"])
+    settings = get_db().execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
+    actual_return_at = _parse_dt(form.get("end_date"), form.get("end_time"), settings["default_return_time"])
+    if not actual_return_at or actual_return_at <= start_at:
+        raise ValueError("Return must be after pickup")
+    breakdown = late_return_breakdown(start_at, actual_return_at)
+    days = breakdown["days"]
+    extra_hours = breakdown["extra_hours"]
+    db = get_db()
+    rows = db.execute(
+        """SELECT oi.*, p.product_type, p.price_unit, COALESCE(t.rate, 0) AS tax_rate
+        FROM order_items oi
+        LEFT JOIN products p ON p.id = oi.product_id
+        LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
+        WHERE oi.order_id = ? AND oi.custom_name NOT IN ('Extra hours', 'Damage charge')
+        ORDER BY oi.id""",
+        (order_id,),
+    ).fetchall()
+    subtotal = tax_total = line_total = 0.0
+    for item in rows:
+        line_subtotal, line_tax, total = _line_recalc(item, days, settings["tax_mode"])
+        db.execute(
+            "UPDATE order_items SET line_subtotal = ?, line_tax = ?, line_total = ? WHERE id = ?",
+            (line_subtotal, line_tax, total, item["id"]),
+        )
+        subtotal += line_subtotal
+        tax_total += line_tax
+        line_total += total
+    damage_rows = db.execute("SELECT line_subtotal, line_tax, line_total FROM order_items WHERE order_id = ? AND custom_name = 'Damage charge'", (order_id,)).fetchall()
+    for row in damage_rows:
+        subtotal += float(row["line_subtotal"] or 0)
+        tax_total += float(row["line_tax"] or 0)
+        line_total += float(row["line_total"] or 0)
+    db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name = 'Extra hours'", (order_id,))
+    hourly_rate = return_charge_defaults(order_id)["hourly_rate"]
+    extra_charge = round(extra_hours * hourly_rate, 2)
+    if extra_charge > 0:
+        db.execute(
+            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
+            VALUES (?, NULL, 'Extra hours', ?, ?, ?, 0, ?, 'fixed')""",
+            (order_id, extra_hours, hourly_rate, extra_charge, extra_charge),
+        )
+        subtotal += extra_charge
+        line_total += extra_charge
+    discount_total = computed_discount(order["discount_mode"], order["discount_value"], subtotal, tax_total) if (order["discount_mode"] or "") in {"percent", "amount"} else float(order["discount_total"] or 0)
+    total = round(line_total - discount_total + float(order["deposit_total"] or 0) + float(order["damage_waiver_amount"] or 0), 2)
+    db.execute(
+        """UPDATE orders SET end_at = ?, extra_hours = ?, subtotal = ?, tax_total = ?, discount_total = ?, total = ? WHERE id = ?""",
+        (actual_return_at.isoformat(timespec="minutes"), extra_hours, round(subtotal, 2), round(tax_total, 2), round(discount_total, 2), total, order_id),
+    )
+    db.commit()
+    from app.services.payments import recalculate_order_payment
+    recalculate_order_payment(order_id)
+    return f"Return revised: {days} rental day{'s' if days != 1 else ''} + {extra_hours:g} extra hour{'s' if extra_hours != 1 else ''}"
 
 
 def return_charge_defaults(order_id):
@@ -748,6 +852,31 @@ def _deposit_applied_payment(order_id):
     ).fetchone()
 
 
+def _non_deposit_paid_total(order_id):
+    row = get_db().execute(
+        """SELECT COALESCE(SUM(amount), 0) AS paid FROM payments
+        WHERE order_id = ? AND status = 'paid' AND COALESCE(deleted_at, '') = ''
+        AND NOT (method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT')""",
+        (order_id,),
+    ).fetchone()
+    return float(row["paid"] or 0) if row else 0.0
+
+
+def _upsert_deposit_applied_payment(order_id, amount):
+    db = get_db()
+    existing = _deposit_applied_payment(order_id)
+    if amount > 0:
+        if existing:
+            db.execute("UPDATE payments SET amount = ?, status = 'paid', deleted_at = '', created_at = ? WHERE id = ?", (amount, now(), existing["id"]))
+        else:
+            db.execute(
+                "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, ?, 'deposit_applied', 'DEPOSIT-SETTLEMENT', 'paid', ?)",
+                (order_id, amount, now()),
+            )
+    elif existing:
+        db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), existing["id"]))
+
+
 def settle_return_deposit(order_id, form):
     order = get_order(order_id)
     if not order:
@@ -759,22 +888,27 @@ def settle_return_deposit(order_id, form):
     note = form.get("deposit_note", "").strip()
     deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
     deposit_available = round(float(order["deposit_total"] or 0), 2)
-    existing_refund = round(float(order["deposit_refund_amount"] or 0), 2)
-    refund_amount = existing_refund if (existing_refund or float(order["deposit_applied_amount"] or 0)) else deposit_available
+    non_deposit_paid = _non_deposit_paid_total(order_id)
+    balance = round(max(float(order["total"] or 0) - non_deposit_paid, 0), 2)
+    # If rental money is still due, the security deposit must settle that first;
+    # only the true remainder can be paid out to the customer.
+    applied_amount = round(min(deposit_available, balance), 2)
+    refund_amount = round(max(deposit_available - applied_amount, 0), 2)
     db = get_db()
-    existing = _deposit_applied_payment(order_id)
-    if existing:
-        db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), existing["id"]))
+    _upsert_deposit_applied_payment(order_id, applied_amount)
     db.execute(
-        """UPDATE orders SET deposit_applied_amount = 0, deposit_refund_amount = ?,
+        """UPDATE orders SET deposit_applied_amount = ?, deposit_refund_amount = ?,
         deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
-        (refund_amount, deposit_process_method, deposit_processed_at, note, order_id),
+        (applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note, order_id),
     )
     db.commit()
     from app.services.payments import recalculate_order_payment
     recalculate_order_payment(order_id)
+    if applied_amount > 0 and refund_amount > 0:
+        return f"Deposit settled: R{applied_amount:.2f} used; R{refund_amount:.2f} refunded"
+    if applied_amount > 0:
+        return f"Deposit settled: R{applied_amount:.2f} used; no refund remaining"
     return f"Deposit refund processed: R{refund_amount:.2f}"
-
 
 def use_return_deposit(order_id, form):
     order = get_order(order_id)
@@ -784,27 +918,11 @@ def use_return_deposit(order_id, form):
     note = form.get("deposit_note", "").strip()
     deposit_available = round(float(order["deposit_total"] or 0), 2)
     db = get_db()
-    paid_row = db.execute(
-        """SELECT COALESCE(SUM(amount), 0) AS paid FROM payments
-        WHERE order_id = ? AND status = 'paid' AND COALESCE(deleted_at, '') = ''
-        AND NOT (method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT')""",
-        (order_id,),
-    ).fetchone()
-    non_deposit_paid = float(paid_row["paid"] or 0) if paid_row else 0
+    non_deposit_paid = _non_deposit_paid_total(order_id)
     balance = round(max(float(order["total"] or 0) - non_deposit_paid, 0), 2)
     deposit_applied = round(min(deposit_available, balance), 2)
     deposit_refund = round(max(deposit_available - deposit_applied, 0), 2)
-    existing = _deposit_applied_payment(order_id)
-    if deposit_applied > 0:
-        if existing:
-            db.execute("UPDATE payments SET amount = ?, status = 'paid', deleted_at = '', created_at = ? WHERE id = ?", (deposit_applied, now(), existing["id"]))
-        else:
-            db.execute(
-                "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, ?, 'deposit_applied', 'DEPOSIT-SETTLEMENT', 'paid', ?)",
-                (order_id, deposit_applied, now()),
-            )
-    elif existing:
-        db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), existing["id"]))
+    _upsert_deposit_applied_payment(order_id, deposit_applied)
     db.execute(
         """UPDATE orders SET deposit_applied_amount = ?, deposit_refund_amount = ?,
         deposit_process_method = '', deposit_processed_at = '', deposit_note = ? WHERE id = ?""",

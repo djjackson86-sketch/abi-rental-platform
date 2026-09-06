@@ -153,11 +153,6 @@ def product_filter_counts():
     }
 
 
-def _default_branch_id():
-    row = get_db().execute("SELECT id FROM branches WHERE active = 1 ORDER BY id LIMIT 1").fetchone()
-    return row["id"] if row else None
-
-
 def _clean(form):
     name = form.get("name", "").strip()
     if not name:
@@ -172,6 +167,8 @@ def _clean(form):
     if tracking_method not in VALID_TRACKING_METHODS:
         tracking_method = "bulk"
     product_group_id = int(form.get("product_group_id") or 0) or None
+    branch_id = int(form.get("branch_id") or 0) or None
+    quantity = 0 if product_type == "service" else max(0, int(form.get("quantity") or 0))
     return {
         "name": name,
         "product_type": product_type,
@@ -186,8 +183,8 @@ def _clean(form):
         "hourly_extra_rate": float(form.get("hourly_extra_rate") or 0),
         "tax_profile_id": int(form.get("tax_profile_id") or 1),
         "product_group_id": product_group_id,
-        "quantity": max(0, int(form.get("quantity") or 0)),
-        "branch_id": int(form.get("branch_id") or 0) or _default_branch_id(),
+        "quantity": quantity,
+        "branch_id": branch_id,
     }
 
 
