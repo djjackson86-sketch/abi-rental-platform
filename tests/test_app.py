@@ -1382,7 +1382,8 @@ def test_draft_order_can_be_edited_without_creating_new_order(client, app):
     assert b'Admin edit fee' in saved.data
     assert b'Edited order note' not in saved.data  # internal notes are saved but not shown on detail yet.
     assert b'R1975.00' in saved.data  # 3 * R200 * 3 days + R50 + R125 damage waiver.
-    assert b'R0.00' in saved.data  # security deposit removed by damage waiver option.
+    assert b'R0.00' in saved.data  # no security-deposit charge remains.
+    assert b'<span>Security deposit</span>' not in saved.data  # security-deposit totals row hidden for damage-waiver orders.
 
     with app.app_context():
         from app.db import get_db
@@ -1542,6 +1543,231 @@ def test_edit_damage_waiver_order_without_amount_field_preserves_stored_waiver_a
         assert order['deposit_total'] == 0
         assert order['deposit_option'] == 'damage_waiver'
         assert order['damage_waiver_amount'] == 125
+
+
+def test_order_estimate_hides_discount_and_damage_waiver_rows(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    new_page = client.get('/orders/new')
+    assert new_page.status_code == 200
+    assert b'id="estimate-product-total"' in new_page.data
+    assert b'id="estimate-tax-total"' in new_page.data
+    assert b'id="estimate-deposit-total"' in new_page.data
+    assert b'id="estimate-order-total"' in new_page.data
+    assert b'id="estimate-discount-total"' not in new_page.data
+    assert b'id="estimate-waiver-total"' not in new_page.data
+    assert b'name="deposit_option"' in new_page.data  # Deposit choice stays (order totals depend on it).
+
+    order_id = create_order_for_status(client, quantity='1')
+    edit_page = client.get(f'/orders/{order_id}/edit')
+    assert edit_page.status_code == 200
+    assert b'id="estimate-discount-total"' not in edit_page.data
+    assert b'id="estimate-waiver-total"' not in edit_page.data
+    assert b'name="damage_waiver_amount"' in edit_page.data  # hidden legacy waiver carry stays.
+
+
+def test_record_payment_method_options_are_cash_eft_card_only(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    detail = client.get(f'/orders/{order_id}')
+    assert detail.status_code == 200
+    assert b'<select name="method">' in detail.data
+    assert b'value="cash">Cash' in detail.data
+    assert b'value="eft">EFT' in detail.data
+    assert b'value="card">Card' in detail.data
+    assert b'value="security_deposit"' not in detail.data
+    assert b'value="damage_waiver"' not in detail.data
+    assert b'value="manual"' not in detail.data
+
+
+def test_order_detail_security_deposit_row_only_for_security_deposit_mode(client):
+    login(client)
+    seed_customer_and_product(client)
+    base = {
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+    }
+
+    security = client.post('/orders/new', data={**base, 'deposit_option': 'security_deposit'}, follow_redirects=True)
+    assert security.status_code == 200
+    assert b'<span>Security deposit</span>' in security.data
+    assert b'R750.00' in security.data
+
+    waiver = client.post('/orders/new', data={**base, 'deposit_option': 'damage_waiver', 'damage_waiver_amount': '125'}, follow_redirects=True)
+    assert waiver.status_code == 200
+    assert b'<span>Security deposit</span>' not in waiver.data
+    assert b'Deposit choice' in waiver.data
+    assert b'<span>Damage waiver</span>' in waiver.data
+
+    no_deposit = client.post('/orders/new', data={**base, 'deposit_option': 'no_deposit', 'damage_waiver_amount': ''}, follow_redirects=True)
+    assert no_deposit.status_code == 200
+    assert b'<span>Security deposit</span>' not in no_deposit.data
+
+
+def test_order_page_applies_percent_discount_and_recalculates_due(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    with app.app_context():
+        from app.db import get_db, now
+        db = get_db()
+        db.execute("INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, 100, 'cash', 'DISCOUNT-PARTIAL', 'paid', ?)", (order_id, now()))
+        db.commit()
+
+    detail = client.get(f'/orders/{order_id}')
+    assert detail.status_code == 200
+    assert b'name="discount_mode"' in detail.data
+    assert b'value="percent" selected>%' in detail.data
+    assert b'value="amount"' in detail.data
+    assert b'value="amount" selected' not in detail.data
+
+    applied = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'percent', 'discount_value': '10'}, follow_redirects=True)
+    assert applied.status_code == 200
+    assert b'Discount applied: %10 = R60.00' in applied.data
+    assert b'R60.00' in applied.data
+
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT subtotal, tax_total, deposit_total, discount_mode, discount_value, discount_total, total, due_total, payment_status FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['subtotal'] == 600  # R200 * 3 rental days
+        assert order['discount_mode'] == 'percent'
+        assert order['discount_value'] == 10
+        assert order['discount_total'] == 60
+        assert order['total'] == 1290  # 600 + 750 deposit - 60 discount
+        assert order['due_total'] == 1190  # total - 100 already paid
+        assert order['payment_status'] == 'partially_paid'
+
+
+def test_order_page_applies_flat_amount_discount_clamps_and_clears(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    applied = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'amount', 'discount_value': '200'}, follow_redirects=True)
+    assert b'Discount applied: R200 = R200.00' in applied.data
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT discount_mode, discount_value, discount_total, total, due_total FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['discount_mode'] == 'amount'
+        assert order['discount_value'] == 200
+        assert order['discount_total'] == 200
+        assert order['total'] == 1150  # 1350 - 200
+        assert order['due_total'] == 1150
+
+    # A flat amount larger than the money base is clamped to subtotal + tax so
+    # the refundable deposit part of the total is never discounted away.
+    clamped = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'amount', 'discount_value': '5000'}, follow_redirects=True)
+    assert clamped.status_code == 200
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT discount_total, total FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['discount_total'] == 600
+        assert order['total'] == 750
+
+    cleared = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'amount', 'discount_value': '0'}, follow_redirects=True)
+    assert b'Discount cleared' in cleared.data
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT discount_total, total FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['discount_total'] == 0
+        assert order['total'] == 1350
+
+
+def test_percent_discount_recomputes_when_order_is_edited(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'percent', 'discount_value': '10'}, follow_redirects=True)
+
+    saved = client.post(f'/orders/{order_id}/edit', data={
+        'customer_id': '1',
+        'product_id': ['1'],
+        'custom_name': [''],
+        'custom_unit_price': [''],
+        'custom_billing_mode': ['fixed'],
+        'quantity': ['2'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'deposit_option': 'security_deposit',
+        'damage_waiver_amount': '',
+    }, follow_redirects=True)
+    assert b'Order saved' in saved.data
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT subtotal, deposit_total, discount_mode, discount_value, discount_total, total, due_total FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['subtotal'] == 1200  # 2 * R200 * 3 rental days
+        assert order['deposit_total'] == 1500
+        assert order['discount_mode'] == 'percent'
+        assert order['discount_value'] == 10
+        assert order['discount_total'] == 120  # recomputed 10% of the new subtotal
+        assert order['total'] == 2580  # 1200 + 1500 - 120
+        assert order['due_total'] == 2580
+
+
+def test_flat_amount_discount_preserved_when_order_is_edited(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'amount', 'discount_value': '150'}, follow_redirects=True)
+
+    saved = client.post(f'/orders/{order_id}/edit', data={
+        'customer_id': '1',
+        'product_id': ['1'],
+        'custom_name': [''],
+        'custom_unit_price': [''],
+        'custom_billing_mode': ['fixed'],
+        'quantity': ['2'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'deposit_option': 'security_deposit',
+        'damage_waiver_amount': '',
+    }, follow_redirects=True)
+    assert b'Order saved' in saved.data
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT subtotal, discount_mode, discount_value, discount_total, total FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['discount_mode'] == 'amount'
+        assert order['discount_value'] == 150
+        assert order['discount_total'] == 150  # flat R discount is not re-scaled
+        assert order['total'] == 2550  # 1200 + 1500 - 150
+
+
+def test_apply_discount_rejects_canceled_orders_and_bad_values(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    canceled_id = create_order_for_status(client, quantity='1', start_date='2026-08-01', end_date='2026-08-03')
+    client.post(f'/orders/{canceled_id}/cancel', follow_redirects=True)
+    blocked = client.post(f'/orders/{canceled_id}/discount', data={'discount_mode': 'percent', 'discount_value': '10'}, follow_redirects=True)
+    assert b'Canceled and archived orders cannot be edited' in blocked.data
+
+    bad_mode = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'half', 'discount_value': '10'}, follow_redirects=True)
+    assert b'Discount type must be % or R' in bad_mode.data
+    negative = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'amount', 'discount_value': '-5'}, follow_redirects=True)
+    assert b'Discount value cannot be negative' in negative.data
+    too_big = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'percent', 'discount_value': '150'}, follow_redirects=True)
+    assert b'Percentage discount cannot exceed 100' in too_big.data
+    not_number = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'amount', 'discount_value': 'abc'}, follow_redirects=True)
+    assert b'Discount value must be a number' in not_number.data
 
 
 def test_canceled_and_archived_order_edit_is_rejected(client):

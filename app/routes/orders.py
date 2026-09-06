@@ -5,7 +5,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order, update_draft_order
+from app.services.orders import _build_order_payload, apply_order_discount, create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, settle_return_deposit, status_actions, transition_order, update_draft_order
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
@@ -277,6 +277,17 @@ def create_document_for_order(order_id):
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("orders.detail", order_id=order_id))
+
+
+@bp.post("/<int:order_id>/discount")
+@login_required
+def apply_discount(order_id):
+    try:
+        message = apply_order_discount(order_id, request.form.get("discount_mode", ""), request.form.get("discount_value", ""))
+        flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))
 
 
 @bp.post("/<int:order_id>/<action>")

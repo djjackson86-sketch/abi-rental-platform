@@ -47,7 +47,7 @@
     <div class="list-row"><span>Due</span><b>R{{ '%.2f'|format(payment_summary.due_total) }}</b></div>
     <form method="post" action="{{ url_for('orders.record_order_payment', order_id=order.id) }}" class="payment-form">
       <h3>Record payment</h3>
-      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method"><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option><option value="security_deposit">Security deposit</option><option value="damage_waiver">Damage waiver</option><option value="manual">Manual</option></select></label><label>Payment date<input type="datetime-local" name="payment_date" value="{{ default_payment_date }}" required></label></div>
+      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method"><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option></select></label><label>Payment date<input type="datetime-local" name="payment_date" value="{{ default_payment_date }}" required></label></div>
       <label>Reference<input name="reference" placeholder="Payment reference or note"></label>
       <button class="btn primary" type="submit">Record payment</button>
     </form>
@@ -89,11 +89,32 @@
     </table>
   </div>
   <div class="totals">
+    <style>
+      .totals .discount-row{flex-wrap:wrap}
+      .totals .discount-form{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+      .totals .discount-form select,.totals .discount-form input{min-height:32px;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:inherit;font-family:inherit;font-size:13px}
+      .totals .discount-form select{width:56px}
+      .totals .discount-form input{width:88px;min-width:0}
+      .totals .discount-form .btn.discount-apply{min-height:32px;height:32px;padding:0 12px;font-size:13px;width:auto}
+      @media(max-width:520px){.totals .discount-row{gap:8px}.totals .discount-form{width:100%;margin-left:0}.totals .discount-row b{min-width:0}}
+    </style>
     <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(order.subtotal) }}</b></div>
     {% if order.coupon_code %}<div class="list-row"><span>Coupon</span><b>{{ order.coupon_code }}</b></div>{% endif %}
-    <div class="list-row"><span>Discount</span><b>R{{ '%.2f'|format(order.discount_total) }}</b></div>
+    <div class="list-row discount-row"><span>Discount</span>
+      {% if order.status not in ['canceled', 'cancelled', 'archived'] %}
+      <form method="post" action="{{ url_for('orders.apply_discount', order_id=order.id) }}" class="discount-form">
+        <select name="discount_mode" aria-label="Discount type">
+          <option value="percent" {% if (order.discount_mode or 'percent') == 'percent' %}selected{% endif %}>%</option>
+          <option value="amount" {% if order.discount_mode == 'amount' %}selected{% endif %}>R</option>
+        </select>
+        <input type="number" step="0.01" min="0" name="discount_value" value="{{ '%.2f'|format(order.discount_value) if order.discount_mode else '' }}" placeholder="0.00" aria-label="Discount value">
+        <button class="btn discount-apply" type="submit">Apply</button>
+      </form>
+      {% endif %}
+      <b>R{{ '%.2f'|format(order.discount_total) }}</b>
+    </div>
     <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(order.tax_total) }}</b></div>
-    <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(order.deposit_total) }}</b></div>
+    {% if (order.deposit_option or 'security_deposit') == 'security_deposit' %}<div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(order.deposit_total) }}</b></div>{% endif %}
     <div class="list-row"><span>Deposit choice</span><b>{{ (order.deposit_option or 'security_deposit').replace('_', ' ')|title }}</b></div>
     {% if order.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(order.damage_waiver_amount) }}</b></div>{% endif %}
     {% if order.extra_hours %}<div class="list-row"><span>Extra hours</span><b>{{ order.extra_hours }} hrs</b></div>{% endif %}

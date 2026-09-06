@@ -182,6 +182,29 @@ def calculate_custom_line(name, quantity, unit_price, billing_mode, days, tax_ra
     return {"quantity": qty, "line_subtotal": round(line_subtotal, 2), "line_tax": round(line_tax, 2), "line_total": round(line_total, 2), "deposit": 0, "unit_price": price, "billing_mode": billing_mode}
 
 
+def computed_discount(mode, value, subtotal, tax_total):
+    """Money discount for a staff-applied order discount.
+
+    mode is 'percent' or 'amount'. Percent discounts apply to the taxable
+    subtotal only (tax, refundable deposit and damage waiver are not
+    discounted). The discount is clamped so it can never exceed the
+    subtotal + tax money base of the order.
+    """
+    subtotal = round(max(float(subtotal or 0), 0), 2)
+    limit = round(subtotal + max(float(tax_total or 0), 0), 2)
+    try:
+        value = float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    if value < 0:
+        return 0
+    if mode == "percent":
+        discount = round(subtotal * value / 100, 2)
+    else:
+        discount = round(value, 2)
+    return min(discount, limit)
+
+
 def _build_order_payload(form):
     db = get_db()
     customer_id = int(form.get("customer_id") or 0) or None
@@ -256,6 +279,12 @@ def _build_order_payload(form):
     # submitted coupon codes to newly saved/recalculated orders.
     coupon_code = ""
     discount_total = 0
+    # Discounts are applied later on the saved order page (staff order
+    # discount), not on the new/edit form. These keys keep the create/update
+    # statements explicit; update_draft_order carries a stored discount
+    # forward when the form submits no discount fields.
+    discount_mode = ""
+    discount_value = 0
     total = round(subtotal + tax_total, 2)
     deposit_option = form.get("deposit_option", "security_deposit")
     if deposit_option not in {"security_deposit", "damage_waiver", "no_deposit"}:
@@ -275,6 +304,8 @@ def _build_order_payload(form):
         "end_at": end_dt.isoformat(timespec="minutes"),
         "subtotal": subtotal,
         "discount_total": discount_total,
+        "discount_mode": discount_mode,
+        "discount_value": discount_value,
         "coupon_code": coupon_code,
         "tax_total": tax_total,
         "deposit_total": deposit_total,
@@ -305,9 +336,9 @@ def create_order(form):
     order_number = next_order_number()
     db = get_db()
     cur = db.execute(
-        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (order_number, payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], payload["total"], payload["notes"], now()),
+        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, discount_mode, discount_value, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (order_number, payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["discount_mode"], payload["discount_value"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], payload["total"], payload["notes"], now()),
     )
     order_id = cur.lastrowid
     _insert_order_items(order_id, payload["lines"])
@@ -340,6 +371,25 @@ def update_draft_order(order_id, form):
             stored_waiver = round(float(order["damage_waiver_amount"]), 2)
             payload["damage_waiver_amount"] = stored_waiver
             payload["total"] = round(float(payload["total"] or 0) + stored_waiver, 2)
+    # Data-safety net (update path only): the new/edit form no longer exposes
+    # any discount option, so a re-save of a discounted order submits no
+    # discount fields. Without this net the re-save would zero the applied
+    # discount and silently raise the order total back up. Carry the stored
+    # discount forward, recomputing percentage discounts against the edited
+    # order's new subtotal while keeping flat R discounts fixed.
+    stored_discount_mode = (order["discount_mode"] or "").strip().lower()
+    if stored_discount_mode in ("percent", "amount"):
+        try:
+            stored_discount_value = float(order["discount_value"] or 0)
+        except (TypeError, ValueError):
+            stored_discount_value = 0.0
+        if stored_discount_value > 0:
+            payload["discount_mode"] = stored_discount_mode
+            payload["discount_value"] = stored_discount_value
+            payload["discount_total"] = computed_discount(
+                stored_discount_mode, stored_discount_value, payload["subtotal"], payload["tax_total"]
+            )
+            payload["total"] = round(float(payload["total"] or 0) - float(payload["discount_total"] or 0), 2)
     paid_row = db.execute("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND status = 'paid'", (order_id,)).fetchone()
     paid_total = float(paid_row["paid"] or 0) if paid_row else 0
     due_total = round(max(float(payload["total"] or 0) - paid_total, 0), 2)
@@ -353,15 +403,64 @@ def update_draft_order(order_id, form):
         payment_status = "overpaid"
     db.execute(
         """UPDATE orders SET customer_id = ?, booking_type = ?, collect_branch_id = ?, return_branch_id = ?,
-        start_at = ?, end_at = ?, subtotal = ?, discount_total = ?, coupon_code = ?, tax_total = ?,
+        start_at = ?, end_at = ?, subtotal = ?, discount_total = ?, discount_mode = ?, discount_value = ?, coupon_code = ?, tax_total = ?,
         deposit_total = ?, deposit_option = ?, damage_waiver_amount = ?, total = ?, due_total = ?,
         payment_status = ?, notes = ? WHERE id = ?""",
-        (payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], due_total, payment_status, payload["notes"], order_id),
+        (payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["discount_mode"], payload["discount_value"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], due_total, payment_status, payload["notes"], order_id),
     )
     db.execute("DELETE FROM order_items WHERE order_id = ?", (order_id,))
     _insert_order_items(order_id, payload["lines"])
     db.commit()
     return order_id
+
+
+def apply_order_discount(order_id, mode, value):
+    """Apply (or clear) a staff discount on the saved order page.
+
+    mode is 'percent' (value = % of the taxable subtotal) or 'amount'
+    (value = flat R discount). The discount is deducted from the order total
+    without touching the stored subtotal/tax/deposit/damage-waiver parts, so
+    existing extra-hours charges and refundable deposit settlement stay
+    intact. Archived and canceled orders cannot be changed.
+    """
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    if not can_edit_order_status(order["status"]):
+        raise ValueError(BLOCKED_EDIT_MESSAGE)
+    mode = (mode or "").strip().lower()
+    if mode in ("%", "percent", "percentage"):
+        mode = "percent"
+    elif mode in ("r", "rand", "amount", "fixed"):
+        mode = "amount"
+    else:
+        raise ValueError("Discount type must be % or R")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("Discount value must be a number")
+    if value < 0:
+        raise ValueError("Discount value cannot be negative")
+    if mode == "percent" and value > 100:
+        raise ValueError("Percentage discount cannot exceed 100")
+    discount_total = computed_discount(mode, value, order["subtotal"], order["tax_total"])
+    previous = float(order["discount_total"] or 0)
+    new_total = round(float(order["total"] or 0) - (discount_total - previous), 2)
+    if new_total < 0:
+        new_total = 0
+    db = get_db()
+    db.execute(
+        "UPDATE orders SET discount_mode = ?, discount_value = ?, discount_total = ?, total = ? WHERE id = ?",
+        (mode, value, discount_total, new_total, order_id),
+    )
+    db.commit()
+    from app.services.payments import recalculate_order_payment
+
+    recalculate_order_payment(order_id)
+    unit = "%" if mode == "percent" else "R"
+    if discount_total:
+        return f"Discount applied: {unit}{value:g} = R{discount_total:.2f}"
+    return "Discount cleared"
 
 
 def draft_order_form(order_id):

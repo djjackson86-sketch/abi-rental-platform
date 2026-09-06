@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS orders (
     end_at TEXT,
     subtotal REAL NOT NULL DEFAULT 0,
     discount_total REAL NOT NULL DEFAULT 0,
+    discount_mode TEXT NOT NULL DEFAULT '',
+    discount_value REAL NOT NULL DEFAULT 0,
     coupon_code TEXT NOT NULL DEFAULT '',
     tax_total REAL NOT NULL DEFAULT 0,
     deposit_total REAL NOT NULL DEFAULT 0,
@@ -348,6 +350,8 @@ def run_migrations(db):
     ensure_column(db, "orders", "deposit_process_method", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "deposit_processed_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "deposit_note", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "discount_mode", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "discount_value", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")
