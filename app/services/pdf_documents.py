@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import display_document_label, display_document_number, document_date, label_for, printable_document, rental_days_label
+from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 
@@ -113,7 +113,7 @@ def _pdf_light_blue_rect(x, y, width, height):
 
 
 def _add_pdf_lines(commands, x, y, lines, size: int | float = 9, leading=14, max_lines=None, font='F1'):
-    for index, line in enumerate([line for line in lines if line]):
+    for index, line in enumerate(lines):
         if max_lines is not None and index >= max_lines:
             break
         commands.append(_pdf_text_command(x, y - (index * leading), line, size=size, font=font))
@@ -194,14 +194,14 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     text_commands.append(_pdf_text_command(detail_x, 760, display_label, size=8.5, font='F2'))
     _add_pdf_lines(text_commands, detail_x, 746, [
         display_number,
-        f'{display_label} date: {document_date(document["created_at"])}',
+        f'{display_label} date: {document_datetime(document["created_at"])}',
     ], size=8.5, leading=14)
 
     text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
     _add_pdf_lines(text_commands, detail_x, 611, [
         f'Order: {document["order_number"]}',
-        f'Pickup: {document_date(document["start_at"])}',
-        f'Return: {document_date(document["end_at"])}',
+        f'Pickup: {document_datetime(document["start_at"])}',
+        f'Return: {document_datetime(document["end_at"])}',
         rent_label,
     ], size=8.5, leading=14)
 
@@ -213,19 +213,25 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     if document['customer_phone']:
         customer_lines.append(document['customer_phone'])
     customer_lines.extend([line for line in customer_address if line])
+    vehicle_lines = []
     if custom_fields.get('vehicle_make'):
-        customer_lines.append(f'Vehicle Make: {custom_fields["vehicle_make"]}')
+        vehicle_lines.append(f'Vehicle Make: {custom_fields["vehicle_make"]}')
     if custom_fields.get('vehicle_color'):
-        customer_lines.append(f'Vehicle Color: {custom_fields["vehicle_color"]}')
+        vehicle_lines.append(f'Vehicle Color: {custom_fields["vehicle_color"]}')
     if custom_fields.get('vehicle_reg_no'):
-        customer_lines.append(f'Veh Reg No: {custom_fields["vehicle_reg_no"]}')
+        vehicle_lines.append(f'Veh Reg No: {custom_fields["vehicle_reg_no"]}')
+    if vehicle_lines:
+        customer_lines.extend(['', *vehicle_lines])
+    alt_lines = []
     if custom_fields.get('alternative_contact_name'):
-        customer_lines.append(f'Alternative Contact Name: {custom_fields["alternative_contact_name"]}')
+        alt_lines.append(f'Alternative Contact Name: {custom_fields["alternative_contact_name"]}')
     if custom_fields.get('alternative_contact_number'):
-        customer_lines.append(f'Alternative Contact Number: {custom_fields["alternative_contact_number"]}')
+        alt_lines.append(f'Alternative Contact Number: {custom_fields["alternative_contact_number"]}')
     if custom_fields.get('alternative_contact_relationship'):
-        customer_lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
-    visible_customer_lines = [line for line in customer_lines if line][:16]
+        alt_lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
+    if alt_lines:
+        customer_lines.extend(['', *alt_lines])
+    visible_customer_lines = customer_lines[:18]
     # Bill To block, aligned under the logo/brand on the left.
     if visible_customer_lines:
         text_commands.append(_pdf_text_command(36, 625, visible_customer_lines[0], size=8.5, font='F2'))
@@ -275,9 +281,10 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         elif _doc_value(document, 'discount_mode', '') == 'amount' and float(_doc_value(document, 'discount_value') or 0):
             discount_label = f'Discount (R{float(_doc_value(document, "discount_value") or 0):.2f})'
         totals.append((discount_label, f'-R{float(_doc_value(document, "discount_total") or 0):.2f}'))
+    totals.append(('Tax', f'R{float(document["tax_total"] or 0):.2f}'))
+    if (_doc_value(document, 'deposit_option', 'security_deposit') or 'security_deposit') == 'security_deposit':
+        totals.append(('Security deposit', f'R{float(document["deposit_total"] or 0):.2f}'))
     totals.extend([
-        ('Tax', f'R{float(document["tax_total"] or 0):.2f}'),
-        ('Security deposit', f'R{float(document["deposit_total"] or 0):.2f}'),
         ('Total', f'R{float(document["total"] or 0):.2f}'),
         ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
         ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
@@ -329,7 +336,7 @@ def document_pdf_bytes(document_id):
     if issuer_phone:
         lines.append(f'Issuer phone: {issuer_phone}')
     lines.extend([line for line in issuer_address if line])
-    lines.extend([f'Order: {document["order_number"]}', f'Pickup: {document["start_at"] or "-"}', f'Return: {document["end_at"] or "-"}'])
+    lines.extend([f'Order: {document["order_number"]}', f'Pickup: {document_datetime(document["start_at"])}', f'Return: {document_datetime(document["end_at"])}'])
     if document['document_type'] == 'invoice':
         lines.append(rental_days_label(document))
         bank_lines = [
@@ -381,7 +388,10 @@ def document_pdf_bytes(document_id):
     lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}'])
     if float(_doc_value(document, 'discount_total') or 0):
         lines.append(f'Discount: -R{float(_doc_value(document, "discount_total") or 0):.2f}')
-    lines.extend([f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])
+    lines.append(f'Tax: R{float(document["tax_total"] or 0):.2f}')
+    if (_doc_value(document, 'deposit_option', 'security_deposit') or 'security_deposit') == 'security_deposit':
+        lines.append(f'Security deposit: R{float(document["deposit_total"] or 0):.2f}')
+    lines.append(f'Total: R{float(document["total"] or 0):.2f}')
     if document['document_type'] == 'invoice':
         lines.extend([f'Paid: R{float(document["paid_total"] or 0):.2f}', f'Amount due: R{float(document["due_total"] or 0):.2f}'])
     logo_bytes = _document_logo_bytes()

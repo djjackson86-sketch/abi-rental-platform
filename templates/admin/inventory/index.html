@@ -79,6 +79,7 @@
                 <th>Stock</th>
                 <th>Branch</th>
                 <th>Deposit</th>
+                <th>Hourly extra</th>
                 <th>Store</th>
                 <th></th>
               </tr>
@@ -86,7 +87,7 @@
             <tbody>
               {% for group in grouped_products %}
                 <tr class="inventory-group-row">
-                  <td colspan="9">
+                  <td colspan="10">
                     <strong>▾ {{ group.name }}</strong>
                     <small>{{ group.products|length }} item{{ '' if group.products|length == 1 else 's' }}{% if group.description %} · {{ group.description }}{% endif %}</small>
                   </td>
@@ -103,6 +104,7 @@
                     <td>{{ p.quantity }}</td>
                     <td>{{ p.branch_name or 'Unassigned' }}</td>
                     <td>R{{ '%.2f'|format(p.security_deposit) }}</td>
+                    <td>R{{ '%.2f'|format(p.hourly_extra_rate or 0) }}</td>
                     <td>
                       {% if p.public_visible and p.active %}
                         <span class="store-dot visible">Visible</span>

@@ -93,7 +93,7 @@ def export_csv():
     products = list_products(query=query, product_type=product_type, visibility=visibility, product_group_id=product_group_id)
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(["group", "name", "sku", "product_type", "branch", "price_amount", "price_unit", "quantity", "security_deposit", "active", "public_visible"])
+    writer.writerow(["group", "name", "sku", "product_type", "branch", "price_amount", "price_unit", "quantity", "security_deposit", "hourly_extra_rate", "active", "public_visible"])
     for product in products:
         writer.writerow([
             product["product_group_name"] or "Ungrouped products",
@@ -105,6 +105,7 @@ def export_csv():
             product["price_unit"],
             product["quantity"],
             product["security_deposit"],
+            product["hourly_extra_rate"],
             product["active"],
             product["public_visible"],
         ])

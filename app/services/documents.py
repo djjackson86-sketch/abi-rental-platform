@@ -171,6 +171,16 @@ def document_date(value):
     return text[:10]
 
 
+def document_datetime(value):
+    parsed = _parse_document_datetime(value)
+    if parsed:
+        return parsed.strftime('%Y-%m-%d  %H:%M')
+    text = str(value or '').strip()
+    if not text:
+        return '—'
+    return text.replace('T', '  ')
+
+
 def rental_days_for_document(document):
     start_at = _parse_document_datetime(document['start_at'])
     end_at = _parse_document_datetime(document['end_at'])
@@ -179,7 +189,7 @@ def rental_days_for_document(document):
 
 def rental_days_label(document):
     days = rental_days_for_document(document)
-    return f"{days} {'Day' if days == 1 else 'Days'} Rental"
+    return f"Rental days {days}"
 
 
 def printable_document(document_id):

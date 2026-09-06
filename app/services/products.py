@@ -183,6 +183,7 @@ def _clean(form):
         "price_amount": float(form.get("price_amount") or 0),
         "price_unit": price_unit,
         "security_deposit": float(form.get("security_deposit") or 0),
+        "hourly_extra_rate": float(form.get("hourly_extra_rate") or 0),
         "tax_profile_id": int(form.get("tax_profile_id") or 1),
         "product_group_id": product_group_id,
         "quantity": max(0, int(form.get("quantity") or 0)),
@@ -195,8 +196,8 @@ def create_product(form):
     db = get_db()
     cur = db.execute(
         """INSERT INTO products
-        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, product_group_id, quantity, branch_id, created_at)
-        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
+        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
+        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -218,7 +219,7 @@ def update_product(product_id, form):
     get_db().execute(
         """UPDATE products SET
         name=:name, product_type=:product_type, tracking_method=:tracking_method, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
-        price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, tax_profile_id=:tax_profile_id, product_group_id=:product_group_id, quantity=:quantity, branch_id=:branch_id
+        price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, hourly_extra_rate=:hourly_extra_rate, tax_profile_id=:tax_profile_id, product_group_id=:product_group_id, quantity=:quantity, branch_id=:branch_id
         WHERE id=:id""",
         data,
     )

@@ -33,8 +33,7 @@ def _process_deposit_clause(alias="o"):
         f"AND COALESCE({prefix}deposit_total, 0) > 0 "
         f"AND COALESCE({prefix}deposit_processed_at, '') = '' "
         f"AND COALESCE({prefix}deposit_process_method, '') = '' "
-        f"AND COALESCE({prefix}deposit_refund_amount, 0) = 0 "
-        f"AND COALESCE({prefix}deposit_applied_amount, 0) = 0"
+        f"AND (COALESCE({prefix}deposit_refund_amount, 0) = 0 OR COALESCE({prefix}deposit_applied_amount, 0) > 0)"
     )
 
 
@@ -101,7 +100,7 @@ def get_order(order_id):
 
 def order_items(order_id):
     return get_db().execute(
-        """SELECT oi.*, p.name AS product_name, p.sku AS product_sku, p.product_type, p.security_deposit
+        """SELECT oi.*, p.name AS product_name, p.sku AS product_sku, p.product_type, p.security_deposit, p.hourly_extra_rate
         FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ? ORDER BY oi.id""",
         (order_id,),
     ).fetchall()
@@ -606,6 +605,15 @@ def status_actions(status):
     return actions
 
 
+def can_process_return_deposit(order):
+    return bool(order) and order["status"] in {"returned", "canceled", "cancelled"}
+
+
+def _require_return_deposit_allowed(order):
+    if not can_process_return_deposit(order):
+        raise ValueError("Return and deposit settlement are only available after the order is returned or canceled")
+
+
 def _parse_deposit_processed_at(value):
     value = (value or "").strip()
     if not value:
@@ -626,7 +634,8 @@ def return_charge_defaults(order_id):
     """Automatic rates for the return/deposit panel from order inventory."""
     for item in order_items(order_id):
         if item["product_id"]:
-            return {"hourly_rate": round(float(item["unit_price"] or 0), 2)}
+            hourly_rate = item["hourly_extra_rate"] if float(item["hourly_extra_rate"] or 0) > 0 else item["unit_price"]
+            return {"hourly_rate": round(float(hourly_rate or 0), 2)}
     return {"hourly_rate": 0.0}
 
 
@@ -634,6 +643,7 @@ def add_return_charges(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
+    _require_return_deposit_allowed(order)
     try:
         extra_hours = max(0, float(form.get("extra_hours") or 0))
         hourly_rate = max(0, float(form.get("extra_hourly_rate") or 0))
@@ -691,12 +701,15 @@ def settle_return_deposit(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
+    _require_return_deposit_allowed(order)
     deposit_process_method = (form.get("deposit_process_method") or "").strip().lower()
     if deposit_process_method not in {"eft", "card", "cash"}:
         raise ValueError("Deposit process method must be EFT, Card, or Cash")
     note = form.get("deposit_note", "").strip()
     deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
     deposit_available = round(float(order["deposit_total"] or 0), 2)
+    existing_refund = round(float(order["deposit_refund_amount"] or 0), 2)
+    refund_amount = existing_refund if (existing_refund or float(order["deposit_applied_amount"] or 0)) else deposit_available
     db = get_db()
     existing = _deposit_applied_payment(order_id)
     if existing:
@@ -704,18 +717,19 @@ def settle_return_deposit(order_id, form):
     db.execute(
         """UPDATE orders SET deposit_applied_amount = 0, deposit_refund_amount = ?,
         deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
-        (deposit_available, deposit_process_method, deposit_processed_at, note, order_id),
+        (refund_amount, deposit_process_method, deposit_processed_at, note, order_id),
     )
     db.commit()
     from app.services.payments import recalculate_order_payment
     recalculate_order_payment(order_id)
-    return f"Deposit settled for refund: R{deposit_available:.2f}"
+    return f"Deposit refund processed: R{refund_amount:.2f}"
 
 
 def use_return_deposit(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
+    _require_return_deposit_allowed(order)
     note = form.get("deposit_note", "").strip()
     deposit_available = round(float(order["deposit_total"] or 0), 2)
     db = get_db()
@@ -742,8 +756,8 @@ def use_return_deposit(order_id, form):
         db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), existing["id"]))
     db.execute(
         """UPDATE orders SET deposit_applied_amount = ?, deposit_refund_amount = ?,
-        deposit_process_method = 'deposit_applied', deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
-        (deposit_applied, deposit_refund, now(), note, order_id),
+        deposit_process_method = '', deposit_processed_at = '', deposit_note = ? WHERE id = ?""",
+        (deposit_applied, deposit_refund, note, order_id),
     )
     db.commit()
     from app.services.payments import recalculate_order_payment

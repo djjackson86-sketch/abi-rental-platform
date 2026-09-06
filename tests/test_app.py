@@ -2140,7 +2140,7 @@ def test_invoice_line_items_show_tax_column(client, app):
     assert b'Finalize invoice' in invoice.data
     assert b'<th>Tax</th>' in invoice.data
     assert b'<th>Rental days</th>' not in invoice.data
-    assert b'1 Day Rental' in invoice.data  # Order details keep rental dates/days visible.
+    assert b'Rental days 1' in invoice.data  # Order details keep rental dates/days visible.
     assert b'R0.00' in invoice.data
     assert b'<span>Tax</span>' in invoice.data  # Accounting totals keep tax visible.
 
@@ -2149,7 +2149,7 @@ def test_invoice_line_items_show_tax_column(client, app):
         pdf = document_pdf_bytes(1)
     assert b'Proforma Invoice' in pdf
     assert b'Unnumbered' in pdf
-    assert b'1 Day Rental' in pdf  # Order details keep rental dates/days visible.
+    assert b'Rental days 1' in pdf  # Order details keep rental dates/days visible.
     assert b'Tax' in pdf
     assert b'R0.00' in pdf
 
@@ -2389,7 +2389,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'2026-07-01',
         b'Return:',
         b'2026-07-02',
-        b'2 Days Rental',
+        b'Rental days 2',
         b'Bill To:',
         b'static/img/sano-trailers-logo.jpg',
         b'SANO Trailers logo',
@@ -2464,7 +2464,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     totals_pos = invoice.data.index(b'class="totals"')
     assert customer_pos < table_pos < totals_pos < banking_pos
     assert invoice.data.index(b'Unnumbered') < invoice.data.index(invoice_date.encode())
-    assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'2 Days Rental')
+    assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'Rental days 2')
     assert b'+27 12 999 0000 | wonderboom@example.test' not in invoice.data
     assert invoice.data.index(b'Wonderboom') < invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test') < invoice.data.index(b'22 Wonderboom Avenue')
 
@@ -2504,7 +2504,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Order: ORD-00001',
         b'Pickup: 2026-07-01',
         b'Return: 2026-07-02',
-        b'2 Days Rental',
+        b'Rental days 2',
         b'Wonderboom Test Bank',
         b'Account number: 444555666',
         b'Paid',
@@ -2512,12 +2512,12 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Amount due',
         b'R650.00',
         b'Thank you for your business.',
-        b'q 0.86 0.94 1 rg 36.00 399.00 523.00 18.00 re f Q',
-        b'q 0.86 0.94 1 rg 382.00 257.00 177.00 88.00 re f Q',
-        b'/F2 8.8 Tf 1 0 0 1 390.00 290.00 Tm (Total) Tj',
-        b'/F2 8.8 Tf 1 0 0 1 505.00 290.00 Tm (R1150.00) Tj',
-        b'/F2 8.8 Tf 1 0 0 1 36.00 240.00 Tm (Thank you for your business.) Tj',
-        b'/F2 8.5 Tf 1 0 0 1 36.00 222.00 Tm (Banking details) Tj',
+        b'q 0.86 0.94 1 rg 36.00 373.00 523.00 18.00 re f Q',
+        b'q 0.86 0.94 1 rg 382.00 231.00 177.00 88.00 re f Q',
+        b'/F2 8.8 Tf 1 0 0 1 390.00 264.00 Tm (Total) Tj',
+        b'/F2 8.8 Tf 1 0 0 1 505.00 264.00 Tm (R1150.00) Tj',
+        b'/F2 8.8 Tf 1 0 0 1 36.00 214.00 Tm (Thank you for your business.) Tj',
+        b'/F2 8.5 Tf 1 0 0 1 36.00 196.00 Tm (Banking details) Tj',
     ]:
         assert expected in pdf
     for removed_label in [
@@ -2532,17 +2532,17 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'Return: 2026-07-02T15:00' not in pdf
     assert b'Invoice date: ' + invoice_created_at.encode() not in pdf
     assert b'Pickup date:' not in pdf
-    assert b'390.00 332.00 Tm (Subtotal)' in pdf
-    assert b'505.00 332.00 Tm (R400.00)' in pdf
-    assert b'390.00 318.00 Tm (Tax)' in pdf
-    assert b'505.00 318.00 Tm (R0.00)' in pdf
-    assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'2 Days Rental')
+    assert b'390.00 306.00 Tm (Subtotal)' in pdf
+    assert b'505.00 306.00 Tm (R400.00)' in pdf
+    assert b'390.00 292.00 Tm (Tax)' in pdf
+    assert b'505.00 292.00 Tm (R0.00)' in pdf
+    assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'Rental days 2')
     assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
     assert pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj')
-    assert pdf.index(b'Subtotal') < pdf.index(b'Tax') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 36.00 222.00 Tm (Banking details) Tj')
-    assert pdf.index(b'/F2 8.8 Tf 1 0 0 1 390.00 290.00 Tm (Total) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 36.00 222.00 Tm (Banking details) Tj')
+    assert pdf.index(b'Subtotal') < pdf.index(b'Tax') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 36.00 196.00 Tm (Banking details) Tj')
+    assert pdf.index(b'/F2 8.8 Tf 1 0 0 1 390.00 264.00 Tm (Total) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 36.00 196.00 Tm (Banking details) Tj')
     assert pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
     assert b'0.08 0.39 1 rg' in pdf
     assert pdf.index(b'12 Pawcare Street') < pdf.index(b'Unit 4') < pdf.index(b'Parkwood') < pdf.index(b'Johannesburg') < pdf.index(b'Gauteng 2193') < pdf.index(b'South Africa')
@@ -3109,7 +3109,7 @@ def test_return_charges_create_order_items_and_use_deposit_applies_balance(clien
     detail = client.get(f'/orders/{order_id}')
     assert b'Damage Charge' in detail.data
     assert b'Add Charges' in detail.data
-    assert b'Settle Deposit' in detail.data
+    assert b'Refund Deposit' in detail.data
     assert b'Use Deposit' in detail.data
     assert b'value="200.00"' in detail.data
 
@@ -3164,7 +3164,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
         'deposit_processed_at': '',
         'deposit_note': 'Processed deposit at counter',
     }, follow_redirects=True)
-    assert b'Deposit settled for refund' in settled.data
+    assert b'Deposit refund processed' in settled.data
     assert label in settled.data
 
     due_after = client.get('/orders?payment_status=process_deposit')
@@ -3199,7 +3199,7 @@ def test_return_deposit_settlement_records_manual_refund_date(client, app):
         'deposit_note': 'Backdated deposit refund',
     }, follow_redirects=True)
 
-    assert b'Deposit settled for refund' in settled.data
+    assert b'Deposit refund processed' in settled.data
     assert b'2026-08-20 14:45 UTC' in settled.data
     assert b'value="2026-08-20T14:45"' in settled.data
     with app.app_context():
@@ -3263,6 +3263,9 @@ def test_return_deposit_settlement_rejects_invalid_method(client):
     login(client)
     seed_customer_and_product(client)
     order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/return', follow_redirects=True)
     response = client.post(f'/orders/{order_id}/settle-return', data={
         'extra_hours': '0',
         'extra_hourly_rate': '0',
@@ -3270,6 +3273,91 @@ def test_return_deposit_settlement_rejects_invalid_method(client):
     }, follow_redirects=True)
     assert b'Deposit process method must be EFT, Card, or Cash' in response.data
 
+
+
+def test_inventory_hourly_extra_rate_feeds_return_charges_and_schema(client, app):
+    login(client)
+    created = client.post('/inventory/new', data={
+        'name': 'Hourly Trailer', 'sku': 'HR-TRL', 'quantity': '2', 'description': 'Hourly charge test.',
+        'product_type': 'rental', 'price_amount': '300', 'price_unit': 'day', 'security_deposit': '900',
+        'hourly_extra_rate': '85.50', 'tax_profile_id': '1', 'active': '1', 'public_visible': '1',
+    }, follow_redirects=True)
+    assert b'Product created' in created.data
+    assert b'name="hourly_extra_rate"' in created.data
+    assert b'value="85.5"' in created.data or b'value="85.50"' in created.data
+    with app.app_context():
+        row = get_db().execute('SELECT hourly_extra_rate FROM products WHERE id=1').fetchone()
+        assert row['hourly_extra_rate'] == 85.5
+    seed_customer_and_product(client)
+    order = client.post('/orders/new', data={
+        'customer_id': '1', 'product_id': '1', 'quantity': '1',
+        'start_date': '2026-07-01', 'start_time': '09:00', 'end_date': '2026-07-02', 'end_time': '09:00',
+    }, follow_redirects=False)
+    order_id = order.headers['Location'].rstrip('/').split('/')[-1]
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'value="85.50"' in returned.data
+
+
+def test_return_deposit_controls_are_gated_until_returned_or_canceled(client):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    draft = client.get(f'/orders/{order_id}')
+    assert b'Refund Deposit' not in draft.data
+    assert b'Return and deposit settlement unlock after the order is returned or canceled.' in draft.data
+    blocked = client.post(f'/orders/{order_id}/use-deposit', data={'deposit_note': 'too early'}, follow_redirects=True)
+    assert b'Return and deposit settlement are only available after the order is returned or canceled' in blocked.data
+    canceled = client.post(f'/orders/{order_id}/cancel', follow_redirects=True)
+    assert b'Refund Deposit' in canceled.data
+
+
+def test_use_deposit_records_unprocessed_remaining_refund_then_method_processes_it(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    client.post(f'/orders/{order_id}/payments', data={'amount': '900', 'method': 'cash', 'reference': 'rental paid'}, follow_redirects=True)
+    used = client.post(f'/orders/{order_id}/use-deposit', data={'deposit_note': 'apply balance'}, follow_redirects=True)
+    assert b'Security deposit used: R450.00; refund R300.00' in used.data
+    assert b'Not processed' in used.data
+    assert b'value="R300.00"' in used.data
+    with app.app_context():
+        order = get_db().execute('SELECT deposit_applied_amount, deposit_refund_amount, deposit_process_method, deposit_processed_at FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['deposit_applied_amount'] == 450
+        assert order['deposit_refund_amount'] == 300
+        assert order['deposit_process_method'] == ''
+        assert order['deposit_processed_at'] == ''
+    process_deposit = client.get('/orders?payment_status=process_deposit')
+    assert b'ORD-00001' in process_deposit.data
+    processed = client.post(f'/orders/{order_id}/settle-return', data={'deposit_process_method': 'eft', 'deposit_processed_at': '2026-08-20T14:45'}, follow_redirects=True)
+    assert b'Deposit refund processed: R300.00' in processed.data
+    assert b'EFT' in processed.data
+    after = client.get('/orders?payment_status=process_deposit')
+    assert b'ORD-00001' not in after.data
+
+
+def test_damage_waiver_documents_hide_security_deposit_and_show_times(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/orders/new', data={
+        'customer_id': '1', 'product_id': '1', 'quantity': '1',
+        'start_date': '2026-07-01', 'start_time': '09:30', 'end_date': '2026-07-02', 'end_time': '15:45',
+        'deposit_option': 'damage_waiver', 'damage_waiver_amount': '125',
+    }, follow_redirects=True)
+    client.post('/orders/1/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    detail = client.get('/documents/1')
+    assert b'Security deposit</span>' not in detail.data
+    assert b'Pickup: 2026-07-01  09:30' in detail.data
+    assert b'Return: 2026-07-02  15:45' in detail.data
+    pdf = client.get('/documents/1/download.pdf')
+    assert pdf.status_code == 200
+    assert b'Security deposit' not in pdf.data
+    assert b'Pickup: 2026-07-01  09:30' in pdf.data
+    assert b'Return: 2026-07-02  15:45' in pdf.data
 
 def test_document_email_prepares_outlook_draft_without_smtp_provider(client, app):
     login(client)

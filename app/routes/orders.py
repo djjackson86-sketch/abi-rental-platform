@@ -5,7 +5,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, return_charge_defaults, settle_return_deposit, status_actions, transition_order, update_draft_order, use_return_deposit
+from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, return_charge_defaults, settle_return_deposit, status_actions, transition_order, update_draft_order, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment
 from app.services.settings import get_company_settings
@@ -241,6 +241,7 @@ def detail(order_id):
         display_payment_date=display_payment_date,
         customer_custom_fields=custom_fields_for(order),
         return_charge_defaults=return_charge_defaults(order_id),
+        can_process_return_deposit=can_process_return_deposit(order),
         default_payment_date=datetime.utcnow().isoformat(timespec="minutes"),
         default_deposit_processed_at=(order["deposit_processed_at"] or datetime.utcnow().isoformat(timespec="minutes"))[:16],
     )

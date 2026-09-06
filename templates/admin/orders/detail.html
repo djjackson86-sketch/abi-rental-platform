@@ -36,8 +36,8 @@
     <div class="list-row"><span>Collection branch</span><b>{{ order.collect_branch_name or '—' }}</b></div>
     <div class="list-row"><span>Return branch</span><b>{{ order.return_branch_name or order.collect_branch_name or '—' }}</b></div>
     <h2>Rental period</h2>
-    <div class="list-row"><span>Pickup</span><b>{{ order.start_at or '—' }}</b></div>
-    <div class="list-row"><span>Return</span><b>{{ order.end_at or '—' }}</b></div>
+    <div class="list-row"><span>Pickup</span><b>{{ order.start_at[:16].replace('T', '  ') if order.start_at else '—' }}</b></div>
+    <div class="list-row"><span>Return</span><b>{{ order.end_at[:16].replace('T', '  ') if order.end_at else '—' }}</b></div>
   </article>
   <article class="panel">
     <h2>Status and payment</h2>
@@ -90,13 +90,13 @@
   </div>
   <div class="totals">
     <style>
-      .totals .discount-row{flex-wrap:wrap}
-      .totals .discount-form{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+      .totals .discount-row{flex-wrap:nowrap;align-items:center;gap:8px}
+      .totals .discount-form{display:inline-flex;align-items:center;gap:4px;margin-left:8px;margin-right:auto}
       .totals .discount-form select,.totals .discount-form input{min-height:32px;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:inherit;font-family:inherit;font-size:13px}
       .totals .discount-form select{width:56px}
       .totals .discount-form input{width:88px;min-width:0}
       .totals .discount-form .btn.discount-apply{min-height:32px;height:32px;padding:0 12px;font-size:13px;width:auto}
-      @media(max-width:520px){.totals .discount-row{gap:8px}.totals .discount-form{width:100%;margin-left:0}.totals .discount-row b{min-width:0}}
+      @media(max-width:520px){.totals .discount-row{gap:6px}.totals .discount-form{margin-left:4px}.totals .discount-form input{width:72px}.totals .discount-row b{min-width:0}}
     </style>
     <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(order.subtotal) }}</b></div>
     {% if order.coupon_code %}<div class="list-row"><span>Coupon</span><b>{{ order.coupon_code }}</b></div>{% endif %}
@@ -119,13 +119,14 @@
     {% if order.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(order.damage_waiver_amount) }}</b></div>{% endif %}
     {% if order.extra_hours %}<div class="list-row"><span>Extra hours</span><b>{{ order.extra_hours }} hrs</b></div>{% endif %}
     {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
-    {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not recorded</b></div>{% endif %}
+    {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not processed</b></div>{% endif %}
     {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }} UTC</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
     <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
   </div>
 </section>
 <section class="panel settings-form">
   <h2>Return / deposit settlement</h2>
+  {% if can_process_return_deposit %}
   <form method="post" action="{{ url_for('orders.add_charges', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
       <label>Extra hours<input type="number" step="0.25" min="0" name="extra_hours" value="{{ order.extra_hours or 0 }}"></label>
@@ -135,18 +136,22 @@
     <p class="form-help">Hourly extra rate is filled from the trailer inventory item on this order. Add Charges creates return charge line items in the Items section above.</p>
     <button class="btn ghost" type="submit">Add Charges</button>
   </form>
+  <form method="post" action="{{ url_for('orders.use_deposit', order_id=order.id) }}" class="payment-form">
+    <label>Use-deposit note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Balance or damage note"></label>
+    <p class="form-help">Use Deposit applies the available security deposit to outstanding charges first and records any remaining refund for processing below.</p>
+    <button class="btn primary" type="submit">Use Deposit</button>
+  </form>
   <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
+      <label>Remaining deposit<input type="text" readonly value="R{{ '%.2f'|format((order.deposit_refund_amount if (order.deposit_applied_amount or order.deposit_refund_amount) else order.deposit_total) or 0) }}"></label>
       <label>Deposit method<select name="deposit_process_method" required><option value="">Choose method</option>{% for value,label in [('eft','EFT'),('card','Card'),('cash','Cash')] %}<option value="{{ value }}" {% if order.deposit_process_method==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label>Deposit date<input type="datetime-local" name="deposit_processed_at" value="{{ default_deposit_processed_at }}"></label>
     </div>
     <label>Settlement note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Refund note"></label>
-    <button class="btn primary" type="submit">Settle Deposit</button>
+    <button class="btn primary" type="submit">Refund Deposit</button>
   </form>
-  <form method="post" action="{{ url_for('orders.use_deposit', order_id=order.id) }}" class="payment-form">
-    <label>Use-deposit note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Balance or damage note"></label>
-    <p class="form-help">Use Deposit applies the available security deposit to any outstanding balance after return charges.</p>
-    <button class="btn primary" type="submit">Use Deposit</button>
-  </form>
+  {% else %}
+  <p class="form-help">Return and deposit settlement unlock after the order is returned or canceled.</p>
+  {% endif %}
 </section>
 {% endblock %}

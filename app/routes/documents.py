@@ -4,7 +4,7 @@ from io import StringIO
 from pathlib import Path
 
 from app.routes.auth import login_required
-from app.services.documents import create_document, display_document_label, display_document_number, document_date, document_filter_counts, finalize_document, get_document, label_for, list_documents, mark_document_email, printable_document, rental_days_label
+from app.services.documents import create_document, display_document_label, display_document_number, document_date, document_datetime, document_filter_counts, finalize_document, get_document, label_for, list_documents, mark_document_email, printable_document, rental_days_label
 from app.services.settings import get_company_settings
 from app.services.email_delivery import build_invoice_email_subject, build_outlook_draft_eml, render_email_template
 from app.services.pdf_documents import DOCUMENT_LOGO_STATIC_PATH, document_pdf_bytes, document_pdf_filename
@@ -108,6 +108,7 @@ def detail(document_id):
         display_number=display_document_number(document),
         custom_fields=custom_fields_for(document),
         document_date=document_date,
+        document_datetime=document_datetime,
         rental_days_label=rental_days_label(document),
         email_message=email_message,
         email_signature=email_signature,

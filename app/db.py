@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS products (
     price_amount REAL NOT NULL DEFAULT 0,
     price_unit TEXT NOT NULL DEFAULT 'day',
     security_deposit REAL NOT NULL DEFAULT 0,
+    hourly_extra_rate REAL NOT NULL DEFAULT 0,
     tax_profile_id INTEGER REFERENCES tax_profiles(id) ON DELETE SET NULL,
     product_group_id INTEGER REFERENCES product_groups(id) ON DELETE SET NULL,
     quantity INTEGER NOT NULL DEFAULT 1,
@@ -338,6 +339,7 @@ def run_migrations(db):
     ensure_column(db, "users", "can_view_all_branches", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "products", "tracking_method", "TEXT NOT NULL DEFAULT 'bulk'")
     ensure_column(db, "products", "product_group_id", "INTEGER REFERENCES product_groups(id) ON DELETE SET NULL")
+    ensure_column(db, "products", "hourly_extra_rate", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "products", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "orders", "booking_type", "TEXT NOT NULL DEFAULT 'return'")
     ensure_column(db, "orders", "collect_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
