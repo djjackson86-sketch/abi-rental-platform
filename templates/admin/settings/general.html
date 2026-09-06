@@ -24,6 +24,9 @@
     <h2>Default invoice email</h2>
     <p class="form-help">This message is used when an invoice email draft is opened for Outlook. Available placeholders: <code>{customer_name}</code>, <code>{document_label}</code>, <code>{document_number}</code>, <code>{order_number}</code>, <code>{company_name}</code>.</p>
     <label class="span-2">Default invoice email message<textarea name="invoice_email_message" rows="7">{{ settings.invoice_email_message }}</textarea></label>
+    <label class="span-2">Email signature<textarea name="invoice_email_signature" rows="4" placeholder="Kind regards,&#10;{{ settings.company_name }}">{{ settings.invoice_email_signature }}</textarea></label>
+    <label class="check-row span-2"><input type="checkbox" name="invoice_email_signature_include_logo" value="1" {% if settings.invoice_email_signature_include_logo %}checked{% endif %}><span>Add the SANO Trailers logo to the email signature</span></label>
+    <p class="form-help span-2">The signature is added to generated Outlook email drafts after the message. If the logo option is enabled, the logo is embedded inline in the email so Outlook can show it with the signature.</p>
   </section>
   {% include "admin/settings/hidden_defaults.html" %}
   <button class="btn primary">Save</button>

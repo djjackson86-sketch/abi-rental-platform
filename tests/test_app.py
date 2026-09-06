@@ -1898,15 +1898,41 @@ def test_invoice_email_default_message_can_be_configured(client):
         'pricing_enabled': '1',
         'enable_time_selection': '1',
         'invoice_email_message': 'Hello {customer_name}, please review {document_label} {document_number} for {order_number}. Regards {company_name}',
+        'invoice_email_signature': 'Kind regards,\n{company_name}\nAccounts team',
+        'invoice_email_signature_include_logo': '1',
     }, follow_redirects=True)
     assert saved.status_code == 200
     assert b'Default invoice email' in saved.data
     assert b'Hello {customer_name}, please review' in saved.data
+    assert b'Email signature' in saved.data
+    assert b'Kind regards,' in saved.data
+    assert b'invoice_email_signature_include_logo' in saved.data
 
     seed_customer_and_product(client)
     order_id = create_order_for_status(client, quantity='1')
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert b'Hello Order Customer, please review Proforma Invoice Unnumbered for ORD-00001. Regards ABI Rentals' in invoice.data
+    assert b'Default signature:' in invoice.data
+    assert b'Accounts team' in invoice.data
+    assert b'Logo will be embedded in the Outlook email signature.' in invoice.data
+
+    draft = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=False)
+    assert draft.status_code == 200
+    from email import policy
+    from email.parser import BytesParser
+    parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
+    html_parts = [part for part in parsed.walk() if part.get_content_type() == 'text/html']
+    assert len(html_parts) == 1
+    html = html_parts[0].get_content()
+    assert 'Hello Order Customer, please review Proforma Invoice Unnumbered for ORD-00001. Regards ABI Rentals' in html
+    assert 'Kind regards,' in html
+    assert 'Accounts team' in html
+    assert 'cid:invoice-signature-logo@abi-rental-platform' in html
+    logo_parts = [part for part in parsed.walk() if part.get_content_type() == 'image/jpeg' and part.get_filename() == 'sano-trailers-logo.jpg']
+    assert len(logo_parts) == 1
+    logo_payload = logo_parts[0].get_payload(decode=True)
+    assert isinstance(logo_payload, bytes)
+    assert logo_payload.startswith(b'\xff\xd8')
 
 
 def test_invoice_finalize_assigns_number_once(client, app):

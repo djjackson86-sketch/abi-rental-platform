@@ -13,6 +13,7 @@
   <form method="post" action="{{ url_for('documents.send_document_email', document_id=document.id) }}" class="form-grid">
     <label>Send to<input type="email" name="to_email" value="{{ document.customer_email or '' }}" placeholder="customer@example.com"></label>
     <label class="span-2">Message<textarea name="message" rows="6">{{ email_message }}</textarea></label>
+    {% if email_signature or email_signature_include_logo %}<div class="form-help span-2"><strong>Default signature:</strong>{% if email_signature %}<br>{{ email_signature|replace('\n', '<br>')|safe }}{% endif %}{% if email_signature_include_logo %}<br>Logo will be embedded in the Outlook email signature.{% endif %}</div>{% endif %}
     <div class="form-actions span-2"><button class="btn primary" type="submit">Generate Email</button></div>
   </form>
 </section>

@@ -27,7 +27,7 @@ def update_company_settings(form):
         "city", "province", "postcode", "additional_detail1", "additional_detail2", "timezone",
         "first_day_of_week", "date_format", "units", "currency", "currency_symbol", "currency_position",
         "tax_mode", "default_pickup_time", "default_return_time", "time_increment_minutes", "deposit_mode", "deposit_value",
-        "invoice_email_message"
+        "invoice_email_message", "invoice_email_signature"
     ]
     current = get_company_settings()
     values = {f: form.get(f, _row_value(current, f, "")) for f in fields}
@@ -35,6 +35,7 @@ def update_company_settings(form):
     values["pricing_enabled"] = 1 if form.get("pricing_enabled") else 0
     values["enable_time_selection"] = 1 if form.get("enable_time_selection") else 0
     values["enable_operating_hours"] = 1 if form.get("enable_operating_hours") else 0
+    values["invoice_email_signature_include_logo"] = 1 if form.get("invoice_email_signature_include_logo") else 0
     values["time_increment_minutes"] = int(values["time_increment_minutes"] or 60)
     values["deposit_value"] = float(values["deposit_value"] or 0)
     values["updated_at"] = now()
