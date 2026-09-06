@@ -1356,7 +1356,9 @@ def test_non_draft_order_can_be_edited_and_keeps_status_with_payment_recalculati
     assert edit_page.status_code == 200
     assert b'Edit order' in edit_page.data
     assert b'Save order changes' in edit_page.data
-    assert b'Edit order' in client.get('/orders').data
+    orders_page = client.get('/orders')
+    assert b'Open' in orders_page.data
+    assert b'Edit order' not in orders_page.data
     assert b'Edit order' in client.get(f'/orders/{order_id}').data
 
     with app.app_context():
