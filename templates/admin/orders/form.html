@@ -177,8 +177,8 @@
   <section class="form-section">
     <h2>Damage waiver / security deposit</h2>
     <div class="form-grid">
-      <label>Deposit choice<select name="deposit_option" id="deposit-option"><option value="security_deposit" {% if order_form.get('deposit_option', 'security_deposit') == 'security_deposit' %}selected{% endif %}>Use security deposit from inventory</option><option value="damage_waiver" {% if order_form.get('deposit_option') == 'damage_waiver' %}selected{% endif %}>Damage waiver instead of security</option><option value="no_deposit" {% if order_form.get('deposit_option') == 'no_deposit' %}selected{% endif %}>No security / no waiver</option></select></label>
-      <label>Damage waiver amount<input type="number" step="0.01" min="0" name="damage_waiver_amount" id="damage-waiver-amount" placeholder="0.00" value="{{ order_form.get('damage_waiver_amount', '') }}"></label>
+      <label class="span-2">Deposit choice<select name="deposit_option" id="deposit-option"><option value="security_deposit" {% if order_form.get('deposit_option', 'security_deposit') == 'security_deposit' %}selected{% endif %}>Use security deposit from inventory</option><option value="damage_waiver" {% if order_form.get('deposit_option') == 'damage_waiver' %}selected{% endif %}>Damage waiver instead of security</option><option value="no_deposit" {% if order_form.get('deposit_option') == 'no_deposit' %}selected{% endif %}>No security / no waiver</option></select></label>
+      <input type="hidden" name="damage_waiver_amount" id="damage-waiver-amount" value="{{ order_form.get('damage_waiver_amount', '') }}">
     </div>
     <p class="form-help">Security deposit is refundable and calculated from the selected inventory. Damage waiver removes security deposit and adds the waiver fee to the order total.</p>
   </section>
@@ -261,7 +261,7 @@
   const addLineBtn=document.getElementById('add-product-line');
   if(addLineBtn){ addLineBtn.addEventListener('click',function(){ if(window.orderLines) window.orderLines.addLine(); }); }
   document.querySelectorAll('.enhanced-line').forEach(bindLineRow); renumberLines();
-  function syncWaiver(){ if(!depositOption||!waiver) return; waiver.disabled=depositOption.value!=='damage_waiver'; if(waiver.disabled) waiver.value=''; updateEstimate(); } if(depositOption) depositOption.addEventListener('change',syncWaiver); if(waiver) waiver.addEventListener('input',updateEstimate); syncWaiver(); updateRentalDays();
+  function syncWaiver(){ updateEstimate(); } if(depositOption) depositOption.addEventListener('change',syncWaiver); if(waiver) waiver.addEventListener('input',updateEstimate); syncWaiver(); updateRentalDays();
 })();
 </script>
 {% endblock %}

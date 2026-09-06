@@ -1488,6 +1488,62 @@ def test_edit_recalculates_security_deposit_inclusive_total_and_due(client, app)
         assert order['payment_status'] == 'partially_paid'
 
 
+def test_edit_damage_waiver_order_without_amount_field_preserves_stored_waiver_and_total(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'damage_waiver',
+        'damage_waiver_amount': '125',
+    }, follow_redirects=True)
+    assert created.status_code == 200
+
+    # The order form no longer shows the editable "Damage waiver amount" box.
+    # The stored amount is carried by a hidden input so edited damage-waiver
+    # orders keep submitting it (and the live estimate keeps showing it).
+    edit_page = client.get('/orders/1/edit')
+    assert edit_page.status_code == 200
+    assert b'id="damage-waiver-amount"' in edit_page.data
+    assert b'name="damage_waiver_amount" id="damage-waiver-amount"' in edit_page.data
+    assert b'<label>Damage waiver amount<input type="number"' not in edit_page.data
+
+    # Re-saving without the amount field (hidden input stripped/never rendered)
+    # must not silently zero the stored waiver fee or shrink the order total.
+    saved = client.post('/orders/1/edit', data={
+        'customer_id': '1',
+        'product_id': ['1'],
+        'custom_name': [''],
+        'custom_unit_price': [''],
+        'custom_billing_mode': ['fixed'],
+        'quantity': ['1'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'damage_waiver',
+        # damage_waiver_amount intentionally omitted.
+    }, follow_redirects=True)
+    assert saved.status_code == 200
+    assert b'Order saved' in saved.data
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        order = db.execute('SELECT total, due_total, deposit_total, deposit_option, damage_waiver_amount FROM orders WHERE id=1').fetchone()
+        assert order is not None
+        assert order['total'] == 325
+        assert order['due_total'] == 325
+        assert order['deposit_total'] == 0
+        assert order['deposit_option'] == 'damage_waiver'
+        assert order['damage_waiver_amount'] == 125
+
+
 def test_canceled_and_archived_order_edit_is_rejected(client):
     login(client)
     seed_customer_and_product(client)

@@ -328,6 +328,18 @@ def update_draft_order(order_id, form):
         raise ValueError(BLOCKED_EDIT_MESSAGE)
     payload = _build_order_payload(form)
     db = get_db()
+    # Data-safety net (update path only): the order form no longer exposes an
+    # editable "Damage waiver amount" box, so a re-save of an existing
+    # damage-waiver order may submit no amount (or an empty one). Preserve the
+    # order's stored waiver fee instead of silently zeroing the fee and
+    # shrinking the order total. The amount is only preserved while the order
+    # still uses the damage_waiver deposit option.
+    if payload["deposit_option"] == "damage_waiver" and float(order["damage_waiver_amount"] or 0) > 0:
+        raw_amount = form.get("damage_waiver_amount") if hasattr(form, "get") else None
+        if raw_amount is None or str(raw_amount).strip() == "":
+            stored_waiver = round(float(order["damage_waiver_amount"]), 2)
+            payload["damage_waiver_amount"] = stored_waiver
+            payload["total"] = round(float(payload["total"] or 0) + stored_waiver, 2)
     paid_row = db.execute("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND status = 'paid'", (order_id,)).fetchone()
     paid_total = float(paid_row["paid"] or 0) if paid_row else 0
     due_total = round(max(float(payload["total"] or 0) - paid_total, 0), 2)
