@@ -390,8 +390,8 @@ def update_draft_order(order_id, form):
                 stored_discount_mode, stored_discount_value, payload["subtotal"], payload["tax_total"]
             )
             payload["total"] = round(float(payload["total"] or 0) - float(payload["discount_total"] or 0), 2)
-    paid_row = db.execute("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND status = 'paid'", (order_id,)).fetchone()
-    paid_total = float(paid_row["paid"] or 0) if paid_row else 0
+    from app.services.payments import payment_total
+    paid_total = payment_total(order_id)
     due_total = round(max(float(payload["total"] or 0) - paid_total, 0), 2)
     if paid_total <= 0:
         payment_status = "payment_due"
@@ -619,50 +619,136 @@ def _parse_deposit_processed_at(value):
     return processed_at.isoformat(timespec="seconds")
 
 
-def settle_return_deposit(order_id, form):
+RETURN_CHARGE_NAMES = {"Extra hours", "Damage charge"}
+
+
+def return_charge_defaults(order_id):
+    """Automatic rates for the return/deposit panel from order inventory."""
+    for item in order_items(order_id):
+        if item["product_id"]:
+            return {"hourly_rate": round(float(item["unit_price"] or 0), 2)}
+    return {"hourly_rate": 0.0}
+
+
+def add_return_charges(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
     try:
         extra_hours = max(0, float(form.get("extra_hours") or 0))
         hourly_rate = max(0, float(form.get("extra_hourly_rate") or 0))
+        damage_charge = max(0, float(form.get("damage_charge") or 0))
     except ValueError as exc:
-        raise ValueError("Extra hours and hourly rate must be numbers") from exc
+        raise ValueError("Extra hours, hourly rate and damage charge must be numbers") from exc
+    extra_charge = round(extra_hours * hourly_rate, 2)
+    damage_charge = round(damage_charge, 2)
+    if extra_charge <= 0 and damage_charge <= 0:
+        raise ValueError("Enter extra hours or a damage charge before adding charges")
+    db = get_db()
+    existing_rows = db.execute(
+        "SELECT id, line_subtotal, line_tax, line_total FROM order_items WHERE order_id = ? AND custom_name IN ('Extra hours', 'Damage charge')",
+        (order_id,),
+    ).fetchall()
+    removed_subtotal = round(sum(float(row["line_subtotal"] or 0) for row in existing_rows), 2)
+    removed_tax = round(sum(float(row["line_tax"] or 0) for row in existing_rows), 2)
+    removed_total = round(sum(float(row["line_total"] or 0) for row in existing_rows), 2)
+    if existing_rows:
+        db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name IN ('Extra hours', 'Damage charge')", (order_id,))
+    if extra_charge > 0:
+        db.execute(
+            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
+            VALUES (?, NULL, 'Extra hours', ?, ?, ?, 0, ?, 'fixed')""",
+            (order_id, extra_hours, hourly_rate, extra_charge, extra_charge),
+        )
+    if damage_charge > 0:
+        db.execute(
+            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
+            VALUES (?, NULL, 'Damage charge', 1, ?, ?, 0, ?, 'fixed')""",
+            (order_id, damage_charge, damage_charge, damage_charge),
+        )
+    added_total = round(extra_charge + damage_charge, 2)
+    new_subtotal = round(float(order["subtotal"] or 0) - removed_subtotal + added_total, 2)
+    new_tax = round(float(order["tax_total"] or 0) - removed_tax, 2)
+    new_total = round(float(order["total"] or 0) - removed_total + added_total, 2)
+    db.execute(
+        "UPDATE orders SET extra_hours = ?, subtotal = ?, tax_total = ?, total = ? WHERE id = ?",
+        (extra_hours, new_subtotal, new_tax, new_total, order_id),
+    )
+    db.commit()
+    from app.services.payments import recalculate_order_payment
+    recalculate_order_payment(order_id)
+    return "Return charges added to order items"
+
+
+def _deposit_applied_payment(order_id):
+    return get_db().execute(
+        "SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT' AND COALESCE(deleted_at, '') = ''",
+        (order_id,),
+    ).fetchone()
+
+
+def settle_return_deposit(order_id, form):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
     deposit_process_method = (form.get("deposit_process_method") or "").strip().lower()
     if deposit_process_method not in {"eft", "card", "cash"}:
         raise ValueError("Deposit process method must be EFT, Card, or Cash")
     note = form.get("deposit_note", "").strip()
     deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
-    extra_charge = round(extra_hours * hourly_rate, 2)
-    deposit_available = float(order["deposit_total"] or 0)
-    deposit_applied = round(min(deposit_available, extra_charge), 2)
-    deposit_refund = round(max(deposit_available - deposit_applied, 0), 2)
+    deposit_available = round(float(order["deposit_total"] or 0), 2)
     db = get_db()
-    if extra_charge > 0:
-        new_total = round(float(order["total"] or 0) + extra_charge, 2)
-        db.execute("UPDATE orders SET total = ? WHERE id = ?", (new_total, order_id))
+    existing = _deposit_applied_payment(order_id)
+    if existing:
+        db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), existing["id"]))
     db.execute(
-        """UPDATE orders SET extra_hours = ?, deposit_applied_amount = ?, deposit_refund_amount = ?,
+        """UPDATE orders SET deposit_applied_amount = 0, deposit_refund_amount = ?,
         deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
-        (extra_hours, deposit_applied, deposit_refund, deposit_process_method, deposit_processed_at, note, order_id),
+        (deposit_available, deposit_process_method, deposit_processed_at, note, order_id),
     )
+    db.commit()
+    from app.services.payments import recalculate_order_payment
+    recalculate_order_payment(order_id)
+    return f"Deposit settled for refund: R{deposit_available:.2f}"
+
+
+def use_return_deposit(order_id, form):
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    note = form.get("deposit_note", "").strip()
+    deposit_available = round(float(order["deposit_total"] or 0), 2)
+    db = get_db()
+    paid_row = db.execute(
+        """SELECT COALESCE(SUM(amount), 0) AS paid FROM payments
+        WHERE order_id = ? AND status = 'paid' AND COALESCE(deleted_at, '') = ''
+        AND NOT (method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT')""",
+        (order_id,),
+    ).fetchone()
+    non_deposit_paid = float(paid_row["paid"] or 0) if paid_row else 0
+    balance = round(max(float(order["total"] or 0) - non_deposit_paid, 0), 2)
+    deposit_applied = round(min(deposit_available, balance), 2)
+    deposit_refund = round(max(deposit_available - deposit_applied, 0), 2)
+    existing = _deposit_applied_payment(order_id)
     if deposit_applied > 0:
-        existing = db.execute("SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT'", (order_id,)).fetchone()
         if existing:
-            db.execute("UPDATE payments SET amount = ?, created_at = ? WHERE id = ?", (deposit_applied, now(), existing["id"]))
+            db.execute("UPDATE payments SET amount = ?, status = 'paid', deleted_at = '', created_at = ? WHERE id = ?", (deposit_applied, now(), existing["id"]))
         else:
             db.execute(
                 "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, ?, 'deposit_applied', 'DEPOSIT-SETTLEMENT', 'paid', ?)",
                 (order_id, deposit_applied, now()),
             )
+    elif existing:
+        db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), existing["id"]))
+    db.execute(
+        """UPDATE orders SET deposit_applied_amount = ?, deposit_refund_amount = ?,
+        deposit_process_method = 'deposit_applied', deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
+        (deposit_applied, deposit_refund, now(), note, order_id),
+    )
     db.commit()
     from app.services.payments import recalculate_order_payment
     recalculate_order_payment(order_id)
-    if extra_charge and deposit_applied:
-        return f"Return settled: R{deposit_applied:.2f} used from deposit; refund R{deposit_refund:.2f}"
-    if extra_charge:
-        return "Extra hours charge added"
-    return f"Deposit refund marked: R{deposit_refund:.2f}"
+    return f"Security deposit used: R{deposit_applied:.2f}; refund R{deposit_refund:.2f}"
 
 
 def _calendar_range(start_date=None, end_date=None):

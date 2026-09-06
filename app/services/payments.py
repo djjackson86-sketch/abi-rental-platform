@@ -1,6 +1,11 @@
 from datetime import datetime
 
 from app.db import get_db, now
+
+
+def _active_payment_clause(alias=""):
+    prefix = f"{alias}." if alias else ""
+    return f"COALESCE({prefix}deleted_at, '') = '' AND COALESCE({prefix}status, 'paid') = 'paid'"
 from app.services.orders import get_order
 
 PAYMENT_LABELS = {
@@ -26,16 +31,24 @@ def display_payment_date(payment):
     return (payment["payment_date"] or payment["created_at"] or "")[:10]
 
 
-def payments_for_order(order_id):
+def payments_for_order(order_id, include_archived=False):
+    where = "order_id = ?" if include_archived else f"order_id = ? AND {_active_payment_clause()}"
     return get_db().execute(
-        """SELECT * FROM payments WHERE order_id = ?
+        f"""SELECT * FROM payments WHERE {where}
         ORDER BY COALESCE(NULLIF(payment_date, ''), created_at) DESC, created_at DESC, id DESC""",
         (order_id,),
     ).fetchall()
 
 
+def get_payment(payment_id):
+    return get_db().execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
+
+
 def payment_total(order_id):
-    row = get_db().execute("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND status = 'paid'", (order_id,)).fetchone()
+    row = get_db().execute(
+        f"SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND {_active_payment_clause()}",
+        (order_id,),
+    ).fetchone()
     return float(row["paid"] or 0)
 
 
@@ -77,12 +90,7 @@ def record_payment(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
-    try:
-        amount = float(form.get("amount", 0) or 0)
-    except ValueError as exc:
-        raise ValueError("Payment amount must be a number") from exc
-    if amount <= 0:
-        raise ValueError("Payment amount must be greater than zero")
+    amount = _parse_payment_amount(form)
     method = form.get("method", "manual").strip() or "manual"
     reference = form.get("reference", "").strip()
     payment_date = parse_payment_date(form.get("payment_date"))
@@ -91,18 +99,57 @@ def record_payment(order_id, form):
     db.execute(
         """INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
         VALUES (?, ?, ?, ?, 'paid', ?, ?)""",
-        (order_id, round(amount, 2), method, reference, payment_date, created_at),
+        (order_id, amount, method, reference, payment_date, created_at),
     )
     db.commit()
     return recalculate_order_payment(order_id)
 
 
-def list_payments():
+def _parse_payment_amount(form):
+    try:
+        amount = float(form.get("amount", 0) or 0)
+    except ValueError as exc:
+        raise ValueError("Payment amount must be a number") from exc
+    if amount <= 0:
+        raise ValueError("Payment amount must be greater than zero")
+    return round(amount, 2)
+
+
+def update_payment(payment_id, form):
+    payment = get_payment(payment_id)
+    if not payment or payment["deleted_at"]:
+        raise ValueError("Payment not found")
+    amount = _parse_payment_amount(form)
+    method = form.get("method", "manual").strip() or "manual"
+    reference = form.get("reference", "").strip()
+    payment_date = parse_payment_date(form.get("payment_date"))
+    db = get_db()
+    db.execute(
+        "UPDATE payments SET amount = ?, method = ?, reference = ?, payment_date = ?, status = 'paid' WHERE id = ?",
+        (amount, method, reference, payment_date, payment_id),
+    )
+    db.commit()
+    return recalculate_order_payment(payment["order_id"])
+
+
+def archive_payment(payment_id):
+    payment = get_payment(payment_id)
+    if not payment or payment["deleted_at"]:
+        raise ValueError("Payment not found")
+    db = get_db()
+    db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), payment_id))
+    db.commit()
+    return recalculate_order_payment(payment["order_id"])
+
+
+def list_payments(include_archived=False):
+    where = "1=1" if include_archived else _active_payment_clause("p")
     return get_db().execute(
-        """SELECT p.*, o.order_number, c.name AS customer_name
+        f"""SELECT p.*, o.order_number, c.name AS customer_name
         FROM payments p
         LEFT JOIN orders o ON o.id = p.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE {where}
         ORDER BY COALESCE(NULLIF(p.payment_date, ''), p.created_at) DESC, p.created_at DESC, p.id DESC"""
     ).fetchall()
 

@@ -19,7 +19,7 @@ def summary_metrics(start_date=None, end_date=None):
         params.append(end_date)
     orders = db.execute(sql, params).fetchone()
     
-    payments_sql = "SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS paid FROM payments WHERE status = 'paid'"
+    payments_sql = "SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS paid FROM payments WHERE status = 'paid' AND COALESCE(deleted_at, '') = ''"
     payments_params = []
     if start_date:
         payments_sql += " AND DATE(created_at) >= ?"
@@ -81,7 +81,7 @@ def payments_by_method(start_date=None, end_date=None):
     db = get_db()
     sql = """
         SELECT method, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total FROM payments
-        WHERE status = 'paid'
+        WHERE status = 'paid' AND COALESCE(deleted_at, '') = ''
     """
     params = []
     if start_date:

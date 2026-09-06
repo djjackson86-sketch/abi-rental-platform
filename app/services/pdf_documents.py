@@ -43,6 +43,13 @@ def _document_logo_bytes():
     return logo_path.read_bytes()
 
 
+def _doc_value(document, key, default=None):
+    try:
+        return document[key]
+    except (KeyError, IndexError):
+        return default
+
+
 def _simple_pdf(lines, logo_bytes=None):
     y = 680 if logo_bytes else 800
     content_lines = []
@@ -260,12 +267,21 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             bank_lines.append(f'{key}: {value}')
     totals = [
         ('Subtotal', f'R{float(document["subtotal"] or 0):.2f}'),
+    ]
+    if float(_doc_value(document, 'discount_total') or 0):
+        discount_label = 'Discount'
+        if _doc_value(document, 'discount_mode', '') == 'percent' and float(_doc_value(document, 'discount_value') or 0):
+            discount_label = f'Discount ({float(_doc_value(document, "discount_value") or 0):g}%)'
+        elif _doc_value(document, 'discount_mode', '') == 'amount' and float(_doc_value(document, 'discount_value') or 0):
+            discount_label = f'Discount (R{float(_doc_value(document, "discount_value") or 0):.2f})'
+        totals.append((discount_label, f'-R{float(_doc_value(document, "discount_total") or 0):.2f}'))
+    totals.extend([
         ('Tax', f'R{float(document["tax_total"] or 0):.2f}'),
         ('Security deposit', f'R{float(document["deposit_total"] or 0):.2f}'),
         ('Total', f'R{float(document["total"] or 0):.2f}'),
         ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
         ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
-    ]
+    ])
     draw_commands.append(_pdf_light_blue_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4))
     for index, (label, amount) in enumerate(totals):
         line_y = totals_y - (index * 14)
@@ -362,7 +378,10 @@ def document_pdf_bytes(document_id):
     lines.append('')
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
-    lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}', f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])
+    lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}'])
+    if float(_doc_value(document, 'discount_total') or 0):
+        lines.append(f'Discount: -R{float(_doc_value(document, "discount_total") or 0):.2f}')
+    lines.extend([f'Tax: R{float(document["tax_total"] or 0):.2f}', f'Security deposit: R{float(document["deposit_total"] or 0):.2f}', f'Total: R{float(document["total"] or 0):.2f}'])
     if document['document_type'] == 'invoice':
         lines.extend([f'Paid: R{float(document["paid_total"] or 0):.2f}', f'Amount due: R{float(document["due_total"] or 0):.2f}'])
     logo_bytes = _document_logo_bytes()

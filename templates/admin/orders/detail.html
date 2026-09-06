@@ -54,7 +54,7 @@
     {% if payments %}
       <div class="schedule-list payment-list">
       {% for payment in payments %}
-        <div class="schedule-row"><span><b>R{{ '%.2f'|format(payment.amount) }}</b><small>{{ payment.method|title }}</small></span><span><small>Payment date</small><b>{{ display_payment_date(payment) }}</b></span><span><small>Reference</small><b>{{ payment.reference or '—' }}</b></span></div>
+        <div class="schedule-row"><span><b>R{{ '%.2f'|format(payment.amount) }}</b><small>{{ payment.method|title }}</small></span><span><small>Payment date</small><b>{{ display_payment_date(payment) }}</b></span><span><small>Reference</small><b>{{ payment.reference or '—' }}</b></span><span class="payment-actions"><a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a><form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form></span></div>
       {% endfor %}
       </div>
     {% endif %}
@@ -126,16 +126,27 @@
 </section>
 <section class="panel settings-form">
   <h2>Return / deposit settlement</h2>
-  <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
+  <form method="post" action="{{ url_for('orders.add_charges', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
       <label>Extra hours<input type="number" step="0.25" min="0" name="extra_hours" value="{{ order.extra_hours or 0 }}"></label>
-      <label>Hourly extra rate<input type="number" step="0.01" min="0" name="extra_hourly_rate" placeholder="0.00"></label>
-      <label>Deposit processed by<select name="deposit_process_method" required><option value="">Choose method</option>{% for value,label in [('eft','EFT'),('card','Card'),('cash','Cash')] %}<option value="{{ value }}" {% if order.deposit_process_method==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-      <label>Deposit refund/processed date<input type="datetime-local" name="deposit_processed_at" value="{{ default_deposit_processed_at }}"></label>
+      <label>Hourly extra rate<input type="number" step="0.01" min="0" name="extra_hourly_rate" value="{{ '%.2f'|format(return_charge_defaults.hourly_rate) }}" placeholder="0.00"></label>
+      <label>Damage Charge<input type="number" step="0.01" min="0" name="damage_charge" placeholder="0.00"></label>
     </div>
-    <label>Settlement note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Damage, late return, refund note"></label>
-    <p class="form-help">If extra hours are charged, the system can apply available security deposit to that charge and shows the remainder to refund.</p>
-    <button class="btn primary" type="submit">Settle return / use deposit</button>
+    <p class="form-help">Hourly extra rate is filled from the trailer inventory item on this order. Add Charges creates return charge line items in the Items section above.</p>
+    <button class="btn ghost" type="submit">Add Charges</button>
+  </form>
+  <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
+    <div class="form-grid compact">
+      <label>Deposit method<select name="deposit_process_method" required><option value="">Choose method</option>{% for value,label in [('eft','EFT'),('card','Card'),('cash','Cash')] %}<option value="{{ value }}" {% if order.deposit_process_method==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label>Deposit date<input type="datetime-local" name="deposit_processed_at" value="{{ default_deposit_processed_at }}"></label>
+    </div>
+    <label>Settlement note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Refund note"></label>
+    <button class="btn primary" type="submit">Settle Deposit</button>
+  </form>
+  <form method="post" action="{{ url_for('orders.use_deposit', order_id=order.id) }}" class="payment-form">
+    <label>Use-deposit note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Balance or damage note"></label>
+    <p class="form-help">Use Deposit applies the available security deposit to any outstanding balance after return charges.</p>
+    <button class="btn primary" type="submit">Use Deposit</button>
   </form>
 </section>
 {% endblock %}

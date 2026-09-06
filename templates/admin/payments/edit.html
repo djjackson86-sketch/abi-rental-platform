@@ -1,0 +1,19 @@
+{% extends "admin/layout.html" %}
+{% set title='Edit payment' %}
+{% block admin_body %}
+<header class="page-header">
+  <div><p class="eyebrow">Payments</p><h1>Edit payment</h1><p>Update payment amount, method, date, or reference.</p></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('orders.detail', order_id=payment.order_id) }}">Back to order</a></div>
+</header>
+<section class="panel settings-form">
+  <form method="post" class="payment-form">
+    <div class="form-grid compact">
+      <label>Amount<input type="number" step="0.01" min="0.01" name="amount" value="{{ '%.2f'|format(payment.amount) }}" required></label>
+      <label>Method<select name="method"><option value="cash" {% if payment.method=='cash' %}selected{% endif %}>Cash</option><option value="eft" {% if payment.method=='eft' %}selected{% endif %}>EFT</option><option value="card" {% if payment.method=='card' %}selected{% endif %}>Card</option><option value="manual" {% if payment.method=='manual' %}selected{% endif %}>Manual</option></select></label>
+      <label>Payment date<input type="datetime-local" name="payment_date" value="{{ payment_date }}" required></label>
+    </div>
+    <label>Reference<input name="reference" value="{{ payment.reference or '' }}" placeholder="Payment reference or note"></label>
+    <div class="form-actions"><button class="btn primary" type="submit">Save payment</button></div>
+  </form>
+</section>
+{% endblock %}

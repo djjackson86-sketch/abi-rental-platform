@@ -2612,6 +2612,26 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     assert b'/DCTDecode' in pdf
 
 
+
+def test_document_detail_has_back_to_order_and_discount_totals(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'percent', 'discount_value': '10'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
+
+    detail = client.get('/documents/1')
+    assert detail.status_code == 200
+    assert f'href="/orders/{order_id}">Back to order'.encode() in detail.data
+    assert b'Discount (10.00%)' in detail.data
+    assert b'-R60.00' in detail.data
+    assert b'R1290.00' in detail.data
+
+    pdf = client.get('/documents/1/download.pdf')
+    assert pdf.status_code == 200
+    assert pdf.data.startswith(b'%PDF-')
+    assert b'-R60.00' in pdf.data
+
 def test_document_generation_list_and_printable_detail(client):
     login(client)
     seed_customer_and_product(client)
@@ -2797,6 +2817,59 @@ def test_order_manual_payments_update_payment_status_and_history(client, app):
         assert saved[1]['reference'] == 'EFT-001'
         assert saved[1]['payment_date'] == '2026-07-06T08:15:00'
 
+
+
+def test_payment_can_be_edited_and_deleted_with_recalculation(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/payments', data={
+        'amount': '200',
+        'method': 'cash',
+        'reference': 'ORIGINAL-PAY',
+        'payment_date': '2026-07-05T10:00',
+    }, follow_redirects=True)
+
+    edit_page = client.get('/payments/1/edit')
+    assert edit_page.status_code == 200
+    assert b'Edit payment' in edit_page.data
+    assert b'value="200.00"' in edit_page.data
+
+    edited = client.post('/payments/1/edit', data={
+        'amount': '300',
+        'method': 'eft',
+        'reference': 'EDITED-PAY',
+        'payment_date': '2026-07-06T11:30',
+    }, follow_redirects=True)
+    assert b'Payment updated' in edited.data
+    assert b'R300.00' in edited.data
+    assert b'EDITED-PAY' in edited.data
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT due_total, payment_status FROM orders WHERE id=?', (order_id,)).fetchone()
+        payment = db.execute('SELECT amount, method, reference, payment_date, deleted_at, status FROM payments WHERE id=1').fetchone()
+        assert order['due_total'] == 1050
+        assert order['payment_status'] == 'partially_paid'
+        assert payment['amount'] == 300
+        assert payment['method'] == 'eft'
+        assert payment['reference'] == 'EDITED-PAY'
+        assert payment['payment_date'] == '2026-07-06T11:30:00'
+        assert payment['deleted_at'] == ''
+
+    deleted = client.post('/payments/1/delete', follow_redirects=True)
+    assert b'Payment deleted' in deleted.data
+    assert b'EDITED-PAY' not in deleted.data
+    assert b'Payment due' in deleted.data
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT due_total, payment_status FROM orders WHERE id=?', (order_id,)).fetchone()
+        payment = db.execute('SELECT status, deleted_at FROM payments WHERE id=1').fetchone()
+        assert order['due_total'] == 1350
+        assert order['payment_status'] == 'payment_due'
+        assert payment['status'] == 'archived'
+        assert payment['deleted_at']
+    assert b'EDITED-PAY' not in client.get('/payments').data
+    assert b'EDITED-PAY' in client.get('/payments?status=archived').data
 
 def test_manual_payment_invalid_date_is_rejected(client, app):
     login(client)
@@ -3024,6 +3097,54 @@ def test_branch_one_way_return_moves_product_to_return_branch(client, app):
     assert b'North Depot' in inventory.data
 
 
+
+def test_return_charges_create_order_items_and_use_deposit_applies_balance(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'Damage Charge' in detail.data
+    assert b'Add Charges' in detail.data
+    assert b'Settle Deposit' in detail.data
+    assert b'Use Deposit' in detail.data
+    assert b'value="200.00"' in detail.data
+
+    charged = client.post(f'/orders/{order_id}/add-return-charges', data={
+        'extra_hours': '2',
+        'extra_hourly_rate': '200',
+        'damage_charge': '150',
+    }, follow_redirects=True)
+    assert b'Return charges added to order items' in charged.data
+    assert b'Extra hours' in charged.data
+    assert b'Damage charge' in charged.data
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT subtotal, total, due_total, extra_hours FROM orders WHERE id=?', (order_id,)).fetchone()
+        items = db.execute('SELECT custom_name, quantity, unit_price, line_total FROM order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
+        assert order['extra_hours'] == 2
+        assert order['subtotal'] == 1150
+        assert order['total'] == 1900
+        assert order['due_total'] == 1900
+        assert any(item['custom_name'] == 'Extra hours' and item['line_total'] == 400 for item in items)
+        assert any(item['custom_name'] == 'Damage charge' and item['line_total'] == 150 for item in items)
+
+    used = client.post(f'/orders/{order_id}/use-deposit', data={'deposit_note': 'Use balance after return'}, follow_redirects=True)
+    assert b'Security deposit used: R750.00; refund R0.00' in used.data
+    with app.app_context():
+        db = get_db()
+        order = db.execute('SELECT deposit_applied_amount, deposit_refund_amount, due_total, payment_status FROM orders WHERE id=?', (order_id,)).fetchone()
+        payment = db.execute("SELECT amount, method, reference, status, deleted_at FROM payments WHERE order_id=? AND method='deposit_applied'", (order_id,)).fetchone()
+        assert order['deposit_applied_amount'] == 750
+        assert order['deposit_refund_amount'] == 0
+        assert order['due_total'] == 1150
+        assert payment['amount'] == 750
+        assert payment['status'] == 'paid'
+        assert payment['deleted_at'] == ''
+
 @pytest.mark.parametrize('method,label', [('eft', b'EFT'), ('card', b'CARD'), ('cash', b'CASH')])
 def test_return_deposit_settlement_records_method_and_removes_from_due_filter(client, app, method, label):
     login(client)
@@ -3043,7 +3164,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
         'deposit_processed_at': '',
         'deposit_note': 'Processed deposit at counter',
     }, follow_redirects=True)
-    assert b'Deposit refund marked' in settled.data
+    assert b'Deposit settled for refund' in settled.data
     assert label in settled.data
 
     due_after = client.get('/orders?payment_status=process_deposit')
@@ -3078,7 +3199,7 @@ def test_return_deposit_settlement_records_manual_refund_date(client, app):
         'deposit_note': 'Backdated deposit refund',
     }, follow_redirects=True)
 
-    assert b'Deposit refund marked' in settled.data
+    assert b'Deposit settled for refund' in settled.data
     assert b'2026-08-20 14:45 UTC' in settled.data
     assert b'value="2026-08-20T14:45"' in settled.data
     with app.app_context():

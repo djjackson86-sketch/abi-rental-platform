@@ -3,7 +3,7 @@
 {% block admin_body %}
 <header class="page-header">
   <div><p class="eyebrow">{{ display_label }}</p><h1>{{ display_number }}</h1><p>{{ document.order_number }} · {{ document.customer_name or 'No customer' }}</p></div>
-  <div class="header-actions"><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a>{% if document.document_type in ['invoice', 'quote'] %}<a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=document.id) }}">Save PDF</a>{% if document.document_type == 'invoice' and document.status == 'draft' %}<form method="post" action="{{ url_for('documents.finalize', document_id=document.id) }}" class="inline-form"><button class="btn ghost" type="submit">Finalize invoice</button></form>{% endif %}{% endif %}<button class="btn primary" onclick="window.print()">Print</button></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('orders.detail', order_id=document.order_id) }}">Back to order</a><a class="btn ghost" href="{{ url_for('documents.index') }}">Back to documents</a>{% if document.document_type in ['invoice', 'quote'] %}<a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=document.id) }}">Save PDF</a>{% if document.document_type == 'invoice' and document.status == 'draft' %}<form method="post" action="{{ url_for('documents.finalize', document_id=document.id) }}" class="inline-form"><button class="btn ghost" type="submit">Finalize invoice</button></form>{% endif %}{% endif %}<button class="btn primary" onclick="window.print()">Print</button></div>
 </header>
 {% if document.document_type in ['invoice', 'quote'] %}
 <section class="panel settings-form">
@@ -63,6 +63,7 @@
   <div class="invoice-footer-grid">
     <div class="totals">
       <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(document.subtotal or 0) }}</b></div>
+      {% if document.discount_total %}<div class="list-row"><span>Discount{% if document.discount_mode == 'percent' and document.discount_value %} ({{ '%.2f'|format(document.discount_value) }}%){% elif document.discount_mode == 'amount' and document.discount_value %} (R{{ '%.2f'|format(document.discount_value) }}){% endif %}</span><b>-R{{ '%.2f'|format(document.discount_total or 0) }}</b></div>{% endif %}
       <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(document.tax_total or 0) }}</b></div>
       <div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(document.deposit_total or 0) }}</b></div>
       <div class="list-row total-row"><span>Total{% if (document.deposit_option or 'security_deposit') == 'security_deposit' and document.deposit_total %} incl. refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(document.total or 0) }}</b></div>
