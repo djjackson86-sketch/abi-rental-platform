@@ -637,10 +637,10 @@ def test_order_draft_creation_and_totals(client):
     assert b'data-deposit="750.00"' in res.data
     assert b'data-tax-rate=' in res.data
     assert b'data-inline-company-details hidden' in res.data
-    assert b'id="inline-customer-type"' in res.data
+    assert b'id="inline-customer-type-individual"' in res.data
     assert b'name="vat_number"' in res.data
     assert b'name="company_reg_no"' in res.data
-    assert b"inlineCompanyDetails.hidden = !inlineCustomerType || inlineCustomerType.value !== 'company'" in res.data
+    assert b"inlineCompanyDetails.hidden = !selected || selected.value !== 'company'" in res.data
 
     res = client.post('/orders/new', data={
         'customer_id': '1',
@@ -668,6 +668,44 @@ def test_order_draft_creation_and_totals(client):
     assert b'Order Customer' in list_res.data
     assert b'Total incl. deposit' in list_res.data
     assert b'built-in method items' not in list_res.data
+
+
+def test_orders_date_range_filters_metrics_and_shows_deposit_to_process(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    july_order = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-02')
+    august_order = create_order_for_status(client, quantity='2', start_date='2026-08-05', end_date='2026-08-06')
+    client.post(f'/orders/{july_order}/reserve', follow_redirects=True)
+    client.post(f'/orders/{july_order}/start', follow_redirects=True)
+    client.post(f'/orders/{july_order}/return', follow_redirects=True)
+
+    filtered = client.get('/orders?start_date=2026-07-01&end_date=2026-07-31')
+    assert filtered.status_code == 200
+    assert b'value="2026-07-01"' in filtered.data
+    assert b'value="2026-07-31"' in filtered.data
+    assert b'ORD-00001' in filtered.data
+    assert b'ORD-00002' not in filtered.data
+    assert b'<small>Revenue</small><b>R1150.00</b>' in filtered.data
+    assert b'Deposit to process' in filtered.data
+    assert b'R750.00' in filtered.data
+
+    with app.app_context():
+        row = get_db().execute('SELECT * FROM orders WHERE id=?', (july_order,)).fetchone()
+        from app.services.orders import deposit_to_process_amount
+        assert deposit_to_process_amount(row) == 750
+
+
+def test_order_form_inline_customer_uses_customer_page_headings(client):
+    login(client)
+    seed_customer_and_product(client)
+    res = client.get('/orders/new')
+    assert res.status_code == 200
+    body = res.data
+    for heading in [b'Customer type', b'Contact details', b'Company details', b'Address', b'Custom customer details']:
+        assert heading in body
+    assert b'Donovan Jackson or ABI Solutions Pty Ltd' in body
+    assert b'id="inline-customer-type-individual"' in body
+    assert b'id="inline-customer-type-company"' in body
 
 
 def test_new_order_form_starts_with_one_line_and_add_line_control(client):
@@ -2136,7 +2174,7 @@ def test_invoice_line_items_show_tax_column(client, app):
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
     assert b'Proforma Invoice' in invoice.data
-    assert b'Unnumbered' in invoice.data
+    assert b'Unnumbered' not in invoice.data
     assert b'Finalize invoice' in invoice.data
     assert b'<th>Tax</th>' in invoice.data
     assert b'<th>Rental days</th>' not in invoice.data
@@ -2148,7 +2186,7 @@ def test_invoice_line_items_show_tax_column(client, app):
         from app.services.pdf_documents import document_pdf_bytes
         pdf = document_pdf_bytes(1)
     assert b'Proforma Invoice' in pdf
-    assert b'Unnumbered' in pdf
+    assert b'Unnumbered' not in pdf
     assert b'Rental days 1' in pdf  # Order details keep rental dates/days visible.
     assert b'Tax' in pdf
     assert b'R0.00' in pdf
@@ -2191,8 +2229,8 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     assert b'Content-Type: application/pdf' in draft.data
     assert b'filename="INVOICE-PROFORMA.pdf"' in draft.data
     assert b'To: order@example.com' in draft.data
-    assert b'Subject: Proforma Invoice Unnumbered for order ORD-00001' in draft.data
-    assert b'Please find attached Proforma Invoice Unnumbered for order ORD-00001.' in draft.data
+    assert b'Subject: Proforma Invoice for order ORD-00001' in draft.data
+    assert b'Please find attached Proforma Invoice  for order ORD-00001.' in draft.data
     from email import policy
     from email.parser import BytesParser
     parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
@@ -2249,7 +2287,7 @@ def test_invoice_email_default_message_can_be_configured(client):
     seed_customer_and_product(client)
     order_id = create_order_for_status(client, quantity='1')
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
-    assert b'Hello Order Customer, please review Proforma Invoice Unnumbered for ORD-00001. Regards ABI Rentals' in invoice.data
+    assert b'Hello Order Customer, please review Proforma Invoice  for ORD-00001. Regards ABI Rentals' in invoice.data
     assert b'Default signature:' in invoice.data
     assert b'Accounts team' in invoice.data
     assert b'Logo will be embedded in the Outlook email signature.' in invoice.data
@@ -2262,7 +2300,7 @@ def test_invoice_email_default_message_can_be_configured(client):
     html_parts = [part for part in parsed.walk() if part.get_content_type() == 'text/html']
     assert len(html_parts) == 1
     html = html_parts[0].get_content()
-    assert 'Hello Order Customer, please review Proforma Invoice Unnumbered for ORD-00001. Regards ABI Rentals' in html
+    assert 'Hello Order Customer, please review Proforma Invoice  for ORD-00001. Regards ABI Rentals' in html
     assert 'Kind regards,' in html
     assert 'Accounts team' in html
     assert 'cid:invoice-signature-logo@abi-rental-platform' in html
@@ -2281,7 +2319,7 @@ def test_invoice_finalize_assigns_number_once(client, app):
     created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert created.status_code == 200
     assert b'Proforma Invoice' in created.data
-    assert b'Unnumbered' in created.data
+    assert b'Unnumbered' not in created.data
 
     finalized = client.post('/documents/1/finalize', follow_redirects=True)
     assert finalized.status_code == 200
@@ -2382,8 +2420,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Business Current',
         b'Use INV number',
         b'Proforma Invoice',
-        b'Unnumbered',
-        b'Invoice date:',
+                b'Invoice date:',
         invoice_date.encode(),
         b'Pickup:',
         b'2026-07-01',
@@ -2463,7 +2500,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert address_pos < customer_pos
     totals_pos = invoice.data.index(b'class="totals"')
     assert customer_pos < table_pos < totals_pos < banking_pos
-    assert invoice.data.index(b'Unnumbered') < invoice.data.index(invoice_date.encode())
+    assert b'Unnumbered' not in invoice.data
+    assert invoice.data.index(b'Invoice date:') < invoice.data.index(invoice_date.encode())
     assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'Rental days 2')
     assert b'+27 12 999 0000 | wonderboom@example.test' not in invoice.data
     assert invoice.data.index(b'Wonderboom') < invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test') < invoice.data.index(b'22 Wonderboom Avenue')
@@ -2481,7 +2519,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
         b'INV-00001',
-        b'Invoice date: ' + invoice_date.encode(),
+        b'Invoice date:',
+        invoice_date.encode(),
         b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj',
         b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj',
         b'/F2 8.5 Tf 1 0 0 1 36.00 625.00 Tm (Bill To:) Tj',
@@ -2537,7 +2576,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'390.00 292.00 Tm (Tax)' in pdf
     assert b'505.00 292.00 Tm (R0.00)' in pdf
     assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'Rental days 2')
-    assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date: ' + invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
+    assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date:') < pdf.index(invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
     assert pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj')
@@ -2664,14 +2703,14 @@ def test_document_generation_list_and_printable_detail(client):
     invoice_created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice_created.status_code == 200
     assert b'Proforma Invoice' in invoice_created.data
-    assert b'Unnumbered' in invoice_created.data
+    assert b'Unnumbered' not in invoice_created.data
 
     order_detail = client.get(f'/orders/{order_id}')
-    assert b'Unnumbered' in order_detail.data
+    assert b'Unnumbered' not in order_detail.data
     assert b'Proforma Invoice' in order_detail.data
 
     documents = client.get('/documents')
-    assert b'Unnumbered' in documents.data
+    assert b'Unnumbered' not in documents.data
     assert b'Proforma Invoice' in documents.data
 
     export = client.get('/documents/export.csv')
@@ -3200,7 +3239,8 @@ def test_return_deposit_settlement_records_manual_refund_date(client, app):
     }, follow_redirects=True)
 
     assert b'Deposit refund processed' in settled.data
-    assert b'2026-08-20 14:45 UTC' in settled.data
+    assert b'2026-08-20 14:45' in settled.data
+    assert b'2026-08-20 14:45 UTC' not in settled.data
     assert b'value="2026-08-20T14:45"' in settled.data
     with app.app_context():
         db = __import__('app.db', fromlist=['get_db']).get_db()
