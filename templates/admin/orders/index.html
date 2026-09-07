@@ -18,7 +18,7 @@
     {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
     {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
   </form>
-  <a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>
+  {% if user_can('new_order') %}<a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>{% endif %}
 </header>
 
 <section class="orders-page-shell">
@@ -72,11 +72,12 @@
         <label>From<input type="date" name="start_date" value="{{ filters.start_date }}"></label><label>To<input type="date" name="end_date" value="{{ filters.end_date }}"></label><button class="btn ghost" type="submit">Apply dates</button>{% if filters.start_date or filters.end_date %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status, return_status=filters.return_status) }}">Clear dates</a>{% endif %}
       </div>
 
-      <a class="btn ghost export-btn" href="{{ url_for('admin.reports_orders_csv') }}">Export</a>
+      {% if user_can('reports') %}<a class="btn ghost export-btn" href="{{ url_for('admin.reports_orders_csv') }}">Export</a>{% endif %}
     </form>
   </aside>
 
   <main class="orders-workspace">
+    {% if current_user_is_main %}
     <div class="orders-tabs-row">
       <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
         <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index') }}">All</a>
@@ -93,6 +94,16 @@
       <div class="metric-card"><small>Revenue</small><b>R{{ '%.2f'|format(counts.revenue) }}</b></div>
       <div class="metric-card"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
     </section>
+    {% else %}
+    <div class="orders-tabs-row">
+      <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
+        <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index') }}">All</a>
+        <a href="#">Upcoming</a>
+        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late') }}">Late</a>
+        <a href="#">With shortage</a>
+      </nav>
+    </div>
+    {% endif %}
 
     <section class="panel orders-list-panel">
       {% if filters.query or filters.status or filters.payment_status or filters.return_status or filters.start_date or filters.end_date %}
@@ -146,7 +157,7 @@
           <div class="empty-arrow" aria-hidden="true"></div>
           <h2>Create your first <span>order</span></h2>
           <p>Create and manage your orders with live availability and automatic pricing calculations. Then try reserving, picking up, and returning items to learn the full workflow.</p>
-          <a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>
+          {% if user_can('new_order') %}<a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>{% endif %}
         </div>
       {% endif %}
     </section>

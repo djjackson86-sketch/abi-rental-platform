@@ -1,0 +1,70 @@
+{% extends "admin/layout.html" %}
+{% set title='Users & access' %}
+{% block admin_body %}
+<header class="page-header">
+  <div><p class="eyebrow">Settings</p><h1>Users & access</h1><p>Add additional accounts and set what they can see and use. Permissions apply to all additional accounts on their next sign-in.</p></div>
+</header>
+{% include "admin/settings/nav.html" %}
+
+<section class="panel settings-form">
+  <h2>Permissions for additional accounts</h2>
+  <p class="form-help">The main profile always has all functions. Tick the modules that additional accounts may open. Their Dashboard only shows the “for the day” cards and the Orders list does not show the totals bar.</p>
+  <form method="post" action="{{ url_for('settings.users_permissions') }}" class="form-grid">
+    {% for key, label in modules %}
+      <label class="check-row"><input type="checkbox" name="module" value="{{ key }}" {% if key in active_staff_modules %}checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Save permissions</button></div>
+  </form>
+</section>
+
+<section class="panel settings-form">
+  <h2>Add an additional account</h2>
+  <p class="form-help">{{ additional_count }} of {{ additional_limit }} additional accounts used.</p>
+  <form method="post" action="{{ url_for('settings.users_add') }}" class="form-grid">
+    <label>Name<input name="name" required placeholder="e.g. Sipho Admin"></label>
+    <label>Email<input type="email" name="email" required placeholder="name@company.co.za"></label>
+    <label>Password<input type="text" name="password" required minlength="6" placeholder="At least 6 characters"></label>
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Add account</button></div>
+  </form>
+</section>
+
+<section class="panel settings-form">
+  <h2>Accounts</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Profile</th><th>Status</th><th>Password</th><th></th></tr></thead>
+      <tbody>
+      {% for user in users %}
+        <tr>
+          <td><strong>{{ user.name }}</strong>{% if user.initials %}<small>{{ user.initials }}</small>{% endif %}</td>
+          <td>{{ user.email }}</td>
+          <td>{% if user.role == 'owner' %}<span class="badge status-reserved">Main profile</span>{% else %}<span class="badge status-returned">Additional</span>{% endif %}</td>
+          <td>{% if user.active %}<span class="badge status-returned">Active</span>{% else %}<span class="badge status-canceled">Inactive</span>{% endif %}</td>
+          <td>
+            {% if user.role != 'owner' %}
+            <form method="post" action="{{ url_for('settings.users_password', user_id=user.id) }}" class="inline-form">
+              <input type="text" name="password" minlength="6" placeholder="New password" required>
+              <button class="btn ghost" type="submit">Reset</button>
+            </form>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.role != 'owner' %}
+            <div class="header-actions">
+              <form method="post" action="{{ url_for('settings.users_active', user_id=user.id) }}" class="inline-form">
+                <input type="hidden" name="active" value="{{ '0' if user.active else '1' }}">
+                <button class="btn ghost" type="submit">{{ 'Deactivate' if user.active else 'Activate' }}</button>
+              </form>
+              <form method="post" action="{{ url_for('settings.users_delete', user_id=user.id) }}" class="inline-form" onsubmit="return confirm('Delete this account?');">
+                <button class="btn ghost" type="submit">Delete</button>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

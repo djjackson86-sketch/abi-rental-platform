@@ -3678,3 +3678,113 @@ def test_ticket_341952905_return_validation_taxed_extra_and_invoice_revision(cli
         assert round(extra['line_total'], 2) == 46.0
         rows = get_db().execute("SELECT id FROM documents WHERE order_id=? AND document_type='invoice' ORDER BY id", (order_id,)).fetchall()
         assert len(rows) == 1
+
+
+def test_main_can_manage_users_and_staff_have_restricted_access(client, app):
+    login(client)
+    users_page = client.get('/settings/users')
+    assert users_page.status_code == 200
+    assert b'Users & access' in users_page.data
+    assert b'Main profile' in users_page.data
+    assert b'Add an additional account' in users_page.data
+    assert b'value="new_order"' in users_page.data
+    assert b'value="inventory"' in users_page.data
+    assert b'name="module" value="customers"' in users_page.data
+
+    added = client.post('/settings/users/add', data={
+        'name': 'Demo Staff',
+        'email': 'staff@demo.test',
+        'password': 'staff123',
+    }, follow_redirects=True)
+    assert b'Additional account created' in added.data
+    assert b'staff@demo.test' in added.data
+
+    client.post('/logout')
+    staff_login = client.post('/login', data={'email': 'staff@demo.test', 'password': 'staff123'}, follow_redirects=True)
+    assert staff_login.status_code == 200
+
+    dashboard = client.get('/dashboard')
+    assert b'Order for the day' in dashboard.data
+    assert b'Customer base for the day' in dashboard.data
+    assert b'Revenue for the day' in dashboard.data
+    assert b'Total orders' not in dashboard.data
+    assert b'Going out' not in dashboard.data
+    assert b'Add order' not in dashboard.data
+
+    orders = client.get('/orders')
+    assert orders.status_code == 200
+    assert b'orders-metrics' not in orders.data
+    assert b'Hide metrics' not in orders.data
+    assert b'Export' not in orders.data
+
+    calendar = client.get('/calendar')
+    assert calendar.status_code == 200
+    customers = client.get('/customers')
+    assert customers.status_code == 200
+
+    for path in ['/inventory', '/branches', '/documents', '/payments', '/online-store', '/app-store', '/reports', '/scan-barcode', '/settings/general', '/settings/users']:
+        blocked = client.get(path)
+        assert blocked.status_code == 403, path
+
+    sidebar = dashboard.data
+    assert b'>Inventory</span>' not in sidebar
+    assert b'>Payments</span>' not in sidebar
+    assert b'>Settings</span>' not in sidebar
+
+
+def test_staff_order_workflow_stays_available_inside_orders(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post('/settings/users/add', data={
+        'name': 'Order Staff',
+        'email': 'orderstaff@demo.test',
+        'password': 'staff123',
+    }, follow_redirects=True)
+    client.post('/logout')
+    client.post('/login', data={'email': 'orderstaff@demo.test', 'password': 'staff123'}, follow_redirects=True)
+
+    detail = client.get(f'/orders/{order_id}')
+    assert detail.status_code == 200
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'Proforma Invoice' in invoice.data
+    created = client.get('/documents/1')
+    assert created.status_code == 200
+
+
+def test_additional_accounts_capped_at_ten(client):
+    login(client)
+    for i in range(10):
+        res = client.post('/settings/users/add', data={
+            'name': f'Staff {i}',
+            'email': f'staff{i}@demo.test',
+            'password': 'staff123',
+        }, follow_redirects=True)
+        assert b'Additional account created' in res.data
+    users_page = client.get('/settings/users')
+    assert b'10 of 10 additional accounts used' in users_page.data
+    overflow = client.post('/settings/users/add', data={
+        'name': 'Overflow',
+        'email': 'overflow@demo.test',
+        'password': 'staff123',
+    }, follow_redirects=True)
+    assert b'Limit reached' in overflow.data
+
+
+def test_permissions_save_applies_globally_on_next_sign_in(client):
+    login(client)
+    saved = client.post('/settings/users/permissions', data={
+        'module': ['new_order', 'dashboard', 'calendar', 'orders'],
+    }, follow_redirects=True)
+    assert b'Additional account permissions saved' in saved.data
+    client.post('/settings/users/add', data={
+        'name': 'Limited Staff',
+        'email': 'limited@demo.test',
+        'password': 'staff123',
+    }, follow_redirects=True)
+    client.post('/logout')
+    client.post('/login', data={'email': 'limited@demo.test', 'password': 'staff123'}, follow_redirects=True)
+    assert client.get('/customers').status_code == 403
+    assert client.get('/inventory').status_code == 403
+    assert client.get('/orders').status_code == 200
+    assert client.get('/calendar').status_code == 200

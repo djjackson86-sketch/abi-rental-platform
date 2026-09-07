@@ -1,8 +1,30 @@
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from functools import wraps
+from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
 from app.routes.auth import login_required
+from app.services.access import (
+    ADDITIONAL_USER_LIMIT,
+    MODULES,
+    additional_user_count,
+    create_additional_user,
+    delete_additional_user,
+    list_users,
+    reset_user_password,
+    save_staff_modules,
+    set_user_active,
+    staff_modules_from_settings,
+)
 from app.services.settings import get_company_settings, update_company_settings, list_tax_profiles, create_tax_profile, list_operating_hours
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
+
+
+def main_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get("user_role") != "owner":
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
 
 
 @bp.route("/general", methods=["GET", "POST"])
@@ -13,6 +35,81 @@ def general():
         flash("Settings saved", "success")
         return redirect(url_for("settings.general"))
     return render_template("admin/settings/general.html", settings=get_company_settings())
+
+
+@bp.route("/users", methods=["GET"])
+@login_required
+@main_required
+def users():
+    settings = get_company_settings()
+    return render_template(
+        "admin/settings/users.html",
+        settings=settings,
+        users=list_users(),
+        additional_count=additional_user_count(),
+        additional_limit=ADDITIONAL_USER_LIMIT,
+        modules=MODULES,
+        active_staff_modules=staff_modules_from_settings(settings),
+    )
+
+
+@bp.post("/users/add")
+@login_required
+@main_required
+def users_add():
+    user_id, error = create_additional_user(
+        request.form.get("name"),
+        request.form.get("email"),
+        request.form.get("password"),
+    )
+    if error:
+        flash(error, "error")
+    else:
+        flash("Additional account created", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/<int:user_id>/password")
+@login_required
+@main_required
+def users_password(user_id):
+    error = reset_user_password(user_id, request.form.get("password"))
+    if error:
+        flash(error, "error")
+    else:
+        flash("Password updated", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/<int:user_id>/active")
+@login_required
+@main_required
+def users_active(user_id):
+    if not set_user_active(user_id, request.form.get("active") == "1"):
+        flash("Main profile cannot be changed", "error")
+    else:
+        flash("Account updated", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/<int:user_id>/delete")
+@login_required
+@main_required
+def users_delete(user_id):
+    if not delete_additional_user(user_id):
+        flash("Main profile cannot be deleted", "error")
+    else:
+        flash("Account deleted", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/permissions")
+@login_required
+@main_required
+def users_permissions():
+    save_staff_modules(request.form.getlist("module"))
+    flash("Additional account permissions saved. They apply on the next sign-in.", "success")
+    return redirect(url_for("settings.users"))
 
 
 @bp.route("/taxes", methods=["GET", "POST"])

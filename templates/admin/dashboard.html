@@ -1,12 +1,26 @@
 {% extends "admin/layout.html" %}
 {% set title='Dashboard' %}
 {% block admin_body %}
+{% if not current_user_is_main %}
 <header class="page-header dashboard-header">
   <div>
     <p class="eyebrow">Dashboard</p>
     <h1>Dashboard</h1>
   </div>
-  <a class="btn ghost" href="{{ url_for('admin.reports') }}">▤ Reports</a>
+</header>
+
+<section class="metrics dashboard-metrics">
+  <div class="metric-card"><small>Order for the day</small><b>{{ day_metrics.orders }}</b><span>{{ day_metrics.day }}</span></div>
+  <div class="metric-card"><small>Customer base for the day</small><b>{{ day_metrics.customers }}</b><span>{{ day_metrics.day }}</span></div>
+  <div class="metric-card"><small>Revenue for the day</small><b>R{{ '%.2f'|format(day_metrics.revenue) }}</b><span>{{ day_metrics.day }}</span></div>
+</section>
+{% else %}
+<header class="page-header dashboard-header">
+  <div>
+    <p class="eyebrow">Dashboard</p>
+    <h1>Dashboard</h1>
+  </div>
+  {% if user_can('reports') %}<a class="btn ghost" href="{{ url_for('admin.reports') }}">▤ Reports</a>{% endif %}
 </header>
 
 <section class="dashboard-note panel">
@@ -15,7 +29,7 @@
     <b>Latest operational snapshot is ready.</b>
     <p>Track today’s movement, upcoming returns, customer growth and revenue from one clean workspace.</p>
   </div>
-  <a href="{{ url_for('orders.new') }}">Create order</a>
+  {% if user_can('new_order') %}<a href="{{ url_for('orders.new') }}">Create order</a>{% endif %}
 </section>
 
 <section class="metrics dashboard-metrics">
@@ -30,8 +44,8 @@
     <div class="movement-head">
       <h2>Going out</h2>
       <div class="header-actions">
-        <a class="btn ghost" href="{{ url_for('admin.reports') }}">Run report</a>
-        <a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>
+        {% if user_can('reports') %}<a class="btn ghost" href="{{ url_for('admin.reports') }}">Run report</a>{% endif %}
+        {% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}
       </div>
     </div>
     <div class="movement-body">
@@ -48,14 +62,14 @@
       <div class="empty-results"><strong>No results</strong><span>No reserved pickups scheduled yet.</span></div>
     {% endif %}
     </div>
-    <div class="movement-foot"><a href="{{ url_for('orders.index', status='reserved') }}">View late</a><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>
+    {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='reserved') }}">View late</a><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>{% endif %}
   </article>
 
   <article class="panel movement-card">
     <div class="movement-head">
       <h2>Coming back</h2>
       <div class="header-actions">
-        <a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>
+        {% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}
       </div>
     </div>
     <div class="movement-body">
@@ -72,7 +86,8 @@
       <div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>
     {% endif %}
     </div>
-    <div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>
+    {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>{% endif %}
   </article>
 </section>
+{% endif %}
 {% endblock %}

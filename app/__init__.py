@@ -1,5 +1,5 @@
 import os
-from flask import Flask
+from flask import Flask, abort, request, session
 
 from .db import init_app as init_db_app
 from .routes.auth import bp as auth_bp
@@ -13,6 +13,7 @@ from .routes.documents import bp as documents_bp
 from .routes.payments import bp as payments_bp
 from .routes.branches import bp as branches_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
+from .services.access import is_main_session, module_for_endpoint, user_can_module
 
 
 def _truthy_env(name):
@@ -73,4 +74,23 @@ def create_app(test_config=None):
     app.register_blueprint(branches_bp)
     app.register_blueprint(internal_telegram_bp)
     app.register_blueprint(public_bp)
+
+    @app.before_request
+    def enforce_module_access():
+        module = module_for_endpoint(request.endpoint)
+        if module is None or not session.get("user_id"):
+            return None
+        if session.get("user_role") == "owner":
+            return None
+        if user_can_module(session, module):
+            return None
+        return abort(403)
+
+    @app.context_processor
+    def inject_access_helpers():
+        return {
+            "current_user_is_main": is_main_session(session),
+            "user_can": lambda module: user_can_module(session, module),
+        }
+
     return app

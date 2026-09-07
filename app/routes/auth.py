@@ -2,6 +2,8 @@ from functools import wraps
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from app.db import get_db
+from app.services.access import staff_modules_from_settings
+from app.services.settings import get_company_settings
 
 bp = Blueprint("auth", __name__)
 
@@ -28,6 +30,11 @@ def login():
             session["initials"] = user["initials"]
             session["branch_id"] = user["branch_id"]
             session["can_view_all_branches"] = bool(user["can_view_all_branches"])
+            session["user_role"] = user["role"]
+            if user["role"] == "owner":
+                session["staff_modules"] = []
+            else:
+                session["staff_modules"] = staff_modules_from_settings(get_company_settings())
             return redirect(url_for("admin.dashboard"))
         flash("Invalid email or password", "error")
     return render_template("login.html")

@@ -7,6 +7,7 @@ from app.services.settings import get_company_settings, update_online_store_sett
 from app.services.orders import calendar_group_availability, dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
+from app.services.timezone import local_now_iso
 
 bp = Blueprint("admin", __name__)
 
@@ -28,7 +29,20 @@ def dashboard():
         "customers": db.execute("SELECT COUNT(*) c FROM customers").fetchone()[ "c"],
         "revenue": db.execute("SELECT COALESCE(SUM(total),0) s FROM orders").fetchone()[ "s"],
     }
-    return render_template("admin/dashboard.html", settings=get_company_settings(), metrics=metrics, schedule=dashboard_schedule())
+    day_prefix = local_now_iso(timespec="seconds")[:10]
+    day_metrics = {
+        "orders": db.execute("SELECT COUNT(*) c FROM orders WHERE substr(created_at, 1, 10) = ?", (day_prefix,)).fetchone()["c"],
+        "customers": db.execute("SELECT COUNT(*) c FROM customers WHERE substr(created_at, 1, 10) = ?", (day_prefix,)).fetchone()["c"],
+        "revenue": db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE substr(created_at, 1, 10) = ?", (day_prefix,)).fetchone()["s"],
+        "day": day_prefix,
+    }
+    return render_template(
+        "admin/dashboard.html",
+        settings=get_company_settings(),
+        metrics=metrics,
+        day_metrics=day_metrics,
+        schedule=dashboard_schedule(),
+    )
 
 @bp.route("/coupons", methods=["GET", "POST"])
 @bp.route("/coupons/<int:coupon_id>/edit", methods=["GET", "POST"])
