@@ -2235,6 +2235,7 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     assert b'Generate Email' in invoice.data
     assert b'Open Email' in invoice.data
     assert b'Download ABI Email Helper for Windows' in invoice.data
+    assert b'Download Email Helper' in invoice.data
     assert b'data-open-email-action="/documents/1/open-email-link"' in invoice.data
     assert b'Send Email' not in invoice.data
     assert b'Outlook-compatible email draft' in invoice.data
