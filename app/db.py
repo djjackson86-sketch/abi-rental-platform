@@ -413,12 +413,16 @@ def init_db():
     for day in range(7):
         db.execute("INSERT OR IGNORE INTO operating_hours (day_of_week, open_time, close_time, closed) VALUES (?, '09:00', '17:00', ?)", (day, 1 if day in (0,6) else 0))
     admin_email = current_app.config["ADMIN_EMAIL"]
-    existing = db.execute("SELECT id FROM users WHERE email = ?", (admin_email,)).fetchone()
-    if not existing:
-        db.execute(
-            "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)",
-            (admin_email, generate_password_hash(current_app.config["ADMIN_PASSWORD"]), "ABI Admin", "AA", "owner", default_branch['id'] if default_branch else None, ts),
-        )
+    owner = db.execute("SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1").fetchone()
+    if owner is None:
+        existing = db.execute("SELECT id FROM users WHERE email = ?", (admin_email,)).fetchone()
+        if existing:
+            db.execute("UPDATE users SET role = 'owner', active = 1 WHERE id = ?", (existing["id"],))
+        else:
+            db.execute(
+                "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)",
+                (admin_email, generate_password_hash(current_app.config["ADMIN_PASSWORD"]), "ABI Admin", "AA", "owner", default_branch['id'] if default_branch else None, ts),
+            )
     db.commit()
 
 

@@ -8,10 +8,9 @@
   <p class="muted">Manage rentals, orders, customers, inventory and your online booking page.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
   <form method="post" class="stack">
-    <label>Email <input name="email" type="email" required autofocus value="admin@abi.local"></label>
-    <label>Password <input name="password" type="password" required value="admin123"></label>
+    <label>Email <input name="email" type="email" required autofocus placeholder="you@company.co.za"></label>
+    <label>Password <input name="password" type="password" required placeholder="Password"></label>
     <button class="btn primary" type="submit">Continue</button>
   </form>
-  <p class="hint">Local seed login: admin@abi.local / admin123</p>
 </main>
 {% endblock %}
