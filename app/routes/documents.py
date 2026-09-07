@@ -66,7 +66,6 @@ def _prepare_email_draft(document_id, to_email, message=None):
         body,
         pdf_bytes,
         pdf_filename,
-        settings['email'],
         cc_email=(settings['email'] or '').strip() or 'info@sanotrailers.co.za',
         signature=signature,
         logo_bytes=_invoice_email_logo_bytes(settings),

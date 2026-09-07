@@ -83,9 +83,14 @@ def build_outlook_draft_eml(to_email, subject, body, attachment_bytes, filename,
     invoice attached so they can review it in Outlook before clicking Send. The office
     address (cc_email) is always included on Cc so every generated draft keeps the
     SANO Trailers office informed.
+
+    The file is deliberately not pre-stamped with a From sender and carries
+    X-Unsent: 1, so Outlook opens it as a draft that sends from the current user's
+    own account instead of a fixed office address.
     """
     msg = EmailMessage()
     msg['Subject'] = subject
+    msg['X-Unsent'] = '1'
     if from_email:
         msg['From'] = from_email
     msg['To'] = to_email

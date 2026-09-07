@@ -2251,6 +2251,8 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     assert b'filename="INVOICE-PROFORMA.pdf"' in draft.data
     assert b'To: order@example.com' in draft.data
     assert b'Cc: info@abi-solutions.local' in draft.data
+    assert b'X-Unsent: 1' in draft.data
+    assert b'From:' not in draft.data
     assert b'Subject: Proforma Invoice for order ORD-00001' in draft.data
     assert b'Please find attached Proforma Invoice  for order ORD-00001.' in draft.data
     from email import policy
@@ -2375,6 +2377,8 @@ def test_generated_email_cc_falls_back_to_sano_office_when_settings_email_blank(
     parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
     assert parsed['Cc'] == 'info@sanotrailers.co.za'
     assert b'Cc: info@sanotrailers.co.za' in draft.data
+    assert b'X-Unsent: 1' in draft.data
+    assert b'From:' not in draft.data
 
 
 def test_invoice_finalize_assigns_number_once(client, app):
@@ -2697,6 +2701,8 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     assert draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-QUOTE-QUO-00001.eml'
     assert b'To: quote@example.com' in draft.data
     assert b'Cc: fallback@example.test' in draft.data
+    assert b'X-Unsent: 1' in draft.data
+    assert b'From:' not in draft.data
     assert b'Subject: Quote QUO-00001 for order ORD-00001' in draft.data
     assert b'Please find attached Quote QUO-00001 for order ORD-00001.' in draft.data
     from email import policy
