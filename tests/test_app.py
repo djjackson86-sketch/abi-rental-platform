@@ -2291,7 +2291,7 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     assert b'Please open this draft' in helper_draft.data
 
 
-def test_invoice_email_default_message_can_be_configured(client):
+def test_invoice_email_default_message_can_be_configured(client, app):
     login(client)
     saved = client.post('/settings/general', data={
         'company_name': 'ABI Rentals',
@@ -2319,21 +2319,28 @@ def test_invoice_email_default_message_can_be_configured(client):
         'deposit_value': '0',
         'pricing_enabled': '1',
         'enable_time_selection': '1',
-        'invoice_email_message': 'Hello {customer_name}, please review {document_label} {document_number} for {order_number}. Regards {company_name}',
+        'invoice_email_message': 'Dear {customer_name},\n\nPlease find attached {document_label} {document_number} for order {order_number}.\n\nShould you have any questions or require further assistance, please contact us at {branch_email} or {branch_contact}.',
         'invoice_email_signature': 'Kind regards,\n{company_name}\nAccounts team',
         'invoice_email_signature_include_logo': '1',
     }, follow_redirects=True)
-    assert saved.status_code == 200
     assert b'Default invoice email' in saved.data
-    assert b'Hello {customer_name}, please review' in saved.data
+    assert b'Dear {customer_name},' in saved.data
+    assert b'{branch_email}' in saved.data
+    assert b'{branch_contact}' in saved.data
     assert b'Email signature' in saved.data
     assert b'Kind regards,' in saved.data
     assert b'invoice_email_signature_include_logo' in saved.data
 
     seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE branches SET email = ?, phone = ? WHERE id = 1", ('midrand@sanotrailers.test', '+27 11 555 0199'))
+        db.commit()
     order_id = create_order_for_status(client, quantity='1')
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
-    assert b'Hello Order Customer, please review Proforma Invoice  for ORD-00001. Regards ABI Rentals' in invoice.data
+    assert b'Dear Order Customer,' in invoice.data
+    assert b'Please find attached Proforma Invoice  for order ORD-00001.' in invoice.data
+    assert b'please contact us at midrand@sanotrailers.test or +27 11 555 0199.' in invoice.data
     assert b'Default signature:' in invoice.data
     assert b'Accounts team' in invoice.data
     assert b'Logo will be embedded in the Outlook email signature.' in invoice.data
@@ -2346,7 +2353,9 @@ def test_invoice_email_default_message_can_be_configured(client):
     html_parts = [part for part in parsed.walk() if part.get_content_type() == 'text/html']
     assert len(html_parts) == 1
     html = html_parts[0].get_content()
-    assert 'Hello Order Customer, please review Proforma Invoice  for ORD-00001. Regards ABI Rentals' in html
+    assert 'Dear Order Customer,' in html
+    assert 'Please find attached Proforma Invoice  for order ORD-00001.' in html
+    assert 'please contact us at midrand@sanotrailers.test or +27 11 555 0199.' in html
     assert 'Kind regards,' in html
     assert 'Accounts team' in html
     assert 'cid:invoice-signature-logo@abi-rental-platform' in html

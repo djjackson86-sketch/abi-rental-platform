@@ -104,12 +104,18 @@ def _public_base_url():
 
 
 def _email_context(document, settings, label=None, number=None):
+    branch_email = document['branch_email'] or settings['email']
+    branch_contact = document['branch_phone'] or settings['phone']
     return {
         'customer_name': document['customer_name'] or 'Customer',
         'document_label': label or display_document_label(document),
         'document_number': number or display_document_number(document),
         'order_number': document['order_number'],
         'company_name': settings['company_name'],
+        'branch_name': document['branch_name'] or settings['company_name'],
+        'branch_email': branch_email,
+        'branch_contact': branch_contact,
+        'branch_phone': branch_contact,
     }
 
 
