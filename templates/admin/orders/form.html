@@ -123,8 +123,9 @@
             <td class="line-total-cell"><output class="line-total-preview">R0.00</output></td>
           </tr>
         {% else %}
+          {% for default_line_number in [1, 2] %}
           <tr class="enhanced-line">
-            <td class="item-no-cell"><span class="item-no">1</span></td>
+            <td class="item-no-cell"><span class="item-no">{{ default_line_number }}</span>{% if default_line_number > 1 %}<button type="button" class="line-remove-row" title="Remove this line">×</button>{% endif %}</td>
             <td><input list="product-options" class="product-search" placeholder="Search product/SKU"><input type="hidden" name="product_id" class="product-id"><input name="custom_name" class="custom-name" placeholder="Or custom product/service"></td>
             <td><select name="custom_billing_mode"><option value="fixed">Fixed price</option><option value="rental_day">Multiply by rental days</option></select></td>
             <td><input type="number" step="0.01" min="0" name="custom_unit_price" class="custom-unit-price" placeholder="Auto from inventory"></td>
@@ -132,12 +133,14 @@
             <td><input type="number" name="quantity" min="1" value="1"></td>
             <td class="line-total-cell"><output class="line-total-preview">R0.00</output></td>
           </tr>
+          {% endfor %}
         {% endfor %}
         <tr class="enhanced-line" id="order-line-template" hidden>
           <td class="item-no-cell"><span class="item-no">1</span><button type="button" class="line-remove-row" title="Remove this line">×</button></td>
           <td><input list="product-options" class="product-search" placeholder="Search product/SKU"><input type="hidden" name="product_id" class="product-id"><input name="custom_name" class="custom-name" placeholder="Or custom product/service"></td>
           <td><select name="custom_billing_mode"><option value="fixed">Fixed price</option><option value="rental_day">Multiply by rental days</option></select></td>
           <td><input type="number" step="0.01" min="0" name="custom_unit_price" class="custom-unit-price" placeholder="Auto from inventory"></td>
+          <td><output class="line-days-preview">—</output></td>
           <td><input type="number" name="quantity" min="1" value="1"></td>
           <td class="line-total-cell"><output class="line-total-preview">R0.00</output></td>
         </tr>

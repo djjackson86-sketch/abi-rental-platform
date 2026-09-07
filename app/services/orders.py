@@ -697,10 +697,22 @@ def return_damage_total(order_id):
     return round(float(row["total"] or 0), 2) if row else 0.0
 
 
+def has_finalized_invoice(order_id):
+    row = get_db().execute(
+        """SELECT id FROM documents
+        WHERE order_id = ? AND document_type = 'invoice' AND status = 'finalized'
+        LIMIT 1""",
+        (order_id,),
+    ).fetchone()
+    return bool(row)
+
+
 def validate_return_ready(order_id):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
+    if not has_finalized_invoice(order_id):
+        raise ValueError("Finalize the invoice before returning this order")
     damage_ok = bool(order["no_damages"]) or return_damage_total(order_id) > 0
     revision_ok = bool(order["no_revision_required"]) or bool(order["return_revised_at"] or "")
     if not damage_ok or not revision_ok:
@@ -903,9 +915,12 @@ def add_return_charges(order_id, form):
     return "Return charges added to order items"
 
 
+DEPOSIT_UTILISED_REFERENCE = "Deposit Amount Utilised"
+
+
 def _deposit_applied_payment(order_id):
     return get_db().execute(
-        "SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT' AND COALESCE(deleted_at, '') = ''",
+        "SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND COALESCE(deleted_at, '') = '' ORDER BY id DESC LIMIT 1",
         (order_id,),
     ).fetchone()
 
@@ -914,7 +929,7 @@ def _non_deposit_paid_total(order_id):
     row = get_db().execute(
         """SELECT COALESCE(SUM(amount), 0) AS paid FROM payments
         WHERE order_id = ? AND status = 'paid' AND COALESCE(deleted_at, '') = ''
-        AND NOT (method = 'deposit_applied' AND reference = 'DEPOSIT-SETTLEMENT')""",
+        AND method != 'deposit_applied'""",
         (order_id,),
     ).fetchone()
     return float(row["paid"] or 0) if row else 0.0
@@ -925,11 +940,11 @@ def _upsert_deposit_applied_payment(order_id, amount):
     existing = _deposit_applied_payment(order_id)
     if amount > 0:
         if existing:
-            db.execute("UPDATE payments SET amount = ?, status = 'paid', deleted_at = '', created_at = ? WHERE id = ?", (amount, now(), existing["id"]))
+            db.execute("UPDATE payments SET amount = ?, reference = ?, status = 'paid', deleted_at = '', created_at = ? WHERE id = ?", (amount, DEPOSIT_UTILISED_REFERENCE, now(), existing["id"]))
         else:
             db.execute(
-                "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, ?, 'deposit_applied', 'DEPOSIT-SETTLEMENT', 'paid', ?)",
-                (order_id, amount, now()),
+                "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, ?, 'deposit_applied', ?, 'paid', ?)",
+                (order_id, amount, DEPOSIT_UTILISED_REFERENCE, now()),
             )
     elif existing:
         db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), existing["id"]))

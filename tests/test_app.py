@@ -708,7 +708,7 @@ def test_order_form_inline_customer_uses_customer_page_headings(client):
     assert b'id="inline-customer-type-company"' in body
 
 
-def test_new_order_form_starts_with_one_line_and_add_line_control(client):
+def test_new_order_form_starts_with_two_lines_and_add_line_control(client):
     login(client)
     seed_customer_and_product(client)
 
@@ -716,8 +716,8 @@ def test_new_order_form_starts_with_one_line_and_add_line_control(client):
     assert res.status_code == 200
     body = res.data.decode()
     rows_section = body[body.find('id="order-lines-body"'):]
-    # One visible blank line plus the hidden clone template = 2 enhanced-line rows.
-    assert rows_section.count('class="enhanced-line"') == 2
+    # Two visible blank lines plus the hidden clone template = 3 enhanced-line rows.
+    assert rows_section.count('class="enhanced-line"') == 3
     assert 'id="order-line-template"' in rows_section
     assert 'id="add-product-line"' in rows_section
     assert b'+ Add product line' in res.data
@@ -2006,6 +2006,16 @@ def create_order_for_status(client, quantity='2', start_date='2026-07-01', end_d
 
 def return_order_ready(client, order_id):
     client.post(f'/orders/{order_id}/return-checklist', data={'no_damages': '1', 'no_revision_required': '1'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    with client.application.app_context():
+        from app.db import get_db
+        db = get_db()
+        doc = db.execute(
+            "SELECT id FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'draft'",
+            (order_id,),
+        ).fetchone()
+    if doc:
+        client.post(f'/documents/{doc["id"]}/finalize', follow_redirects=True)
     return client.post(f'/orders/{order_id}/return', follow_redirects=True)
 
 def test_order_status_workflow_and_calendar(client):
@@ -3577,11 +3587,26 @@ def test_ticket_341952905_return_validation_taxed_extra_and_invoice_revision(cli
         db.commit()
     order_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-02')
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
-    blocked = client.post(f'/orders/{order_id}/return', follow_redirects=True)
-    assert b'Before returning' in blocked.data
+
+    blocked_without_invoice = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'Finalize the invoice before returning this order' in blocked_without_invoice.data
+
+    created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'Proforma Invoice' in created.data
+    duplicate_draft = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'already exists' in duplicate_draft.data
+    with app.app_context():
+        doc_id = get_db().execute("SELECT id FROM documents WHERE order_id=? AND document_type='invoice'", (order_id,)).fetchone()['id']
+    client.post(f'/documents/{doc_id}/finalize', follow_redirects=True)
+    duplicate_final = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'finalized invoice already exists' in duplicate_final.data
+
+    blocked_without_checks = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'Before returning' in blocked_without_checks.data
     detail = client.get(f'/orders/{order_id}')
     assert b'No Damages' in detail.data
     assert b'No Revision Required' in detail.data
+    assert b'Save return checklist' not in detail.data
     assert b'Live calculated extra days/hours' in detail.data
     assert b'Hourly extra rate' not in detail.data
     client.post(f'/orders/{order_id}/revise-return', data={'end_date': '2026-07-02', 'end_time': '11:00'}, follow_redirects=True)
@@ -3592,17 +3617,5 @@ def test_ticket_341952905_return_validation_taxed_extra_and_invoice_revision(cli
         extra = get_db().execute("SELECT line_tax, line_total FROM order_items WHERE order_id=? AND custom_name='Extra hours'", (order_id,)).fetchone()
         assert round(extra['line_tax'], 2) == 6.0
         assert round(extra['line_total'], 2) == 46.0
-    created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
-    assert b'Proforma Invoice' in created.data
-    duplicate = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
-    assert b'already exists' in duplicate.data
-    with app.app_context():
-        doc_id = get_db().execute("SELECT id FROM documents WHERE order_id=? AND document_type='invoice'", (order_id,)).fetchone()['id']
-    client.post(f'/documents/{doc_id}/finalize', follow_redirects=True)
-    revised = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
-    assert b'Invoice' in revised.data
-    with app.app_context():
-        rows = get_db().execute("SELECT id, number, revision_of_id, revision_number FROM documents WHERE order_id=? AND document_type='invoice' ORDER BY id", (order_id,)).fetchall()
-        assert rows[0]['number'] == rows[1]['number']
-        assert rows[1]['revision_of_id'] == rows[0]['id']
-        assert rows[1]['revision_number'] == 1
+        rows = get_db().execute("SELECT id FROM documents WHERE order_id=? AND document_type='invoice' ORDER BY id", (order_id,)).fetchall()
+        assert len(rows) == 1

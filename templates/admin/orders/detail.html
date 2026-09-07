@@ -11,9 +11,13 @@
     <a class="btn ghost" href="{{ url_for('orders.index') }}">Back</a>
     {% if order.status not in ['canceled', 'cancelled', 'archived'] %}<a class="btn primary" href="{{ url_for('orders.edit', order_id=order.id) }}">Edit order</a>{% endif %}
     {% for action, label, style in actions %}
-    <form method="post" action="{{ url_for('orders.change_status', order_id=order.id, action=action) }}" class="inline-form">
-      <button class="btn {{ style }}" type="submit">{{ label }}</button>
-    </form>
+      {% if action == 'return' and not finalized_invoice_exists %}
+        <button class="btn {{ style }}" type="button" disabled title="Finalize the invoice before returning this order">{{ label }}</button>
+      {% else %}
+        <form method="post" action="{{ url_for('orders.change_status', order_id=order.id, action=action) }}" class="inline-form">
+          <button class="btn {{ style }}" type="submit">{{ label }}</button>
+        </form>
+      {% endif %}
     {% endfor %}
   </div>
 </header>
@@ -43,8 +47,8 @@
     <h2>Status and payment</h2>
     <div class="list-row"><span>Status</span><b>{{ order.status|title }}</b></div>
     <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>
-    <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
-    <div class="list-row"><span>Due</span><b>{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
+    <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
+    <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
     {% if payment_summary.due_total < 0 %}
     <form method="post" action="{{ url_for('orders.refund_order', order_id=order.id) }}" class="payment-form refund-form">
       <h3>Refund credit</h3>
@@ -73,7 +77,7 @@
     <div class="document-actions">
       <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="quote"><button class="btn ghost" type="submit">New quote</button></form>
       <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="contract"><button class="btn ghost" type="submit">New contract</button></form>
-      <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="invoice"><button class="btn ghost" type="submit">New invoice</button></form>
+      <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="invoice"><button class="btn ghost" type="submit" {% if has_invoice %}disabled title="This order already has an invoice/proforma"{% endif %}>New invoice</button></form>
       <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="packing_slip"><button class="btn ghost" type="submit">Packing slip</button></form>
     </div>
     {% if documents %}
@@ -107,13 +111,14 @@
       .totals .discount-form select{width:56px}
       .totals .discount-form input{width:88px;min-width:0}
       .totals .discount-form .btn.discount-apply{min-height:32px;height:32px;padding:0 12px;font-size:13px;width:auto}
+      .btn[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none}
       @media(max-width:520px){.totals .discount-row{gap:6px}.totals .discount-form{margin-left:4px}.totals .discount-form input{width:72px}.totals .discount-row b{min-width:0}}
     </style>
     <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(order.subtotal) }}</b></div>
     {% if order.coupon_code %}<div class="list-row"><span>Coupon</span><b>{{ order.coupon_code }}</b></div>{% endif %}
     <div class="list-row discount-row"><span>Discount</span>
       {% if order.status not in ['canceled', 'cancelled', 'archived'] %}
-      <form method="post" action="{{ url_for('orders.apply_discount', order_id=order.id) }}" class="discount-form">
+      <form method="post" action="{{ url_for('orders.apply_discount', order_id=order.id) }}" class="discount-form" data-ajax-discount>
         <select name="discount_mode" aria-label="Discount type">
           <option value="percent" {% if (order.discount_mode or 'percent') == 'percent' %}selected{% endif %}>%</option>
           <option value="amount" {% if order.discount_mode == 'amount' %}selected{% endif %}>R</option>
@@ -122,9 +127,9 @@
         <button class="btn discount-apply" type="submit">Apply</button>
       </form>
       {% endif %}
-      <b>R{{ '%.2f'|format(order.discount_total) }}</b>
+      <b data-total-field="discount_total">R{{ '%.2f'|format(order.discount_total) }}</b>
     </div>
-    <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(order.tax_total) }}</b></div>
+    <div class="list-row"><span>Tax</span><b data-total-field="tax_total">R{{ '%.2f'|format(order.tax_total) }}</b></div>
     {% if (order.deposit_option or 'security_deposit') == 'security_deposit' %}<div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(order.deposit_total) }}</b></div>{% endif %}
     <div class="list-row"><span>Deposit choice</span><b>{{ (order.deposit_option or 'security_deposit').replace('_', ' ')|title }}</b></div>
     {% if order.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(order.damage_waiver_amount) }}</b></div>{% endif %}
@@ -132,13 +137,14 @@
     {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
     {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not processed</b></div>{% endif %}
     {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
-    <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(order.total) }}</b></div>
-    <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
-    <div class="list-row"><span>Due</span><b>{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
+    <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b data-total-field="total">R{{ '%.2f'|format(order.total) }}</b></div>
+    <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
+    <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
   </div>
 </section>
 <section class="panel settings-form">
   <h2>Return / deposit settlement</h2>
+  {% if order.status == 'started' and not finalized_invoice_exists %}<p class="form-help"><strong>Finalize the invoice before returning this order.</strong></p>{% endif %}
   {% if can_process_return_deposit %}
   {% if order.status == 'started' %}
   <form method="post" action="{{ url_for('orders.revise_return', order_id=order.id) }}" class="payment-form">
@@ -160,7 +166,6 @@
     <p class="form-help">Damage Charge creates a return charge line item in the Items section above. Extra hours are calculated from the actual return date/time and taxed with the trailer tax profile.</p>
     <button class="btn ghost" type="submit">Add Charges</button>
   </form>
-  <form method="post" action="{{ url_for('orders.return_checklist', order_id=order.id) }}" class="payment-form"><div class="form-grid compact"><label class="switch"><input type="checkbox" name="no_damages" value="1" {% if order.no_damages %}checked{% endif %}> No Damages</label><label class="switch"><input type="checkbox" name="no_revision_required" value="1" {% if order.no_revision_required %}checked{% endif %}> No Revision Required</label></div><button class="btn ghost" type="submit">Save return checklist</button></form>
   <form method="post" action="{{ url_for('orders.use_deposit', order_id=order.id) }}" class="payment-form">
     <label>Use-deposit note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Balance or damage note"></label>
     <p class="form-help">Use Deposit applies the available security deposit to outstanding charges first and records any remaining refund for processing below.</p>
@@ -186,6 +191,29 @@
   function parse(dt, tm){ if(!dt) return null; const d=dt.split('-').map(Number); const t=(tm||'00:00').split(':').map(Number); if(d.length!==3||!d[0]) return null; return new Date(d[0], d[1]-1, d[2], t[0]||0, t[1]||0); }
   function update(){ if(!out) return; const startRaw=out.dataset.startAt||''; const parts=startRaw.split('T'); const start=parse(parts[0], parts[1]); const end=parse(dateInput&&dateInput.value, timeInput&&timeInput.value); if(!start||!end||end<=start){ out.textContent='Live calculated extra days/hours: 0 rental days + 0 extra hours'; return; } const hours=(end-start)/(60*60*1000); const days=Math.max(1, Math.floor(hours/24)); const extra=Math.max(0, Math.round((hours-(days*24))*100)/100); out.textContent='Live calculated extra days/hours: '+days+' rental day'+(days===1?'':'s')+' + '+extra+' extra hour'+(extra===1?'':'s'); }
   if(dateInput) dateInput.addEventListener('input', update); if(timeInput) timeInput.addEventListener('input', update); update();
+})();
+(function(){
+  const form=document.querySelector('[data-ajax-discount]');
+  if(!form || !window.fetch) return;
+  const money=new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR'});
+  function fmt(value){ const n=Number(value||0); const abs=money.format(Math.abs(n)); return n < 0 ? '-' + abs : abs; }
+  function setField(name,value){ document.querySelectorAll('[data-total-field="'+name+'"]').forEach(el=>{ el.textContent=fmt(value); }); }
+  form.addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    const button=form.querySelector('button[type="submit"]');
+    if(button) button.disabled=true;
+    try{
+      const response=await fetch(form.action,{method:'POST',body:new FormData(form),headers:{'X-Requested-With':'fetch','Accept':'application/json'}});
+      const data=await response.json();
+      if(!response.ok || !data.ok) throw new Error(data.message||'Discount could not be applied');
+      setField('discount_total',data.discount_total); setField('tax_total',data.tax_total); setField('total',data.total); setField('paid_total',data.paid_total); setField('due_total',data.due_total);
+      form.dataset.lastMessage=data.message||'';
+    }catch(err){
+      form.submit();
+    }finally{
+      if(button) button.disabled=false;
+    }
+  });
 })();
 </script>
 {% endblock %}

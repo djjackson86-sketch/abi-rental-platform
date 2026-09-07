@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
@@ -236,13 +236,18 @@ def detail(order_id):
         order_rental_days = rental_days(datetime.fromisoformat(order["start_at"]), datetime.fromisoformat(order["end_at"])) if order["start_at"] and order["end_at"] else 1
     except ValueError:
         order_rental_days = 1
+    documents = documents_for_order(order_id)
+    has_invoice = any(document["document_type"] == "invoice" for document in documents)
+    finalized_invoice_exists = has_finalized_invoice(order_id)
     return render_template(
         "admin/orders/detail.html",
         settings=get_company_settings(),
         order=order,
         items=order_items(order_id),
         actions=status_actions(order["status"]),
-        documents=documents_for_order(order_id),
+        documents=documents,
+        has_invoice=has_invoice,
+        finalized_invoice_exists=finalized_invoice_exists,
         document_types=document_type_options(),
         label_for=label_for,
         payments=payments_for_order(order_id),
@@ -351,10 +356,26 @@ def create_document_for_order(order_id):
 @bp.post("/<int:order_id>/discount")
 @login_required
 def apply_discount(order_id):
+    wants_json = request.headers.get("X-Requested-With") == "fetch" or "application/json" in (request.headers.get("Accept") or "")
     try:
         message = apply_order_discount(order_id, request.form.get("discount_mode", ""), request.form.get("discount_value", ""))
+        if wants_json:
+            order = get_order(order_id)
+            summary = payment_summary(order_id)
+            return jsonify({
+                "ok": True,
+                "message": message,
+                "discount_total": float(order["discount_total"] or 0),
+                "tax_total": float(order["tax_total"] or 0),
+                "total": float(order["total"] or 0),
+                "paid_total": float(summary["paid_total"] or 0),
+                "due_total": float(summary["due_total"] or 0),
+                "payment_status": summary["payment_status"],
+            })
         flash(message, "success")
     except ValueError as exc:
+        if wants_json:
+            return jsonify({"ok": False, "message": str(exc)}), 400
         flash(str(exc), "error")
     return redirect(url_for("orders.detail", order_id=order_id))
 

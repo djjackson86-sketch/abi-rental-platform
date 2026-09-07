@@ -37,15 +37,11 @@ def create_document(order_id, document_type):
     revision_number = 0
     number = '' if document_type == 'invoice' else _next_document_number(document_type)
     if document_type == 'invoice':
-        draft = db.execute("SELECT id FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'draft' ORDER BY id DESC LIMIT 1", (order_id,)).fetchone()
-        if draft:
-            raise ValueError("A proforma invoice already exists for this order")
-        finalized = db.execute("SELECT id, number FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'finalized' ORDER BY id DESC LIMIT 1", (order_id,)).fetchone()
-        if finalized:
-            revision_of_id = finalized["id"]
-            number = finalized["number"] or _next_document_number('invoice')
-            rev_row = db.execute("SELECT COALESCE(MAX(revision_number), 0) AS rev FROM documents WHERE revision_of_id = ? OR id = ?", (revision_of_id, revision_of_id)).fetchone()
-            revision_number = int(rev_row["rev"] or 0) + 1
+        existing = db.execute("SELECT id, status FROM documents WHERE order_id = ? AND document_type = 'invoice' ORDER BY id DESC LIMIT 1", (order_id,)).fetchone()
+        if existing:
+            if existing["status"] == "draft":
+                raise ValueError("A proforma invoice already exists for this order")
+            raise ValueError("A finalized invoice already exists for this order")
     cur = db.execute(
         """INSERT INTO documents (order_id, document_type, status, number, pdf_path, revision_of_id, revision_number, revised_at, created_at)
         VALUES (?, ?, 'draft', ?, '', ?, ?, ?, ?)""",
@@ -78,6 +74,13 @@ def finalize_document(document_id):
         raise ValueError('Document not found')
     if document['status'] == 'finalized':
         return document_id
+    if document['document_type'] == 'invoice':
+        existing = db.execute(
+            "SELECT id FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'finalized' AND id != ? LIMIT 1",
+            (document['order_id'], document_id),
+        ).fetchone()
+        if existing:
+            raise ValueError('A finalized invoice already exists for this order')
     number = (document['number'] or '').strip()
     if document['document_type'] == 'invoice' and not number:
         number = _next_document_number('invoice')
