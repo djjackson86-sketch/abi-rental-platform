@@ -75,18 +75,22 @@ def build_email_html(body, signature='', logo_cid=None):
     return ''.join(html)
 
 
-def build_outlook_draft_eml(to_email, subject, body, attachment_bytes, filename, from_email='', signature='', logo_bytes=None, logo_filename='sano-trailers-logo.jpg'):
+def build_outlook_draft_eml(to_email, subject, body, attachment_bytes, filename, from_email='', cc_email='', signature='', logo_bytes=None, logo_filename='sano-trailers-logo.jpg'):
     """Build an RFC 822 .eml file that Outlook/default mail apps can open.
 
     Browsers cannot safely launch a desktop compose window with a file attachment via
     mailto. Downloading/opening this .eml gives staff a prepared message with the PDF
-    invoice attached so they can review it in Outlook before clicking Send.
+    invoice attached so they can review it in Outlook before clicking Send. The office
+    address (cc_email) is always included on Cc so every generated draft keeps the
+    SANO Trailers office informed.
     """
     msg = EmailMessage()
     msg['Subject'] = subject
     if from_email:
         msg['From'] = from_email
     msg['To'] = to_email
+    if cc_email:
+        msg['Cc'] = cc_email
     msg['Date'] = formatdate(localtime=True)
     msg.set_content(combine_email_body(body, signature))
     if signature or logo_bytes:

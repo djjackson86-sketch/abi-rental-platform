@@ -260,15 +260,6 @@ CREATE TABLE IF NOT EXISTS documents (
     revised_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS email_open_tokens (
-    token TEXT PRIMARY KEY,
-    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    to_email TEXT NOT NULL,
-    message TEXT NOT NULL DEFAULT '',
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
 """
 
 
@@ -394,14 +385,7 @@ def run_migrations(db):
     ensure_column(db, "documents", "revision_of_id", "INTEGER REFERENCES documents(id) ON DELETE SET NULL")
     ensure_column(db, "documents", "revision_number", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(db, "documents", "revised_at", "TEXT NOT NULL DEFAULT ''")
-    db.execute("""CREATE TABLE IF NOT EXISTS email_open_tokens (
-        token TEXT PRIMARY KEY,
-        document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-        to_email TEXT NOT NULL,
-        message TEXT NOT NULL DEFAULT '',
-        expires_at TEXT NOT NULL,
-        created_at TEXT NOT NULL
-    )""")
+    db.execute("DROP TABLE IF EXISTS email_open_tokens")
     db.execute("""CREATE TABLE IF NOT EXISTS app_store_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,

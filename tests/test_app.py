@@ -2233,12 +2233,13 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
     assert b'Generate Email' in invoice.data
-    assert b'Open Email' in invoice.data
-    assert b'Download ABI Email Helper for Windows' in invoice.data
-    assert b'Download Email Helper' in invoice.data
-    assert b'data-open-email-action="/documents/1/open-email-link"' in invoice.data
+    assert b'Open Email' not in invoice.data
+    assert b'Download ABI Email Helper' not in invoice.data
+    assert b'Download Email Helper' not in invoice.data
+    assert b'open-email-link' not in invoice.data
     assert b'Send Email' not in invoice.data
     assert b'Outlook-compatible email draft' in invoice.data
+    assert b'is always copied on the draft' in invoice.data
     assert b'Dear Order Customer' in invoice.data
     assert b'name="invoice_email_message"' not in invoice.data
 
@@ -2249,11 +2250,13 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     assert b'Content-Type: application/pdf' in draft.data
     assert b'filename="INVOICE-PROFORMA.pdf"' in draft.data
     assert b'To: order@example.com' in draft.data
+    assert b'Cc: info@abi-solutions.local' in draft.data
     assert b'Subject: Proforma Invoice for order ORD-00001' in draft.data
     assert b'Please find attached Proforma Invoice  for order ORD-00001.' in draft.data
     from email import policy
     from email.parser import BytesParser
     parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
+    assert parsed['Cc'] == 'info@abi-solutions.local'
     pdf_parts = [part for part in parsed.iter_attachments() if part.get_filename() == 'INVOICE-PROFORMA.pdf']
     assert len(pdf_parts) == 1
     assert pdf_parts[0].get_payload(decode=True).startswith(b'%PDF-')
@@ -2263,32 +2266,6 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
         assert row['email_status'] == 'prepared'
         assert row['sent_to'] == 'order@example.com'
         assert row['sent_at'] == ''
-
-    helper = client.get('/documents/email-helper/download')
-    assert helper.status_code == 200
-    assert helper.mimetype == 'application/zip'
-    assert helper.headers['Content-Disposition'] == 'attachment; filename=ABI-Email-Helper.zip'
-    from io import BytesIO
-    from zipfile import ZipFile
-    with ZipFile(BytesIO(helper.data)) as archive:
-        names = set(archive.namelist())
-        assert {'abi-email-helper.ps1', 'install-abi-email-helper.cmd', 'README.txt'} <= names
-        assert 'abi-email://' in archive.read('README.txt').decode()
-        assert 'abi-rental-platform.onrender.com' in archive.read('abi-email-helper.ps1').decode()
-
-    link = client.post('/documents/1/open-email-link', data={'to_email': 'open@example.com', 'message': 'Please open this draft'}, follow_redirects=False)
-    assert link.status_code == 200
-    payload = link.get_json()
-    assert payload['ok'] is True
-    assert payload['protocol_url'].startswith('abi-email://open?url=')
-    assert '/documents/email-helper/' in payload['download_url']
-    assert payload['download_url'].endswith('.eml')
-    helper_draft = client.get(payload['download_url'].replace('http://localhost', ''))
-    assert helper_draft.status_code == 200
-    assert helper_draft.mimetype == 'message/rfc822'
-    assert helper_draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-INVOICE-PROFORMA.eml'
-    assert b'To: open@example.com' in helper_draft.data
-    assert b'Please open this draft' in helper_draft.data
 
 
 def test_invoice_email_default_message_can_be_configured(client, app):
@@ -2357,6 +2334,7 @@ def test_invoice_email_default_message_can_be_configured(client, app):
 
     draft = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=False)
     assert draft.status_code == 200
+    assert b'Cc: accounts@abi.test' in draft.data
     from email import policy
     from email.parser import BytesParser
     parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
@@ -2374,6 +2352,29 @@ def test_invoice_email_default_message_can_be_configured(client, app):
     logo_payload = logo_parts[0].get_payload(decode=True)
     assert isinstance(logo_payload, bytes)
     assert logo_payload.startswith(b'\xff\xd8')
+
+
+def test_generated_email_cc_falls_back_to_sano_office_when_settings_email_blank(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE company_settings SET email = '' WHERE id = 1")
+        db.commit()
+
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert invoice.status_code == 200
+    assert b'info@sanotrailers.co.za is always copied' in invoice.data
+
+    draft = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=False)
+    assert draft.status_code == 200
+    assert draft.mimetype == 'message/rfc822'
+    from email import policy
+    from email.parser import BytesParser
+    parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
+    assert parsed['Cc'] == 'info@sanotrailers.co.za'
+    assert b'Cc: info@sanotrailers.co.za' in draft.data
 
 
 def test_invoice_finalize_assigns_number_once(client, app):
@@ -2680,6 +2681,8 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     assert b'/documents/1/download.pdf' in quote.data
     assert b'Generate Email' in quote.data
     assert b'Outlook-compatible email draft' in quote.data
+    assert b'Open Email' not in quote.data
+    assert b'Download Email Helper' not in quote.data
     assert b'Finalize invoice' not in quote.data
 
     download = client.get('/documents/1/download.pdf')
@@ -2693,6 +2696,7 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     assert draft.mimetype == 'message/rfc822'
     assert draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-QUOTE-QUO-00001.eml'
     assert b'To: quote@example.com' in draft.data
+    assert b'Cc: fallback@example.test' in draft.data
     assert b'Subject: Quote QUO-00001 for order ORD-00001' in draft.data
     assert b'Please find attached Quote QUO-00001 for order ORD-00001.' in draft.data
     from email import policy
