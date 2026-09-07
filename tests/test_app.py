@@ -2233,6 +2233,9 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
     assert b'Generate Email' in invoice.data
+    assert b'Open Email' in invoice.data
+    assert b'Download ABI Email Helper for Windows' in invoice.data
+    assert b'data-open-email-action="/documents/1/open-email-link"' in invoice.data
     assert b'Send Email' not in invoice.data
     assert b'Outlook-compatible email draft' in invoice.data
     assert b'Dear Order Customer' in invoice.data
@@ -2259,6 +2262,32 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
         assert row['email_status'] == 'prepared'
         assert row['sent_to'] == 'order@example.com'
         assert row['sent_at'] == ''
+
+    helper = client.get('/documents/email-helper/download')
+    assert helper.status_code == 200
+    assert helper.mimetype == 'application/zip'
+    assert helper.headers['Content-Disposition'] == 'attachment; filename=ABI-Email-Helper.zip'
+    from io import BytesIO
+    from zipfile import ZipFile
+    with ZipFile(BytesIO(helper.data)) as archive:
+        names = set(archive.namelist())
+        assert {'abi-email-helper.ps1', 'install-abi-email-helper.cmd', 'README.txt'} <= names
+        assert 'abi-email://' in archive.read('README.txt').decode()
+        assert 'abi-rental-platform.onrender.com' in archive.read('abi-email-helper.ps1').decode()
+
+    link = client.post('/documents/1/open-email-link', data={'to_email': 'open@example.com', 'message': 'Please open this draft'}, follow_redirects=False)
+    assert link.status_code == 200
+    payload = link.get_json()
+    assert payload['ok'] is True
+    assert payload['protocol_url'].startswith('abi-email://open?url=')
+    assert '/documents/email-helper/' in payload['download_url']
+    assert payload['download_url'].endswith('.eml')
+    helper_draft = client.get(payload['download_url'].replace('http://localhost', ''))
+    assert helper_draft.status_code == 200
+    assert helper_draft.mimetype == 'message/rfc822'
+    assert helper_draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-INVOICE-PROFORMA.eml'
+    assert b'To: open@example.com' in helper_draft.data
+    assert b'Please open this draft' in helper_draft.data
 
 
 def test_invoice_email_default_message_can_be_configured(client):

@@ -9,12 +9,14 @@
 <section class="panel settings-form">
   <h2>Email {{ display_label }}</h2>
   {% if document.email_status != 'not_sent' %}<p class="form-help">Last email status: {{ document.email_status|replace('_', ' ')|title }}{% if document.sent_to %} for {{ document.sent_to }}{% endif %}{% if document.sent_at %} at {{ document.sent_at }}{% endif %}{% if document.email_error %}. Error: {{ document.email_error }}{% endif %}</p>{% endif %}
-  <p class="form-help">Click <strong>Generate Email</strong> to download an Outlook-compatible email draft. Open the .eml file on the office PC to review the message and send it from Outlook. The PDF {{ display_label|lower }} is attached automatically.</p>
-  <form method="post" action="{{ url_for('documents.send_document_email', document_id=document.id) }}" class="form-grid">
+  <p class="form-help">Click <strong>Generate Email</strong> to download an Outlook-compatible email draft. To open drafts like double-clicking a downloaded .eml file, install the Windows helper once, then use <strong>Open Email</strong>. The PDF {{ display_label|lower }} is attached automatically.</p>
+  <p class="form-help"><a href="{{ url_for('documents.download_email_helper') }}">Download ABI Email Helper for Windows</a> · If Open Email does not launch Outlook, use Generate Email and open the downloaded .eml manually.</p>
+  <form method="post" action="{{ url_for('documents.send_document_email', document_id=document.id) }}" data-open-email-action="{{ url_for('documents.open_email_link', document_id=document.id) }}" class="form-grid" id="email-draft-form">
     <label>Send to<input type="email" name="to_email" value="{{ document.customer_email or '' }}" placeholder="customer@example.com"></label>
     <label class="span-2">Message<textarea name="message" rows="6">{{ email_message }}</textarea></label>
     {% if email_signature or email_signature_include_logo %}<div class="form-help span-2"><strong>Default signature:</strong>{% if email_signature %}<br>{{ email_signature|replace('\n', '<br>')|safe }}{% endif %}{% if email_signature_include_logo %}<br>Logo will be embedded in the Outlook email signature.{% endif %}</div>{% endif %}
-    <div class="form-actions span-2"><button class="btn primary" type="submit">Generate Email</button></div>
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Generate Email</button><button class="btn ghost" type="button" data-open-email-button>Open Email</button></div>
+    <p class="form-help span-2" data-open-email-status></p>
   </form>
 </section>
 {% endif %}
@@ -73,4 +75,34 @@
     {% if document.document_type in ['invoice', 'quote'] and has_bank_details %}<article class="invoice-banking-block"><p class="invoice-thank-you"><strong>Thank you for your business.</strong></p><h3>Banking details</h3><p>{% if document.branch_bank_name %}<strong>{{ document.branch_bank_name }}</strong>{% endif %}{% if document.branch_bank_account_name %}<br>Account holder: {{ document.branch_bank_account_name }}{% endif %}{% if document.branch_bank_account_number %}<br>Account number: {{ document.branch_bank_account_number }}{% endif %}{% if document.branch_bank_branch_code %}<br>Branch code: {{ document.branch_bank_branch_code }}{% endif %}{% if document.branch_bank_account_type %}<br>Account type: {{ document.branch_bank_account_type }}{% endif %}{% if document.branch_bank_reference_note %}<br>{{ document.branch_bank_reference_note }}{% endif %}</p></article>{% endif %}
   </div>
 </section>
+{% if document.document_type in ['invoice', 'quote'] %}
+<script>
+(function(){
+  const form = document.getElementById('email-draft-form');
+  if(!form) return;
+  const button = form.querySelector('[data-open-email-button]');
+  const status = form.querySelector('[data-open-email-status]');
+  if(!button || !window.fetch) return;
+  button.addEventListener('click', async function(){
+    if(status) status.textContent = 'Preparing email draft for Outlook...';
+    button.disabled = true;
+    try {
+      const response = await fetch(form.dataset.openEmailAction, {
+        method: 'POST',
+        body: new FormData(form),
+        headers: {'Accept': 'application/json', 'X-Requested-With': 'fetch'}
+      });
+      const data = await response.json();
+      if(!response.ok || !data.ok) throw new Error(data.message || 'Could not prepare email draft');
+      if(status) status.textContent = 'Opening ABI Email Helper. If the browser asks, allow it to open Outlook.';
+      window.location.href = data.protocol_url;
+    } catch (err) {
+      if(status) status.textContent = (err && err.message ? err.message : 'Open Email failed') + '. Use Generate Email as a fallback.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}
