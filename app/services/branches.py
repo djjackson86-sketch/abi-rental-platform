@@ -2,7 +2,12 @@ from app.db import get_db, now
 
 
 def list_branches(active_only=False):
-    sql = "SELECT b.*, (SELECT COUNT(*) FROM products p WHERE p.branch_id = b.id) AS product_count FROM branches b"
+    sql = """
+        SELECT b.*,
+               (SELECT COUNT(*) FROM products p WHERE p.branch_id = b.id) AS product_count,
+               (SELECT COUNT(*) FROM orders o WHERE o.collect_branch_id = b.id OR o.return_branch_id = b.id) AS order_count,
+               (SELECT COUNT(*) FROM users u WHERE u.branch_id = b.id) AS user_count
+        FROM branches b"""
     if active_only:
         sql += " WHERE b.active = 1"
     sql += " ORDER BY b.active DESC, b.name"
@@ -60,3 +65,27 @@ def update_branch(branch_id, form):
 
 def branch_options():
     return list_branches(active_only=True)
+
+
+def delete_branch(branch_id):
+    """Delete a depot branch and detach its references.
+
+    Products, orders and users keep working after the delete: their branch_id is
+    set to NULL first (no orphaned pointers), then the branch row is removed.
+    Deleting the final remaining branch is not allowed.
+    """
+    db = get_db()
+    branch = get_branch(branch_id)
+    if not branch:
+        raise ValueError("Branch not found")
+    remaining = db.execute("SELECT COUNT(*) AS c FROM branches").fetchone()["c"]
+    if int(remaining) <= 1:
+        raise ValueError("Cannot delete the last branch; keep at least one depot branch")
+    db.execute("UPDATE products SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
+    db.execute(
+        "UPDATE orders SET collect_branch_id = CASE WHEN collect_branch_id = ? THEN NULL ELSE collect_branch_id END, return_branch_id = CASE WHEN return_branch_id = ? THEN NULL ELSE return_branch_id END WHERE collect_branch_id = ? OR return_branch_id = ?",
+        (branch_id, branch_id, branch_id, branch_id),
+    )
+    db.execute("UPDATE users SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
+    db.execute("DELETE FROM branches WHERE id = ?", (branch_id,))
+    db.commit()

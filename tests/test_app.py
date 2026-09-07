@@ -3788,3 +3788,41 @@ def test_permissions_save_applies_globally_on_next_sign_in(client):
     assert client.get('/inventory').status_code == 403
     assert client.get('/orders').status_code == 200
     assert client.get('/calendar').status_code == 200
+
+
+def test_branch_can_be_deleted_and_references_detached(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE products SET branch_id = 2 WHERE id = 1')
+        db.execute('UPDATE orders SET collect_branch_id = 2, return_branch_id = 2 WHERE id = ?', (order_id,))
+        db.commit()
+
+    page = client.get('/branches')
+    assert b'Delete' in page.data
+    assert b'Branch 2' in page.data
+
+    deleted = client.post('/branches/2/delete', follow_redirects=True)
+    assert b'Branch deleted' in deleted.data
+    assert b'Branch 2' not in deleted.data
+
+    with app.app_context():
+        db = get_db()
+        product = db.execute('SELECT branch_id FROM products WHERE id = 1').fetchone()
+        order = db.execute('SELECT collect_branch_id, return_branch_id FROM orders WHERE id = ?', (order_id,)).fetchone()
+        assert product['branch_id'] is None
+        assert order['collect_branch_id'] is None
+        assert order['return_branch_id'] is None
+
+
+def test_cannot_delete_last_remaining_branch(client, app):
+    login(client)
+    assert client.post('/branches/1/delete', follow_redirects=True).status_code == 200
+    assert client.post('/branches/2/delete', follow_redirects=True).status_code == 200
+    last = client.post('/branches/3/delete', follow_redirects=True)
+    assert b'Cannot delete the last branch' in last.data
+    with app.app_context():
+        remaining = get_db().execute('SELECT COUNT(*) AS c FROM branches').fetchone()['c']
+        assert remaining == 1
