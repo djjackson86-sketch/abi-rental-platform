@@ -24,13 +24,16 @@ def _row_value(row, key, default=''):
 def update_company_settings(form):
     fields = [
         "company_name", "email", "phone", "website", "country", "address_line1", "address_line2",
-        "city", "province", "postcode", "additional_detail1", "additional_detail2", "timezone",
-        "first_day_of_week", "date_format", "units", "currency", "currency_symbol", "currency_position",
+        "city", "province", "postcode", "additional_detail1", "additional_detail2", "units",
+        "currency", "currency_symbol", "currency_position",
         "tax_mode", "default_pickup_time", "default_return_time", "time_increment_minutes", "deposit_mode", "deposit_value",
         "invoice_email_message", "invoice_email_signature"
     ]
     current = get_company_settings()
     values = {f: form.get(f, _row_value(current, f, "")) for f in fields}
+    values["timezone"] = "Africa/Johannesburg"
+    values["date_format"] = "dd-mm-yyyy"
+    values["first_day_of_week"] = _row_value(current, "first_day_of_week", "Sunday") or "Sunday"
     values["use_ampm"] = 1 if form.get("use_ampm") else 0
     values["pricing_enabled"] = 1 if form.get("pricing_enabled") else 0
     values["enable_time_selection"] = 1 if form.get("enable_time_selection") else 0

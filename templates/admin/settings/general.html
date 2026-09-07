@@ -15,10 +15,8 @@
     <label>Postcode<input name="postcode" value="{{ settings.postcode }}"></label>
     <label class="span-2">Address line 1<input name="address_line1" value="{{ settings.address_line1 }}"></label>
     <label class="span-2">Address line 2<input name="address_line2" value="{{ settings.address_line2 }}"></label>
-    <label>Timezone<input name="timezone" value="{{ settings.timezone }}"></label>
-    <label>Date format<input name="date_format" value="{{ settings.date_format }}"></label>
     <label>Units<select name="units"><option value="metric" {% if settings.units=='metric' %}selected{% endif %}>Metric</option><option value="imperial" {% if settings.units=='imperial' %}selected{% endif %}>Imperial</option></select></label>
-    <label>First day<input name="first_day_of_week" value="{{ settings.first_day_of_week }}"></label>
+    <p class="form-help span-2">Dates use the current day-month-year format and all times are fixed to South Africa time.</p>
   </div>
   <section class="panel-subsection span-2">
     <h2>Default invoice email</h2>

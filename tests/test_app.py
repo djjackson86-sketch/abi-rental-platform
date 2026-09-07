@@ -2304,8 +2304,8 @@ def test_invoice_email_default_message_can_be_configured(client, app):
         'postcode': '0001',
         'address_line1': '1 Main Road',
         'address_line2': '',
-        'timezone': 'Africa/Johannesburg',
-        'date_format': 'dd-mm-yyyy',
+        'timezone': 'Europe/London',
+        'date_format': 'mm-dd-yyyy',
         'units': 'metric',
         'first_day_of_week': 'Monday',
         'currency': 'ZAR',
@@ -2324,6 +2324,16 @@ def test_invoice_email_default_message_can_be_configured(client, app):
         'invoice_email_signature_include_logo': '1',
     }, follow_redirects=True)
     assert b'Default invoice email' in saved.data
+    assert b'Timezone' not in saved.data
+    assert b'Date format' not in saved.data
+    assert b'First day' not in saved.data
+    assert b'Dates use the current day-month-year format and all times are fixed to South Africa time.' in saved.data
+    with app.app_context():
+        stored_settings = get_db().execute('SELECT timezone, date_format, first_day_of_week FROM company_settings WHERE id = 1').fetchone()
+        assert stored_settings is not None
+        assert stored_settings['timezone'] == 'Africa/Johannesburg'
+        assert stored_settings['date_format'] == 'dd-mm-yyyy'
+        assert stored_settings['first_day_of_week'] == 'Sunday'
     assert b'Dear {customer_name},' in saved.data
     assert b'{branch_email}' in saved.data
     assert b'{branch_contact}' in saved.data
