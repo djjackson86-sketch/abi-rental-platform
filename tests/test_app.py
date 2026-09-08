@@ -6,7 +6,7 @@ from datetime import datetime
 import pytest
 
 from app import create_app
-from app.db import get_db
+from app.db import get_db, init_db
 from app.services.orders import rental_days
 
 
@@ -3812,6 +3812,33 @@ def test_branch_can_be_deleted_and_references_detached(client, app):
         db = get_db()
         product = db.execute('SELECT branch_id FROM products WHERE id = 1').fetchone()
         order = db.execute('SELECT collect_branch_id, return_branch_id FROM orders WHERE id = ?', (order_id,)).fetchone()
+        assert product['branch_id'] is None
+        assert order['collect_branch_id'] is None
+        assert order['return_branch_id'] is None
+
+
+def test_deleted_seed_branch_stays_deleted_after_init_db(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE products SET branch_id = 2 WHERE id = 1')
+        db.execute('UPDATE orders SET collect_branch_id = 2, return_branch_id = 2 WHERE id = ?', (order_id,))
+        db.commit()
+
+    deleted = client.post('/branches/2/delete', follow_redirects=True)
+    assert b'Branch deleted' in deleted.data
+
+    with app.app_context():
+        init_db()
+        db = get_db()
+        branch = db.execute("SELECT id FROM branches WHERE name = 'Branch 2'").fetchone()
+        product = db.execute('SELECT branch_id FROM products WHERE id = 1').fetchone()
+        order = db.execute('SELECT collect_branch_id, return_branch_id FROM orders WHERE id = ?', (order_id,)).fetchone()
+        assert branch is None
+        assert product is not None
+        assert order is not None
         assert product['branch_id'] is None
         assert order['collect_branch_id'] is None
         assert order['return_branch_id'] is None

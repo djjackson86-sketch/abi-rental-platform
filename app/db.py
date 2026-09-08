@@ -405,11 +405,11 @@ def init_db():
     ts = now()
     db.execute("INSERT OR IGNORE INTO company_settings (id, company_name, email, updated_at) VALUES (1, 'ABI Solutions', 'info@abi-solutions.local', ?)", (ts,))
     db.execute("INSERT OR IGNORE INTO tax_profiles (id, name, rate, is_default, active, created_at) VALUES (1, 'No VAT', 0, 1, 1, ?)", (ts,))
-    for branch_name, code in [('Branch 1', 'BR1'), ('Branch 2', 'BR2'), ('Branch 3', 'BR3')]:
-        db.execute("INSERT OR IGNORE INTO branches (name, code, created_at, updated_at) VALUES (?, ?, ?, ?)", (branch_name, code, ts, ts))
+    branch_count = db.execute("SELECT COUNT(*) AS c FROM branches").fetchone()
+    if branch_count and branch_count["c"] == 0:
+        for branch_name, code in [('Branch 1', 'BR1'), ('Branch 2', 'BR2'), ('Branch 3', 'BR3')]:
+            db.execute("INSERT INTO branches (name, code, created_at, updated_at) VALUES (?, ?, ?, ?)", (branch_name, code, ts, ts))
     default_branch = db.execute("SELECT id FROM branches ORDER BY id LIMIT 1").fetchone()
-    if default_branch:
-        db.execute("UPDATE orders SET collect_branch_id = COALESCE(collect_branch_id, ?), return_branch_id = COALESCE(return_branch_id, ?) WHERE collect_branch_id IS NULL OR return_branch_id IS NULL", (default_branch['id'], default_branch['id']))
     for day in range(7):
         db.execute("INSERT OR IGNORE INTO operating_hours (day_of_week, open_time, close_time, closed) VALUES (?, '09:00', '17:00', ?)", (day, 1 if day in (0,6) else 0))
     admin_email = current_app.config["ADMIN_EMAIL"]
