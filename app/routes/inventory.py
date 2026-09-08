@@ -1,7 +1,8 @@
 import csv
 from io import StringIO
 
-from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
+from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.services.products import (
@@ -21,8 +22,32 @@ from app.services.products import (
 )
 from app.services.settings import get_company_settings, list_tax_profiles
 from app.services.branches import branch_options
+from app.services.access import session_branch_scope
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
+
+
+def _scoped_branch_options():
+    branch_id = session_branch_scope()
+    branches = branch_options()
+    if not branch_id:
+        return branches
+    return [branch for branch in branches if branch["id"] == branch_id]
+
+
+def _force_staff_product_branch(form):
+    branch_id = session_branch_scope()
+    if not branch_id:
+        return form
+    mutable = MultiDict(form)
+    mutable["branch_id"] = str(branch_id)
+    return mutable
+
+
+def _ensure_product_access(product):
+    branch_id = session_branch_scope()
+    if branch_id and product and product["branch_id"] not in (None, branch_id):
+        abort(404)
 
 
 @bp.route("")
@@ -117,7 +142,7 @@ def export_csv():
 def new():
     if request.method == "POST":
         try:
-            product_id = create_product(request.form)
+            product_id = create_product(_force_staff_product_branch(request.form))
             flash("Product created", "success")
             return redirect(url_for("inventory.edit", product_id=product_id))
         except ValueError as exc:
@@ -127,7 +152,7 @@ def new():
         settings=get_company_settings(),
         product=None,
         tax_profiles=list_tax_profiles(),
-        branches=branch_options(),
+        branches=_scoped_branch_options(),
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
     )
@@ -140,9 +165,10 @@ def edit(product_id):
     if not product:
         flash("Product not found", "error")
         return redirect(url_for("inventory.index"))
+    _ensure_product_access(product)
     if request.method == "POST":
         try:
-            immutable_change_requested = update_product(product_id, request.form)
+            immutable_change_requested = update_product(product_id, _force_staff_product_branch(request.form))
             flash("Product saved", "success")
             if immutable_change_requested:
                 flash("Product type and tracking method cannot be changed after saving", "info")
@@ -155,7 +181,7 @@ def edit(product_id):
         settings=get_company_settings(),
         product=product,
         tax_profiles=list_tax_profiles(),
-        branches=branch_options(),
+        branches=_scoped_branch_options(),
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
     )
@@ -164,6 +190,8 @@ def edit(product_id):
 @bp.route("/<int:product_id>/archive", methods=["POST"])
 @login_required
 def archive(product_id):
+    product = get_product(product_id)
+    _ensure_product_access(product)
     archive_product(product_id)
     flash("Product archived and hidden from store", "success")
     return redirect(url_for("inventory.index"))

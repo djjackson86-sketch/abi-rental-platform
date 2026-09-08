@@ -15,6 +15,7 @@ screen is separately gated.
 
 import json
 
+from flask import has_request_context, session
 from werkzeug.security import generate_password_hash
 
 from app.db import get_db, now
@@ -141,7 +142,11 @@ def list_users():
     """All accounts with the main profile first, then additional accounts."""
     db = get_db()
     rows = db.execute(
-        "SELECT id, email, name, initials, role, active, created_at FROM users ORDER BY CASE WHEN role = 'owner' THEN 0 ELSE 1 END, id"
+        """SELECT u.id, u.email, u.name, u.initials, u.role, u.branch_id, u.can_view_all_branches, u.active, u.created_at,
+               b.name AS branch_name
+        FROM users u
+        LEFT JOIN branches b ON b.id = u.branch_id
+        ORDER BY CASE WHEN u.role = 'owner' THEN 0 ELSE 1 END, u.id"""
     ).fetchall()
     return rows
 
@@ -155,7 +160,15 @@ def _normalise_email(email):
     return (email or "").strip().lower()
 
 
-def create_additional_user(name, email, password):
+def _clean_branch_access(branch_id):
+    try:
+        branch_id = int(branch_id or 0)
+    except (TypeError, ValueError):
+        branch_id = 0
+    return (branch_id or None, 0 if branch_id else 1)
+
+
+def create_additional_user(name, email, password, branch_id=None):
     """Create an additional (staff) account. Returns (user_id, error)."""
     db = get_db()
     name = (name or "").strip()
@@ -172,9 +185,10 @@ def create_additional_user(name, email, password):
     if existing:
         return None, "A user with that email already exists"
     initials = "".join(part[0] for part in name.split() if part)[:2].upper() or "US"
+    branch_id, can_view_all = _clean_branch_access(branch_id)
     cur = db.execute(
-        "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, 'staff', NULL, 1, 1, ?)",
-        (email, generate_password_hash(password), name, initials, now()),
+        "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, 'staff', ?, ?, 1, ?)",
+        (email, generate_password_hash(password), name, initials, branch_id, can_view_all, now()),
     )
     db.commit()
     return cur.lastrowid, None
@@ -219,3 +233,57 @@ def save_staff_modules(module_keys):
     db.execute("UPDATE company_settings SET staff_permissions_json = ? WHERE id = 1", (payload,))
     db.commit()
     return valid
+
+
+def update_user_branch(user_id, branch_id):
+    """Assign an additional account to one branch, or all branches when blank."""
+    db = get_db()
+    row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row is None or row["role"] == "owner":
+        return False
+    branch_id, can_view_all = _clean_branch_access(branch_id)
+    db.execute(
+        "UPDATE users SET branch_id = ?, can_view_all_branches = ? WHERE id = ?",
+        (branch_id, can_view_all, user_id),
+    )
+    db.commit()
+    return True
+
+
+def session_branch_scope():
+    """Return branch_id for branch-limited staff, otherwise None (all branches)."""
+    if not has_request_context():
+        return None
+    if session.get("user_role") == "owner" or session.get("can_view_all_branches"):
+        return None
+    try:
+        return int(session.get("branch_id") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def order_branch_clause(alias="o"):
+    branch_id = session_branch_scope()
+    if not branch_id:
+        return "", []
+    prefix = f"{alias}." if alias else ""
+    return f" AND ({prefix}collect_branch_id = ? OR {prefix}return_branch_id = ?)", [branch_id, branch_id]
+
+
+def product_branch_clause(alias="p", include_unassigned=True):
+    branch_id = session_branch_scope()
+    if not branch_id:
+        return "", []
+    prefix = f"{alias}." if alias else ""
+    if include_unassigned:
+        return f" AND ({prefix}branch_id = ? OR {prefix}branch_id IS NULL)", [branch_id]
+    return f" AND {prefix}branch_id = ?", [branch_id]
+
+
+def user_can_access_order(order):
+    branch_id = session_branch_scope()
+    if not branch_id:
+        return True
+    if not order:
+        return False
+    return order["collect_branch_id"] == branch_id or order["return_branch_id"] == branch_id

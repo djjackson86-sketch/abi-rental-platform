@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
@@ -12,6 +12,7 @@ from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_options, default_branch_id
 from app.services.timezone import local_now_iso
+from app.services.access import session_branch_scope, user_can_access_order
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -52,16 +53,52 @@ def _selected_customer_summary(customers, selected_customer_id):
 
 
 def _products():
-    return get_db().execute("""
+    branch_id = session_branch_scope()
+    scope_sql = " AND (p.branch_id = ? OR p.branch_id IS NULL)" if branch_id else ""
+    params = [branch_id] if branch_id else []
+    return get_db().execute(f"""
         SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
                p.security_deposit, p.hourly_extra_rate, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
         FROM products p
         LEFT JOIN branches b ON b.id = p.branch_id
         LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
-        WHERE p.active = 1
+        WHERE p.active = 1{scope_sql}
         ORDER BY p.name
-    """).fetchall()
+    """, params).fetchall()
 
+
+
+
+def _scoped_branch_options():
+    branch_id = session_branch_scope()
+    branches = branch_options()
+    if not branch_id:
+        return branches
+    return [branch for branch in branches if branch["id"] == branch_id]
+
+
+def _scoped_default_branch_id(fallback=None):
+    return session_branch_scope() or fallback or default_branch_id()
+
+
+def _force_staff_collection_branch(form):
+    branch_id = session_branch_scope()
+    if not branch_id:
+        return form
+    mutable = MultiDict(form)
+    mutable["collect_branch_id"] = str(branch_id)
+    if mutable.get("booking_type") != "oneway":
+        mutable["return_branch_id"] = str(branch_id)
+    return mutable
+
+
+def _ensure_order_access(order_id):
+    order = get_order(order_id)
+    if not order:
+        return None
+    if not user_can_access_order(order):
+        abort(404)
+    return order
 
 def _form_with_inline_customer(form):
     """Create/attach the inline customer when saving an order draft directly."""
@@ -138,7 +175,7 @@ def new():
                         _build_order_payload(request.form)
                         if customer_fields_changed(stored, request.form):
                             update_customer(stored["id"], request.form)
-                form = _form_with_inline_customer(request.form)
+                form = _force_staff_collection_branch(_form_with_inline_customer(request.form))
                 order_id = create_order(form)
                 flash("Draft order created", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
@@ -164,8 +201,8 @@ def new():
         default_return_date=(slot + timedelta(days=1)).date().isoformat(),
         default_start_time=slot.strftime("%H:%M"),
         time_options=_time_options(15),
-        branches=branch_options(),
-        default_branch_id=default_branch_id(),
+        branches=_scoped_branch_options(),
+        default_branch_id=_scoped_default_branch_id(),
         form_mode="new",
         form_action=url_for("orders.new"),
         custom_field_label=custom_field_label,
@@ -176,6 +213,7 @@ def new():
 @login_required
 def edit(order_id):
     try:
+        _ensure_order_access(order_id)
         form_data = draft_order_form(order_id)
     except ValueError as exc:
         flash(str(exc), "error")
@@ -193,7 +231,7 @@ def edit(order_id):
                 form_data = None
         else:
             try:
-                form = _form_with_inline_customer(request.form)
+                form = _force_staff_collection_branch(_form_with_inline_customer(request.form))
                 update_draft_order(order_id, form)
                 flash("Order saved", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
@@ -204,7 +242,7 @@ def edit(order_id):
         try:
             form_data = draft_order_form(order_id)
         except ValueError:
-            form_data = {"order": get_order(order_id), "lines": []}
+            form_data = {"order": _ensure_order_access(order_id), "lines": []}
     return render_template(
         "admin/orders/form.html",
         settings=get_company_settings(),
@@ -216,8 +254,8 @@ def edit(order_id):
         default_start_time=form_data.get("start_time", ""),
         default_return_time=form_data.get("end_time", ""),
         time_options=_time_options(15),
-        branches=branch_options(),
-        default_branch_id=form_data.get("collect_branch_id") or default_branch_id(),
+        branches=_scoped_branch_options(),
+        default_branch_id=_scoped_default_branch_id(form_data.get("collect_branch_id")),
         form_mode="edit",
         form_action=url_for("orders.edit", order_id=order_id),
         custom_field_label=custom_field_label,
@@ -228,7 +266,7 @@ def edit(order_id):
 @bp.route("/<int:order_id>")
 @login_required
 def detail(order_id):
-    order = get_order(order_id)
+    order = _ensure_order_access(order_id)
     if not order:
         flash("Order not found", "error")
         return redirect(url_for("orders.index"))
@@ -267,6 +305,7 @@ def detail(order_id):
 @bp.post("/<int:order_id>/revise-return")
 @login_required
 def revise_return(order_id):
+    _ensure_order_access(order_id)
     try:
         message = revise_started_return(order_id, request.form)
         flash(message, "success")
@@ -278,6 +317,7 @@ def revise_return(order_id):
 @bp.post("/<int:order_id>/add-return-charges")
 @login_required
 def add_charges(order_id):
+    _ensure_order_access(order_id)
     try:
         message = add_return_charges(order_id, request.form)
         flash(message, "success")
@@ -289,6 +329,7 @@ def add_charges(order_id):
 @bp.post("/<int:order_id>/settle-return")
 @login_required
 def settle_return(order_id):
+    _ensure_order_access(order_id)
     try:
         message = settle_return_deposit(order_id, request.form)
         flash(message, "success")
@@ -300,6 +341,7 @@ def settle_return(order_id):
 @bp.post("/<int:order_id>/use-deposit")
 @login_required
 def use_deposit(order_id):
+    _ensure_order_access(order_id)
     try:
         message = use_return_deposit(order_id, request.form)
         flash(message, "success")
@@ -311,6 +353,7 @@ def use_deposit(order_id):
 @bp.post("/<int:order_id>/return-checklist")
 @login_required
 def return_checklist(order_id):
+    _ensure_order_access(order_id)
     try:
         message = update_return_checklist(order_id, request.form)
         flash(message, "success")
@@ -322,6 +365,7 @@ def return_checklist(order_id):
 @bp.post("/<int:order_id>/refund")
 @login_required
 def refund_order(order_id):
+    _ensure_order_access(order_id)
     try:
         record_refund(order_id, request.form)
         flash("Refund recorded", "success")
@@ -333,6 +377,7 @@ def refund_order(order_id):
 @bp.post("/<int:order_id>/payments")
 @login_required
 def record_order_payment(order_id):
+    _ensure_order_access(order_id)
     try:
         record_payment(order_id, request.form)
         flash("Payment recorded", "success")
@@ -344,6 +389,7 @@ def record_order_payment(order_id):
 @bp.post("/<int:order_id>/documents")
 @login_required
 def create_document_for_order(order_id):
+    _ensure_order_access(order_id)
     try:
         document_id = create_document(order_id, request.form.get("document_type", ""))
         flash("Document created", "success")
@@ -356,6 +402,7 @@ def create_document_for_order(order_id):
 @bp.post("/<int:order_id>/discount")
 @login_required
 def apply_discount(order_id):
+    _ensure_order_access(order_id)
     wants_json = request.headers.get("X-Requested-With") == "fetch" or "application/json" in (request.headers.get("Accept") or "")
     try:
         message = apply_order_discount(order_id, request.form.get("discount_mode", ""), request.form.get("discount_value", ""))
@@ -383,6 +430,7 @@ def apply_discount(order_id):
 @bp.post("/<int:order_id>/<action>")
 @login_required
 def change_status(order_id, action):
+    _ensure_order_access(order_id)
     try:
         message = transition_order(order_id, action)
         flash(message, "success")

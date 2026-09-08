@@ -10,10 +10,12 @@ from app.services.access import (
     list_users,
     reset_user_password,
     save_staff_modules,
+    update_user_branch,
     set_user_active,
     staff_modules_from_settings,
 )
 from app.services.settings import get_company_settings, update_company_settings, list_tax_profiles, create_tax_profile, list_operating_hours
+from app.services.branches import branch_options
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
@@ -50,6 +52,7 @@ def users():
         additional_limit=ADDITIONAL_USER_LIMIT,
         modules=MODULES,
         active_staff_modules=staff_modules_from_settings(settings),
+        branches=branch_options(),
     )
 
 
@@ -61,6 +64,7 @@ def users_add():
         request.form.get("name"),
         request.form.get("email"),
         request.form.get("password"),
+        request.form.get("branch_id"),
     )
     if error:
         flash(error, "error")
@@ -78,6 +82,17 @@ def users_password(user_id):
         flash(error, "error")
     else:
         flash("Password updated", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/<int:user_id>/branch")
+@login_required
+@main_required
+def users_branch(user_id):
+    if not update_user_branch(user_id, request.form.get("branch_id")):
+        flash("Main profile always has access to all branches", "error")
+    else:
+        flash("Account branch access updated. It applies on the next sign-in.", "success")
     return redirect(url_for("settings.users"))
 
 

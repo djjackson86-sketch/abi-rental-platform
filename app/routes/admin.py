@@ -8,6 +8,7 @@ from app.services.orders import calendar_group_availability, dashboard_schedule,
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.timezone import local_now_iso
+from app.services.access import order_branch_clause, product_branch_clause
 
 bp = Blueprint("admin", __name__)
 
@@ -23,17 +24,19 @@ def index():
 @login_required
 def dashboard():
     db = get_db()
+    order_scope_sql, order_scope_params = order_branch_clause("o")
+    product_scope_sql, product_scope_params = product_branch_clause("p", include_unassigned=True)
     metrics = {
-        "orders": db.execute("SELECT COUNT(*) c FROM orders").fetchone()[ "c"],
-        "products": db.execute("SELECT COUNT(*) c FROM products").fetchone()[ "c"],
+        "orders": db.execute(f"SELECT COUNT(*) c FROM orders o WHERE 1=1{order_scope_sql}", order_scope_params).fetchone()[ "c"],
+        "products": db.execute(f"SELECT COUNT(*) c FROM products p WHERE 1=1{product_scope_sql}", product_scope_params).fetchone()[ "c"],
         "customers": db.execute("SELECT COUNT(*) c FROM customers").fetchone()[ "c"],
-        "revenue": db.execute("SELECT COALESCE(SUM(total),0) s FROM orders").fetchone()[ "s"],
+        "revenue": db.execute(f"SELECT COALESCE(SUM(o.total),0) s FROM orders o WHERE 1=1{order_scope_sql}", order_scope_params).fetchone()[ "s"],
     }
     day_prefix = local_now_iso(timespec="seconds")[:10]
     day_metrics = {
-        "orders": db.execute("SELECT COUNT(*) c FROM orders WHERE substr(created_at, 1, 10) = ?", (day_prefix,)).fetchone()["c"],
+        "orders": db.execute(f"SELECT COUNT(*) c FROM orders o WHERE substr(o.created_at, 1, 10) = ?{order_scope_sql}", [day_prefix, *order_scope_params]).fetchone()["c"],
         "customers": db.execute("SELECT COUNT(*) c FROM customers WHERE substr(created_at, 1, 10) = ?", (day_prefix,)).fetchone()["c"],
-        "revenue": db.execute("SELECT COALESCE(SUM(total),0) s FROM orders WHERE substr(created_at, 1, 10) = ?", (day_prefix,)).fetchone()["s"],
+        "revenue": db.execute(f"SELECT COALESCE(SUM(o.total),0) s FROM orders o WHERE substr(o.created_at, 1, 10) = ?{order_scope_sql}", [day_prefix, *order_scope_params]).fetchone()["s"],
         "day": day_prefix,
     }
     return render_template(

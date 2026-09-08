@@ -2,6 +2,7 @@ from datetime import datetime, date, time, timedelta
 from math import ceil
 
 from app.db import get_db, now
+from app.services.access import order_branch_clause, product_branch_clause as scoped_product_branch_clause
 from app.services.timezone import local_now, local_now_iso
 
 STATUS_LABELS = {
@@ -45,6 +46,9 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
         LEFT JOIN branches cb ON cb.id = o.collect_branch_id
         LEFT JOIN branches rb ON rb.id = o.return_branch_id WHERE 1=1"""
     params = []
+    scope_sql, scope_params = order_branch_clause("o")
+    sql += scope_sql
+    params.extend(scope_params)
     if query:
         sql += " AND (LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ?)"
         needle = f"%{query.lower()}%"
@@ -73,6 +77,10 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
 def _order_filter_where(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
     clauses = ["1=1"]
     params = []
+    scope_sql, scope_params = order_branch_clause("o")
+    if scope_sql:
+        clauses.append(scope_sql.replace(" AND ", "", 1))
+        params.extend(scope_params)
     if query:
         clauses.append("(LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ?)")
         needle = f"%{query.lower()}%"
@@ -122,10 +130,11 @@ def deposit_to_process_amount(order):
 
 def order_filter_counts():
     db = get_db()
-    status_rows = db.execute("SELECT status, COUNT(*) count FROM orders GROUP BY status").fetchall()
-    payment_rows = db.execute("SELECT payment_status, COUNT(*) count FROM orders GROUP BY payment_status").fetchall()
-    process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders WHERE {_process_deposit_clause('')}").fetchone()
-    late_return_row = db.execute("SELECT COUNT(*) AS count FROM orders WHERE status = 'started' AND end_at < ?", (now(),)).fetchone()
+    scope_sql, scope_params = order_branch_clause("o")
+    status_rows = db.execute(f"SELECT o.status AS status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.status", scope_params).fetchall()
+    payment_rows = db.execute(f"SELECT o.payment_status AS payment_status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.payment_status", scope_params).fetchall()
+    process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_process_deposit_clause('o')}", scope_params).fetchone()
+    late_return_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND o.status = 'started' AND o.end_at < ?", [*scope_params, now()]).fetchone()
     payment_counts = {row["payment_status"]: row["count"] for row in payment_rows}
     payment_counts["process_deposit"] = process_deposit_row["count"] if process_deposit_row else 0
     return {
@@ -1034,14 +1043,16 @@ def _calendar_range(start_date=None, end_date=None):
 def calendar_group_availability(start_date=None, end_date=None):
     range_start, range_end = _calendar_range(start_date, end_date)
     db = get_db()
+    product_branch_clause, product_branch_params = scoped_product_branch_clause("p", include_unassigned=True)
     products = db.execute(
-        """SELECT p.id, p.name, p.sku, p.quantity, p.tracking_method,
+        f"""SELECT p.id, p.name, p.sku, p.quantity, p.tracking_method,
                COALESCE(pg.id, 0) AS group_id,
                COALESCE(pg.name, 'Ungrouped trailers') AS group_name
         FROM products p
         LEFT JOIN product_groups pg ON pg.id = p.product_group_id AND pg.active = 1
-        WHERE p.active = 1 AND p.product_type = 'rental'
-        ORDER BY CASE WHEN pg.id IS NULL THEN 1 ELSE 0 END, pg.sort_order, pg.name, p.name"""
+        WHERE p.active = 1 AND p.product_type = 'rental'{product_branch_clause}
+        ORDER BY CASE WHEN pg.id IS NULL THEN 1 ELSE 0 END, pg.sort_order, pg.name, p.name""",
+        product_branch_params,
     ).fetchall()
 
     groups = []
@@ -1119,6 +1130,9 @@ def scheduled_events(limit=50, start_date=None, end_date=None):
         LEFT JOIN branches rb ON rb.id = o.return_branch_id
         WHERE o.status IN ('reserved', 'started')"""
     params = []
+    scope_sql, scope_params = order_branch_clause("o")
+    sql += scope_sql
+    params.extend(scope_params)
     if start_date:
         sql += " AND DATE(o.start_at) >= ?"
         params.append(start_date)

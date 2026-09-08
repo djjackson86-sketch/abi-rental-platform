@@ -1,4 +1,5 @@
 from app.db import get_db, now
+from app.services.access import product_branch_clause
 
 VALID_TYPES = {"rental", "sale", "service"}
 VALID_UNITS = {"hour", "day", "week", "month", "fixed"}
@@ -85,6 +86,9 @@ def list_products(query="", product_type="", visibility="", product_group_id="")
         LEFT JOIN product_groups g ON g.id = p.product_group_id
         WHERE 1=1"""
     params = []
+    branch_sql, branch_params = product_branch_clause("p", include_unassigned=True)
+    sql += branch_sql
+    params.extend(branch_params)
     if query:
         sql += " AND (LOWER(p.name) LIKE ? OR LOWER(p.sku) LIKE ? OR LOWER(p.description) LIKE ?)"
         needle = f"%{query.lower()}%"
