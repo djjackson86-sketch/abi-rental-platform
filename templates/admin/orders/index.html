@@ -134,7 +134,7 @@
                 <tr>
                   <td>
                     <strong>{{ o.order_number }}</strong>
-                    <small>Created {{ o.created_at[:10] }}</small>
+                    <small>Created {{ o.created_at[:10] }}{% if o.created_by_name %} by {{ o.created_by_name }}{% endif %}</small>
                   </td>
                   <td>
                     <strong class="table-primary-text">{{ o.customer_name or 'No customer yet' }}</strong>

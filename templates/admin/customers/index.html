@@ -105,6 +105,7 @@
                 <th>Name</th>
                 <th>Email</th>
                 <th>Created at</th>
+                <th>Created by</th>
                 <th>Orders</th>
                 <th>Balance due</th>
                 <th></th>
@@ -123,6 +124,7 @@
                   </td>
                   <td>{{ c.email or '—' }}</td>
                   <td>{{ c.created_at[:10] }}</td>
+                  <td>{{ c.created_by_name or '—' }}</td>
                   <td>{{ c.order_count }}</td>
                   <td>R{{ '%.2f'|format(c.balance_due) }}</td>
                   <td><a class="btn ghost" href="{{ url_for('customers.detail', customer_id=c.id) }}">Open</a></td>

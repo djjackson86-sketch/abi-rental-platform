@@ -250,6 +250,16 @@ def update_user_branch(user_id, branch_id):
     return True
 
 
+def current_session_user_id():
+    """Return logged-in user id in request contexts, or None for public/background work."""
+    if not has_request_context():
+        return None
+    try:
+        return int(session.get("user_id") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
 def session_branch_scope():
     """Return branch_id for branch-limited staff, otherwise None (all branches)."""
     if not has_request_context():

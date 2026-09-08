@@ -619,6 +619,71 @@ def seed_customer_and_product(client):
     }, follow_redirects=True)
 
 
+def test_created_by_user_shows_for_customers_and_orders(client, app):
+    login(client)
+    client.post('/inventory/new', data={
+        'name': 'Creator Trailer',
+        'sku': 'CRT-TRL',
+        'quantity': '2',
+        'description': 'Creator audit trailer.',
+        'product_type': 'rental',
+        'price_amount': '200',
+        'price_unit': 'day',
+        'security_deposit': '500',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    client.post('/settings/users/add', data={
+        'name': 'Creator Staff',
+        'email': 'creator@demo.test',
+        'password': 'staff123',
+    }, follow_redirects=True)
+    client.post('/logout')
+    client.post('/login', data={'email': 'creator@demo.test', 'password': 'staff123'}, follow_redirects=True)
+
+    customer_res = client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Creator Customer',
+        'email': 'creator-customer@example.com',
+        'phone': '+270****1111',
+    }, follow_redirects=True)
+    assert b'Customer created' in customer_res.data
+    assert b'Created by' in customer_res.data
+    assert b'Creator Staff' in customer_res.data
+    customers_page = client.get('/customers')
+    assert b'Creator Customer' in customers_page.data
+    assert b'Creator Staff' in customers_page.data
+
+    order_res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'notes': 'Creator audit order',
+    }, follow_redirects=True)
+    assert b'Draft order created' in order_res.data
+    assert b'Created by' in order_res.data
+    assert b'Creator Staff' in order_res.data
+    orders_page = client.get('/orders')
+    assert b'ORD-00001' in orders_page.data
+    assert b'by Creator Staff' in orders_page.data
+
+    with app.app_context():
+        db = get_db()
+        customer = db.execute('SELECT created_by_user_id FROM customers WHERE name = ?', ('Creator Customer',)).fetchone()
+        order = db.execute('SELECT created_by_user_id FROM orders WHERE order_number = ?', ('ORD-00001',)).fetchone()
+        staff = db.execute('SELECT id FROM users WHERE email = ?', ('creator@demo.test',)).fetchone()
+        assert customer is not None
+        assert order is not None
+        assert staff is not None
+        assert customer['created_by_user_id'] == staff['id']
+        assert order['created_by_user_id'] == staff['id']
+
+
 def test_order_draft_creation_and_totals(client):
     login(client)
     seed_customer_and_product(client)

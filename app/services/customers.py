@@ -1,6 +1,7 @@
 import json
 
 from app.db import get_db, now
+from app.services.access import current_session_user_id
 
 VALID_TYPES = {"individual", "company"}
 HIDDEN_CUSTOM_FIELD_KEYS = {"id_or_license", "custom_question", "custom_answer_type", "custom_answer"}
@@ -28,7 +29,11 @@ CUSTOM_FIELD_FORM_KEYS = list(VISIBLE_CUSTOM_FIELD_ORDER)
 
 
 def list_customers(query="", customer_type="", marketing=""):
-    sql = "SELECT c.*, (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count FROM customers c WHERE 1=1"
+    sql = """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email,
+        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count
+        FROM customers c
+        LEFT JOIN users u ON u.id = c.created_by_user_id
+        WHERE 1=1"""
     params = []
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
@@ -67,7 +72,13 @@ def customer_filter_counts():
 
 
 def get_customer(customer_id):
-    return get_db().execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    return get_db().execute(
+        """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email
+        FROM customers c
+        LEFT JOIN users u ON u.id = c.created_by_user_id
+        WHERE c.id = ?""",
+        (customer_id,),
+    ).fetchone()
 
 
 def customer_orders(customer_id):
@@ -125,9 +136,9 @@ def create_customer(form):
     data = _clean(form)
     db = get_db()
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :created_at)""",
-        {**data, "created_at": now()},
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, created_by_user_id, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :created_by_user_id, :created_at)""",
+        {**data, "created_by_user_id": current_session_user_id(), "created_at": now()},
     )
     db.commit()
     customer_id = cur.lastrowid

@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS customers (
     custom_fields_json TEXT NOT NULL DEFAULT '{}',
     balance_due REAL NOT NULL DEFAULT 0,
     standard_discount_percent REAL NOT NULL DEFAULT 0,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
 
@@ -216,6 +217,7 @@ CREATE TABLE IF NOT EXISTS orders (
     total REAL NOT NULL DEFAULT 0,
     due_total REAL NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
 
@@ -367,6 +369,7 @@ def run_migrations(db):
     ensure_column(db, "orders", "return_revised_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "discount_mode", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "discount_value", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "orders", "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")
@@ -376,6 +379,7 @@ def run_migrations(db):
     ensure_column(db, "customers", "country", "TEXT NOT NULL DEFAULT 'South Africa'")
     ensure_column(db, "customers", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     ensure_column(db, "customers", "standard_discount_percent", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "customers", "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
     ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
     ensure_column(db, "payments", "payment_date", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "payments", "deleted_at", "TEXT NOT NULL DEFAULT ''")

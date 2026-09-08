@@ -2,7 +2,7 @@ from datetime import datetime, date, time, timedelta
 from math import ceil
 
 from app.db import get_db, now
-from app.services.access import order_branch_clause, product_branch_clause as scoped_product_branch_clause
+from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause
 from app.services.timezone import local_now, local_now_iso
 
 STATUS_LABELS = {
@@ -41,10 +41,12 @@ def _process_deposit_clause(alias="o"):
 
 def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
+        cu.name AS created_by_name, cu.email AS created_by_email,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
         LEFT JOIN branches cb ON cb.id = o.collect_branch_id
-        LEFT JOIN branches rb ON rb.id = o.return_branch_id WHERE 1=1"""
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id
+        LEFT JOIN users cu ON cu.id = o.created_by_user_id WHERE 1=1"""
     params = []
     scope_sql, scope_params = order_branch_clause("o")
     sql += scope_sql
@@ -150,10 +152,12 @@ def get_order(order_id):
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
             c.custom_fields_json AS custom_fields_json, c.standard_discount_percent AS customer_standard_discount_percent,
-            cb.name AS collect_branch_name, rb.name AS return_branch_name
+            cb.name AS collect_branch_name, rb.name AS return_branch_name,
+            cu.name AS created_by_name, cu.email AS created_by_email
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
         LEFT JOIN branches cb ON cb.id = o.collect_branch_id
-        LEFT JOIN branches rb ON rb.id = o.return_branch_id WHERE o.id = ?""",
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id
+        LEFT JOIN users cu ON cu.id = o.created_by_user_id WHERE o.id = ?""",
         (order_id,),
     ).fetchone()
 
@@ -397,9 +401,9 @@ def create_order(form):
     order_number = next_order_number()
     db = get_db()
     cur = db.execute(
-        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, discount_mode, discount_value, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (order_number, payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["discount_mode"], payload["discount_value"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], payload["total"], payload["notes"], now()),
+        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, discount_mode, discount_value, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_by_user_id, created_at)
+        VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (order_number, payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["discount_mode"], payload["discount_value"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], payload["total"], payload["notes"], current_session_user_id(), now()),
     )
     order_id = cur.lastrowid
     _insert_order_items(order_id, payload["lines"])

@@ -46,6 +46,8 @@
   <article class="panel">
     <h2>Status and payment</h2>
     <div class="list-row"><span>Status</span><b>{{ order.status|title }}</b></div>
+    <div class="list-row"><span>Created by</span><b>{{ order.created_by_name or '—' }}</b></div>
+    <div class="list-row"><span>Created</span><b>{{ order.created_at[:16].replace('T', '  ') }}</b></div>
     <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>
     <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
     <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
