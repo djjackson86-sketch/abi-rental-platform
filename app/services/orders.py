@@ -737,10 +737,18 @@ def update_return_checklist(order_id, form):
     if not order:
         raise ValueError("Order not found")
     _require_return_deposit_allowed(order)
-    no_damages = 1 if form.get("no_damages") else 0
-    no_revision_required = 1 if form.get("no_revision_required") else 0
-    get_db().execute("UPDATE orders SET no_damages = ?, no_revision_required = ? WHERE id = ?", (no_damages, no_revision_required, order_id))
-    get_db().commit()
+    updates = []
+    params = []
+    if "no_damages" in form:
+        updates.append("no_damages = ?")
+        params.append(1 if form.get("no_damages") else 0)
+    if "no_revision_required" in form:
+        updates.append("no_revision_required = ?")
+        params.append(1 if form.get("no_revision_required") else 0)
+    if updates:
+        params.append(order_id)
+        get_db().execute(f"UPDATE orders SET {', '.join(updates)} WHERE id = ?", params)
+        get_db().commit()
     return "Return checklist saved"
 
 

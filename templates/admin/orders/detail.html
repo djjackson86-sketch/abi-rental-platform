@@ -153,7 +153,7 @@
     <div class="form-grid compact">
       <label>Actual return date<input type="date" id="actual-return-date" name="end_date" value="{{ order.end_at[:10] if order.end_at else '' }}" required></label>
       <label>Actual return time<input type="time" id="actual-return-time" name="end_time" value="{{ order.end_at[11:16] if order.end_at else '' }}" required></label>
-      <label class="switch"><input type="checkbox" name="no_revision_required" value="1" {% if order.no_revision_required %}checked{% endif %}> No Revision Required</label>
+      <label class="switch"><input type="checkbox" name="no_revision_required" value="1" class="checklist-auto-save" data-return-checklist-url="{{ url_for('orders.return_checklist', order_id=order.id) }}" {% if order.no_revision_required %}checked{% endif %}> No Revision Required<span class="checklist-save-state"></span></label>
     </div>
     <p class="form-help" id="actual-return-breakdown" data-start-at="{{ order.start_at[:16] if order.start_at else '' }}">Live extra days/hours will appear here.</p>
     <p class="form-help">Adjust before pressing Return order, or tick No Revision Required if the planned return is still correct. Billing recalculates full 24-hour rental days from pickup plus extra hours after the pickup time.</p>
@@ -163,7 +163,7 @@
   <form method="post" action="{{ url_for('orders.add_charges', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
       <label>Damage Charge<input type="number" step="0.01" min="0" name="damage_charge" placeholder="0.00"></label>
-      <label class="switch"><input type="checkbox" name="no_damages" value="1" {% if order.no_damages %}checked{% endif %}> No Damages</label>
+      <label class="switch"><input type="checkbox" name="no_damages" value="1" class="checklist-auto-save" data-return-checklist-url="{{ url_for('orders.return_checklist', order_id=order.id) }}" {% if order.no_damages %}checked{% endif %}> No Damages<span class="checklist-save-state"></span></label>
     </div>
     <p class="form-help">Damage Charge creates a return charge line item in the Items section above. Extra hours are calculated from the actual return date/time and taxed with the trailer tax profile.</p>
     <button class="btn ghost" type="submit">Add Charges</button>
@@ -215,6 +215,42 @@
     }finally{
       if(button) button.disabled=false;
     }
+  });
+})();
+(function(){
+  const boxes=[].slice.call(document.querySelectorAll('input.checklist-auto-save'));
+  if(!boxes.length || !window.fetch) return;
+  const noDamages=boxes.find(function(b){return b.name==='no_damages';});
+  const noRevision=boxes.find(function(b){return b.name==='no_revision_required';});
+  const endpoint=noDamages&&noDamages.getAttribute('data-return-checklist-url');
+  if(!noDamages||!noRevision||!endpoint) return;
+  function flash(box,text,ok){
+    const s=box.parentElement.querySelector('.checklist-save-state');
+    if(!s) return;
+    s.textContent=text; s.style.display='inline'; s.style.marginLeft='6px'; s.style.fontSize='12px'; s.style.fontWeight='650'; s.style.color=ok?'#1a7f37':'#d93025';
+    clearTimeout(s._t);
+    s._t=setTimeout(function(){ s.textContent=''; s.style.display='none'; }, 2000);
+  }
+  function setBusy(busy){ boxes.forEach(function(b){ b.disabled=busy; }); }
+  boxes.forEach(function(box){
+    box.addEventListener('change', async function(){
+      const was=box.checked;
+      setBusy(true);
+      try{
+        const body=new FormData();
+        if(noDamages.checked) body.set('no_damages','1');
+        if(noRevision.checked) body.set('no_revision_required','1');
+        const response=await fetch(endpoint,{method:'POST',body:body,headers:{'X-Requested-With':'fetch','Accept':'application/json'}});
+        const data=await response.json();
+        if(!response.ok || !data.ok) throw new Error(data.message||'Could not save the return checklist');
+        flash(box,'Saved ✓',true);
+      }catch(err){
+        box.checked=was;
+        flash(box,'Save failed — retry',false);
+      }finally{
+        setBusy(false);
+      }
+    });
   });
 })();
 </script>

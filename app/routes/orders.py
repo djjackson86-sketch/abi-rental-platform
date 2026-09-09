@@ -354,10 +354,15 @@ def use_deposit(order_id):
 @login_required
 def return_checklist(order_id):
     _ensure_order_access(order_id)
+    wants_json = request.headers.get("X-Requested-With") == "fetch" or "application/json" in (request.headers.get("Accept") or "")
     try:
         message = update_return_checklist(order_id, request.form)
+        if wants_json:
+            return jsonify({"ok": True, "message": message})
         flash(message, "success")
     except ValueError as exc:
+        if wants_json:
+            return jsonify({"ok": False, "message": str(exc)}), 400
         flash(str(exc), "error")
     return redirect(url_for("orders.detail", order_id=order_id))
 

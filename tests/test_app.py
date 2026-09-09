@@ -3918,3 +3918,55 @@ def test_cannot_delete_last_remaining_branch(client, app):
     with app.app_context():
         remaining = get_db().execute('SELECT COUNT(*) AS c FROM branches').fetchone()['c']
         assert remaining == 1
+
+
+def test_return_checklist_json_toggle_saves_flag_and_preserves_sibling(client, app):
+    """Ticking one return checklist flag via the AJAX endpoint persists it and
+    never clears the sibling flag; once both are set a started order can return."""
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client)
+    assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
+
+    def flags():
+        with app.app_context():
+            row = get_db().execute('SELECT no_damages, no_revision_required FROM orders WHERE id = ?', (order_id,)).fetchone()
+        return row
+
+    headers = {'X-Requested-With': 'fetch', 'Accept': 'application/json'}
+
+    # Both flags on via JSON toggles.
+    res = client.post(f'/orders/{order_id}/return-checklist', data={'no_damages': '1', 'no_revision_required': '1'}, headers=headers)
+    assert res.status_code == 200
+    assert res.get_json()['ok'] is True
+    assert flags()['no_damages'] == 1
+    assert flags()['no_revision_required'] == 1
+
+    # Unticking only one flag (its key present, sibling absent) leaves the sibling untouched.
+    res = client.post(f'/orders/{order_id}/return-checklist', data={'no_damages': ''}, headers=headers)
+    assert res.status_code == 200
+    assert res.get_json()['ok'] is True
+    assert flags()['no_damages'] == 0
+    assert flags()['no_revision_required'] == 1
+
+    # Re-tick damages only; revision flag must stay saved.
+    res = client.post(f'/orders/{order_id}/return-checklist', data={'no_damages': '1'}, headers=headers)
+    assert res.status_code == 200
+    assert flags()['no_damages'] == 1
+    assert flags()['no_revision_required'] == 1
+
+    # With both flags persisted via the endpoint, the order can be returned.
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    with app.app_context():
+        doc = get_db().execute(
+            "SELECT id FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'draft'",
+            (order_id,),
+        ).fetchone()
+    client.post(f'/documents/{doc["id"]}/finalize', follow_redirects=True)
+    returned = client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    assert b'Order returned' in returned.data
+
+    # A non-existent order rejects the AJAX toggle with a JSON error, not a redirect.
+    missing = client.post('/orders/999999/return-checklist', data={'no_damages': '1'}, headers=headers)
+    assert missing.status_code == 400
+    assert missing.get_json()['ok'] is False
