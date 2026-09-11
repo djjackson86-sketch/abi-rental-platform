@@ -8,7 +8,11 @@
   <p class="muted">Manage rentals, orders, customers, inventory and your online booking page.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
   <form method="post" class="stack">
-    <label>Email <input name="email" type="email" required autofocus placeholder="you@company.co.za"></label>
+    {% if users %}
+    <label>Name <select name="user_id" required autofocus><option value="" selected disabled>Select your name</option>{% for account in users %}<option value="{{ account.id }}">{{ account.name }}</option>{% endfor %}</select></label>
+    {% else %}
+    <div class="flash error">No active accounts are available. Ask the main profile to add one under Settings &rarr; Users &amp; access.</div>
+    {% endif %}
     <label>Password <input name="password" type="password" required placeholder="Password"></label>
     <button class="btn primary" type="submit">Continue</button>
   </form>

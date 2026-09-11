@@ -14,6 +14,8 @@ screen is separately gated.
 """
 
 import json
+import re
+import uuid
 
 from flask import has_request_context, session
 from werkzeug.security import generate_password_hash
@@ -139,14 +141,28 @@ def is_main_session(session):
 
 
 def list_users():
-    """All accounts with the main profile first, then additional accounts."""
+    """All accounts with the main profile first, then additional accounts.
+
+    Email is intentionally not selected: accounts sign in by name and the email
+    column is no longer surfaced anywhere in the UI.
+    """
     db = get_db()
     rows = db.execute(
-        """SELECT u.id, u.email, u.name, u.initials, u.role, u.branch_id, u.can_view_all_branches, u.active, u.created_at,
+        """SELECT u.id, u.name, u.initials, u.role, u.branch_id, u.can_view_all_branches, u.active, u.created_at,
                b.name AS branch_name
         FROM users u
         LEFT JOIN branches b ON b.id = u.branch_id
         ORDER BY CASE WHEN u.role = 'owner' THEN 0 ELSE 1 END, u.id"""
+    ).fetchall()
+    return rows
+
+
+def login_user_options():
+    """Active accounts for the sign-in name dropdown (main profile first)."""
+    rows = get_db().execute(
+        """SELECT id, name, role FROM users
+        WHERE active = 1
+        ORDER BY CASE WHEN role = 'owner' THEN 0 ELSE 1 END, LOWER(name), id"""
     ).fetchall()
     return rows
 
@@ -156,8 +172,32 @@ def additional_user_count():
     return int(row["c"] if row is not None else 0)
 
 
-def _normalise_email(email):
-    return (email or "").strip().lower()
+def _normalise_name(name):
+    return " ".join((name or "").split())
+
+
+def _placeholder_email(name):
+    """Hidden internal value for the legacy NOT NULL UNIQUE users.email column.
+
+    Accounts are created and signed in by name only, and email is never surfaced
+    in the UI. The column is kept (not dropped) so the owner seed path and any
+    historic rows stay intact.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", _normalise_name(name).lower()).strip("-") or "user"
+    return f"{slug}-{uuid.uuid4().hex[:8]}@abi.local"
+
+
+def name_taken(name, exclude_user_id=None):
+    """True when another account already uses this name (case-insensitive)."""
+    name = _normalise_name(name)
+    if not name:
+        return False
+    sql = "SELECT id FROM users WHERE LOWER(name) = ?"
+    params = [name.lower()]
+    if exclude_user_id:
+        sql += " AND id <> ?"
+        params.append(exclude_user_id)
+    return get_db().execute(sql, params).fetchone() is not None
 
 
 def _clean_branch_access(branch_id):
@@ -168,27 +208,26 @@ def _clean_branch_access(branch_id):
     return (branch_id or None, 0 if branch_id else 1)
 
 
-def create_additional_user(name, email, password, branch_id=None):
-    """Create an additional (staff) account. Returns (user_id, error)."""
+def create_additional_user(name, password, branch_id=None):
+    """Create an additional (staff) account. Returns (user_id, error).
+
+    Accounts are identified by name only — no email is collected from the user.
+    """
     db = get_db()
-    name = (name or "").strip()
-    email = _normalise_email(email)
+    name = _normalise_name(name)
     if not name:
         return None, "Name is required"
-    if not email or "@" not in email:
-        return None, "A valid email is required"
     if not password or len(password) < 6:
         return None, "Password must be at least 6 characters"
     if additional_user_count() >= ADDITIONAL_USER_LIMIT:
         return None, f"Limit reached: only {ADDITIONAL_USER_LIMIT} additional accounts are allowed"
-    existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-    if existing:
-        return None, "A user with that email already exists"
+    if name_taken(name):
+        return None, "An account with that name already exists"
     initials = "".join(part[0] for part in name.split() if part)[:2].upper() or "US"
     branch_id, can_view_all = _clean_branch_access(branch_id)
     cur = db.execute(
         "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, 'staff', ?, ?, 1, ?)",
-        (email, generate_password_hash(password), name, initials, branch_id, can_view_all, now()),
+        (_placeholder_email(name), generate_password_hash(password), name, initials, branch_id, can_view_all, now()),
     )
     db.commit()
     return cur.lastrowid, None

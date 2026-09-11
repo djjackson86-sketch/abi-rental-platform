@@ -19,10 +19,9 @@
 
 <section class="panel settings-form">
   <h2>Add an additional account</h2>
-  <p class="form-help">{{ additional_count }} of {{ additional_limit }} additional accounts used.</p>
+  <p class="form-help">{{ additional_count }} of {{ additional_limit }} additional accounts used. Everyone signs in by selecting their name, so each account needs a unique name.</p>
   <form method="post" action="{{ url_for('settings.users_add') }}" class="form-grid">
     <label>Name<input name="name" required placeholder="e.g. Sipho Admin"></label>
-    <label>Email<input type="email" name="email" required placeholder="name@company.co.za"></label>
     <label>Password<input type="text" name="password" required minlength="6" placeholder="At least 6 characters"></label>
     <label>Branch access<select name="branch_id"><option value="">All branches</option>{% for branch in branches %}<option value="{{ branch.id }}">{{ branch.name }}</option>{% endfor %}</select></label>
     <div class="form-actions span-2"><button class="btn primary" type="submit">Add account</button></div>
@@ -33,12 +32,11 @@
   <h2>Accounts</h2>
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Name</th><th>Email</th><th>Profile</th><th>Branch access</th><th>Status</th><th>Password</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Profile</th><th>Branch access</th><th>Status</th><th>Password</th><th></th></tr></thead>
       <tbody>
       {% for user in users %}
         <tr>
           <td><strong>{{ user.name }}</strong>{% if user.initials %}<small>{{ user.initials }}</small>{% endif %}</td>
-          <td>{{ user.email }}</td>
           <td>{% if user.role == 'owner' %}<span class="badge status-reserved">Main profile</span>{% else %}<span class="badge status-returned">Additional</span>{% endif %}</td>
           <td>
             {% if user.role == 'owner' %}

@@ -30,8 +30,21 @@ def client(app):
     return app.test_client()
 
 
-def login(client):
-    return client.post('/login', data={'email': 'admin@abi.local', 'password': 'admin123'}, follow_redirects=True)
+def login(client, name=None, password='admin123'):
+    """Sign in the way the UI does: pick a name from the dropdown, then the password.
+
+    The form posts the selected account id, so resolve the name to an id first.
+    Defaults to the main profile (the seeded owner).
+    """
+    with client.application.app_context():
+        if name is None:
+            row = get_db().execute(
+                "SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1"
+            ).fetchone()
+        else:
+            row = get_db().execute("SELECT id FROM users WHERE name = ?", (name,)).fetchone()
+        user_id = row['id'] if row else None
+    return client.post('/login', data={'user_id': str(user_id), 'password': password}, follow_redirects=True)
 
 
 def test_health(client):
@@ -636,11 +649,10 @@ def test_created_by_user_shows_for_customers_and_orders(client, app):
     }, follow_redirects=True)
     client.post('/settings/users/add', data={
         'name': 'Creator Staff',
-        'email': 'creator@demo.test',
         'password': 'staff123',
     }, follow_redirects=True)
     client.post('/logout')
-    client.post('/login', data={'email': 'creator@demo.test', 'password': 'staff123'}, follow_redirects=True)
+    login(client, 'Creator Staff', 'staff123')
 
     customer_res = client.post('/customers/new', data={
         'customer_type': 'individual',
@@ -676,7 +688,7 @@ def test_created_by_user_shows_for_customers_and_orders(client, app):
         db = get_db()
         customer = db.execute('SELECT created_by_user_id FROM customers WHERE name = ?', ('Creator Customer',)).fetchone()
         order = db.execute('SELECT created_by_user_id FROM orders WHERE order_number = ?', ('ORD-00001',)).fetchone()
-        staff = db.execute('SELECT id FROM users WHERE email = ?', ('creator@demo.test',)).fetchone()
+        staff = db.execute('SELECT id FROM users WHERE name = ?', ('Creator Staff',)).fetchone()
         assert customer is not None
         assert order is not None
         assert staff is not None
@@ -3758,14 +3770,14 @@ def test_main_can_manage_users_and_staff_have_restricted_access(client, app):
 
     added = client.post('/settings/users/add', data={
         'name': 'Demo Staff',
-        'email': 'staff@demo.test',
         'password': 'staff123',
     }, follow_redirects=True)
     assert b'Additional account created' in added.data
-    assert b'staff@demo.test' in added.data
+    assert b'Demo Staff' in added.data
+    assert b'@demo.test' not in added.data
 
     client.post('/logout')
-    staff_login = client.post('/login', data={'email': 'staff@demo.test', 'password': 'staff123'}, follow_redirects=True)
+    staff_login = login(client, 'Demo Staff', 'staff123')
     assert staff_login.status_code == 200
 
     dashboard = client.get('/dashboard')
@@ -3803,11 +3815,10 @@ def test_staff_order_workflow_stays_available_inside_orders(client, app):
     order_id = create_order_for_status(client, quantity='1')
     client.post('/settings/users/add', data={
         'name': 'Order Staff',
-        'email': 'orderstaff@demo.test',
         'password': 'staff123',
     }, follow_redirects=True)
     client.post('/logout')
-    client.post('/login', data={'email': 'orderstaff@demo.test', 'password': 'staff123'}, follow_redirects=True)
+    login(client, 'Order Staff', 'staff123')
 
     detail = client.get(f'/orders/{order_id}')
     assert detail.status_code == 200
@@ -3822,7 +3833,6 @@ def test_additional_accounts_capped_at_ten(client):
     for i in range(10):
         res = client.post('/settings/users/add', data={
             'name': f'Staff {i}',
-            'email': f'staff{i}@demo.test',
             'password': 'staff123',
         }, follow_redirects=True)
         assert b'Additional account created' in res.data
@@ -3830,7 +3840,6 @@ def test_additional_accounts_capped_at_ten(client):
     assert b'10 of 10 additional accounts used' in users_page.data
     overflow = client.post('/settings/users/add', data={
         'name': 'Overflow',
-        'email': 'overflow@demo.test',
         'password': 'staff123',
     }, follow_redirects=True)
     assert b'Limit reached' in overflow.data
@@ -3844,11 +3853,10 @@ def test_permissions_save_applies_globally_on_next_sign_in(client):
     assert b'Additional account permissions saved' in saved.data
     client.post('/settings/users/add', data={
         'name': 'Limited Staff',
-        'email': 'limited@demo.test',
         'password': 'staff123',
     }, follow_redirects=True)
     client.post('/logout')
-    client.post('/login', data={'email': 'limited@demo.test', 'password': 'staff123'}, follow_redirects=True)
+    login(client, 'Limited Staff', 'staff123')
     assert client.get('/customers').status_code == 403
     assert client.get('/inventory').status_code == 403
     assert client.get('/orders').status_code == 200
@@ -3970,3 +3978,86 @@ def test_return_checklist_json_toggle_saves_flag_and_preserves_sibling(client, a
     missing = client.post('/orders/999999/return-checklist', data={'no_damages': '1'}, headers=headers)
     assert missing.status_code == 400
     assert missing.get_json()['ok'] is False
+
+
+def test_login_page_lists_names_and_hides_emails(client):
+    res = client.get('/login')
+    assert res.status_code == 200
+    # Accounts are now identified by name, so the dropdown carries the names.
+    assert b'Head office admin' in res.data
+    assert b'name="user_id"' in res.data
+    assert b'Select your name' in res.data
+    # No email input and no email values on the sign-in screen.
+    assert b'name="email"' not in res.data
+    assert b'admin@abi.local' not in res.data
+
+
+def test_login_requires_the_selected_account_password(client, app):
+    with app.app_context():
+        owner_id = get_db().execute("SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1").fetchone()['id']
+
+    wrong = client.post('/login', data={'user_id': str(owner_id), 'password': 'wrong-pass'}, follow_redirects=True)
+    assert b'Invalid name or password' in wrong.data
+    assert client.get('/dashboard').status_code == 302
+
+    unknown = client.post('/login', data={'user_id': '99999', 'password': 'admin123'}, follow_redirects=True)
+    assert b'Invalid name or password' in unknown.data
+
+    missing = client.post('/login', data={'password': 'admin123'}, follow_redirects=True)
+    assert b'Invalid name or password' in missing.data
+
+    ok = client.post('/login', data={'user_id': str(owner_id), 'password': 'admin123'}, follow_redirects=True)
+    assert b'Dashboard' in ok.data
+
+
+def test_inactive_account_cannot_sign_in_and_leaves_the_dropdown(client, app):
+    login(client)
+    client.post('/settings/users/add', data={'name': 'Inactive Staff', 'password': 'staff123'}, follow_redirects=True)
+    with app.app_context():
+        staff_id = get_db().execute("SELECT id FROM users WHERE name = ?", ('Inactive Staff',)).fetchone()['id']
+    client.post(f'/settings/users/{staff_id}/active', data={'active': '0'}, follow_redirects=True)
+    client.post('/logout')
+
+    res = client.post('/login', data={'user_id': str(staff_id), 'password': 'staff123'}, follow_redirects=True)
+    assert b'Invalid name or password' in res.data
+    assert b'Inactive Staff' not in client.get('/login').data
+
+
+def test_accounts_are_created_without_email_and_the_column_is_hidden(client, app):
+    login(client)
+    created = client.post('/settings/users/add', data={
+        'name': 'No Email Staff',
+        'password': 'staff123',
+    }, follow_redirects=True)
+    assert b'Additional account created' in created.data
+    assert b'name="email"' not in created.data
+
+    with app.app_context():
+        row = get_db().execute("SELECT email FROM users WHERE name = ?", ('No Email Staff',)).fetchone()
+        assert row is not None
+        # The legacy NOT NULL UNIQUE column keeps an internal placeholder only.
+        assert row['email'].endswith('@abi.local')
+        assert 'no-email-staff' in row['email']
+
+    users_page = client.get('/settings/users')
+    assert b'<th>Email</th>' not in users_page.data
+    assert b'No Email Staff' in users_page.data
+
+
+def test_duplicate_account_names_are_blocked(client, app):
+    login(client)
+    client.post('/settings/users/add', data={'name': 'Duplicate Name', 'password': 'staff123'}, follow_redirects=True)
+    second = client.post('/settings/users/add', data={
+        'name': 'duplicate name',
+        'password': 'staff456',
+    }, follow_redirects=True)
+    assert b'An account with that name already exists' in second.data
+
+    with app.app_context():
+        count = get_db().execute(
+            "SELECT COUNT(*) AS c FROM users WHERE LOWER(name) = ?", ('duplicate name',)
+        ).fetchone()['c']
+        assert count == 1
+
+    # The sign-in list stays unambiguous: exactly one entry for that name.
+    assert client.get('/login').data.count(b'Duplicate Name') == 1

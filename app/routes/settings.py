@@ -62,7 +62,6 @@ def users():
 def users_add():
     user_id, error = create_additional_user(
         request.form.get("name"),
-        request.form.get("email"),
         request.form.get("password"),
         request.form.get("branch_id"),
     )

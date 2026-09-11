@@ -425,7 +425,7 @@ def init_db():
         else:
             db.execute(
                 "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)",
-                (admin_email, generate_password_hash(current_app.config["ADMIN_PASSWORD"]), "ABI Admin", "AA", "owner", default_branch['id'] if default_branch else None, ts),
+                (admin_email, generate_password_hash(current_app.config["ADMIN_PASSWORD"]), "Head office admin", "HO", "owner", default_branch['id'] if default_branch else None, ts),
             )
     db.commit()
 

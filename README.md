@@ -14,8 +14,8 @@ python app.py
 
 Open: http://127.0.0.1:5057
 
-Seed login:
-- Email: admin@abi.local
+Seed login (sign in by selecting your name):
+- Name: Head office admin
 - Password: admin123
 
 ## Current milestone

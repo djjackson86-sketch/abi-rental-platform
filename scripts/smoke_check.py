@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Small deployment smoke check for ABI Rental Platform.
 
+Accounts sign in by selecting their name, so this script reads the sign-in
+dropdown and posts the matching account id.
+
 Usage:
   python scripts/smoke_check.py http://127.0.0.1:5057
-  ADMIN_EMAIL=... ADMIN_PASSWORD=... python scripts/smoke_check.py https://service.onrender.com
+  ADMIN_NAME=... ADMIN_PASSWORD=... python scripts/smoke_check.py https://service.onrender.com
 """
 from __future__ import annotations
 
 import os
+import re
 import sys
 from http.cookiejar import CookieJar
 from urllib import parse, request
@@ -40,17 +44,32 @@ def main() -> int:
     if status != 200 or ("Online bookings" not in body and "Online booking is temporarily unavailable" not in body):
         fail("/store did not render the public store or unavailable state")
 
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@abi.local")
+    admin_name = os.environ.get("ADMIN_NAME", "Head office admin")
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+
+    status, body, _ = fetch(opener, f"{base_url}/login")
+    if status != 200:
+        fail(f"/login did not render: status={status}")
+    options = re.findall(r'<option value="(\d+)"[^>]*>([^<]*)</option>', body)
+    if not options:
+        fail("/login rendered no accounts in the name dropdown")
+    account_id = next(
+        (uid for uid, label in options if label.strip().lower() == admin_name.strip().lower()),
+        None,
+    )
+    if account_id is None:
+        # The main profile is always listed first.
+        account_id = options[0][0]
+
     status, body, final_url = fetch(
         opener,
         f"{base_url}/login",
-        {"email": admin_email, "password": admin_password},
+        {"user_id": account_id, "password": admin_password},
     )
     if status != 200 or "/login" in final_url:
-        fail("admin login failed; set ADMIN_EMAIL and ADMIN_PASSWORD for this environment")
+        fail("sign-in failed; set ADMIN_NAME and ADMIN_PASSWORD for this environment")
     if "Continue setup" not in body and "Dashboard" not in body:
-        fail("admin login did not reach an admin page")
+        fail("sign-in did not reach an admin page")
 
     print(f"OK: smoke checks passed for {base_url}")
     return 0
