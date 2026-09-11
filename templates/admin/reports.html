@@ -11,117 +11,161 @@
     </div>
   </div>
   <div class="header-actions">
-    <a class="btn primary" href="{{ url_for('admin.reports_orders_csv') }}">Download orders CSV</a>
+    <a class="btn primary" href="{{ url_for('admin.reports_orders_csv', start_date=filters.start_date or None, end_date=filters.end_date or None, branch=filters.branch or None) }}">Download orders CSV</a>
   </div>
 </header>
 
 <section class="reports-page-shell">
   <aside class="reports-filter-rail panel">
     <form method="get" class="reports-filter-form">
-      {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
-      {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Quick ranges</strong></div>
+        <div class="report-presets">
+          {% for preset in presets %}<a class="report-preset{{ ' is-active' if filters.start_date == preset.start and filters.end_date == preset.end }}" href="{{ url_for('admin.reports', branch=filters.branch or None, start_date=preset.start, end_date=preset.end) }}">{{ preset.label }}</a>{% endfor %}
+        </div>
+      </div>
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Branch</strong></div>
+        {% if branch_scope %}
+        <select disabled aria-label="Branch (fixed to your branch)"><option selected>{{ branches[0].name if branches else 'Your branch' }}</option></select>
+        {% else %}
+        <select name="branch" aria-label="Branch">
+          <option value="">All branches</option>
+          {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+      </div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>Start date</strong></div>
         <input type="date" name="start_date" value="{{ filters.start_date }}">
-
       </div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>End date</strong></div>
         <input type="date" name="end_date" value="{{ filters.end_date }}">
-
       </div>
-      <button class="btn ghost" type="submit">Filter</button>
-      {% if filters.start_date or filters.end_date %}
-        <a class="link-muted" href="{{ url_for('admin.reports') }}">Clear</a>
-      {% endif %}
+      <div class="filter-group reports-filter-actions">
+        <button class="btn primary" type="submit">Apply filters</button>
+        {% if filters.start_date or filters.end_date or filters.branch %}
+          <a class="link-muted" href="{{ url_for('admin.reports') }}">Clear all</a>
+        {% endif %}
+      </div>
     </form>
   </aside>
 
   <main class="reports-workspace">
-    <section class="metrics reports-metrics">
-      <div class="metric-card"><small>Orders</small><b>{{ metrics.orders }}</b></div>
-      <div class="metric-card"><small>Revenue summary</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b></div>
-      <div class="metric-card"><small>Payment summary</small><b>R{{ '%.2f'|format(metrics.paid) }}</b></div>
-      <div class="metric-card"><small>Due</small><b>R{{ '%.2f'|format(metrics.due) }}</b></div>
+    <section class="reports-period">
+      <div class="reports-period-main">
+        <p class="reports-period-label">Reporting period</p>
+        <p class="reports-period-value">{{ period_label }}</p>
+      </div>
+      <div class="reports-period-stats">
+        <span><b>{{ metrics.orders }}</b> order{{ '' if metrics.orders == 1 else 's' }}</span>
+        <span><b>{{ metrics.payments }}</b> payment{{ '' if metrics.payments == 1 else 's' }}</span>
+        <span><b>{{ metrics.customers }}</b> customer{{ '' if metrics.customers == 1 else 's' }}</span>
+        <span><b>{{ metrics.products }}</b> in fleet</span>
+      </div>
     </section>
 
-    <section class="panel reports-grid">
-      <div class="report-column">
-        <article class="report-card revenue-summary">
-          <header class="report-card-header">
-            <h2>Revenue summary</h2>
-          </header>
-          <div class="report-card-body">
-            <div class="metric-row"><span>Total revenue</span><b>R{{ '%.2f'|format(metrics.revenue) }}</b></div>
-            <div class="metric-row"><span>Total paid</span><b>R{{ '%.2f'|format(metrics.paid) }}</b></div>
-            <div class="metric-row"><span>Total due</span><b>R{{ '%.2f'|format(metrics.due) }}</b></div>
-          </div>
-        </article>
-        
-        <article class="report-card orders-by-status">
-          <header class="report-card-header">
-            <h2>Orders by status</h2>
-          </header>
-          <div class="report-card-body">
-            {% if status_rows %}
-              {% for row in status_rows %}
-                <div class="metric-row"><span>{{ row.status|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
-              {% endfor %}
-            {% else %}
-              <p class="empty">No orders yet.</p>
-            {% endif %}
-          </div>
-        </article>
-      </div>
-      
-      <div class="report-column">
-        <article class="report-card payment-summary">
-          <header class="report-card-header">
-            <h2>Payment summary</h2>
-          </header>
-          <div class="report-card-body">
-            {% if payment_rows %}
-              {% for row in payment_rows %}
-                <div class="metric-row"><span>{{ row.method|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
-              {% endfor %}
-            {% else %}
-              <p class="empty">No payments recorded yet.</p>
-            {% endif %}
-          </div>
-        </article>
-        
-        <article class="report-card product-performance">
-          <header class="report-card-header">
-            <h2>Product performance</h2>
-          </header>
-          <div class="report-card-body">
-            {% if product_rows %}
-              {% for row in product_rows %}
-                <div class="metric-row"><span>{{ row.product_name }}</span><b>{{ row.quantity }} items · R{{ '%.2f'|format(row.total) }}</b></div>
-              {% endfor %}
-            {% else %}
-              <p class="empty">No order items yet.</p>
-            {% endif %}
-          </div>
-        </article>
-      </div>
-      
-      <div class="report-column">
-        <article class="report-card customer-summary">
-          <header class="report-card-header">
-            <h2>Customer summary</h2>
-          </header>
-          <div class="report-card-body">
-            {% if customer_rows %}
-              {% for row in customer_rows %}
-                <div class="metric-row"><span>{{ row.customer_name }}</span><b>{{ row.orders }} orders · R{{ '%.2f'|format(row.total) }}</b></div>
-              {% endfor %}
-            {% else %}
-              <p class="empty">No customers yet.</p>
-            {% endif %}
-          </div>
-        </article>
-      </div>
+    <section class="metrics reports-metrics">
+      <div class="metric-card"><small>Orders</small><b>{{ metrics.orders }}</b><em>in this period</em></div>
+      <div class="metric-card"><small>Revenue summary</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><em>total value</em></div>
+      <div class="metric-card"><small>Payments received</small><b>R{{ '%.2f'|format(metrics.paid) }}</b><em>received</em></div>
+      <div class="metric-card"><small>Amount due</small><b>R{{ '%.2f'|format(metrics.due) }}</b><em>outstanding</em></div>
+    </section>
+
+    <section class="reports-grid">
+      <article class="report-card revenue-summary">
+        <header class="report-card-header">
+          <h2>Revenue summary</h2>
+          <p>What the period is worth and what is still owed</p>
+        </header>
+        <div class="report-card-body">
+          <div class="metric-row"><span>Total revenue</span><b>R{{ '%.2f'|format(metrics.revenue) }}</b></div>
+          <div class="metric-row"><span>Total paid</span><b>R{{ '%.2f'|format(metrics.paid) }}</b></div>
+          <div class="metric-row"><span>Total due</span><b{{ ' class="is-due"'|safe if metrics.due }}>R{{ '%.2f'|format(metrics.due) }}</b></div>
+          {% if metrics.revenue %}
+            {% set paid_share = (metrics.paid / metrics.revenue * 100)|round(1) %}
+            {% if paid_share > 100 %}{% set paid_share = 100 %}{% endif %}
+            {% set paid_pct = paid_share|round(0)|int %}
+            {% set due_pct = 100 - paid_pct %}
+            <div class="report-split-wrap">
+              <div class="report-split" role="img" aria-label="{{ paid_pct }}% of R{{ '%.2f'|format(metrics.revenue) }} received">
+                <span class="report-split-paid" style="width: {{ paid_share }}%"></span>
+                <span class="report-split-due" style="width: {{ (100 - paid_share)|round(1) }}%"></span>
+              </div>
+              <p class="report-split-legend"><span><i class="split-dot paid"></i>Paid {{ paid_pct }}%</span><span><i class="split-dot due"></i>Outstanding {{ due_pct }}%</span></p>
+            </div>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="report-card orders-by-status">
+        <header class="report-card-header">
+          <h2>Orders by status</h2>
+          <p>Order count and value per stage</p>
+        </header>
+        <div class="report-card-body">
+          {% if status_rows %}
+            {% set ns = namespace(top=0) %}
+            {% for row in status_rows %}{% if (row.count or 0) > ns.top %}{% set ns.top = row.count %}{% endif %}{% endfor %}
+            {% for row in status_rows %}
+              <div class="metric-row has-bar"><i class="metric-bar" style="width: {{ (row.count / ns.top * 100)|round(1) if ns.top else 0 }}%"></i><span>{{ row.status|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+            {% endfor %}
+          {% else %}
+            <p class="report-empty">No orders in this period.</p>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="report-card payment-summary">
+        <header class="report-card-header">
+          <h2>Payment summary</h2>
+          <p>Money received, grouped by method</p>
+        </header>
+        <div class="report-card-body">
+          {% if payment_rows %}
+            {% set pay_ns = namespace(top=0) %}
+            {% for row in payment_rows %}{% if (row.count or 0) > pay_ns.top %}{% set pay_ns.top = row.count %}{% endif %}{% endfor %}
+            {% for row in payment_rows %}
+              <div class="metric-row has-bar"><i class="metric-bar is-green" style="width: {{ (row.count / pay_ns.top * 100)|round(1) if pay_ns.top else 0 }}%"></i><span>{{ row.method|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+            {% endfor %}
+          {% else %}
+            <p class="report-empty">No payments recorded in this period.</p>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="report-card product-performance">
+        <header class="report-card-header">
+          <h2>Product performance</h2>
+          <p>Rental value per trailer, refundable deposits excluded</p>
+        </header>
+        <div class="report-card-body">
+          {% if product_rows %}
+            {% for row in product_rows %}
+              <div class="metric-row"><span>{{ row.product_name }}</span><b>{{ row.quantity }} item{{ '' if row.quantity == 1 else 's' }} · R{{ '%.2f'|format(row.total) }}</b></div>
+            {% endfor %}
+          {% else %}
+            <p class="report-empty">No order items in this period.</p>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="report-card customer-summary">
+        <header class="report-card-header">
+          <h2>Customer summary</h2>
+          <p>Top customers by value</p>
+        </header>
+        <div class="report-card-body">
+          {% if customer_rows %}
+            {% for row in customer_rows %}
+              <div class="metric-row"><span>{{ row.customer_name }}</span><b>{{ row.orders }} order{{ '' if row.orders == 1 else 's' }} · R{{ '%.2f'|format(row.total) }}</b></div>
+            {% endfor %}
+          {% else %}
+            <p class="report-empty">No customers in this period.</p>
+          {% endif %}
+        </div>
+      </article>
     </section>
   </main>
 </section>

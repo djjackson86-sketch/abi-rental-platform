@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS company_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    company_name TEXT NOT NULL DEFAULT 'ABI Solutions',
+    company_name TEXT NOT NULL DEFAULT 'Sano Trailers',
     email TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     website TEXT NOT NULL DEFAULT '',
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS company_settings (
     store_enabled INTEGER NOT NULL DEFAULT 1,
     show_prices INTEGER NOT NULL DEFAULT 1,
     show_availability INTEGER NOT NULL DEFAULT 1,
-    store_title TEXT NOT NULL DEFAULT 'ABI Solutions Rentals',
+    store_title TEXT NOT NULL DEFAULT 'Sano Trailers Rentals',
     store_intro TEXT NOT NULL DEFAULT 'Browse our rental catalogue and request a booking online.',
     store_hero_text TEXT NOT NULL DEFAULT 'Select your rental period and we will confirm availability.',
     checkout_instructions TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.',
@@ -330,7 +330,7 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "store_enabled", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "company_settings", "show_prices", "INTEGER NOT NULL DEFAULT 1")
     ensure_column(db, "company_settings", "show_availability", "INTEGER NOT NULL DEFAULT 1")
-    ensure_column(db, "company_settings", "store_title", "TEXT NOT NULL DEFAULT 'ABI Solutions Rentals'")
+    ensure_column(db, "company_settings", "store_title", "TEXT NOT NULL DEFAULT 'Sano Trailers Rentals'")
     ensure_column(db, "company_settings", "store_intro", "TEXT NOT NULL DEFAULT 'Browse our rental catalogue and request a booking online.'")
     ensure_column(db, "company_settings", "store_hero_text", "TEXT NOT NULL DEFAULT 'Select your rental period and we will confirm availability.'")
     ensure_column(db, "company_settings", "checkout_instructions", "TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.'")
@@ -407,7 +407,7 @@ def init_db():
     db.executescript(SCHEMA)
     run_migrations(db)
     ts = now()
-    db.execute("INSERT OR IGNORE INTO company_settings (id, company_name, email, updated_at) VALUES (1, 'ABI Solutions', 'info@abi-solutions.local', ?)", (ts,))
+    db.execute("INSERT OR IGNORE INTO company_settings (id, company_name, email, updated_at) VALUES (1, 'Sano Trailers', 'info@abi-solutions.local', ?)", (ts,))
     db.execute("INSERT OR IGNORE INTO tax_profiles (id, name, rate, is_default, active, created_at) VALUES (1, 'No VAT', 0, 1, 1, ?)", (ts,))
     branch_count = db.execute("SELECT COUNT(*) AS c FROM branches").fetchone()
     if branch_count and branch_count["c"] == 0:

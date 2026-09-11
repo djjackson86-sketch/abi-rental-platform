@@ -1,4 +1,4 @@
-"""User account and module-access helpers for ABI Rental.
+"""User account and module-access helpers for Sano Trailers.
 
 Two account kinds exist:
 - Main profile: role == 'owner' (seeded from ADMIN_EMAIL). Has every module and

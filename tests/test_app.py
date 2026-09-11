@@ -1,7 +1,7 @@
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -780,7 +780,7 @@ def test_order_form_inline_customer_uses_customer_page_headings(client):
     body = res.data
     for heading in [b'Customer type', b'Contact details', b'Company details', b'Address', b'Custom customer details']:
         assert heading in body
-    assert b'Donovan Jackson or ABI Solutions Pty Ltd' in body
+    assert b'Donovan Jackson or Sano Trailers Pty Ltd' in body
     assert b'id="inline-customer-type-individual"' in body
     assert b'id="inline-customer-type-company"' in body
 
@@ -4180,4 +4180,175 @@ def test_calendar_date_filter_is_submitted_once(client):
     form = page.split('calendar-filter-form', 1)[1].split('</form>', 1)[0]
     assert form.count('name="start_date"') == 1
     assert form.count('name="end_date"') == 1
+    # The only hidden field is the browsed month, which has no visible twin.
+    assert form.count('type="hidden"') == 1
+    assert 'type="hidden" name="month"' in form
+
+
+def test_calendar_keeps_the_browsed_month_when_filtering(client):
+    """Filtering or picking a day must not snap the grid back to today."""
+    login(client)
+    # A date filter with no explicit month follows the filtered period.
+    followed = client.get('/calendar?start_date=2026-07-01&end_date=2026-07-01').data
+    assert b'July 2026' in followed
+
+    # The filter form carries the browsed month forward.
+    browsed = client.get('/calendar?month=2026-07').data
+    assert b'name="month" value="2026-07"' in browsed
+    # ... and every day link keeps it too.
+    assert b'month=2026-07&amp;start_date=' in browsed
+
+
+def test_calendar_shows_a_visual_month_grid(client, app):
+    """The month grid counts the same reservations the timeline lists."""
+    login(client)
+    _seed_two_branch_calendar(client, app)
+
+    body = client.get('/calendar?month=2026-07').data
+    assert b'July 2026' in body
+    assert b'Mon' in body and b'Sun' in body
+    assert b'visual-calendar-grid' in body
+    # both reserved orders pick up and return on the same day
+    assert b'aria-label="2026-07-01: 2 pickups, 2 returns"' in body
+    # selecting a day drives the existing date filters
+    assert b'start_date=2026-07-01&amp;end_date=2026-07-01' in body
+    # month navigation
+    assert b'month=2026-06' in body
+    assert b'month=2026-08' in body
+
+    # the grid obeys the branch filter, like everything else on the page
+    north = client.get('/calendar?month=2026-07&branch=2').data
+    assert b'aria-label="2026-07-01: 1 pickup, 1 return"' in north
+
+    # a nonsense month falls back to the current one instead of 500ing
+    assert client.get('/calendar?month=not-a-month').status_code == 200
+    assert client.get('/calendar?month=2026-13').status_code == 200
+
+
+def test_calendar_visual_grid_highlights_today_and_the_selected_range(client):
+    login(client)
+    today = datetime.now().date().isoformat()
+    body = client.get('/calendar').data
+    assert b'is-today' in body
+
+    ranged = client.get(f'/calendar?start_date={today}&end_date={today}').data
+    assert b'is-selected' in ranged
+
+
+def test_reports_date_filter_is_submitted_once_and_actually_filters(client):
+    """Regression: the report form posted each date twice, so the stale value won."""
+    login(client)
+    seed_customer_and_product(client)
+    created = create_order_for_status(client, quantity='1')
+
+    form = client.get('/reports').data.decode().split('reports-filter-form', 1)[1].split('</form>', 1)[0]
+    assert form.count('name="start_date"') == 1
+    assert form.count('name="end_date"') == 1
     assert 'type="hidden"' not in form
+
+    today = datetime.now().date().isoformat()
+    # A window that excludes the order actually empties the report.
+    excluded = client.get('/reports?start_date=2020-01-01&end_date=2020-01-02').data
+    assert b'Order Trailer' not in excluded
+    assert b'No order items in this period.' in excluded
+
+    # The window the order falls in still shows it, and names the period.
+    included = client.get(f'/reports?start_date={today}&end_date={today}').data
+    assert b'Order Trailer' in included
+    pretty_today = datetime.now().strftime('%d %b %Y').lstrip('0')
+    assert pretty_today.encode() in included
+    assert b'Reporting period' in included
+    assert created
+
+
+def test_reports_can_filter_by_branch(client, app):
+    login(client)
+    _seed_two_branch_calendar(client, app)
+
+    everything = client.get('/reports').data
+    assert b'<option value="">All branches</option>' in everything
+    assert b'Order Trailer' in everything and b'North Trailer' in everything
+    assert b'All time' in everything
+
+    north = client.get('/reports?branch=2').data
+    assert b'<option value="2" selected>North Depot</option>' in north
+    assert b'North Trailer' in north
+    assert b'Order Trailer' not in north
+    assert b'North Depot' in north
+
+    central = client.get('/reports?branch=1').data
+    assert b'Order Trailer' in central
+    assert b'North Trailer' not in central
+
+    # An unknown branch id is ignored rather than trusted.
+    bogus = client.get('/reports?branch=999')
+    assert bogus.status_code == 200
+    assert b'Order Trailer' in bogus.data and b'North Trailer' in bogus.data
+
+    # The CSV export honours the same filter.
+    csv_north = client.get('/reports/orders.csv?branch=2').data.decode()
+    assert 'ORD-00002' in csv_north
+    assert 'ORD-00001' not in csv_north
+
+
+def test_reports_branch_filter_never_widens_a_staff_scope(client, app):
+    login(client)
+    _seed_two_branch_calendar(client, app)
+    client.post('/settings/users/permissions',
+                data={'module': ['new_order', 'dashboard', 'calendar', 'orders', 'customers', 'reports']},
+                follow_redirects=True)
+    client.post('/settings/users/add',
+                data={'name': 'North Reporter', 'password': 'staff123', 'branch_id': '2'},
+                follow_redirects=True)
+    client.post('/logout')
+    login(client, 'North Reporter', 'staff123')
+
+    body = client.get('/reports').data
+    assert b'North Trailer' in body
+    assert b'Order Trailer' not in body
+    # The control is a fixed label for them, never a chooser.
+    assert b'name="branch"' not in body
+
+    for attempt in ['', '1', '999', '2']:
+        page = client.get(f'/reports?branch={attempt}')
+        assert page.status_code == 200, attempt
+        assert b'North Trailer' in page.data, attempt
+        assert b'Order Trailer' not in page.data, f'branch={attempt!r} leaked another branch'
+
+    csv_page = client.get('/reports/orders.csv?branch=1').data.decode()
+    assert 'ORD-00002' in csv_page
+    assert 'ORD-00001' not in csv_page
+
+
+def test_reports_offer_quick_date_ranges(client):
+    """Presets are the fastest way into a report, so they must be there and work."""
+    login(client)
+    body = client.get('/reports').data
+    for label in [b'Today', b'Last 7 days', b'Last 30 days', b'This month', b'Last month', b'Year to date']:
+        assert label in body, label
+
+    today = datetime.now().date()
+    week_start = (today - timedelta(days=6)).isoformat()
+    week = client.get(f'/reports?start_date={week_start}&end_date={today.isoformat()}')
+    assert week.status_code == 200
+    assert b'report-preset is-active' in week.data
+    assert week_start.encode() in week.data
+
+    # Year to date starts on 1 January.
+    ytd = client.get(f'/reports?start_date={today.year}-01-01&end_date={today.isoformat()}')
+    assert f'{today.year}-01-01'.encode() in ytd.data
+
+
+def test_pages_carry_the_sano_favicon_and_no_abi_branding(client):
+    login(client)
+    for path in ['/dashboard', '/calendar', '/reports']:
+        body = client.get(path).data
+        assert b'ABI' not in body, f'{path} still says ABI'
+        assert b'favicon-32.png' in body, f'{path} has no favicon'
+
+    client.post('/logout')
+    login_page = client.get('/login').data
+    assert b'favicon.ico' in login_page
+    assert b'apple-touch-icon' in login_page
+    assert b'ABI' not in login_page
+    assert b'Sign in to Sano Trailers' in login_page

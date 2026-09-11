@@ -1,5 +1,6 @@
 from datetime import datetime, date, time, timedelta
 from math import ceil
+import calendar as _month_calendar
 
 from app.db import get_db, now
 from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause
@@ -755,7 +756,7 @@ def update_return_checklist(order_id, form):
 def late_return_breakdown(start_at, actual_return_at):
     """Return billable full 24h rental days plus extra hours after pickup time.
 
-    ABI rents in 24-hour blocks. Once the actual return passes the original
+    Sano Trailers rents in 24-hour blocks. Once the actual return passes the original
     pickup time on a later date, the completed 24h blocks are full rental days
     and only the remainder is extra hours (06 08:00 -> 09 10:00 = 3d + 2h).
     """
@@ -1156,6 +1157,75 @@ def scheduled_events(limit=50, start_date=None, end_date=None, branch_id=None):
     sql += " ORDER BY o.start_at ASC, o.end_at ASC LIMIT ?"
     params.append(limit)
     return db.execute(sql, params).fetchall()
+def calendar_month_overview(month=None, branch_id=None, start_date=None, end_date=None):
+    """Monday-first month grid with per-day pickup and return counts.
+
+    Backs the visual month calendar above the reservation filters. The counts
+    come from exactly the same orders the timeline lists, so the grid and the
+    list underneath it can never contradict each other. ``branch_id`` obeys the
+    usual rule: the session scope wins, a filter only narrows.
+    """
+    today = date.today()
+    try:
+        year, month_number = (int(part) for part in str(month).split("-"))
+        first_day = date(year, month_number, 1)
+    except (AttributeError, TypeError, ValueError):
+        first_day = today.replace(day=1)
+    last_day = date(
+        first_day.year,
+        first_day.month,
+        _month_calendar.monthrange(first_day.year, first_day.month)[1],
+    )
+
+    if start_date and end_date and end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    db = get_db()
+    sql = """SELECT o.start_at, o.end_at FROM orders o
+        WHERE o.status IN ('reserved', 'started')
+          AND DATE(o.start_at) <= ? AND DATE(o.end_at) >= ?"""
+    params = [last_day.isoformat(), first_day.isoformat()]
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
+
+    pickups = {}
+    returns = {}
+    for row in db.execute(sql, params).fetchall():
+        pickup_day = str(row["start_at"] or "")[:10]
+        return_day = str(row["end_at"] or "")[:10]
+        if pickup_day:
+            pickups[pickup_day] = pickups.get(pickup_day, 0) + 1
+        if return_day:
+            returns[return_day] = returns.get(return_day, 0) + 1
+
+    weeks = []
+    for week in _month_calendar.Calendar(firstweekday=0).monthdatescalendar(first_day.year, first_day.month):
+        days = []
+        for day in week:
+            key = day.isoformat()
+            days.append({
+                "date": key,
+                "day": day.day,
+                "in_month": day.month == first_day.month,
+                "pickups": pickups.get(key, 0),
+                "returns": returns.get(key, 0),
+                "is_today": day == today,
+                "selected": key == start_date or key == end_date
+                            or bool(start_date and end_date and start_date < key < end_date),
+            })
+        weeks.append(days)
+
+    return {
+        "month": first_day.strftime("%Y-%m"),
+        "label": first_day.strftime("%B %Y"),
+        "weeks": weeks,
+        "previous_month": (first_day - timedelta(days=1)).strftime("%Y-%m"),
+        "next_month": (last_day + timedelta(days=1)).strftime("%Y-%m"),
+        "is_current_month": first_day.year == today.year and first_day.month == today.month,
+    }
+
+
 def dashboard_schedule():
     events = scheduled_events(limit=100)
     return {

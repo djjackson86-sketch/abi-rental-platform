@@ -1,54 +1,62 @@
 from app.db import get_db
+from app.services.access import order_branch_clause
+
 
 def money(value):
     return round(float(value or 0), 2)
 
 
-def summary_metrics(start_date=None, end_date=None):
+def _window(column, start_date, end_date):
+    """Shared date restriction for one DATE()-comparable column."""
+    sql = ""
+    params = []
+    if start_date:
+        sql += f" AND DATE({column}) >= ?"
+        params.append(start_date)
+    if end_date:
+        sql += f" AND DATE({column}) <= ?"
+        params.append(end_date)
+    return sql, params
+
+
+def summary_metrics(start_date=None, end_date=None, branch_id=None):
+    """Headline figures. The branch restriction applies to orders and payments.
+
+    Customer and product totals stay company-wide: they count master data, not
+    activity, so scoping them to one branch would understate the business.
+    """
     db = get_db()
     sql = """
-        SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS revenue, COALESCE(SUM(due_total), 0) AS due FROM orders
+        SELECT COUNT(*) AS count, COALESCE(SUM(o.total), 0) AS revenue, COALESCE(SUM(o.due_total), 0) AS due
+        FROM orders o
         WHERE 1=1
     """
     params = []
-    if start_date:
-        sql += " AND DATE(created_at) >= ?"
-        params.append(start_date)
-    if end_date:
-        sql += " AND DATE(created_at) <= ?"
-        params.append(end_date)
+    window_sql, window_params = _window("o.created_at", start_date, end_date)
+    sql += window_sql
+    params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
     orders = db.execute(sql, params).fetchone()
-    
-    payments_sql = "SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS paid FROM payments WHERE status = 'paid' AND COALESCE(deleted_at, '') = ''"
+
+    payments_sql = """
+        SELECT COUNT(*) AS count, COALESCE(SUM(pay.amount), 0) AS paid
+        FROM payments pay JOIN orders o ON o.id = pay.order_id
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+    """
     payments_params = []
-    if start_date:
-        payments_sql += " AND DATE(created_at) >= ?"
-        payments_params.append(start_date)
-    if end_date:
-        payments_sql += " AND DATE(created_at) <= ?"
-        payments_params.append(end_date)
+    window_sql, window_params = _window("pay.created_at", start_date, end_date)
+    payments_sql += window_sql
+    payments_params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    payments_sql += scope_sql
+    payments_params.extend(scope_params)
     payments = db.execute(payments_sql, payments_params).fetchone()
-    
-    customers_sql = "SELECT COUNT(*) AS count FROM customers WHERE 1=1"
-    customers_params = []
-    if start_date:
-        # For customers, we might want to filter by when they were created or when they had orders
-        # For simplicity, let's not filter customers by date for now
-        pass
-    if end_date:
-        pass
-    customers = db.execute(customers_sql, customers_params).fetchone()
-    
-    products_sql = "SELECT COUNT(*) AS count FROM products WHERE active = 1"
-    products_params = []
-    if start_date:
-        # Products don't have a direct date filter, but we could filter by when they were created
-        # For simplicity, let's not filter products by date for now
-        pass
-    if end_date:
-        pass
-    products = db.execute(products_sql, products_params).fetchone()
-    
+
+    customers = db.execute("SELECT COUNT(*) AS count FROM customers WHERE 1=1").fetchone()
+    products = db.execute("SELECT COUNT(*) AS count FROM products WHERE active = 1").fetchone()
+
     return {
         "orders": orders["count"] or 0,
         "revenue": money(orders["revenue"]),
@@ -60,57 +68,62 @@ def summary_metrics(start_date=None, end_date=None):
     }
 
 
-def orders_by_status(start_date=None, end_date=None):
+def orders_by_status(start_date=None, end_date=None, branch_id=None):
     db = get_db()
     sql = """
-        SELECT status, COUNT(*) AS count, COALESCE(SUM(total), 0) AS total FROM orders
+        SELECT o.status, COUNT(*) AS count, COALESCE(SUM(o.total), 0) AS total FROM orders o
         WHERE 1=1
     """
     params = []
-    if start_date:
-        sql += " AND DATE(created_at) >= ?"
-        params.append(start_date)
-    if end_date:
-        sql += " AND DATE(created_at) <= ?"
-        params.append(end_date)
-    sql += " GROUP BY status ORDER BY count DESC, status"
+    window_sql, window_params = _window("o.created_at", start_date, end_date)
+    sql += window_sql
+    params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
+    sql += " GROUP BY o.status ORDER BY count DESC, o.status"
     return db.execute(sql, params).fetchall()
 
 
-def payments_by_method(start_date=None, end_date=None):
+def payments_by_method(start_date=None, end_date=None, branch_id=None):
     db = get_db()
     sql = """
-        SELECT method, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total FROM payments
-        WHERE status = 'paid' AND COALESCE(deleted_at, '') = ''
+        SELECT pay.method AS method, COUNT(*) AS count, COALESCE(SUM(pay.amount), 0) AS total
+        FROM payments pay JOIN orders o ON o.id = pay.order_id
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
     """
     params = []
-    if start_date:
-        sql += " AND DATE(created_at) >= ?"
-        params.append(start_date)
-    if end_date:
-        sql += " AND DATE(created_at) <= ?"
-        params.append(end_date)
-    sql += " GROUP BY method ORDER BY total DESC, method"
+    window_sql, window_params = _window("pay.created_at", start_date, end_date)
+    sql += window_sql
+    params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
+    sql += " GROUP BY pay.method ORDER BY total DESC, pay.method"
     return db.execute(sql, params).fetchall()
 
 
-def product_performance(start_date=None, end_date=None, limit=10):
+def product_performance(start_date=None, end_date=None, limit=10, branch_id=None):
     db = get_db()
     sql = """
         SELECT COALESCE(p.name, oi.custom_name, 'Custom line') AS product_name,
             COALESCE(SUM(oi.quantity), 0) AS quantity,
             COALESCE(SUM(oi.line_total), 0) AS total
         FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
         LEFT JOIN products p ON p.id = oi.product_id
         WHERE 1=1
     """
     params = []
-    if start_date:
-        sql += " AND DATE(oi.created_at) >= ?"
-        params.append(start_date)
-    if end_date:
-        sql += " AND DATE(oi.created_at) <= ?"
-        params.append(end_date)
+    # order_items has no created_at: the order's own date is the reporting date,
+    # which also matches every other query in this module (and fixes a 500 that
+    # any report date filter used to raise).
+    window_sql, window_params = _window("o.created_at", start_date, end_date)
+    sql += window_sql
+    params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
     sql += """
         GROUP BY product_name
         ORDER BY total DESC, quantity DESC
@@ -120,7 +133,7 @@ def product_performance(start_date=None, end_date=None, limit=10):
     return db.execute(sql, params).fetchall()
 
 
-def customer_summary(start_date=None, end_date=None, limit=10):
+def customer_summary(start_date=None, end_date=None, limit=10, branch_id=None):
     db = get_db()
     sql = """
         SELECT c.name AS customer_name, COUNT(o.id) AS orders, COALESCE(SUM(o.total), 0) AS total
@@ -129,12 +142,14 @@ def customer_summary(start_date=None, end_date=None, limit=10):
         WHERE 1=1
     """
     params = []
-    if start_date:
-        sql += " AND DATE(o.created_at) >= ?"
-        params.append(start_date)
-    if end_date:
-        sql += " AND DATE(o.created_at) <= ?"
-        params.append(end_date)
+    window_sql, window_params = _window("o.created_at", start_date, end_date)
+    sql += window_sql
+    params.extend(window_params)
+    # Only ever applied when there IS a restriction: with none, the LEFT JOIN
+    # still lists customers who have not ordered yet.
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
     sql += """
         GROUP BY c.id, c.name
         ORDER BY total DESC, orders DESC, c.name
@@ -144,7 +159,7 @@ def customer_summary(start_date=None, end_date=None, limit=10):
     return db.execute(sql, params).fetchall()
 
 
-def orders_export_rows(start_date=None, end_date=None):
+def orders_export_rows(start_date=None, end_date=None, branch_id=None):
     db = get_db()
     sql = """
         SELECT o.order_number, COALESCE(c.name, '') AS customer, o.status, o.payment_status, o.total, o.due_total
@@ -153,11 +168,11 @@ def orders_export_rows(start_date=None, end_date=None):
         WHERE 1=1
     """
     params = []
-    if start_date:
-        sql += " AND DATE(o.created_at) >= ?"
-        params.append(start_date)
-    if end_date:
-        sql += " AND DATE(o.created_at) <= ?"
-        params.append(end_date)
+    window_sql, window_params = _window("o.created_at", start_date, end_date)
+    sql += window_sql
+    params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
     sql += " ORDER BY o.created_at DESC, o.id DESC"
     return db.execute(sql, params).fetchall()

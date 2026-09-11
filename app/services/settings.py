@@ -65,7 +65,7 @@ def list_operating_hours():
 
 def update_online_store_settings(form):
     values = {
-        "store_title": form.get("store_title", "").strip() or "ABI Solutions Rentals",
+        "store_title": form.get("store_title", "").strip() or "Sano Trailers Rentals",
         "store_intro": form.get("store_intro", "").strip(),
         "store_hero_text": form.get("store_hero_text", "").strip(),
         "checkout_instructions": form.get("checkout_instructions", "").strip(),

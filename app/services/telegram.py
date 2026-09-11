@@ -181,7 +181,7 @@ def daily_summary_counts(target_date):
 
 
 def format_daily_summary(summary):
-    lines = [f"📋 <b>ABI Rental daily summary for {_escape(summary['date'])}</b>", ""]
+    lines = [f"📋 <b>Sano Trailers daily summary for {_escape(summary['date'])}</b>", ""]
     lines.append(f"<b>Going out ({len(summary['going_out'])})</b>")
     if summary["going_out"]:
         for order in summary["going_out"][:20]:
@@ -214,4 +214,4 @@ def send_daily_summary(date_text=None):
 
 
 def send_test_message():
-    return _send_message("✅ ABI Rental Telegram notifications are connected.")
+    return _send_message("✅ Sano Trailers Telegram notifications are connected.")

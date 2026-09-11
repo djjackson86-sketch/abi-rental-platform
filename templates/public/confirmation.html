@@ -6,7 +6,7 @@
   <section class="panel confirmation-card">
     <p class="eyebrow">Booking request received</p>
     <h1>Booking request received</h1>
-    <p>Thanks {{ order.customer_name }}. We created draft order <strong>{{ order.order_number }}</strong>. ABI Solutions will confirm availability and follow up with you.</p>
+    <p>Thanks {{ order.customer_name }}. We created draft order <strong>{{ order.order_number }}</strong>. Sano Trailers will confirm availability and follow up with you.</p>
     <div class="two-col">
       <article><h2>Rental period</h2><p>Pickup: {{ order.start_at }}<br>Return: {{ order.end_at }}</p></article>
       <article><h2>Estimated total{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} incl. refundable deposit{% endif %}</h2><p><strong>R{{ '%.2f'|format(order.total) }}</strong><br>Security deposit: R{{ '%.2f'|format(order.deposit_total) }}</p></article>

@@ -15,9 +15,46 @@
   </div>
 </header>
 
+<section class="panel visual-calendar-panel">
+  <div class="visual-calendar-head">
+    <div>
+      <h2>{{ month_grid.label }}</h2>
+      <p class="form-help">Pickups and returns by day. Select a day to focus the timeline and availability below.</p>
+    </div>
+    <div class="visual-calendar-nav">
+      <a class="btn ghost" href="{{ url_for('admin.calendar', month=month_grid.previous_month, branch=filters.branch or None) }}" aria-label="Previous month">‹ Previous</a>
+      <a class="btn ghost{{ ' is-active' if month_grid.is_current_month }}" href="{{ url_for('admin.calendar', branch=filters.branch or None) }}">This month</a>
+      <a class="btn ghost" href="{{ url_for('admin.calendar', month=month_grid.next_month, branch=filters.branch or None) }}" aria-label="Next month">Next ›</a>
+    </div>
+  </div>
+
+  <div class="visual-calendar-weekdays">
+    {% for weekday in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}<span>{{ weekday }}</span>{% endfor %}
+  </div>
+
+  <div class="visual-calendar-grid">
+    {% for week in month_grid.weeks %}
+      {% for day in week %}
+      <a class="visual-calendar-day{{ '' if day.in_month else ' is-outside' }}{{ ' is-today' if day.is_today }}{{ ' is-selected' if day.selected }}"
+         href="{{ url_for('admin.calendar', branch=filters.branch or None, month=month_grid.month, start_date=day.date, end_date=day.date) }}"
+         aria-label="{{ day.date }}: {{ day.pickups }} pickup{{ '' if day.pickups == 1 else 's' }}, {{ day.returns }} return{{ '' if day.returns == 1 else 's' }}">
+        <span class="visual-calendar-number">{{ day.day }}</span>
+        <span class="visual-calendar-badges">
+          {% if day.pickups %}<span class="cal-badge cal-out">↑ {{ day.pickups }}</span>{% endif %}
+          {% if day.returns %}<span class="cal-badge cal-in">↓ {{ day.returns }}</span>{% endif %}
+        </span>
+      </a>
+      {% endfor %}
+    {% endfor %}
+  </div>
+
+  <p class="visual-calendar-legend"><span class="cal-badge cal-out">↑</span> pickups <span class="cal-badge cal-in">↓</span> returns &nbsp;·&nbsp; select a day to focus it</p>
+</section>
+
 <section class="calendar-page-shell">
   <aside class="calendar-filter-rail panel">
     <form method="get" class="calendar-filter-form">
+      <input type="hidden" name="month" value="{{ month_grid.month }}">
       <div class="filter-group">
         <div class="filter-group-head"><strong>Branch</strong></div>
         {% if branch_scope %}
