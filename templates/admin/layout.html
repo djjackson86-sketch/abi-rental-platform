@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}{{ title or 'Admin' }} | ABI Rental Platform{% endblock %}
+{% block title %}{{ title or 'Admin' }} | Sano Trailers{% endblock %}
 {% block body %}
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="logo" href="{{ url_for('admin.dashboard') }}"><span>ABI</span><strong>Rental</strong></a>
+    <a class="logo" href="{{ url_for('admin.dashboard') }}"><img src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers"></a>
     {% if user_can('new_order') %}<a href="{{ url_for('orders.new') }}"><span>＋</span><span>New order</span></a>{% endif %}
     {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}"><span>◎</span><span>Dashboard</span></a>{% endif %}
     {% if user_can('calendar') %}<a href="{{ url_for('admin.calendar') }}"><span>▣</span><span>Calendar</span></a>{% endif %}
