@@ -68,7 +68,7 @@
 
     <section class="metrics reports-metrics">
       <div class="metric-card"><small>Orders</small><b>{{ metrics.orders }}</b><em>in this period</em></div>
-      <div class="metric-card"><small>Revenue summary</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><em>total value</em></div>
+      <div class="metric-card"><small>Revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><em>total value</em></div>
       <div class="metric-card"><small>Payments received</small><b>R{{ '%.2f'|format(metrics.paid) }}</b><em>received</em></div>
       <div class="metric-card"><small>Amount due</small><b>R{{ '%.2f'|format(metrics.due) }}</b><em>outstanding</em></div>
     </section>
@@ -103,7 +103,7 @@
         <div class="report-card-body">
           {% if status_rows %}
             {% for row in status_rows %}
-              <div class="metric-row has-bar"><i class="metric-bar" style="width: {{ row.bar }}%"></i><span>{{ row.status|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row has-bar"><i class="metric-bar" style="width: {{ row.bar }}%"></i><span>{{ row.status|replace('_', ' ')|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No orders in this period.</p>
@@ -119,7 +119,7 @@
         <div class="report-card-body">
           {% if payment_rows %}
             {% for row in payment_rows %}
-              <div class="metric-row has-bar"><i class="metric-bar is-green" style="width: {{ row.bar }}%"></i><span>{{ row.method|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row has-bar"><i class="metric-bar is-green" style="width: {{ row.bar }}%"></i><span>{{ row.method|replace('_', ' ')|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No payments recorded in this period.</p>
