@@ -18,20 +18,27 @@
 <section class="calendar-page-shell">
   <aside class="calendar-filter-rail panel">
     <form method="get" class="calendar-filter-form">
-      {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
-      {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Branch</strong></div>
+        {% if branch_scope %}
+        <select disabled aria-label="Branch (fixed to your branch)"><option selected>{{ branches[0].name if branches else 'Your branch' }}</option></select>
+        {% else %}
+        <select name="branch">
+          <option value="">All branches</option>
+          {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+      </div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>Start date</strong></div>
         <input type="date" name="start_date" value="{{ filters.start_date }}">
-
       </div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>End date</strong></div>
         <input type="date" name="end_date" value="{{ filters.end_date }}">
-
       </div>
       <button class="btn ghost" type="submit">Filter</button>
-      {% if filters.start_date or filters.end_date %}
+      {% if filters.start_date or filters.end_date or filters.branch %}
         <a class="link-muted" href="{{ url_for('admin.calendar') }}">Clear</a>
       {% endif %}
     </form>
@@ -44,7 +51,7 @@
           {% for order in events %}
           <a class="timeline-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
             <div class="timeline-date"><b>{{ order.start_at }}</b><small>to {{ order.end_at }}</small></div>
-            <div class="timeline-main"><b>{{ order.order_number }} · {{ order.status|title }}</b><span>{{ order.customer_name or 'No customer' }} · {{ order.product_names or 'No items' }}</span></div>
+            <div class="timeline-main"><b>{{ order.order_number }} · {{ order.status|title }}</b><span>{{ order.customer_name or 'No customer' }} · {{ order.product_names or 'No items' }}{% if order.collect_branch_name %} · {{ order.collect_branch_name }}{% if order.return_branch_name and order.return_branch_name != order.collect_branch_name %} → {{ order.return_branch_name }}{% endif %}{% endif %}</span></div>
             <div class="timeline-action">Open</div>
           </a>
           {% endfor %}
@@ -58,7 +65,7 @@
       <div class="panel-title">
         <div>
           <h2>Trailer group availability</h2>
-          <p class="form-help">Booked and available rental stock for {{ availability.start_date }} to {{ availability.end_date }}.</p>
+          <p class="form-help">Booked and available rental stock for {{ availability.start_date }} to {{ availability.end_date }}{% if branch_label %} · {{ branch_label }}{% endif %}.</p>
         </div>
       </div>
       {% if availability.groups %}

@@ -4061,3 +4061,123 @@ def test_duplicate_account_names_are_blocked(client, app):
 
     # The sign-in list stays unambiguous: exactly one entry for that name.
     assert client.get('/login').data.count(b'Duplicate Name') == 1
+
+
+def _seed_two_branch_calendar(client, app):
+    """One trailer plus one reserved order on each of two branches, same day."""
+    client.post('/branches', data={'branch_id': '2', 'name': 'North Depot', 'code': 'NORTH', 'active': '1'}, follow_redirects=True)
+    seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE products SET branch_id = 1 WHERE id = 1')
+        db.execute(
+            """INSERT INTO products (name, product_type, description, sku, active, public_visible, price_amount, price_unit, security_deposit, tax_profile_id, product_group_id, quantity, tracking_method, branch_id, created_at)
+            VALUES ('North Trailer', 'rental', '', 'NORTH-001', 1, 1, 300, 'day', 500, 1, NULL, 2, 'bulk', 2, '2026-06-01T00:00:00')"""
+        )
+        db.commit()
+        north_product = db.execute("SELECT id FROM products WHERE sku = 'NORTH-001'").fetchone()['id']
+
+    central = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-01')
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': str(north_product),
+        'quantity': '1',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-01',
+        'end_time': '15:00',
+        'collect_branch_id': '2',
+        'return_branch_id': '2',
+    }, follow_redirects=False)
+    if created.status_code != 302:
+        import re as _re
+        _flashes = _re.findall(r'<div class="flash[^"]*">(.*?)</div>', created.data.decode(), _re.S)
+        raise AssertionError(f'second order was rejected: {_flashes}')
+    north = created.headers['Location'].rstrip('/').split('/')[-1]
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE orders SET collect_branch_id = 1, return_branch_id = 1 WHERE id = ?', (central,))
+        db.execute('UPDATE orders SET collect_branch_id = 2, return_branch_id = 2 WHERE id = ?', (north,))
+        db.commit()
+    assert b'Order reserved' in client.post(f'/orders/{central}/reserve', follow_redirects=True).data
+    assert b'Order reserved' in client.post(f'/orders/{north}/reserve', follow_redirects=True).data
+    return central, north
+
+
+def test_calendar_can_be_filtered_by_branch(client, app):
+    login(client)
+    _seed_two_branch_calendar(client, app)
+    query = '?start_date=2026-07-01&end_date=2026-07-01'
+
+    everything = client.get('/calendar' + query)
+    assert everything.status_code == 200
+    body = everything.data
+    assert b'<option value="">All branches</option>' in body
+    assert b'North Depot' in body
+    # Unfiltered: every branch's stock and every branch's booking shows up.
+    assert b'Order Trailer' in body and b'North Trailer' in body
+    assert b'ORD-00001' in body and b'ORD-00002' in body
+    assert b'Clear' not in client.get('/calendar').data
+
+    north = client.get('/calendar' + query + '&branch=2')
+    assert north.status_code == 200
+    page = north.data
+    assert b'<option value="2" selected>North Depot</option>' in page
+    assert b'North Trailer' in page and b'ORD-00002' in page
+    assert b'Order Trailer' not in page and b'ORD-00001' not in page
+    assert 'Booked and available rental stock for 2026-07-01 to 2026-07-01 · North Depot'.encode() in page
+    assert b'Clear' in page
+
+    central = client.get('/calendar' + query + '&branch=1').data
+    assert b'Order Trailer' in central and b'ORD-00001' in central
+    assert b'North Trailer' not in central and b'ORD-00002' not in central
+
+    # Branch names still show on each row, so the filter is legible.
+    assert b'North Depot' in north.data
+
+    # An unknown or malformed branch id is ignored rather than trusted.
+    for bogus_value in ['999', 'abc', '-1', '2 OR 1=1']:
+        bogus = client.get('/calendar' + query + '&branch=' + bogus_value.replace(' ', '%20'))
+        assert bogus.status_code == 200, bogus_value
+        assert b'Order Trailer' in bogus.data and b'North Trailer' in bogus.data, bogus_value
+
+
+def test_calendar_branch_filter_cannot_widen_a_staff_members_scope(client, app):
+    login(client)
+    _seed_two_branch_calendar(client, app)
+    client.post('/settings/users/permissions', data={
+        'module': ['new_order', 'dashboard', 'calendar', 'orders'],
+    }, follow_redirects=True)
+    client.post('/settings/users/add', data={
+        'name': 'North Staff',
+        'password': 'staff123',
+        'branch_id': '2',
+    }, follow_redirects=True)
+    client.post('/logout')
+    login(client, 'North Staff', 'staff123')
+
+    query = '?start_date=2026-07-01&end_date=2026-07-01'
+    body = client.get('/calendar' + query).data
+    assert b'North Trailer' in body and b'ORD-00002' in body
+    assert b'Order Trailer' not in body and b'ORD-00001' not in body
+    # The control is shown fixed to the staff branch, never as a chooser.
+    assert b'name="branch"' not in body
+    assert b'North Depot' in body
+
+    # Neither "all branches" nor another branch id can widen the view.
+    for attempt in ['', '1', '2', '999', 'abc']:
+        page = client.get('/calendar' + query + '&branch=' + attempt)
+        assert page.status_code == 200, attempt
+        assert b'North Trailer' in page.data, attempt
+        assert b'Order Trailer' not in page.data, f'branch={attempt!r} leaked another branch'
+        assert b'ORD-00001' not in page.data, f'branch={attempt!r} leaked another branch'
+
+
+def test_calendar_date_filter_is_submitted_once(client):
+    """Regression: hidden start_date/end_date inputs shadowed the date pickers."""
+    login(client)
+    page = client.get('/calendar?start_date=2026-07-01&end_date=2026-07-01').data.decode()
+    form = page.split('calendar-filter-form', 1)[1].split('</form>', 1)[0]
+    assert form.count('name="start_date"') == 1
+    assert form.count('name="end_date"') == 1
+    assert 'type="hidden"' not in form

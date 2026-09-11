@@ -8,9 +8,19 @@ from app.services.orders import calendar_group_availability, dashboard_schedule,
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.timezone import local_now_iso
-from app.services.access import order_branch_clause, product_branch_clause
+from app.services.access import order_branch_clause, product_branch_clause, session_branch_scope
+from app.services.branches import branch_options
 
 bp = Blueprint("admin", __name__)
+
+
+def _scoped_branch_options():
+    """Branches this session may filter by: all of them, or just the staff branch."""
+    branch_id = session_branch_scope()
+    branches = branch_options()
+    if not branch_id:
+        return branches
+    return [branch for branch in branches if branch["id"] == branch_id]
 
 @bp.route("/health")
 def health():
@@ -93,14 +103,29 @@ def scan_barcode():
 @bp.route("/calendar")
 @login_required
 def calendar():
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
+    branch_scope = session_branch_scope()
+    branches = _scoped_branch_options()
+    if branch_scope:
+        # Branch-limited staff are already pinned to their branch, so the filter
+        # is never applied for them: a crafted ?branch= must not change anything.
+        selected_branch = ''
+    else:
+        requested_branch = request.args.get('branch', '').strip()
+        allowed = {str(branch["id"]) for branch in branches}
+        selected_branch = requested_branch if requested_branch in allowed else ''
+    branch_id = int(selected_branch) if selected_branch else None
+    branch_label = next((branch["name"] for branch in branches if str(branch["id"]) == selected_branch), '')
     return render_template(
         "admin/calendar.html",
         settings=get_company_settings(),
-        events=scheduled_events(start_date=start_date or None, end_date=end_date or None),
-        availability=calendar_group_availability(start_date=start_date or None, end_date=end_date or None),
-        filters={"start_date": start_date, "end_date": end_date},
+        branches=branches,
+        branch_scope=branch_scope,
+        branch_label=branch_label,
+        events=scheduled_events(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id),
+        availability=calendar_group_availability(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id),
+        filters={"start_date": start_date, "end_date": end_date, "branch": selected_branch},
     )
 
 @bp.route("/online-store", methods=["GET", "POST"])

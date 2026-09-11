@@ -1052,10 +1052,12 @@ def _calendar_range(start_date=None, end_date=None):
     return range_start, range_end
 
 
-def calendar_group_availability(start_date=None, end_date=None):
+def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
     range_start, range_end = _calendar_range(start_date, end_date)
     db = get_db()
-    product_branch_clause, product_branch_params = scoped_product_branch_clause("p", include_unassigned=True)
+    product_branch_clause, product_branch_params = scoped_product_branch_clause(
+        "p", include_unassigned=True, branch_id=branch_id
+    )
     products = db.execute(
         f"""SELECT p.id, p.name, p.sku, p.quantity, p.tracking_method,
                COALESCE(pg.id, 0) AS group_id,
@@ -1131,7 +1133,7 @@ def calendar_group_availability(start_date=None, end_date=None):
     }
 
 
-def scheduled_events(limit=50, start_date=None, end_date=None):
+def scheduled_events(limit=50, start_date=None, end_date=None, branch_id=None):
     db = get_db()
     sql = """SELECT o.*, c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
             (SELECT GROUP_CONCAT(COALESCE(p.name, oi.custom_name), ', ')
@@ -1142,7 +1144,7 @@ def scheduled_events(limit=50, start_date=None, end_date=None):
         LEFT JOIN branches rb ON rb.id = o.return_branch_id
         WHERE o.status IN ('reserved', 'started')"""
     params = []
-    scope_sql, scope_params = order_branch_clause("o")
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
     sql += scope_sql
     params.extend(scope_params)
     if start_date:

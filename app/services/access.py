@@ -311,22 +311,36 @@ def session_branch_scope():
         return None
 
 
-def order_branch_clause(alias="o"):
-    branch_id = session_branch_scope()
-    if not branch_id:
+def order_branch_clause(alias="o", branch_id=None):
+    """SQL restriction for an orders query (collection or return branch).
+
+    Branch-limited staff are pinned to their own branch by the session. A caller
+    may also pass an explicit ``branch_id`` for a UI branch filter; the session
+    scope always wins, so a filter can only ever narrow a view, never widen it.
+    """
+    scope = session_branch_scope()
+    target = scope or branch_id
+    if not target:
         return "", []
     prefix = f"{alias}." if alias else ""
-    return f" AND ({prefix}collect_branch_id = ? OR {prefix}return_branch_id = ?)", [branch_id, branch_id]
+    return f" AND ({prefix}collect_branch_id = ? OR {prefix}return_branch_id = ?)", [target, target]
 
 
-def product_branch_clause(alias="p", include_unassigned=True):
-    branch_id = session_branch_scope()
-    if not branch_id:
+def product_branch_clause(alias="p", include_unassigned=True, branch_id=None):
+    """SQL restriction for a products query.
+
+    Unassigned stock only rides along on the staff branch-scope view: choosing a
+    specific branch in a filter means that branch's stock, not "that branch plus
+    anything not allocated yet".
+    """
+    scope = session_branch_scope()
+    target = scope or branch_id
+    if not target:
         return "", []
     prefix = f"{alias}." if alias else ""
-    if include_unassigned:
-        return f" AND ({prefix}branch_id = ? OR {prefix}branch_id IS NULL)", [branch_id]
-    return f" AND {prefix}branch_id = ?", [branch_id]
+    if include_unassigned and not branch_id:
+        return f" AND ({prefix}branch_id = ? OR {prefix}branch_id IS NULL)", [target]
+    return f" AND {prefix}branch_id = ?", [target]
 
 
 def user_can_access_order(order):
