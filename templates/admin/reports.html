@@ -83,17 +83,13 @@
           <div class="metric-row"><span>Total revenue</span><b>R{{ '%.2f'|format(metrics.revenue) }}</b></div>
           <div class="metric-row"><span>Total paid</span><b>R{{ '%.2f'|format(metrics.paid) }}</b></div>
           <div class="metric-row"><span>Total due</span><b{{ ' class="is-due"'|safe if metrics.due }}>R{{ '%.2f'|format(metrics.due) }}</b></div>
-          {% if metrics.revenue %}
-            {% set paid_share = (metrics.paid / metrics.revenue * 100)|round(1) %}
-            {% if paid_share > 100 %}{% set paid_share = 100 %}{% endif %}
-            {% set paid_pct = paid_share|round(0)|int %}
-            {% set due_pct = 100 - paid_pct %}
+          {% if metrics.payment_split %}
             <div class="report-split-wrap">
-              <div class="report-split" role="img" aria-label="{{ paid_pct }}% of R{{ '%.2f'|format(metrics.revenue) }} received">
-                <span class="report-split-paid" style="width: {{ paid_share }}%"></span>
-                <span class="report-split-due" style="width: {{ (100 - paid_share)|round(1) }}%"></span>
+              <div class="report-split" role="img" aria-label="{{ metrics.payment_split.paid_pct }}% of R{{ '%.2f'|format(metrics.revenue) }} received">
+                <span class="report-split-paid" style="width: {{ metrics.payment_split.paid_share }}%"></span>
+                <span class="report-split-due" style="width: {{ metrics.payment_split.due_share }}%"></span>
               </div>
-              <p class="report-split-legend"><span><i class="split-dot paid"></i>Paid {{ paid_pct }}%</span><span><i class="split-dot due"></i>Outstanding {{ due_pct }}%</span></p>
+              <p class="report-split-legend"><span><i class="split-dot paid"></i>Paid {{ metrics.payment_split.paid_pct }}%</span><span><i class="split-dot due"></i>Outstanding {{ metrics.payment_split.due_pct }}%</span></p>
             </div>
           {% endif %}
         </div>
@@ -106,10 +102,8 @@
         </header>
         <div class="report-card-body">
           {% if status_rows %}
-            {% set ns = namespace(top=0) %}
-            {% for row in status_rows %}{% if (row.count or 0) > ns.top %}{% set ns.top = row.count %}{% endif %}{% endfor %}
             {% for row in status_rows %}
-              <div class="metric-row has-bar"><i class="metric-bar" style="width: {{ (row.count / ns.top * 100)|round(1) if ns.top else 0 }}%"></i><span>{{ row.status|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row has-bar"><i class="metric-bar" style="width: {{ row.bar }}%"></i><span>{{ row.status|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No orders in this period.</p>
@@ -124,10 +118,8 @@
         </header>
         <div class="report-card-body">
           {% if payment_rows %}
-            {% set pay_ns = namespace(top=0) %}
-            {% for row in payment_rows %}{% if (row.count or 0) > pay_ns.top %}{% set pay_ns.top = row.count %}{% endif %}{% endfor %}
             {% for row in payment_rows %}
-              <div class="metric-row has-bar"><i class="metric-bar is-green" style="width: {{ (row.count / pay_ns.top * 100)|round(1) if pay_ns.top else 0 }}%"></i><span>{{ row.method|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row has-bar"><i class="metric-bar is-green" style="width: {{ row.bar }}%"></i><span>{{ row.method|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No payments recorded in this period.</p>

@@ -4352,3 +4352,196 @@ def test_pages_carry_the_sano_favicon_and_no_abi_branding(client):
     assert b'apple-touch-icon' in login_page
     assert b'ABI' not in login_page
     assert b'Sign in to Sano Trailers' in login_page
+
+
+def _libsql_row(fields, values):
+    """A production-shaped row, for tests that must not depend on sqlite3.
+
+    libsql_client.Row is a *tuple subclass*, so ``row.count`` is the tuple
+    method rather than the column and ``dict(row)`` misreads the values. Local
+    dev runs on sqlite3 rows, which behave differently — so a test that only
+    ever touches sqlite3 rows cannot see this class of bug at all.
+    """
+    class Row(tuple):
+        def __new__(cls, names, items):
+            row = super().__new__(cls, items)
+            row._fields = tuple(names)
+            row._values = tuple(items)
+            return row
+
+        def asdict(self):
+            return dict(zip(self._fields, self._values))
+
+        def keys(self):
+            return list(self._fields)
+
+        def __getitem__(self, key):
+            if isinstance(key, str):
+                return self._values[self._fields.index(key)]
+            return tuple.__getitem__(self, key)
+
+    return Row(fields, values)
+
+
+def test_report_rows_are_normalised_from_production_shaped_rows():
+    """Regression: /reports 500'd on the deployed build with
+
+        TypeError: '>' not supported between instances of 'method' and 'int'
+
+    because reports.html did `(row.count or 0) > ns.top` and libsql rows are
+    tuples, so `row.count` was `tuple.count`, not the column. 136 local tests
+    and 42/42 local browser checks passed regardless: sqlite3.Row has no
+    `.count`, so on SQLite the expression quietly resolved to the value.
+    """
+    from app.services import reports
+
+    row = _libsql_row(('status', 'count', 'total'), ('reserved', 3, 900.0))
+    assert callable(row.count), 'the trap itself: .count is a bound method'
+    assert row['count'] == 3
+
+    assert reports.row_dict(row) == {'status': 'reserved', 'count': 3, 'total': 900.0}
+
+    bars = reports.rows_with_bars([
+        _libsql_row(('status', 'count', 'total'), ('reserved', 3, 900.0)),
+        _libsql_row(('status', 'count', 'total'), ('draft', 1, 100.0)),
+    ])
+    assert [entry['count'] for entry in bars] == [3, 1]
+    assert [entry['bar'] for entry in bars] == [100.0, 33.3]
+    assert bars[1]['status'] == 'draft'
+
+
+def test_report_bar_scale_survives_empty_and_zero_rows():
+    from app.services import reports
+
+    assert reports.rows_with_bars([]) == []
+    assert reports.rows_with_bars([_libsql_row(('count',), (0,))])[0]['bar'] == 0.0
+
+
+def test_payment_split_percentages_are_worked_out_in_python():
+    from app.services import reports
+
+    assert reports.payment_split(0, 0) is None
+    assert reports.payment_split(0, 250) is None
+    split = reports.payment_split(800, 200)
+    assert split == {'paid_share': 25.0, 'due_share': 75.0, 'paid_pct': 25, 'due_pct': 75}
+    # An overpayment must never overflow the bar.
+    assert reports.payment_split(100, 500)['paid_share'] == 100.0
+
+
+def test_reports_page_renders_when_the_database_returns_libsql_rows(client, monkeypatch):
+    """End-to-end guard for the production-only 500 on /reports."""
+    from app.services import reports
+
+    class Cursor:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def fetchone(self):
+            return self._rows[0] if self._rows else None
+
+    class FakeDB:
+        def execute(self, sql, params=None):
+            statement = ' '.join(sql.split()).lower()
+            if 'group by o.status' in statement:
+                return Cursor([
+                    _libsql_row(('status', 'count', 'total'), ('reserved', 3, 900.0)),
+                    _libsql_row(('status', 'count', 'total'), ('draft', 1, 100.0)),
+                ])
+            if 'group by pay.method' in statement:
+                return Cursor([_libsql_row(('method', 'count', 'total'), ('cash', 2, 500.0))])
+            if 'group by product_name' in statement:
+                return Cursor([_libsql_row(('product_name', 'quantity', 'total'), ('Order Trailer', 2, 600.0))])
+            if 'group by c.id, c.name' in statement:
+                return Cursor([_libsql_row(('customer_name', 'orders', 'total'), ('Acme', 1, 800.0))])
+            if 'sum(pay.amount)' in statement:
+                return Cursor([_libsql_row(('count', 'paid'), (1, 200.0))])
+            if 'as revenue' in statement:
+                return Cursor([_libsql_row(('count', 'revenue', 'due'), (2, 800.0, 600.0))])
+            if 'from customers' in statement:
+                return Cursor([_libsql_row(('count',), (4,))])
+            return Cursor([_libsql_row(('count',), (7,))])
+
+    monkeypatch.setattr(reports, 'get_db', lambda: FakeDB())
+    login(client)
+
+    page = client.get('/reports')
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert 'Reserved' in body and '3 · R900.00' in body
+    # Bar scale and paid/outstanding split render as finished values.
+    assert 'width: 100.0%' in body
+    assert 'width: 33.3%' in body
+    assert 'Paid 25%' in body and 'Outstanding 75%' in body
+    # The raw tuple must never leak into the page.
+    assert 'built-in method' not in body
+
+
+def test_orders_can_be_filtered_by_branch(client, app):
+    login(client)
+    _seed_two_branch_calendar(client, app)
+
+    everything = client.get('/orders')
+    assert everything.status_code == 200
+    body = everything.data
+    assert b'<option value="">All branches</option>' in body
+    assert b'North Depot' in body
+    assert b'ORD-00001' in body and b'ORD-00002' in body
+
+    north = client.get('/orders?branch=2')
+    assert north.status_code == 200
+    page = north.data
+    assert b'<option value="2" selected>North Depot</option>' in page
+    assert b'ORD-00002' in page
+    assert b'ORD-00001' not in page
+    assert b'Clear branch' in page
+
+    central = client.get('/orders?branch=1').data
+    assert b'ORD-00001' in central
+    assert b'ORD-00002' not in central
+
+    # An unknown or malformed branch id is ignored rather than trusted.
+    for bogus in ['999', 'abc', '-1', '2 OR 1=1']:
+        page = client.get('/orders?branch=' + bogus.replace(' ', '%20'))
+        assert page.status_code == 200, bogus
+        assert b'ORD-00001' in page.data and b'ORD-00002' in page.data, bogus
+
+
+def test_orders_branch_filter_cannot_widen_a_staff_members_scope(client, app):
+    login(client)
+    _seed_two_branch_calendar(client, app)
+    client.post('/settings/users/permissions', data={
+        'module': ['new_order', 'dashboard', 'calendar', 'orders'],
+    }, follow_redirects=True)
+    client.post('/settings/users/add', data={
+        'name': 'North Staff',
+        'password': 'staff123',
+        'branch_id': '2',
+    }, follow_redirects=True)
+    client.post('/logout')
+    login(client, 'North Staff', 'staff123')
+
+    body = client.get('/orders').data
+    assert b'ORD-00002' in body
+    assert b'ORD-00001' not in body
+    # A fixed label, never a chooser or a hidden branch field to tamper with.
+    assert b'name="branch"' not in body
+    assert b'North Depot' in body
+
+    for attempt in ['', '1', '2', '999', 'abc']:
+        page = client.get('/orders?branch=' + attempt)
+        assert page.status_code == 200, attempt
+        assert b'ORD-00002' in page.data, attempt
+        assert b'ORD-00001' not in page.data, f'branch={attempt!r} leaked another branch'
+
+
+def test_orders_metrics_toggle_is_wired_to_the_totals_row(client):
+    """Regression: the button shipped as a dead control with aria-disabled."""
+    login(client)
+    body = client.get('/orders').data
+    assert b'aria-disabled="true"' not in body
+    assert b'aria-controls="orders-metrics"' in body
+    assert b'id="orders-metrics"' in body
+    assert b'metrics-toggle' in body

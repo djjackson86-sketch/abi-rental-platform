@@ -311,6 +311,33 @@ def session_branch_scope():
         return None
 
 
+def resolve_branch_filter(requested=""):
+    """Resolve a branch-aware screen's ``?branch=`` filter.
+
+    Returns ``(selected, branch_id, label, branches, scope)``. Branch-limited
+    staff are already pinned to their branch by the session, so their filter is
+    always empty: a crafted ``?branch=`` must never widen what they see. For an
+    all-branch viewer an unknown id is ignored rather than trusted.
+
+    Shared by /calendar, /reports and /orders — reuse it rather than re-deriving
+    the logic, so the scoping rule cannot drift between screens.
+    """
+    from app.services.branches import branch_options
+
+    scope = session_branch_scope()
+    branches = branch_options()
+    if scope:
+        branches = [branch for branch in branches if branch["id"] == scope]
+        selected = ""
+    else:
+        allowed = {str(branch["id"]) for branch in branches}
+        requested = (requested or "").strip()
+        selected = requested if requested in allowed else ""
+    branch_id = int(selected) if selected else None
+    label = next((branch["name"] for branch in branches if str(branch["id"]) == selected), "")
+    return selected, branch_id, label, branches, scope
+
+
 def order_branch_clause(alias="o", branch_id=None):
     """SQL restriction for an orders query (collection or return branch).
 

@@ -12,7 +12,7 @@ from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_options, default_branch_id
 from app.services.timezone import local_now_iso
-from app.services.access import session_branch_scope, user_can_access_order
+from app.services.access import resolve_branch_filter, session_branch_scope, user_can_access_order
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -127,14 +127,18 @@ def index():
     return_status = request.args.get("return_status", "")
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
-    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date)
+    selected_branch, branch_id, branch_label, branches, branch_scope = resolve_branch_filter(request.args.get("branch", ""))
+    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id)
     return render_template(
         "admin/orders/index.html",
         settings=get_company_settings(),
         orders=orders,
-        counts=order_counts(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date),
-        filter_counts=order_filter_counts(),
-        filters={"query": query, "status": status, "payment_status": payment_status, "return_status": return_status, "start_date": start_date, "end_date": end_date},
+        counts=order_counts(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id),
+        filter_counts=order_filter_counts(branch_id=branch_id),
+        branches=branches,
+        branch_label=branch_label,
+        branch_scope=branch_scope,
+        filters={"query": query, "status": status, "payment_status": payment_status, "return_status": return_status, "start_date": start_date, "end_date": end_date, "branch": selected_branch},
         deposit_to_process_amount=deposit_to_process_amount,
     )
 

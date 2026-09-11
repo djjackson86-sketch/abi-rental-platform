@@ -9,7 +9,7 @@ from app.services.orders import calendar_group_availability, calendar_month_over
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.timezone import local_now_iso
-from app.services.access import order_branch_clause, product_branch_clause, session_branch_scope
+from app.services.access import order_branch_clause, product_branch_clause, resolve_branch_filter, session_branch_scope
 from app.services.branches import branch_options
 
 bp = Blueprint("admin", __name__)
@@ -26,22 +26,11 @@ def _scoped_branch_options():
 def _branch_filter():
     """Resolve the ``?branch=`` filter for a branch-aware screen.
 
-    Returns ``(selected, branch_id, label, branches, scope)``. Branch-limited
-    staff are already pinned to their branch by the session, so their filter is
-    always empty: a crafted ``?branch=`` must never change what they see. For an
-    all-branch viewer an unknown id is ignored rather than trusted.
+    Thin wrapper over the shared resolver in ``app.services.access`` so
+    /calendar, /reports and /orders cannot drift apart. Returns
+    ``(selected, branch_id, label, branches, scope)``.
     """
-    scope = session_branch_scope()
-    branches = _scoped_branch_options()
-    if scope:
-        selected = ''
-    else:
-        requested = request.args.get('branch', '').strip()
-        allowed = {str(branch["id"]) for branch in branches}
-        selected = requested if requested in allowed else ''
-    branch_id = int(selected) if selected else None
-    label = next((branch["name"] for branch in branches if str(branch["id"]) == selected), '')
-    return selected, branch_id, label, branches, scope
+    return resolve_branch_filter(request.args.get("branch", ""))
 
 
 @bp.route("/health")

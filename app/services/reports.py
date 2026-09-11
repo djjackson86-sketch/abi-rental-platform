@@ -6,6 +6,64 @@ def money(value):
     return round(float(value or 0), 2)
 
 
+def row_dict(row):
+    """Normalise a database row into a plain dict.
+
+    Production runs on libSQL rows while local dev runs on sqlite3 rows, and the
+    two expose completely different interfaces. libsql_client.Row is a *tuple
+    subclass*, so ``row.count`` resolves to ``tuple.count`` (a bound method, not
+    the column) and ``dict(row)`` misreads the values as key/value pairs. That
+    difference produced a production-only 500:
+
+        TypeError: '>' not supported between instances of 'method' and 'int'
+
+    Never read report columns off a raw row object — convert first.
+    """
+    if isinstance(row, dict):
+        return dict(row)
+    asdict = getattr(row, "asdict", None)  # libsql_client.Row
+    if callable(asdict):
+        return dict(asdict())
+    fields = getattr(row, "_fields", None)  # libsql_client.Row, older versions
+    if fields:
+        return {name: row[name] for name in fields}
+    keys = getattr(row, "keys", None)  # sqlite3.Row
+    if callable(keys):
+        return {key: row[key] for key in keys()}
+    raise TypeError(f"cannot convert row of type {type(row)!r} to a dict")
+
+
+def rows_with_bars(rows, count_key="count"):
+    """Convert rows to dicts and attach a 0-100 ``bar`` share to each.
+
+    The bar scale is computed here, not in the template: arithmetic in Jinja is
+    unverifiable locally (it can pass every test and still fail on the deployed
+    page), so templates only ever render finished values.
+    """
+    materialised = [row_dict(row) for row in rows]
+    top = max((int(row.get(count_key) or 0) for row in materialised), default=0)
+    for row in materialised:
+        count = int(row.get(count_key) or 0)
+        row["bar"] = round(count / top * 100, 1) if top else 0.0
+    return materialised
+
+
+def payment_split(revenue, paid):
+    """Paid vs outstanding as percentages, or ``None`` when nothing was invoiced."""
+    revenue = float(revenue or 0)
+    paid = float(paid or 0)
+    if revenue <= 0:
+        return None
+    paid_share = min(max(paid / revenue * 100, 0.0), 100.0)
+    paid_pct = int(round(paid_share))
+    return {
+        "paid_share": round(paid_share, 1),
+        "due_share": round(100 - paid_share, 1),
+        "paid_pct": paid_pct,
+        "due_pct": 100 - paid_pct,
+    }
+
+
 def _window(column, start_date, end_date):
     """Shared date restriction for one DATE()-comparable column."""
     sql = ""
@@ -65,6 +123,7 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
         "paid": money(payments["paid"]),
         "customers": customers["count"] or 0,
         "products": products["count"] or 0,
+        "payment_split": payment_split(orders["revenue"], payments["paid"]),
     }
 
 
@@ -82,7 +141,7 @@ def orders_by_status(start_date=None, end_date=None, branch_id=None):
     sql += scope_sql
     params.extend(scope_params)
     sql += " GROUP BY o.status ORDER BY count DESC, o.status"
-    return db.execute(sql, params).fetchall()
+    return rows_with_bars(db.execute(sql, params).fetchall())
 
 
 def payments_by_method(start_date=None, end_date=None, branch_id=None):
@@ -100,7 +159,7 @@ def payments_by_method(start_date=None, end_date=None, branch_id=None):
     sql += scope_sql
     params.extend(scope_params)
     sql += " GROUP BY pay.method ORDER BY total DESC, pay.method"
-    return db.execute(sql, params).fetchall()
+    return rows_with_bars(db.execute(sql, params).fetchall())
 
 
 def product_performance(start_date=None, end_date=None, limit=10, branch_id=None):
@@ -130,7 +189,7 @@ def product_performance(start_date=None, end_date=None, limit=10, branch_id=None
         LIMIT ?
     """
     params.append(limit)
-    return db.execute(sql, params).fetchall()
+    return [row_dict(row) for row in db.execute(sql, params).fetchall()]
 
 
 def customer_summary(start_date=None, end_date=None, limit=10, branch_id=None):
@@ -156,7 +215,7 @@ def customer_summary(start_date=None, end_date=None, limit=10, branch_id=None):
         LIMIT ?
     """
     params.append(limit)
-    return db.execute(sql, params).fetchall()
+    return [row_dict(row) for row in db.execute(sql, params).fetchall()]
 
 
 def orders_export_rows(start_date=None, end_date=None, branch_id=None):

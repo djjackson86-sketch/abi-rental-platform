@@ -40,7 +40,7 @@ def _process_deposit_clause(alias="o"):
     )
 
 
-def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
+def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         cu.name AS created_by_name, cu.email AS created_by_email,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
@@ -49,7 +49,7 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
         LEFT JOIN branches rb ON rb.id = o.return_branch_id
         LEFT JOIN users cu ON cu.id = o.created_by_user_id WHERE 1=1"""
     params = []
-    scope_sql, scope_params = order_branch_clause("o")
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
     sql += scope_sql
     params.extend(scope_params)
     if query:
@@ -77,10 +77,10 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
     return get_db().execute(sql, params).fetchall()
 
 
-def _order_filter_where(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
+def _order_filter_where(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
     clauses = ["1=1"]
     params = []
-    scope_sql, scope_params = order_branch_clause("o")
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
     if scope_sql:
         clauses.append(scope_sql.replace(" AND ", "", 1))
         params.extend(scope_params)
@@ -108,8 +108,8 @@ def _order_filter_where(query="", status="", payment_status="", return_status=""
     return " AND ".join(clauses), params
 
 
-def order_counts(query="", status="", payment_status="", return_status="", start_date="", end_date=""):
-    where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date)
+def order_counts(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
+    where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date, branch_id=branch_id)
     db = get_db()
     row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM(o.total),0) revenue, COALESCE(SUM(o.due_total),0) due
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
@@ -131,9 +131,10 @@ def deposit_to_process_amount(order):
     return round(float(order["deposit_total"] or 0), 2)
 
 
-def order_filter_counts():
+def order_filter_counts(branch_id=None):
+    """Counts for the Orders filter rail, honouring the branch filter."""
     db = get_db()
-    scope_sql, scope_params = order_branch_clause("o")
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
     status_rows = db.execute(f"SELECT o.status AS status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.status", scope_params).fetchall()
     payment_rows = db.execute(f"SELECT o.payment_status AS payment_status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.payment_status", scope_params).fetchall()
     process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_process_deposit_clause('o')}", scope_params).fetchone()

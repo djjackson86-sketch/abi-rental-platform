@@ -17,6 +17,7 @@
     {% if filters.return_status %}<input type="hidden" name="return_status" value="{{ filters.return_status }}">{% endif %}
     {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
     {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
+    {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
   </form>
   {% if user_can('new_order') %}<a class="btn primary" href="{{ url_for('orders.new') }}">Add order</a>{% endif %}
 </header>
@@ -29,6 +30,18 @@
       {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
       {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
       <div class="filter-group">
+        <div class="filter-group-head"><strong>Branch</strong><span>⌃</span></div>
+        {% if branch_scope %}
+        <label class="filter-fixed" title="Your account only sees this branch">{{ branches[0].name if branches else 'Your branch' }}</label>
+        {% else %}
+        <select name="branch" aria-label="Branch" onchange="this.form.submit()">
+          <option value="">All branches</option>
+          {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        {% if filters.branch %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status, return_status=filters.return_status, start_date=filters.start_date, end_date=filters.end_date) }}">Clear branch</a>{% endif %}
+      </div>
+      <div class="filter-group">
         <div class="filter-group-head"><strong>Status</strong><span>⌃</span></div>
         {% for s,label in [('draft','Draft'),('reserved','Reserved'),('started','Started'),('returned','Returned'),('archived','Archived'),('canceled','Canceled')] %}
           <label class="filter-check">
@@ -37,7 +50,7 @@
             <em>({{ filter_counts.status.get(s, 0) }})</em>
           </label>
         {% endfor %}
-        {% if filters.status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, payment_status=filters.payment_status, return_status=filters.return_status) }}">Clear status</a>{% endif %}
+        {% if filters.status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, payment_status=filters.payment_status, return_status=filters.return_status, branch=filters.branch or None) }}">Clear status</a>{% endif %}
       </div>
 
       <div class="filter-group">
@@ -54,7 +67,7 @@
           <span>Process deposit</span>
           <em>({{ filter_counts.payment_status.get('process_deposit', 0) }})</em>
         </label>
-        {% if filters.payment_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, return_status=filters.return_status) }}">Clear payment</a>{% endif %}
+        {% if filters.payment_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, return_status=filters.return_status, branch=filters.branch or None) }}">Clear payment</a>{% endif %}
       </div>
 
       <div class="filter-group compact">
@@ -64,15 +77,15 @@
           <span>Late</span>
           <em>({{ filter_counts.return_status.get('late', 0) }})</em>
         </label>
-        {% if filters.return_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status) }}">Clear return status</a>{% endif %}
+        {% if filters.return_status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status, branch=filters.branch or None) }}">Clear return status</a>{% endif %}
       </div>
 
       <div class="filter-group compact">
         <div class="filter-group-head"><strong>Date range</strong><span>⌃</span></div>
-        <label>From<input type="date" name="start_date" value="{{ filters.start_date }}"></label><label>To<input type="date" name="end_date" value="{{ filters.end_date }}"></label><button class="btn ghost" type="submit">Apply dates</button>{% if filters.start_date or filters.end_date %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status, return_status=filters.return_status) }}">Clear dates</a>{% endif %}
+        <label>From<input type="date" name="start_date" value="{{ filters.start_date }}"></label><label>To<input type="date" name="end_date" value="{{ filters.end_date }}"></label><button class="btn ghost" type="submit">Apply dates</button>{% if filters.start_date or filters.end_date %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status, return_status=filters.return_status, branch=filters.branch or None) }}">Clear dates</a>{% endif %}
       </div>
 
-      {% if user_can('reports') %}<a class="btn ghost export-btn" href="{{ url_for('admin.reports_orders_csv') }}">Export</a>{% endif %}
+      {% if user_can('reports') %}<a class="btn ghost export-btn" href="{{ url_for('admin.reports_orders_csv', branch=filters.branch or None) }}">Export</a>{% endif %}
     </form>
   </aside>
 
@@ -80,15 +93,15 @@
     {% if current_user_is_main %}
     <div class="orders-tabs-row">
       <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
-        <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index') }}">All</a>
+        <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index', branch=filters.branch or None) }}">All</a>
         <a href="#">Upcoming</a>
-        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late') }}">Late</a>
+        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
         <a href="#">With shortage</a>
       </nav>
-      <button class="btn ghost metrics-toggle" type="button" aria-disabled="true">Hide metrics⌃</button>
+      <button class="btn ghost metrics-toggle" type="button" aria-expanded="true" aria-controls="orders-metrics" title="Collapse or expand the totals row above the order list">Hide metrics⌃</button>
     </div>
 
-    <section class="metrics orders-metrics">
+    <section class="metrics orders-metrics" id="orders-metrics">
       <div class="metric-card"><small>Orders</small><b>{{ counts.total }}</b></div>
       <div class="metric-card"><small>Items ordered</small><b>{{ counts['items'] }}</b></div>
       <div class="metric-card"><small>Revenue</small><b>R{{ '%.2f'|format(counts.revenue) }}</b></div>
@@ -97,9 +110,9 @@
     {% else %}
     <div class="orders-tabs-row">
       <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
-        <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index') }}">All</a>
+        <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index', branch=filters.branch or None) }}">All</a>
         <a href="#">Upcoming</a>
-        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late') }}">Late</a>
+        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
         <a href="#">With shortage</a>
       </nav>
     </div>
@@ -163,4 +176,34 @@
     </section>
   </main>
 </section>
+
+{% if current_user_is_main %}
+<script>
+// "Hide metrics" collapses the Orders totals row and remembers the choice, so
+// staff who work from the list keep the extra vertical space between visits.
+// Main profile only: restricted staff never get the totals row at all.
+(function () {
+  var btn = document.querySelector('.metrics-toggle');
+  var panel = document.getElementById('orders-metrics');
+  if (!btn || !panel) return;
+  var KEY = 'orders.metrics.hidden';
+
+  function apply(hidden) {
+    panel.classList.toggle('is-hidden', hidden);
+    btn.textContent = hidden ? 'Show metrics⌄' : 'Hide metrics⌃';
+    btn.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+  }
+
+  var hidden = false;
+  try { hidden = window.localStorage.getItem(KEY) === '1'; } catch (err) { hidden = false; }
+  apply(hidden);
+
+  btn.addEventListener('click', function () {
+    hidden = !hidden;
+    try { window.localStorage.setItem(KEY, hidden ? '1' : '0'); } catch (err) { /* private mode */ }
+    apply(hidden);
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}
