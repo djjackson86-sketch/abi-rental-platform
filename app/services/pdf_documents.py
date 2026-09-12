@@ -1,8 +1,9 @@
+import math
 from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, document_tax_view, label_for, printable_document, rental_days_label
+from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 
@@ -108,6 +109,33 @@ def _pdf_text_command(x, y, text, size: int | float = 9, font='F1'):
     return f'/{font} {size} Tf 1 0 0 1 {x:.2f} {y:.2f} Tm ({_escape_pdf_text(text)}) Tj'
 
 
+def _pdf_paid_stamp(x, y, text='PAID', size=30, angle=-18.0, colour=(0.78, 0.09, 0.09)):
+    """A diagonal PAID stamp.
+
+    PDF has no stamp primitive, so this rotates the coordinate system and draws
+    a stroked box with the word inside it. Drawn before the text layer so any
+    real content still sits on top.
+    """
+    radians = math.radians(angle)
+    cos, sin = math.cos(radians), math.sin(radians)
+    text_width = len(text) * size * 0.62
+    width = text_width + (size * 0.9)
+    height = size * 1.5
+    pad_x = max(6.0, (width - text_width) / 2)
+    pad_y = max(4.0, (height - (size * 0.72)) / 2)
+    return [
+        'q',
+        f'{colour[0]:.3f} {colour[1]:.3f} {colour[2]:.3f} rg',
+        f'{colour[0]:.3f} {colour[1]:.3f} {colour[2]:.3f} RG',
+        f'{cos:.5f} {sin:.5f} {-sin:.5f} {cos:.5f} {x:.2f} {y:.2f} cm',
+        f'1.8 w 0 0 {height:.2f} {width:.2f} re S',
+        'BT',
+        f'/F2 {size} Tf {pad_x:.2f} {pad_y:.2f} Td ({_escape_pdf_text(text)}) Tj',
+        'ET',
+        'Q',
+    ]
+
+
 def _pdf_light_blue_rect(x, y, width, height):
     return f'q 0.86 0.94 1 rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f Q'
 
@@ -184,6 +212,11 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
         ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
 
+    # A settled invoice is stamped PAID. Drawn first so every real figure sits
+    # on top of it, and pinned in the empty band above the totals.
+    if document_paid_stamp(document):
+        draw_commands.extend(_pdf_paid_stamp(395, 498))
+
     text_commands = ['BT']
     # Top-left brand/address, matching the supplied template.
     _add_pdf_lines(text_commands, 36, 715, [
@@ -247,22 +280,31 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
     # Line items are quoted EXCLUDING VAT; the VAT is stated once in the summary.
     tax_view = document_tax_view(document, items)
-    _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
-    _add_pdf_lines(text_commands, 250, table_y, ['Qty'], size=7.5)
-    _add_pdf_lines(text_commands, 305, table_y, ['Unit excl. VAT'], size=7.5)
-    _add_pdf_lines(text_commands, 372, table_y, ['Rental days'], size=7.5)
-    _add_pdf_lines(text_commands, 430, table_y, ['Subtotal excl. VAT'], size=7.5)
+    # Column headings as the client specified them (PRODUCT | QTY | DAYS | UNIT
+    # EXCL. VAT | SUBTOTAL EXCL. VAT | TAX | TOTAL INCL. VAT). Widths at 7.5pt:
+    # unit 58, subtotal 80, tax 15, total-incl 62 - the last column ends near
+    # x=502, inside the 559 table edge, so nothing collides.
+    _add_pdf_lines(text_commands, 36, table_y, ['PRODUCT'], size=7.5)
+    _add_pdf_lines(text_commands, 165, table_y, ['QTY'], size=7.5)
+    _add_pdf_lines(text_commands, 200, table_y, ['DAYS'], size=7.5)
+    _add_pdf_lines(text_commands, 235, table_y, ['UNIT EXCL. VAT'], size=7.5)
+    _add_pdf_lines(text_commands, 310, table_y, ['SUBTOTAL EXCL. VAT'], size=7.5)
+    _add_pdf_lines(text_commands, 405, table_y, ['TAX'], size=7.5)
+    _add_pdf_lines(text_commands, 440, table_y, ['TOTAL INCL. VAT'], size=7.5)
     y = table_y - 24
     for index, item in enumerate(items[:8]):
         name = item['product_name'] or item['custom_name'] or 'Item'
         sku = item['product_sku'] or ''
-        line_view = tax_view['lines'][index] if index < len(tax_view['lines']) else {'unit_excl': 0.0, 'subtotal_excl': 0.0, 'rental_days': None}
+        line_view = tax_view['lines'][index] if index < len(tax_view['lines']) else {
+            'unit_excl': 0.0, 'subtotal_excl': 0.0, 'tax': 0.0, 'total_incl': 0.0, 'rental_days': None}
         days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
         _add_pdf_lines(text_commands, 36, y, [name, sku], size=8, leading=11, max_lines=2)
-        _add_pdf_lines(text_commands, 250, y, [str(item['quantity'])], size=8)
-        _add_pdf_lines(text_commands, 305, y, [f"R{line_view['unit_excl']:.2f}"], size=8)
-        _add_pdf_lines(text_commands, 372, y, [days_text], size=8)
-        _add_pdf_lines(text_commands, 430, y, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, 165, y, [str(item['quantity'])], size=8)
+        _add_pdf_lines(text_commands, 200, y, [days_text], size=8)
+        _add_pdf_lines(text_commands, 235, y, [f"R{line_view['unit_excl']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, 310, y, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, 405, y, [f"R{line_view['tax']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, 440, y, [f"R{line_view['total_incl']:.2f}"], size=8)
         y -= 36
 
     totals_y = max(170, y - 12)

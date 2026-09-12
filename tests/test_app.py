@@ -2327,14 +2327,20 @@ def test_invoice_line_items_exclude_vat_and_summarise_it(client, app):
     assert b'Proforma Invoice' in invoice.data
     assert b'Unnumbered' not in invoice.data
     assert b'Finalize invoice' in invoice.data
+    # the client's column order: PRODUCT | QTY | DAYS | UNIT | SUBTOTAL | TAX | TOTAL INCL
+    assert b'<th>Product</th>' in invoice.data
+    assert b'<th>Days</th>' in invoice.data
     assert b'<th>Unit excl. VAT</th>' in invoice.data
     assert b'<th>Subtotal excl. VAT</th>' in invoice.data
-    assert b'<th>Tax</th>' not in invoice.data  # no per-line VAT column any more
-    # the hire length sits between the unit price and the line subtotal
-    assert b'<th>Rental days</th>' in invoice.data
-    assert (invoice.data.index(b'<th>Unit excl. VAT</th>')
-            < invoice.data.index(b'<th>Rental days</th>')
-            < invoice.data.index(b'<th>Subtotal excl. VAT</th>'))
+    assert b'<th>Tax</th>' in invoice.data
+    assert b'<th>Total incl. VAT</th>' in invoice.data
+    assert (invoice.data.index(b'<th>Product</th>')
+            < invoice.data.index(b'<th>Qty</th>')
+            < invoice.data.index(b'<th>Days</th>')
+            < invoice.data.index(b'<th>Unit excl. VAT</th>')
+            < invoice.data.index(b'<th>Subtotal excl. VAT</th>')
+            < invoice.data.index(b'<th>Tax</th>')
+            < invoice.data.index(b'<th>Total incl. VAT</th>'))
     assert b'Rental days 1' in invoice.data  # Order details keep rental dates/days visible.
     assert b'<span>Total without VAT</span>' in invoice.data
     assert b'<span>Total with VAT</span>' in invoice.data
@@ -2345,12 +2351,12 @@ def test_invoice_line_items_exclude_vat_and_summarise_it(client, app):
     assert b'Proforma Invoice' in pdf
     assert b'Unnumbered' not in pdf
     assert b'Rental days 1' in pdf  # Order details keep rental dates/days visible.
-    assert b'(Unit excl. VAT) Tj' in pdf
-    assert b'(Subtotal excl. VAT) Tj' in pdf
-    assert b'(Rental days) Tj' in pdf
-    assert (pdf.index(b'(Unit excl. VAT) Tj') < pdf.index(b'(Rental days) Tj')
-            < pdf.index(b'(Subtotal excl. VAT) Tj'))
-    assert b'(Tax) Tj' not in pdf  # the per-line Tax column is gone
+    for heading in (b'(PRODUCT) Tj', b'(QTY) Tj', b'(DAYS) Tj', b'(UNIT EXCL. VAT) Tj',
+                    b'(SUBTOTAL EXCL. VAT) Tj', b'(TAX) Tj', b'(TOTAL INCL. VAT) Tj'):
+        assert heading in pdf
+    assert (pdf.index(b'(PRODUCT) Tj') < pdf.index(b'(QTY) Tj') < pdf.index(b'(DAYS) Tj')
+            < pdf.index(b'(UNIT EXCL. VAT) Tj') < pdf.index(b'(SUBTOTAL EXCL. VAT) Tj')
+            < pdf.index(b'(TAX) Tj') < pdf.index(b'(TOTAL INCL. VAT) Tj'))
     for label in (b'(Total without VAT) Tj', b'(Total with VAT) Tj', b'(Amount due) Tj'):
         assert label in pdf
 
@@ -4814,20 +4820,28 @@ def test_rental_days_column_only_fills_for_rental_lines(client, app):
 
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     html = invoice.data.decode('utf-8')
-    assert '<th>Rental days</th>' in html
-    assert html.index('<th>Unit excl. VAT</th>') < html.index('<th>Rental days</th>') < html.index('<th>Subtotal excl. VAT</th>')
+    assert '<th>Days</th>' in html
+    assert (html.index('<th>Product</th>') < html.index('<th>Qty</th>') < html.index('<th>Days</th>')
+            < html.index('<th>Unit excl. VAT</th>'))
 
     # 2026-07-01 09:00 -> 2026-07-03 15:00 is 3 rental days
-    assert _invoice_row_cells(html, 'Order Trailer')[3] == '3'
-    assert _invoice_row_cells(html, 'Weekend hire')[3] == '3'
+    assert _invoice_row_cells(html, 'Order Trailer')[2] == '3'
+    assert _invoice_row_cells(html, 'Weekend hire')[2] == '3'
     # not hires: sold stock and a fixed fee
-    assert _invoice_row_cells(html, 'Order Spare Wheel')[3] == '\u2014'
-    assert _invoice_row_cells(html, 'Delivery fee')[3] == '\u2014'
+    assert _invoice_row_cells(html, 'Order Spare Wheel')[2] == '\u2014'
+    assert _invoice_row_cells(html, 'Delivery fee')[2] == '\u2014'
+
+    # per-line tax and inclusive total reconcile with the excl amounts
+    rental = _invoice_row_cells(html, 'Order Trailer')
+    net = float(rental[4].lstrip('R'))
+    tax = float(rental[5].lstrip('R'))
+    gross = float(rental[6].lstrip('R'))
+    assert round(net + tax, 2) == gross
 
     with app.app_context():
         from app.services.pdf_documents import document_pdf_bytes
         pdf = document_pdf_bytes(1)
-    assert b'(Rental days) Tj' in pdf
+    assert b'(DAYS) Tj' in pdf
     assert b'(3) Tj' in pdf
 
 
@@ -4882,3 +4896,49 @@ def test_quote_and_invoice_numbers_start_at_the_clients_number(client, app):
     with app.app_context():
         number = get_db().execute("SELECT number FROM documents WHERE id = ?", (invoice_id,)).fetchone()["number"]
     assert number == 'INV-10145'
+
+
+
+def test_paid_invoice_prints_a_paid_stamp(client, app):
+    """A settled invoice carries a PAID stamp on screen and in the PDF.
+
+    Unpaid invoices must never be stamped, and a quote must never be stamped even
+    when the order behind it is paid - a quote is not something a customer pays.
+    """
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-01')
+
+    with app.app_context():
+        total = float(get_db().execute("SELECT total FROM orders WHERE id = ?", (order_id,)).fetchone()["total"])
+    assert total > 0
+
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'paid-stamp' not in invoice.data
+
+    # pay it in full through the app so the order's own payment_status flips
+    client.post(f'/orders/{order_id}/payments', data={
+        'amount': f'{total:.2f}', 'method': 'eft', 'reference': 'PAID-IN-FULL',
+        'status': 'paid', 'payment_date': '2026-07-01',
+    }, follow_redirects=True)
+
+    with app.app_context():
+        from app.services.documents import document_paid_stamp, get_document
+        from app.services.pdf_documents import document_pdf_bytes
+        assert document_paid_stamp(get_document(1)) is True
+        pdf = document_pdf_bytes(1)
+    assert b'(PAID) Tj' in pdf
+
+    page = client.get('/documents/1')
+    assert b'paid-stamp' in page.data
+    assert b'>PAID</div>' in page.data
+
+    # a quote is not payable, so it is never stamped
+    quote = client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
+    assert b'paid-stamp' not in quote.data
+
+    with app.app_context():
+        from app.services.documents import document_paid_stamp, get_document
+        quote_id = get_db().execute(
+            "SELECT id FROM documents WHERE document_type = 'quote'").fetchone()["id"]
+        assert document_paid_stamp(get_document(quote_id)) is False

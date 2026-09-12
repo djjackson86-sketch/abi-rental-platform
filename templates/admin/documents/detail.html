@@ -19,6 +19,7 @@
 </section>
 {% endif %}
 <section class="document-page panel{% if document.document_type in ['invoice', 'quote'] %} document-type-invoice{% endif %}{% if document.document_type == 'quote' %} document-type-quote{% endif %}">
+  {% if is_paid %}<div class="paid-stamp" aria-hidden="true">PAID</div>{% endif %}
   {% set issuer_name = document.branch_name or settings.company_name %}
   {% set issuer_email = document.branch_email or settings.email %}
   {% set issuer_phone = document.branch_phone or settings.phone %}
@@ -52,10 +53,10 @@
   {% endif %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Item</th><th>Qty</th><th>Unit excl. VAT</th><th>Rental days</th><th>Subtotal excl. VAT</th></tr></thead>
+      <thead><tr><th>Product</th><th>Qty</th><th>Days</th><th>Unit excl. VAT</th><th>Subtotal excl. VAT</th><th>Tax</th><th>Total incl. VAT</th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].unit_excl) }}</td><td>{% if tax_view.lines[loop.index0].rental_days %}{{ tax_view.lines[loop.index0].rental_days }}{% else %}—{% endif %}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].subtotal_excl) }}</td></tr>
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>{% if tax_view.lines[loop.index0].rental_days %}{{ tax_view.lines[loop.index0].rental_days }}{% else %}—{% endif %}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].unit_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].subtotal_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].tax) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].total_incl) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

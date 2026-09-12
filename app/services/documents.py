@@ -134,7 +134,7 @@ def document_filter_counts():
 
 def get_document(document_id):
     return get_db().execute(
-        """SELECT d.*, o.order_number, o.customer_id, o.status AS order_status, o.start_at, o.end_at,
+        """SELECT d.*, o.order_number, o.customer_id, o.status AS order_status, o.payment_status, o.start_at, o.end_at,
             o.subtotal, o.discount_total, o.discount_mode, o.discount_value, o.tax_total, o.deposit_total, o.deposit_option, o.total, o.due_total, o.notes,
             COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'paid' AND COALESCE(p.deleted_at, '') = ''), 0) AS paid_total,
             c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
@@ -233,6 +233,8 @@ def document_tax_view(document, items):
         lines.append({
             'unit_excl': round(unit, 2),
             'subtotal_excl': round(subtotal, 2),
+            'tax': round(tax, 2),
+            'total_incl': round(subtotal + tax, 2),
             'rental_days': order_days if is_rental else None,
         })
 
@@ -248,6 +250,18 @@ def document_tax_view(document, items):
         'gross': round(net + vat, 2),
         'rate': round(vat / subtotal * 100, 2) if subtotal else 0.0,
     }
+
+
+def document_paid_stamp(document):
+    """True when a settled invoice should print with a PAID stamp.
+
+    Only invoices are stamped - a quote is never paid - and the decision reuses
+    the order's own ``payment_status`` so the stamp always agrees with what the
+    Orders screen shows. 'paid'/'overpaid' both mean nothing is outstanding.
+    """
+    if not document or _row_get(document, 'document_type', '') != 'invoice':
+        return False
+    return _row_get(document, 'payment_status', '') in ('paid', 'overpaid')
 
 
 def printable_document(document_id):
