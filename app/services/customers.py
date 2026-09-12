@@ -4,7 +4,14 @@ from app.db import get_db, now
 from app.services.access import current_session_user_id
 
 VALID_TYPES = {"individual", "company"}
-HIDDEN_CUSTOM_FIELD_KEYS = {"id_or_license", "custom_question", "custom_answer_type", "custom_answer"}
+HIDDEN_CUSTOM_FIELD_KEYS = {
+    "id_or_license", "custom_question", "custom_answer_type", "custom_answer",
+    # Booqable import audit trail (kept in the DB, never rendered - 2026-09-12)
+    "booqable_id", "booqable_number", "booqable_balance_due_cents",
+    "booqable_deposit_type", "booqable_deposit_value", "booqable_client_verification",
+    "booqable_latest_order_at", "booqable_your_reference", "booqable_tags",
+    "booqable_updated_at", "booqable_address_raw",
+}
 VISIBLE_CUSTOM_FIELD_LABELS = {
     "vehicle_make": "Vehicle Make",
     "vehicle_color": "Vehicle Color",

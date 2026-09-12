@@ -383,6 +383,18 @@ def run_migrations(db):
     ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
     ensure_column(db, "payments", "payment_date", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "payments", "deleted_at", "TEXT NOT NULL DEFAULT ''")
+
+    # --- Booqable import source keys (additive, 2026-09-12) -------------------
+    # Lets the one-off Booqable importer re-run idempotently and lets orders /
+    # line items join back to their source record. Partial unique indexes so the
+    # many existing rows with an empty source_id never collide.
+    for _table in ("customers", "orders", "products"):
+        ensure_column(db, _table, "source_system", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(db, _table, "source_id", "TEXT NOT NULL DEFAULT ''")
+        db.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{_table}_source "
+            f"ON {_table}(source_system, source_id) WHERE source_id <> ''"
+        )
     ensure_column(db, "documents", "sent_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "sent_to", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "email_status", "TEXT NOT NULL DEFAULT 'not_sent'")
