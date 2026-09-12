@@ -19,6 +19,11 @@
         </form>
       {% endif %}
     {% endfor %}
+    {% if current_user_is_main %}
+      <form method="post" action="{{ url_for('orders.delete', order_id=order.id) }}" class="inline-form" onsubmit="return confirm('Permanently delete {{ order.order_number|e }}?\n\nThis removes the order, its items, payments, quotes and invoices for good. It cannot be undone.');">
+        <button class="btn danger" type="submit" title="Main profile only">Delete order</button>
+      </form>
+    {% endif %}
   </div>
 </header>
 <section class="two-col">

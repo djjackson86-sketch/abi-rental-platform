@@ -1,6 +1,8 @@
 from datetime import datetime, date, time, timedelta
 from math import ceil
 import calendar as _month_calendar
+import json
+import os
 
 from app.db import get_db, now
 from app.services.numbering import next_in_sequence
@@ -172,6 +174,91 @@ def order_items(order_id):
         FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ? ORDER BY oi.id""",
         (order_id,),
     ).fetchall()
+
+
+ORDER_DELETE_BACKUP_DIR = os.path.join(os.path.expanduser("~"), "abi-backups")
+
+
+def _row_dict(row):
+    """Normalise a sqlite3/libsql row into a plain dict for the JSON snapshot."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return dict(row)
+    asdict = getattr(row, "asdict", None)
+    if callable(asdict):
+        return dict(asdict())
+    fields = getattr(row, "_fields", None)
+    if fields:
+        return {name: row[name] for name in fields}
+    keys = getattr(row, "keys", None)
+    if callable(keys):
+        return {key: row[key] for key in keys()}
+    raise TypeError(f"cannot convert row of type {type(row)!r} to a dict")
+
+
+def _backup_order_before_delete(order, items, payments, documents):
+    """Write everything about to be deleted to ~/abi-backups/ (best effort).
+
+    The libsql adapter autocommits every statement, so the deletes in
+    delete_order() cannot be rolled back — this JSON file is the only recovery
+    path. A failing backup must never block the caller's explicit delete, so the
+    error is swallowed and reported as an empty path.
+    """
+    try:
+        os.makedirs(ORDER_DELETE_BACKUP_DIR, exist_ok=True)
+        stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        label = str(order["order_number"] or order["id"]).replace("/", "-")
+        path = os.path.join(ORDER_DELETE_BACKUP_DIR, f"order-delete-{label}-{stamp}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "deleted_at_utc": now(),
+                    "order": _row_dict(order),
+                    "order_items": [_row_dict(row) for row in items],
+                    "payments": [_row_dict(row) for row in payments],
+                    "documents": [_row_dict(row) for row in documents],
+                },
+                handle,
+                indent=2,
+                default=str,
+            )
+        return path
+    except Exception:
+        return ""
+
+
+def delete_order(order_id):
+    """Permanently delete an order and everything attached to it.
+
+    Children are deleted first and explicitly (documents -> payments ->
+    order_items -> orders) because the libsql adapter autocommits: this is not one
+    transaction, so the FK cascade cannot be relied on and the order of the
+    statements is what keeps the run deterministic. Every affected row is dumped
+    to ~/abi-backups/ first — there is no rollback. Returns a dict of rowcounts
+    plus the backup path. The main-profile-only rule lives on the route.
+    """
+    db = get_db()
+    order = db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if not order:
+        raise ValueError("Order not found")
+    items = db.execute("SELECT * FROM order_items WHERE order_id = ?", (order_id,)).fetchall()
+    payments = db.execute("SELECT * FROM payments WHERE order_id = ?", (order_id,)).fetchall()
+    documents = db.execute("SELECT * FROM documents WHERE order_id = ?", (order_id,)).fetchall()
+    counts = {
+        "backup_path": _backup_order_before_delete(order, items, payments, documents),
+        "order_items": len(items),
+        "payments": len(payments),
+        "documents": len(documents),
+    }
+    for table in ("documents", "payments", "order_items", "orders"):
+        cursor = db.execute(f"DELETE FROM {table} WHERE order_id = ?" if table != "orders" else "DELETE FROM orders WHERE id = ?",
+                            (order_id,))
+        db.commit()
+        if table != "orders" and cursor is not None and cursor.rowcount is not None:
+            counts[table] = cursor.rowcount
+    counts["orders"] = 1
+    return counts
 
 
 def next_order_number():

@@ -16,8 +16,9 @@ screen is separately gated.
 import json
 import re
 import uuid
+from functools import wraps
 
-from flask import has_request_context, session
+from flask import abort, has_request_context, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.db import get_db, now
@@ -138,6 +139,21 @@ def user_can_module(session, module):
 
 def is_main_session(session):
     return session.get("user_role") == "owner"
+
+
+def main_required(view):
+    """Restrict a view to the main profile (role 'owner').
+
+    Permanent deletions are reserved for the main profile, so the check has to
+    live on the endpoint — hiding the button in a template is not a permission
+    boundary. Returns 403 (not a redirect) so a crafted POST is visibly refused.
+    """
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get("user_role") != "owner":
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
 
 
 def list_users():

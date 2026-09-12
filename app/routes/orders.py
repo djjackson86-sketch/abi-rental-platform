@@ -5,14 +5,14 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_options, default_branch_id
 from app.services.timezone import local_now_iso
-from app.services.access import resolve_branch_filter, session_branch_scope, user_can_access_order
+from app.services.access import main_required, resolve_branch_filter, session_branch_scope, user_can_access_order
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -443,6 +443,35 @@ def apply_discount(order_id):
             return jsonify({"ok": False, "message": str(exc)}), 400
         flash(str(exc), "error")
     return redirect(url_for("orders.detail", order_id=order_id))
+
+
+@bp.post("/<int:order_id>/delete")
+@login_required
+@main_required
+def delete(order_id):
+    """Permanently delete an order with its items, payments and documents.
+
+    Main profile only — the endpoint carries the gate, not the template. Staff
+    keep every other order action. This is irreversible: delete_order() dumps the
+    rows to ~/abi-backups/ first, and the client's confirm dialog is the second
+    barrier.
+    """
+    order = _ensure_order_access(order_id)
+    if not order:
+        flash("Order not found", "error")
+        return redirect(url_for("orders.index"))
+    order_number = order["order_number"] or order_id
+    try:
+        counts = delete_order(order_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("orders.detail", order_id=order_id))
+    flash(
+        f"{order_number} deleted permanently — {counts['order_items']} item(s), "
+        f"{counts['payments']} payment(s), {counts['documents']} document(s) removed",
+        "success",
+    )
+    return redirect(url_for("orders.index"))
 
 
 @bp.post("/<int:order_id>/<action>")

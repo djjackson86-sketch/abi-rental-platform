@@ -5127,3 +5127,165 @@ def test_document_left_column_aligns_with_the_logo_artwork(client, app):
     assert f'/F1 8.2 Tf 1 0 0 1 {LEFT_BLOCK_X:.2f} 715.00 Tm ('.encode() in pdf
     assert f'/F2 8.5 Tf 1 0 0 1 {LEFT_BLOCK_X:.2f} 625.00 Tm (Bill To:) Tj'.encode() in pdf
     assert b'1 0 0 1 36.00 625.00 Tm (Bill To:) Tj' not in pdf
+
+
+# --- ABI-341952935: permanent product delete + main-profile order delete ----
+
+
+def _product_id_by_sku(sku):
+    row = get_db().execute("SELECT id FROM products WHERE sku = ?", (sku,)).fetchone()
+    return row["id"] if row else None
+
+
+def test_unused_product_can_be_deleted_permanently_by_main_profile(client, app):
+    login(client)
+    client.post('/inventory/new', data={
+        'name': 'Delete Me Trailer',
+        'sku': 'DEL-TRL',
+        'quantity': '1',
+        'product_type': 'rental',
+        'price_amount': '100',
+        'price_unit': 'day',
+        'active': '1',
+    }, follow_redirects=True)
+    with app.app_context():
+        product_id = _product_id_by_sku('DEL-TRL')
+    assert product_id is not None
+
+    page = client.get(f'/inventory/{product_id}/edit')
+    assert page.status_code == 200
+    assert b'Delete product' in page.data
+    assert b'/inventory/%d/delete' % product_id in page.data
+
+    res = client.post(f'/inventory/{product_id}/delete', follow_redirects=True)
+    assert b'Product deleted permanently' in res.data
+    with app.app_context():
+        assert _product_id_by_sku('DEL-TRL') is None
+        assert get_db().execute("SELECT id FROM products WHERE id = ?", (product_id,)).fetchone() is None
+
+
+def test_product_used_on_an_order_must_be_archived_not_deleted(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    page = client.get('/inventory/1/edit')
+    assert b'Delete product' not in page.data
+    assert b'only be archived' in page.data
+
+    res = client.post('/inventory/1/delete', follow_redirects=True)
+    assert b'archive it instead' in res.data
+
+    with app.app_context():
+        assert get_db().execute("SELECT id FROM products WHERE id = 1").fetchone() is not None
+        lines = get_db().execute(
+            "SELECT COUNT(*) AS c FROM order_items WHERE order_id = ? AND product_id = 1", (order_id,)
+        ).fetchone()["c"]
+        assert lines > 0
+        # archive still works for an in-use product
+    assert b'Product archived' in client.post('/inventory/1/archive', follow_redirects=True).data
+
+
+def test_staff_cannot_delete_products_or_orders(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post('/settings/users/add', data={'name': 'Inventory Staff', 'password': 'staff123'}, follow_redirects=True)
+    client.post('/settings/users/permissions', data={
+        'module': ['new_order', 'dashboard', 'calendar', 'orders', 'customers', 'inventory'],
+    }, follow_redirects=True)
+    client.post('/logout')
+    login(client, 'Inventory Staff', 'staff123')
+
+    # staff can still use inventory and archive, but never see or reach delete
+    product_page = client.get('/inventory/1/edit')
+    assert product_page.status_code == 200
+    assert b'Delete product' not in product_page.data
+    assert client.post('/inventory/1/delete').status_code == 403
+
+    order_page = client.get(f'/orders/{order_id}')
+    assert order_page.status_code == 200
+    assert b'Delete order' not in order_page.data
+    assert client.post(f'/orders/{order_id}/delete').status_code == 403
+
+    with app.app_context():
+        assert get_db().execute("SELECT id FROM products WHERE id = 1").fetchone() is not None
+        assert get_db().execute("SELECT id FROM orders WHERE id = ?", (order_id,)).fetchone() is not None
+
+
+def test_main_profile_can_delete_a_product_it_created(client, app):
+    """The main profile sees Delete on an unused product and it is reachable."""
+    login(client)
+    client.post('/inventory/new', data={
+        'name': 'Second Unused Trailer', 'sku': 'DEL-TRL-2', 'quantity': '1',
+        'product_type': 'rental', 'price_amount': '50', 'price_unit': 'day', 'active': '1',
+    }, follow_redirects=True)
+    with app.app_context():
+        product_id = _product_id_by_sku('DEL-TRL-2')
+    assert client.post(f'/inventory/{product_id}/delete', follow_redirects=True).status_code == 200
+    with app.app_context():
+        assert _product_id_by_sku('DEL-TRL-2') is None
+
+
+def test_deleting_an_order_removes_its_items_payments_and_documents(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='2')
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/payments', data={
+        'amount': '100', 'method': 'cash', 'payment_date': '2026-07-01T10:00',
+    }, follow_redirects=True)
+
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) AS c FROM order_items WHERE order_id = ?", (order_id,)).fetchone()["c"] > 0
+        assert get_db().execute("SELECT COUNT(*) AS c FROM payments WHERE order_id = ?", (order_id,)).fetchone()["c"] > 0
+        assert get_db().execute("SELECT COUNT(*) AS c FROM documents WHERE order_id = ?", (order_id,)).fetchone()["c"] > 0
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'Delete order' in detail.data
+    assert f'/orders/{order_id}/delete'.encode() in detail.data
+
+    res = client.post(f'/orders/{order_id}/delete', follow_redirects=True)
+    assert b'deleted permanently' in res.data
+
+    with app.app_context():
+        for table, column in (('orders', 'id'), ('order_items', 'order_id'), ('payments', 'order_id'), ('documents', 'order_id')):
+            remaining = get_db().execute(
+                f"SELECT COUNT(*) AS c FROM {table} WHERE {column} = ?", (order_id,)
+            ).fetchone()["c"]
+            assert remaining == 0, table
+
+    # the deleted order is gone from the UI (no orphan detail page)
+    assert client.get(f'/orders/{order_id}', follow_redirects=True).status_code == 200
+    assert b'Order not found' in client.get(f'/orders/{order_id}', follow_redirects=True).data
+
+    # MAX-based numbering must not rewind to 1 after the only order is deleted
+    with app.app_context():
+        from app.services.orders import next_order_number
+        assert next_order_number() == 'ORD-10145'
+
+
+def test_order_delete_dumps_a_backup_before_removing_rows(client, app, tmp_path, monkeypatch):
+    """No rollback exists on libsql, so the rows must be on disk before the DELETE."""
+    import json as _json
+    import app.services.orders as orders_service
+
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/payments', data={
+        'amount': '50', 'method': 'cash', 'payment_date': '2026-07-01T10:00',
+    }, follow_redirects=True)
+
+    monkeypatch.setattr(orders_service, "ORDER_DELETE_BACKUP_DIR", str(tmp_path))
+    client.post(f'/orders/{order_id}/delete', follow_redirects=True)
+
+    files = list(tmp_path.glob("order-delete-*.json"))
+    assert len(files) == 1
+    payload = _json.loads(files[0].read_text())
+    assert int(payload["order"]["id"]) == int(order_id)
+    assert len(payload["order_items"]) >= 1
+    assert len(payload["payments"]) == 1
+    with app.app_context():
+        assert get_db().execute("SELECT id FROM orders WHERE id = ?", (order_id,)).fetchone() is None

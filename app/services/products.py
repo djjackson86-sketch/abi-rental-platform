@@ -233,3 +233,35 @@ def update_product(product_id, form):
 def archive_product(product_id):
     get_db().execute("UPDATE products SET active = 0, public_visible = 0 WHERE id = ?", (product_id,))
     get_db().commit()
+
+
+def product_order_item_count(product_id):
+    """How many order lines reference this product."""
+    row = get_db().execute(
+        "SELECT COUNT(*) AS c FROM order_items WHERE product_id = ?", (product_id,)
+    ).fetchone()
+    return int(row["c"] or 0)
+
+
+def product_has_order_history(product_id):
+    """True when an order (and therefore a quote/invoice) references the product."""
+    return product_order_item_count(product_id) > 0
+
+
+def delete_product(product_id):
+    """Permanently delete a product that no order has ever used.
+
+    Refuses when the product has order history and points staff at Archive
+    instead. That guard is what protects live documents: ``order_items.product_id``
+    is ON DELETE SET NULL and the order/document templates plus the invoice PDF
+    render ``product_name or custom_name`` (catalogue lines store an empty
+    custom_name), so deleting an in-use product would erase the item description
+    on that order, its quote and its invoice.
+    """
+    product = get_product(product_id)
+    if not product:
+        raise ValueError("Product not found")
+    if product_has_order_history(product_id):
+        raise ValueError("This product has been used on orders — archive it instead")
+    get_db().execute("DELETE FROM products WHERE id = ?", (product_id,))
+    get_db().commit()

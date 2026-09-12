@@ -9,6 +9,7 @@ from app.services.products import (
     archive_product,
     create_product,
     create_product_group,
+    delete_product,
     get_product,
     get_product_group,
     group_products_for_display,
@@ -16,13 +17,14 @@ from app.services.products import (
     list_products,
     product_counts,
     product_filter_counts,
+    product_has_order_history,
     tracking_label,
     update_product,
     update_product_group,
 )
 from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
-from app.services.access import session_branch_scope
+from app.services.access import main_required, session_branch_scope
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -181,6 +183,7 @@ def edit(product_id):
         "admin/inventory/form.html",
         settings=get_company_settings(),
         product=product,
+        product_used_on_orders=product_has_order_history(product["id"]),
         tax_profiles=list_tax_profiles(),
         global_vat_rate=global_vat_rate(),
         branches=_scoped_branch_options(),
@@ -196,4 +199,27 @@ def archive(product_id):
     _ensure_product_access(product)
     archive_product(product_id)
     flash("Product archived and hidden from store", "success")
+    return redirect(url_for("inventory.index"))
+
+
+@bp.route("/<int:product_id>/delete", methods=["POST"])
+@login_required
+@main_required
+def delete(product_id):
+    """Permanently remove an unused product. Main profile only.
+
+    Products that an order already uses must be archived instead — the service
+    refuses them, and the guard is server-side so a crafted POST cannot bypass a
+    hidden button.
+    """
+    product = get_product(product_id)
+    if not product:
+        flash("Product not found", "error")
+        return redirect(url_for("inventory.index"))
+    _ensure_product_access(product)
+    try:
+        delete_product(product_id)
+        flash("Product deleted permanently", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
     return redirect(url_for("inventory.index"))
