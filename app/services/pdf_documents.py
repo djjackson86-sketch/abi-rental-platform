@@ -9,6 +9,16 @@ from app.services.settings import get_company_settings
 
 
 DOCUMENT_LOGO_STATIC_PATH = 'img/sano-trailers-logo.jpg'
+# The document logo is 1200x510 with the ARTWORK starting 22px in (the JPG carries
+# built-in white padding), so the image box sits ~1.7pt to the LEFT of the visible
+# mark. Text aligned to the image edge therefore reads as indented against the
+# logo - ~9pt out at x=36, which is exactly what the client spotted. The issuer
+# and Bill To blocks align with the artwork instead, derived from the same numbers
+# that place the image so the two can never drift apart.
+LOGO_IMAGE_X = 25
+LOGO_IMAGE_WIDTH = 92
+LOGO_INK_LEFT_RATIO = 22 / 1200
+LEFT_BLOCK_X = round(LOGO_IMAGE_X + LOGO_INK_LEFT_RATIO * LOGO_IMAGE_WIDTH, 2)
 A4_PORTRAIT_WIDTH = 595
 A4_PORTRAIT_HEIGHT = 842
 A4_PORTRAIT_MEDIABOX = f'[0 0 {A4_PORTRAIT_WIDTH} {A4_PORTRAIT_HEIGHT}]'
@@ -128,7 +138,9 @@ def _pdf_paid_stamp(x, y, text='PAID', size=30, angle=-18.0, colour=(0.78, 0.09,
         f'{colour[0]:.3f} {colour[1]:.3f} {colour[2]:.3f} rg',
         f'{colour[0]:.3f} {colour[1]:.3f} {colour[2]:.3f} RG',
         f'{cos:.5f} {sin:.5f} {-sin:.5f} {cos:.5f} {x:.2f} {y:.2f} cm',
-        f'1.8 w 0 0 {height:.2f} {width:.2f} re S',
+        # PDF `re` is (x y width height) - these were swapped, which drew a tall
+        # sideways frame that reached up into the Order block.
+        f'1.8 w 0 0 {width:.2f} {height:.2f} re S',
         'BT',
         f'/F2 {size} Tf {pad_x:.2f} {pad_y:.2f} Td ({_escape_pdf_text(text)}) Tj',
         'ET',
@@ -199,14 +211,14 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     draw_commands = []
     if logo_bytes:
         logo_width, logo_height = _jpeg_dimensions(logo_bytes)
-        display_width = 92
+        display_width = LOGO_IMAGE_WIDTH
         display_height = display_width * logo_height / logo_width
         # The mark is a wide lockup (SANO tiles over TRAILERS) with a tight crop, so the
         # image box is anchored so that the INK lands exactly where the old padded asset's
         # ink sat (top-left, directly above the issuer/branch wording). Anchoring by the
         # image edge instead would let the branch-name line collide with the artwork.
         logo_bottom = A4_PORTRAIT_HEIGHT - 104
-        draw_commands.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 25 {logo_bottom:.2f} cm /Im1 Do Q')
+        draw_commands.append(f'q {display_width:.2f} 0 0 {display_height:.2f} {LOGO_IMAGE_X} {logo_bottom:.2f} cm /Im1 Do Q')
         image_object = (
             f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
@@ -219,7 +231,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 
     text_commands = ['BT']
     # Top-left brand/address, matching the supplied template.
-    _add_pdf_lines(text_commands, 36, 715, [
+    _add_pdf_lines(text_commands, LEFT_BLOCK_X, 715, [
         issuer_name,
         *[line for line in [issuer_phone, issuer_email] if line],
         *[line for line in issuer_address if line],
@@ -271,8 +283,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     visible_customer_lines = customer_lines[:18]
     # Bill To block, aligned under the logo/brand on the left.
     if visible_customer_lines:
-        text_commands.append(_pdf_text_command(36, 625, visible_customer_lines[0], size=8.5, font='F2'))
-        _add_pdf_lines(text_commands, 36, 612, visible_customer_lines[1:], size=8.5, leading=13)
+        text_commands.append(_pdf_text_command(LEFT_BLOCK_X, 625, visible_customer_lines[0], size=8.5, font='F2'))
+        _add_pdf_lines(text_commands, LEFT_BLOCK_X, 612, visible_customer_lines[1:], size=8.5, leading=13)
     customer_bottom_y = 625 - ((len(visible_customer_lines) - 1) * 13 if visible_customer_lines else 0)
 
     # Invoice table and totals.

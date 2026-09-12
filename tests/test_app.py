@@ -2748,7 +2748,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         invoice_date.encode(),
         b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj',
         b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj',
-        b'/F2 8.5 Tf 1 0 0 1 36.00 625.00 Tm (Bill To:) Tj',
+        # left column aligns with the logo ARTWORK (x=26.69), not the padded image box
+        b'/F2 8.5 Tf 1 0 0 1 26.69 625.00 Tm (Bill To:) Tj',
         b'Bill To:',
         b'Order Customer',
         b'order@example.com',
@@ -4942,3 +4943,35 @@ def test_paid_invoice_prints_a_paid_stamp(client, app):
         quote_id = get_db().execute(
             "SELECT id FROM documents WHERE document_type = 'quote'").fetchone()["id"]
         assert document_paid_stamp(get_document(quote_id)) is False
+
+
+
+def test_document_left_column_aligns_with_the_logo_artwork(client, app):
+    """The issuer and Bill To blocks line up with the visible logo, not the image box.
+
+    static/img/sano-trailers-logo.jpg is 1200x510 with the artwork starting 22px in,
+    so the image box sits ~1.7pt left of the mark. Text placed at the image edge
+    therefore reads as indented - the client spotted ~9pt of drift at x=36. This
+    guards the relationship rather than one coordinate, so moving the logo cannot
+    silently break the text alignment.
+    """
+    from app.services.pdf_documents import (
+        LEFT_BLOCK_X, LOGO_IMAGE_WIDTH, LOGO_IMAGE_X, LOGO_INK_LEFT_RATIO,
+    )
+
+    assert LEFT_BLOCK_X == round(LOGO_IMAGE_X + LOGO_INK_LEFT_RATIO * LOGO_IMAGE_WIDTH, 2)
+    assert LOGO_IMAGE_X < LEFT_BLOCK_X < 36, 'must sit left of the old, indented position'
+
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf = document_pdf_bytes(1)
+
+    # the issuer block and the Bill To block share that exact left edge
+    assert f'/F1 8.2 Tf 1 0 0 1 {LEFT_BLOCK_X:.2f} 715.00 Tm ('.encode() in pdf
+    assert f'/F2 8.5 Tf 1 0 0 1 {LEFT_BLOCK_X:.2f} 625.00 Tm (Bill To:) Tj'.encode() in pdf
+    assert b'1 0 0 1 36.00 625.00 Tm (Bill To:) Tj' not in pdf
