@@ -1,5 +1,5 @@
 from app.db import get_db, now
-from app.services.access import product_branch_clause
+from app.services.access import product_branch_clause, session_branch_scope
 from app.services.settings import global_tax_profile_id
 
 VALID_TYPES = {"rental", "sale", "service"}
@@ -171,7 +171,135 @@ def _quantity_from_form(form):
         return 0
 
 
-def _clean(form):
+BRANCH_QTY_PREFIX = "qty_branch_"
+
+
+def _branch_counts_from_form(form):
+    """Read the per-branch stock inputs (``qty_branch_<branch id>``).
+
+    Returns ``(counts, present)`` where ``counts`` maps branch id -> whole
+    quantity for every box that was filled in, and ``present`` is True when the
+    form carried the per-branch inputs at all. A blank box means "not
+    configured for that branch" and is skipped; ``0`` is a real count (it gates
+    bookings collected from that branch). Negative or non-whole values are
+    refused.
+    """
+    counts = {}
+    present = False
+    try:
+        keys = list(form.keys())
+    except AttributeError:
+        keys = []
+    for key in keys:
+        key = str(key)
+        if not key.startswith(BRANCH_QTY_PREFIX):
+            continue
+        present = True
+        suffix = key[len(BRANCH_QTY_PREFIX):]
+        try:
+            branch_id = int(suffix)
+        except (TypeError, ValueError):
+            continue
+        if branch_id <= 0:
+            continue
+        raw = form.get(key)
+        raw = "" if raw is None else str(raw).strip()
+        if raw == "":
+            continue
+        try:
+            amount = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError("Stock counts must be whole numbers")
+        if amount != int(amount):
+            raise ValueError("Stock counts must be whole numbers")
+        amount = int(amount)
+        if amount < 0:
+            raise ValueError("Stock counts cannot be negative")
+        counts[branch_id] = amount
+    return counts, present
+
+
+def product_branch_stock(product_id):
+    """{branch_id: quantity} rows for a product — empty when it is not split."""
+    rows = get_db().execute(
+        "SELECT branch_id, quantity FROM product_branch_stock WHERE product_id = ? ORDER BY branch_id",
+        (product_id,),
+    ).fetchall()
+    return {int(row["branch_id"]): int(row["quantity"] or 0) for row in rows}
+
+
+def stock_breakdown_rows(product_ids=None):
+    """{product_id: [{'branch_name','quantity'}, ...]} for the inventory list/CSV."""
+    sql = """SELECT s.product_id, s.branch_id, s.quantity,
+            COALESCE(b.name, 'Branch ' || s.branch_id) AS branch_name
+        FROM product_branch_stock s
+        LEFT JOIN branches b ON b.id = s.branch_id"""
+    params = []
+    if product_ids is not None:
+        ids = [int(pid) for pid in product_ids]
+        if not ids:
+            return {}
+        sql += " WHERE s.product_id IN (%s)" % ",".join("?" for _ in ids)
+        params.extend(ids)
+    sql += " ORDER BY branch_name, s.branch_id"
+    breakdown = {}
+    for row in get_db().execute(sql, params).fetchall():
+        breakdown.setdefault(int(row["product_id"]), []).append({
+            "branch_id": int(row["branch_id"]),
+            "branch_name": row["branch_name"],
+            "quantity": int(row["quantity"] or 0),
+        })
+    return breakdown
+
+
+def format_stock_breakdown(rows):
+    """One-line 'Midrand 5 · Wonderboom 2' summary of a product's branch stock."""
+    return " \u00b7 ".join(f"{row['branch_name']} {row['quantity']}" for row in (rows or []))
+
+
+def set_product_branch_stock(product_id, counts, restrict_branch_id=None):
+    """Replace a product's per-branch counts and keep products.quantity the total.
+
+    ``counts`` maps branch id -> whole quantity; an empty mapping clears the
+    split and returns the product to the single shared pool. ``restrict_branch_id``
+    narrows the write to one branch and preserves every other branch's row — the
+    server-side guard for branch-limited staff, so a scoped user can only ever
+    edit their own depot's count.
+    """
+    db = get_db()
+    cleaned = {}
+    for branch_id, amount in (counts or {}).items():
+        try:
+            branch_id = int(branch_id)
+            amount = int(amount)
+        except (TypeError, ValueError):
+            continue
+        if branch_id > 0 and amount >= 0:
+            cleaned[branch_id] = amount
+    if restrict_branch_id:
+        cleaned = {b: q for b, q in cleaned.items() if b == int(restrict_branch_id)}
+        db.execute(
+            "DELETE FROM product_branch_stock WHERE product_id = ? AND branch_id = ?",
+            (product_id, restrict_branch_id),
+        )
+    else:
+        db.execute("DELETE FROM product_branch_stock WHERE product_id = ?", (product_id,))
+    timestamp = now()
+    for branch_id, amount in sorted(cleaned.items()):
+        db.execute(
+            """INSERT INTO product_branch_stock (product_id, branch_id, quantity, updated_at)
+            VALUES (?, ?, ?, ?)""",
+            (product_id, branch_id, amount, timestamp),
+        )
+    if cleaned or not restrict_branch_id:
+        # products.quantity stays the computed total of the branch rows.
+        total = sum(product_branch_stock(product_id).values())
+        db.execute("UPDATE products SET quantity = ? WHERE id = ?", (total, product_id))
+    db.commit()
+    return dict(cleaned)
+
+
+def _clean(form, existing_quantity=None):
     name = form.get("name", "").strip()
     if not name:
         raise ValueError("Product name is required")
@@ -188,7 +316,21 @@ def _clean(form):
     branch_id = int(form.get("branch_id") or 0) or None
     # Services and untracked products keep no stock count at all.
     untracked = product_type == "service" or tracking_method == "none"
-    quantity = 0 if untracked else _quantity_from_form(form)
+    branch_counts, branch_form_present = _branch_counts_from_form(form)
+    if untracked:
+        quantity = 0
+        branch_counts = {}
+    elif branch_counts:
+        quantity = sum(branch_counts.values())
+    elif branch_form_present:
+        # Every per-branch box was left blank: the product keeps one shared
+        # pool. Never silently zero an existing count — keep the stored total,
+        # or the previous default of 1 for a brand-new product.
+        quantity = _quantity_from_form(form) if "quantity" in list(form.keys()) else (
+            max(0, int(existing_quantity)) if existing_quantity is not None else 1
+        )
+    else:
+        quantity = _quantity_from_form(form)
     return {
         "name": name,
         "product_type": product_type,
@@ -206,11 +348,17 @@ def _clean(form):
         "product_group_id": product_group_id,
         "quantity": quantity,
         "branch_id": branch_id,
+        "branch_counts": branch_counts,
+        "branch_form_present": branch_form_present,
+        "untracked": untracked,
     }
 
 
 def create_product(form):
     data = _clean(form)
+    branch_counts = data.pop("branch_counts")
+    data.pop("branch_form_present")
+    data.pop("untracked")
     db = get_db()
     cur = db.execute(
         """INSERT INTO products
@@ -219,7 +367,12 @@ def create_product(form):
         {**data, "created_at": now()},
     )
     db.commit()
-    return cur.lastrowid
+    product_id = cur.lastrowid
+    if branch_counts:
+        set_product_branch_stock(
+            product_id, branch_counts, restrict_branch_id=session_branch_scope()
+        )
+    return product_id
 
 
 def update_product(product_id, form):
@@ -233,8 +386,11 @@ def update_product(product_id, form):
     The guard lives here, in the service layer: hiding or disabling the form
     inputs is presentation, not a permission boundary.
     """
-    data = _clean(form)
     existing = get_product(product_id)
+    data = _clean(form, existing_quantity=(existing["quantity"] if existing else None))
+    branch_counts = data.pop("branch_counts")
+    branch_form_present = data.pop("branch_form_present")
+    untracked = data.pop("untracked")
     blocked_change = False
     if existing:
         blocked_change = (
@@ -247,9 +403,26 @@ def update_product(product_id, form):
             # _clean() zeroes the quantity of an untracked product; re-read the
             # submitted count so a refused change cannot wipe a tracked stock count.
             untracked = existing["product_type"] == "service" or existing["tracking_method"] == "none"
-            data["quantity"] = 0 if untracked else _quantity_from_form(form)
+            data["quantity"] = 0 if untracked else _submitted_quantity(form, existing["quantity"])
         else:
             blocked_change = False
+    # Per-branch counts are written before the product row so the total stored in
+    # products.quantity is the one we intend: the sum of the rows for a split
+    # product, or the single shared pool when every branch box was left blank.
+    scope = session_branch_scope()
+    if untracked:
+        set_product_branch_stock(product_id, {})
+        data["quantity"] = 0
+    elif branch_counts:
+        set_product_branch_stock(product_id, branch_counts, restrict_branch_id=scope)
+        data["quantity"] = sum(product_branch_stock(product_id).values())
+    elif branch_form_present:
+        set_product_branch_stock(product_id, {}, restrict_branch_id=scope)
+        remaining = product_branch_stock(product_id)
+        if remaining:
+            # A branch-limited user only cleared their own depot's row, so the
+            # shared total stays the sum of the rows that are left.
+            data["quantity"] = sum(remaining.values())
     data["id"] = product_id
     get_db().execute(
         """UPDATE products SET
@@ -260,6 +433,16 @@ def update_product(product_id, form):
     )
     get_db().commit()
     return blocked_change
+
+
+def _submitted_quantity(form, fallback):
+    """Total a form asks for: the sum of any per-branch boxes, else the legacy box."""
+    branch_counts, present = _branch_counts_from_form(form)
+    if branch_counts:
+        return sum(branch_counts.values())
+    if present:
+        return max(0, int(fallback or 0))
+    return _quantity_from_form(form)
 
 
 def archive_product(product_id):

@@ -82,6 +82,18 @@ def delete_branch(branch_id):
     if int(remaining) <= 1:
         raise ValueError("Cannot delete the last branch; keep at least one depot branch")
     db.execute("UPDATE products SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
+    # Per-branch stock counts belong to the depot that is being deleted.
+    stock_products = [row["product_id"] for row in db.execute(
+        "SELECT DISTINCT product_id FROM product_branch_stock WHERE branch_id = ?", (branch_id,)
+    ).fetchall()]
+    db.execute("DELETE FROM product_branch_stock WHERE branch_id = ?", (branch_id,))
+    for product_id in stock_products:
+        # products.quantity stays the computed total of the rows that are left.
+        total = db.execute(
+            "SELECT COALESCE(SUM(quantity), 0) AS total FROM product_branch_stock WHERE product_id = ?",
+            (product_id,),
+        ).fetchone()["total"]
+        db.execute("UPDATE products SET quantity = ? WHERE id = ?", (int(total or 0), product_id))
     db.execute(
         "UPDATE orders SET collect_branch_id = CASE WHEN collect_branch_id = ? THEN NULL ELSE collect_branch_id END, return_branch_id = CASE WHEN return_branch_id = ? THEN NULL ELSE return_branch_id END WHERE collect_branch_id = ? OR return_branch_id = ?",
         (branch_id, branch_id, branch_id, branch_id),

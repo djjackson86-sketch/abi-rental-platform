@@ -10,14 +10,17 @@ from app.services.products import (
     create_product,
     create_product_group,
     delete_product,
+    format_stock_breakdown,
     get_product,
     get_product_group,
     group_products_for_display,
     list_product_groups,
     list_products,
+    product_branch_stock,
     product_counts,
     product_filter_counts,
     product_has_order_history,
+    stock_breakdown_rows,
     tracking_label,
     update_product,
     update_product_group,
@@ -60,6 +63,7 @@ def index():
     visibility = request.args.get("visibility", "")
     product_group_id = request.args.get("product_group_id", "")
     products = list_products(query=query, product_type=product_type, visibility=visibility, product_group_id=product_group_id)
+    breakdown = stock_breakdown_rows([product["id"] for product in products])
     return render_template(
         "admin/inventory/index.html",
         settings=get_company_settings(),
@@ -70,6 +74,8 @@ def index():
         filter_counts=product_filter_counts(),
         filters={"query": query, "product_type": product_type, "visibility": visibility, "product_group_id": product_group_id},
         tracking_label=tracking_label,
+        stock_breakdown={pid: format_stock_breakdown(rows) for pid, rows in breakdown.items()},
+        branch_split={pid for pid, rows in breakdown.items() if len(rows) > 1},
     )
 
 
@@ -118,9 +124,10 @@ def export_csv():
     visibility = request.args.get("visibility", "")
     product_group_id = request.args.get("product_group_id", "")
     products = list_products(query=query, product_type=product_type, visibility=visibility, product_group_id=product_group_id)
+    breakdown = stock_breakdown_rows([product["id"] for product in products])
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(["group", "name", "sku", "product_type", "branch", "price_amount", "price_unit", "quantity", "security_deposit", "hourly_extra_rate", "active", "public_visible"])
+    writer.writerow(["group", "name", "sku", "product_type", "branch", "price_amount", "price_unit", "quantity", "stock_by_branch", "security_deposit", "hourly_extra_rate", "active", "public_visible"])
     for product in products:
         writer.writerow([
             product["product_group_name"] or "Ungrouped products",
@@ -131,6 +138,7 @@ def export_csv():
             product["price_amount"],
             product["price_unit"],
             product["quantity"],
+            format_stock_breakdown(breakdown.get(product["id"])),
             product["security_deposit"],
             product["hourly_extra_rate"],
             product["active"],
@@ -158,6 +166,7 @@ def new():
         branches=_scoped_branch_options(),
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
+        branch_stock={},
     )
 
 
@@ -192,6 +201,7 @@ def edit(product_id):
         branches=_scoped_branch_options(),
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
+        branch_stock=product_branch_stock(product_id),
     )
 
 

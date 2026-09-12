@@ -6,8 +6,9 @@ import os
 
 from app.db import get_db, now
 from app.services.numbering import next_in_sequence
-from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause
+from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause, session_branch_scope
 from app.services.settings import global_vat_rate
+from app.services.products import product_branch_stock
 from app.services.timezone import local_now, local_now_iso
 
 STATUS_LABELS = {
@@ -736,9 +737,15 @@ def availability_errors(order_id):
         # bookable and must never be blocked by the availability check.
         if (product["product_type"] or "") == "service" or (product["tracking_method"] or "") == "none":
             continue
-        branch_clause = "" if product["branch_id"] is None else "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)"
+        # A product that holds per-branch counts is gated by the count for the
+        # branch the booking is collected from — a branch with no row (or a 0
+        # row) is not available from that branch. Products with no branch rows
+        # keep the legacy single shared pool, bookable from every branch.
+        branch_stock = product_branch_stock(item["product_id"])
+        branch_scoped = product["branch_id"] is not None or bool(branch_stock)
+        branch_clause = "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)" if branch_scoped else ""
         params = [item["product_id"], order_id]
-        if product["branch_id"] is not None:
+        if branch_scoped:
             params.append(order["collect_branch_id"])
         params.extend([order["end_at"], order["start_at"]])
         booked = db.execute(
@@ -752,9 +759,17 @@ def availability_errors(order_id):
               AND o.end_at > ?""",
             params,
         ).fetchone()["booked"] or 0
-        available = int(product["quantity"] or 0) - int(booked)
-        if item["quantity"] > available:
-            errors.append(f"Only {available} available for {product['name']} during this rental period")
+        if branch_stock:
+            stock_total = int(branch_stock.get(int(order["collect_branch_id"] or 0), 0))
+            available = stock_total - int(booked)
+            if item["quantity"] > available:
+                errors.append(
+                    f"Only {available} available for {product['name']} at this collection branch during this rental period"
+                )
+        else:
+            available = int(product["quantity"] or 0) - int(booked)
+            if item["quantity"] > available:
+                errors.append(f"Only {available} available for {product['name']} during this rental period")
     return errors
 
 
@@ -1179,6 +1194,17 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
     product_branch_clause, product_branch_params = scoped_product_branch_clause(
         "p", include_unassigned=True, branch_id=branch_id
     )
+    # With a branch selected, a product that holds a per-branch count for that
+    # branch is stock for it even when the product's own branch differs — the
+    # session scope still wins, so this can only ever narrow. Products without
+    # per-branch rows keep the plain clause (unchanged behaviour).
+    branch_target = session_branch_scope() or branch_id
+    if branch_target and product_branch_clause:
+        product_branch_clause = (
+            " AND (p.branch_id = ? OR EXISTS (SELECT 1 FROM product_branch_stock s"
+            " WHERE s.product_id = p.id AND s.branch_id = ?))"
+        )
+        product_branch_params = [branch_target, branch_target]
     products = db.execute(
         f"""SELECT p.id, p.name, p.sku, p.quantity, p.tracking_method,
                COALESCE(pg.id, 0) AS group_id,
@@ -1192,6 +1218,17 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
 
     groups = []
     groups_by_id = {}
+    # Per-branch counts for every product in the view (one query, not one per row).
+    branch_stock = {}
+    product_ids = [product["id"] for product in products]
+    if product_ids:
+        placeholders = ",".join("?" for _ in product_ids)
+        for row in db.execute(
+            f"SELECT product_id, branch_id, quantity FROM product_branch_stock WHERE product_id IN ({placeholders})",
+            product_ids,
+        ).fetchall():
+            branch_stock.setdefault(int(row["product_id"]), {})[int(row["branch_id"])] = int(row["quantity"] or 0)
+
     for product in products:
         group_id = product["group_id"]
         group = groups_by_id.get(group_id)
@@ -1207,29 +1244,48 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
             groups_by_id[group_id] = group
             groups.append(group)
 
+        stock_rows = branch_stock.get(int(product["id"]))
+        # A product with per-branch counts is counted per branch when a branch is
+        # selected, so its bookings must be counted per collection branch too.
+        # NOTE the placeholder order matches the SQL below: product id, the two
+        # date bounds, then the appended branch clause.
+        branch_booking_clause = ""
+        booking_params = [
+            product["id"],
+            range_end.isoformat(timespec="seconds"),
+            range_start.isoformat(timespec="seconds"),
+        ]
+        if stock_rows and branch_id:
+            branch_booking_clause = " AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)"
+            booking_params.append(branch_id)
         booked = db.execute(
-            """SELECT COALESCE(SUM(oi.quantity), 0) AS booked
+            f"""SELECT COALESCE(SUM(oi.quantity), 0) AS booked
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
             WHERE oi.product_id = ?
               AND o.status IN ('reserved', 'started')
               AND o.start_at < ?
-              AND o.end_at > ?""",
-            (product["id"], range_end.isoformat(timespec="seconds"), range_start.isoformat(timespec="seconds")),
+              AND o.end_at > ?{branch_booking_clause}""",
+            booking_params,
         ).fetchone()["booked"] or 0
         reservations = db.execute(
-            """SELECT o.id, o.order_number, o.status, o.start_at, o.end_at, oi.quantity
+            f"""SELECT o.id, o.order_number, o.status, o.start_at, o.end_at, oi.quantity
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
             WHERE oi.product_id = ?
               AND o.status IN ('reserved', 'started')
               AND o.start_at < ?
-              AND o.end_at > ?
+              AND o.end_at > ?{branch_booking_clause}
             ORDER BY o.start_at, o.id""",
-            (product["id"], range_end.isoformat(timespec="seconds"), range_start.isoformat(timespec="seconds")),
+            booking_params,
         ).fetchall()
 
-        total = int(product["quantity"] or 0)
+        if stock_rows:
+            # Selected branch -> that branch's count; no filter -> the total of
+            # all branch counts.
+            total = int(stock_rows.get(int(branch_id), 0)) if branch_id else sum(stock_rows.values())
+        else:
+            total = int(product["quantity"] or 0)
         booked = int(booked or 0)
         available = max(total - booked, 0)
         # Products set to "Don't track quantities" hold no stock count, so the
@@ -1241,6 +1297,7 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
             "sku": product["sku"],
             "tracking_method": product["tracking_method"],
             "untracked": untracked,
+            "branch_split": bool(stock_rows),
             "total_quantity": total,
             "booked_quantity": booked,
             "available_quantity": available,

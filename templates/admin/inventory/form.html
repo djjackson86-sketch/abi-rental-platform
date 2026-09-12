@@ -24,7 +24,19 @@
       <label class="span-2">Product name<input name="name" required value="{{ product.name if product else '' }}" placeholder="6m Trailer"></label>
       <label>SKU<input name="sku" value="{{ product.sku if product else '' }}" placeholder="TRL-001"></label>
       <label>Product group<select name="product_group_id"><option value="">Ungrouped</option>{% for group in product_groups %}<option value="{{ group.id }}" {% if product and product.product_group_id==group.id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></label>
-      <label data-stock-field>Quantity / stock<input name="quantity" type="number" min="0" value="{{ product.quantity if product else 1 }}"></label>
+      <div class="span-2 stock-branch-field" data-stock-field>
+        <div class="stock-branch-head" style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><strong>Stock per branch</strong><span class="form-help">Total in stock: <b data-stock-total>{{ product.quantity if product else 1 }}</b></span></div>
+        {% if branches %}
+        <div class="branch-stock-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:8px 0 0">
+          {% for branch in branches %}
+          <label>{{ branch.name }}<input class="branch-stock-input" name="qty_branch_{{ branch.id }}" type="number" min="0" step="1" placeholder="Shared" title="Leave blank to keep one shared stock pool across all branches" value="{{ branch_stock.get(branch.id, '') }}"></label>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="form-help">No branches yet &mdash; the product keeps one shared stock pool.</p>
+        {% endif %}
+        <p class="form-help">Leave every branch box empty to keep one shared stock pool that is bookable from all branches. Enter a count to track this product per branch: a branch with no count (or 0) cannot be booked from that branch. The total above is the sum of the counts.</p>
+      </div>
       <label>Current branch<select name="branch_id"><option value="">Unassigned (all branches)</option>{% for branch in branches %}<option value="{{ branch.id }}" {% if product and product.branch_id==branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label>
       <label class="span-2">Description<textarea name="description" rows="4" placeholder="Describe this product for staff and customers">{{ product.description if product else '' }}</textarea></label>
     </div>
@@ -60,17 +72,27 @@
   const typeInputs=[...document.querySelectorAll('input[name="product_type"]')];
   const trackingInputs=[...document.querySelectorAll('input[name="tracking_method"]')];
   const stockField=document.querySelector('[data-stock-field]');
-  const qty=stockField&&stockField.querySelector('input[name="quantity"]');
+  const branchInputs=[...document.querySelectorAll('[data-stock-field] input[name^="qty_branch_"]')];
+  const totalOut=document.querySelector('[data-stock-total]');
+  const sharedTotal={{ (product.quantity if product else 1) }};
+  function syncTotal(){
+    if(!totalOut) return;
+    const entered=branchInputs.filter(input=>input.value!=='');
+    if(!entered.length){ totalOut.textContent=String(sharedTotal); return; }
+    totalOut.textContent=String(entered.reduce((sum,input)=>sum+Math.max(0,parseInt(input.value,10)||0),0));
+  }
   function syncStockField(){
     const selectedType=typeInputs.find(input=>input.checked);
     const selectedTracking=trackingInputs.find(input=>input.checked);
     // No stock count for services or for products set to "Don't track quantities".
     const untracked=(selectedType&&selectedType.value==='service')||(selectedTracking&&selectedTracking.value==='none');
     if(stockField) stockField.hidden=!!untracked;
-    if(qty){ qty.disabled=!!untracked; if(untracked) qty.value='0'; }
+    branchInputs.forEach(input=>{ input.disabled=!!untracked; if(untracked) input.value=''; });
+    syncTotal();
   }
   typeInputs.forEach(input=>input.addEventListener('change',syncStockField));
   trackingInputs.forEach(input=>input.addEventListener('change',syncStockField));
+  branchInputs.forEach(input=>input.addEventListener('input',syncTotal));
   syncStockField();
 })();
 </script>

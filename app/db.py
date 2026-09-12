@@ -176,6 +176,15 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_branch_stock (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    UNIQUE(product_id, branch_id)
+);
+
 CREATE TABLE IF NOT EXISTS coupons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -426,6 +435,23 @@ def run_migrations(db):
         installed_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )""")
+
+    # --- Per-branch stock counts (additive, 2026-09-12) ----------------------
+    # A tracked product may hold one stock count per branch. When it has rows
+    # here it is branch-managed (a booking collected at a branch with no row, or
+    # a 0 row, is not available from that branch); with no rows it keeps the
+    # legacy single shared pool in products.quantity. products.quantity stays the
+    # computed total (sum of the rows) so reports, calendar totals and the
+    # order-form picker keep working unchanged.
+    db.execute("""CREATE TABLE IF NOT EXISTS product_branch_stock (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        UNIQUE(product_id, branch_id)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_product_branch_stock_product ON product_branch_stock(product_id)")
 
 def init_db():
     db = get_db()

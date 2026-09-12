@@ -102,9 +102,9 @@
                     <td><span class="badge product-type-{{ p.product_type }}">{{ p.product_type }}</span></td>
                     <td>{{ tracking_label(p.tracking_method) }}</td>
                     <td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td>
-                    <td>{% if p.product_type == 'service' or p.tracking_method == 'none' %}Not tracked{% else %}{{ p.quantity }}{% endif %}</td>
+                    <td>{% if p.product_type == 'service' or p.tracking_method == 'none' %}Not tracked{% else %}{{ p.quantity }}{% if stock_breakdown.get(p.id) %}<small>{{ stock_breakdown.get(p.id) }}</small>{% endif %}{% endif %}</td>
                     <td>{% if p.product_type == 'rental' %}Per order{% else %}—{% endif %}</td>
-                    <td>{{ p.branch_name or 'Unassigned' }}</td>
+                    <td>{% if p.id in branch_split %}Multiple branches{% else %}{{ p.branch_name or 'Unassigned' }}{% endif %}</td>
                     <td>R{{ '%.2f'|format(p.security_deposit) }}</td>
                     <td>R{{ '%.2f'|format(p.hourly_extra_rate or 0) }}</td>
                     <td>
