@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS company_settings (
     currency_symbol TEXT NOT NULL DEFAULT 'R',
     currency_position TEXT NOT NULL DEFAULT 'before',
     tax_mode TEXT NOT NULL DEFAULT 'exclusive',
+    vat_rate REAL NOT NULL DEFAULT 15,
     default_pickup_time TEXT NOT NULL DEFAULT '09:00',
     default_return_time TEXT NOT NULL DEFAULT '15:00',
     enable_time_selection INTEGER NOT NULL DEFAULT 1,
@@ -339,6 +340,7 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "invoice_email_message", "TEXT NOT NULL DEFAULT 'Dear {customer_name}\n\nPlease find attached {document_label} {document_number} for order {order_number}.\n\nKind regards,\n{company_name}'")
     ensure_column(db, "company_settings", "invoice_email_signature", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "invoice_email_signature_include_logo", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(db, "company_settings", "vat_rate", "REAL NOT NULL DEFAULT 15")
     ensure_column(db, "company_settings", "staff_permissions_json", "TEXT NOT NULL DEFAULT '[\"new_order\",\"dashboard\",\"calendar\",\"orders\",\"customers\"]'")
     ensure_column(db, "branches", "bank_name", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "branches", "bank_account_name", "TEXT NOT NULL DEFAULT ''")

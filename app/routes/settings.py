@@ -14,7 +14,10 @@ from app.services.access import (
     set_user_active,
     staff_modules_from_settings,
 )
-from app.services.settings import get_company_settings, update_company_settings, list_tax_profiles, create_tax_profile, list_operating_hours
+from app.services.settings import (
+    get_company_settings, update_company_settings, list_tax_profiles, create_tax_profile,
+    list_operating_hours, global_vat_rate, update_vat_settings,
+)
 from app.services.branches import branch_options
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
@@ -130,10 +133,11 @@ def users_permissions():
 @login_required
 def taxes():
     if request.method == "POST":
-        create_tax_profile(request.form.get("name", "Tax profile"), request.form.get("rate", 0), bool(request.form.get("is_default")))
-        flash("Tax profile added", "success")
+        update_vat_settings(request.form)
+        flash("VAT settings saved", "success")
         return redirect(url_for("settings.taxes"))
-    return render_template("admin/settings/taxes.html", settings=get_company_settings(), tax_profiles=list_tax_profiles())
+    return render_template("admin/settings/taxes.html", settings=get_company_settings(),
+                           vat_rate=global_vat_rate())
 
 
 @bp.route("/pricing", methods=["GET", "POST"])

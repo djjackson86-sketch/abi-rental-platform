@@ -1,3 +1,29 @@
 {% extends "admin/layout.html" %}
-{% set title='Taxes' %}
-{% block admin_body %}<header class="page-header"><div><p class="eyebrow">Settings</p><h1>Taxes</h1><p>Create tax profiles and decide whether product prices include or exclude tax.</p></div></header>{% include "admin/settings/nav.html" %}<section class="two-col"><form method="post" class="panel stack"><h2>Add tax profile</h2><label>Name<input name="name" required placeholder="VAT"></label><label>Rate %<input name="rate" type="number" step="0.01" value="15"></label><label class="switch"><input type="checkbox" name="is_default"> Set as default</label><button class="btn primary">Add tax profile</button></form><article class="panel"><h2>Profiles</h2>{% for tax in tax_profiles %}<div class="list-row"><span>{{ tax.name }}</span><b>{{ tax.rate }}%</b>{% if tax.is_default %}<em>Default</em>{% endif %}</div>{% endfor %}</article></section>{% endblock %}
+{% set title='VAT' %}
+{% block admin_body %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Settings</p>
+    <h1>VAT</h1>
+    <p>One VAT rate for the whole system. Set it once here &mdash; it is never chosen per product.</p>
+  </div>
+</header>
+{% include "admin/settings/nav.html" %}
+<form method="post" class="settings-form panel">
+  <div class="form-grid">
+    <label>VAT rate %<input name="vat_rate" type="number" step="0.01" min="0" value="{{ '%g'|format(vat_rate) }}"></label>
+    <label class="switch"><input type="checkbox" name="prices_include_vat" value="1" {% if settings.tax_mode == 'inclusive' %}checked{% endif %}> Our prices already include VAT</label>
+  </div>
+  <p class="form-help">
+    {% if settings.tax_mode == 'inclusive' %}
+    <strong>Prices include VAT.</strong> A rental priced at R345.00 is charged to the customer as R345.00, and the invoice shows
+    R300.00 excluding VAT plus R45.00 VAT. Enter prices exactly as your customers see them.
+    {% else %}
+    <strong>Prices exclude VAT.</strong> A rental priced at R300.00 is charged to the customer as R345.00
+    (R300.00 plus {{ '%g'|format(vat_rate) }}% VAT), and the invoice shows the VAT added on top.
+    {% endif %}
+  </p>
+  <p class="muted">This rate applies to every order line, including custom lines, and to every product in Inventory.</p>
+  <button class="btn primary">Save</button>
+</form>
+{% endblock %}

@@ -172,8 +172,8 @@
   <section class="form-section order-estimate-panel" id="order-estimate-panel" data-tax-mode="{{ settings.tax_mode or 'exclusive' }}" aria-live="polite">
     <h2>Order estimate</h2>
     <div class="estimate-grid">
-      <div><span>Product total</span><strong id="estimate-product-total">R0.00</strong></div>
-      <div><span>Tax estimate</span><strong id="estimate-tax-total">R0.00</strong></div>
+      <div><span>{% if settings.tax_mode == 'inclusive' %}Total excluding VAT{% else %}Product total{% endif %}</span><strong id="estimate-product-total">R0.00</strong></div>
+      <div><span>{% if settings.tax_mode == 'inclusive' %}VAT included{% else %}Tax estimate{% endif %}</span><strong id="estimate-tax-total">R0.00</strong></div>
       <div><span>Security deposit</span><strong id="estimate-deposit-total">R0.00</strong></div>
       <div class="estimate-grand-total"><span id="estimate-order-total-label">Estimated order total{% if order_form.get('deposit_option', 'security_deposit') == 'security_deposit' %} incl. refundable deposit{% elif order_form.get('deposit_option') == 'damage_waiver' %} incl. damage waiver{% endif %}</span><strong id="estimate-order-total">R0.00</strong></div>
     </div>

@@ -20,7 +20,7 @@ from app.services.products import (
     update_product,
     update_product_group,
 )
-from app.services.settings import get_company_settings, list_tax_profiles
+from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
 from app.services.access import session_branch_scope
 
@@ -152,6 +152,7 @@ def new():
         settings=get_company_settings(),
         product=None,
         tax_profiles=list_tax_profiles(),
+        global_vat_rate=global_vat_rate(),
         branches=_scoped_branch_options(),
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
@@ -181,6 +182,7 @@ def edit(product_id):
         settings=get_company_settings(),
         product=product,
         tax_profiles=list_tax_profiles(),
+        global_vat_rate=global_vat_rate(),
         branches=_scoped_branch_options(),
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,

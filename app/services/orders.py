@@ -4,6 +4,7 @@ import calendar as _month_calendar
 
 from app.db import get_db, now
 from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause
+from app.services.settings import global_vat_rate
 from app.services.timezone import local_now, local_now_iso
 
 STATUS_LABELS = {
@@ -326,7 +327,8 @@ def _build_order_payload(form):
             line["billing_mode"] = "catalog"
             lines.append({"product": product, "custom_name": "", "line": line})
         elif custom_name:
-            line = calculate_custom_line(custom_name, quantity, custom_price or 0, custom_mode, days, 0, settings["tax_mode"])
+            line = calculate_custom_line(custom_name, quantity, custom_price or 0, custom_mode, days,
+                                        global_vat_rate(), settings["tax_mode"])
             lines.append({"product": None, "custom_name": custom_name, "line": line})
         else:
             continue

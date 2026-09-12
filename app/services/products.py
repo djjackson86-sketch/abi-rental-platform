@@ -1,5 +1,6 @@
 from app.db import get_db, now
 from app.services.access import product_branch_clause
+from app.services.settings import global_tax_profile_id
 
 VALID_TYPES = {"rental", "sale", "service"}
 VALID_UNITS = {"hour", "day", "week", "month", "fixed"}
@@ -185,7 +186,8 @@ def _clean(form):
         "price_unit": price_unit,
         "security_deposit": float(form.get("security_deposit") or 0),
         "hourly_extra_rate": float(form.get("hourly_extra_rate") or 0),
-        "tax_profile_id": int(form.get("tax_profile_id") or 1),
+        # VAT is global: every product uses the one profile, never a per-product choice
+        "tax_profile_id": global_tax_profile_id(),
         "product_group_id": product_group_id,
         "quantity": quantity,
         "branch_id": branch_id,

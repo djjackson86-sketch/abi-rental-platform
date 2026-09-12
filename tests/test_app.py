@@ -233,12 +233,66 @@ def test_barcode_lookup(client):
     assert b'No active product found with barcode' in res.data
 
 
-def test_tax_profile_creation(client):
+def test_vat_is_one_global_setting_not_a_per_product_choice(client, app):
+    """VAT moved from a per-product tax profile dropdown to one global rate + mode."""
     login(client)
-    res = client.post('/settings/taxes', data={'name': 'VAT', 'rate': '15', 'is_default': 'on'}, follow_redirects=True)
+    res = client.post('/settings/taxes', data={'vat_rate': '15', 'prices_include_vat': '1'},
+                      follow_redirects=True)
     assert res.status_code == 200
-    assert b'VAT' in res.data
-    assert b'15.0%' in res.data
+    assert b'Prices include VAT' in res.data
+
+    with app.app_context():
+        from app.db import get_db
+        db = get_db()
+        settings = db.execute('SELECT tax_mode, vat_rate FROM company_settings WHERE id=1').fetchone()
+        assert settings['tax_mode'] == 'inclusive'
+        assert settings['vat_rate'] == 15
+
+    # the inventory form no longer offers a tax profile to choose
+    form = client.get('/inventory/new')
+    assert b'name="tax_profile_id"' not in form.data
+
+    # a posted tax_profile_id is ignored: the product follows the global profile
+    client.post('/inventory/new', data={
+        'name': 'Global VAT trailer', 'product_type': 'rental', 'tracking_method': 'bulk',
+        'price_amount': '345', 'price_unit': 'day', 'security_deposit': '0',
+        'hourly_extra_rate': '0', 'tax_profile_id': '1', 'active': '1', 'public_visible': '1',
+    }, follow_redirects=True)
+    with app.app_context():
+        from app.db import get_db
+        from app.services.settings import global_tax_profile_id
+        db = get_db()
+        row = db.execute("SELECT tax_profile_id FROM products WHERE name='Global VAT trailer'").fetchone()
+        assert row['tax_profile_id'] == global_tax_profile_id()
+
+
+def test_inclusive_vat_never_drifts_a_cent(client, app):
+    """The client's query: R1000 VAT-inclusive must not invoice as R1000.01.
+
+    Typing a rounded VAT-exclusive price (869.57) and adding 15% back gives 1000.01.
+    Storing the inclusive price fixes it: the total is fixed and VAT is derived.
+    """
+    from app.services.orders import calculate_line
+
+    def line(price, mode):
+        return calculate_line({
+            'product_type': 'rental', 'price_amount': price, 'price_unit': 'day',
+            'tax_rate': 15, 'security_deposit': 0,
+        }, 1, 1, mode)
+
+    # the old way drifts by a cent
+    drifted = line(round(1000 / 1.15, 2), 'exclusive')
+    assert drifted['line_total'] == 1000.01
+
+    # inclusive mode returns the advertised price exactly, for every cent value
+    for price in (345.00, 255.00, 1000.00, 40.20, 4020.01, 199.99, 1234.56):
+        result = line(price, 'inclusive')
+        assert result['line_total'] == price
+        assert round(result['line_subtotal'] + result['line_tax'], 2) == price
+
+    # the client's own example: R345 per day is R300 + R45 VAT
+    result = line(345.00, 'inclusive')
+    assert (result['line_subtotal'], result['line_tax'], result['line_total']) == (300.00, 45.00, 345.00)
 
 
 def test_store_empty_state(client):
@@ -1497,7 +1551,8 @@ def test_draft_order_can_be_edited_without_creating_new_order(client, app):
     assert b'ORD-00001' in saved.data
     assert b'Admin edit fee' in saved.data
     assert b'Edited order note' not in saved.data  # internal notes are saved but not shown on detail yet.
-    assert b'R1975.00' in saved.data  # 3 * R200 * 3 days + R50 + R125 damage waiver.
+    # 3 * R200 * 3 days + R50 custom + R7.50 VAT on the custom line + R125 damage waiver.
+    assert b'R1982.50' in saved.data
     assert b'R0.00' in saved.data  # no security-deposit charge remains.
     assert b'<span>Security deposit</span>' not in saved.data  # security-deposit totals row hidden for damage-waiver orders.
 
@@ -1509,8 +1564,8 @@ def test_draft_order_can_be_edited_without_creating_new_order(client, app):
         item_count = db.execute('SELECT COUNT(*) AS count FROM order_items WHERE order_id=?', (order_id,)).fetchone()['count']
         assert orders_count == 1
         assert order['status'] == 'draft'
-        assert order['total'] == 1975
-        assert order['due_total'] == 1975
+        assert order['total'] == 1982.50
+        assert order['due_total'] == 1982.50
         assert order['deposit_total'] == 0
         assert order['damage_waiver_amount'] == 125
         assert order['notes'] == 'Edited order note'
@@ -1546,7 +1601,8 @@ def test_non_draft_order_can_be_edited_and_keeps_status_with_payment_recalculati
     assert saved.status_code == 200
     assert b'Order saved' in saved.data
     assert b'Reserved' in saved.data
-    assert b'R400.00' in saved.data  # 1 * R200 * 1 day + R75 custom + R125 damage waiver.
+    # 1 * R200 * 1 day + R75 custom + R11.25 VAT on the custom line + R125 damage waiver.
+    assert b'R411.25' in saved.data
 
     with app.app_context():
         from app.db import get_db
@@ -1554,8 +1610,8 @@ def test_non_draft_order_can_be_edited_and_keeps_status_with_payment_recalculati
         order = db.execute('SELECT status, total, due_total, payment_status, start_at, end_at FROM orders WHERE id=?', (order_id,)).fetchone()
         items = db.execute('SELECT product_id, custom_name, quantity, unit_price FROM order_items WHERE order_id=? ORDER BY id', (order_id,)).fetchall()
         assert order['status'] == 'reserved'
-        assert order['total'] == 400
-        assert order['due_total'] == 250
+        assert order['total'] == 411.25
+        assert order['due_total'] == 261.25
         assert order['payment_status'] == 'partially_paid'
         assert order['start_at'] == '2026-07-02T10:00'
         assert order['end_at'] == '2026-07-03T10:00'

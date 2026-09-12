@@ -47,6 +47,55 @@ def update_company_settings(form):
     get_db().commit()
 
 
+DEFAULT_VAT_RATE = 15.0
+
+
+def global_vat_rate():
+    """The single VAT rate for the whole app."""
+    try:
+        return float(_row_value(get_company_settings(), "vat_rate", DEFAULT_VAT_RATE))
+    except (TypeError, ValueError):
+        return DEFAULT_VAT_RATE
+
+
+def global_tax_profile_id():
+    """The one tax profile every product uses, so VAT is never a per-product choice."""
+    db = get_db()
+    row = db.execute("SELECT id FROM tax_profiles WHERE is_default = 1 ORDER BY id LIMIT 1").fetchone()
+    if row:
+        return row["id"]
+    row = db.execute("SELECT id FROM tax_profiles ORDER BY id LIMIT 1").fetchone()
+    if row:
+        db.execute("UPDATE tax_profiles SET is_default = 1 WHERE id = ?", (row["id"],))
+        db.commit()
+        return row["id"]
+    cur = db.execute(
+        "INSERT INTO tax_profiles (name, rate, is_default, active, created_at) VALUES (?, ?, 1, 1, ?)",
+        ("VAT", global_vat_rate(), now()))
+    db.commit()
+    return cur.lastrowid
+
+
+def update_vat_settings(form):
+    """Save the global VAT rate and whether the prices already include it."""
+    db = get_db()
+    raw = form.get("vat_rate")
+    if raw is None or str(raw).strip() == "":
+        rate = global_vat_rate()          # no rate posted: keep the current one
+    else:
+        try:
+            rate = max(0.0, float(raw))
+        except (TypeError, ValueError):
+            rate = global_vat_rate()
+    mode = "inclusive" if form.get("prices_include_vat") else "exclusive"
+    db.execute("UPDATE company_settings SET vat_rate = ?, tax_mode = ?, updated_at = ? WHERE id = 1",
+               (rate, mode, now()))
+    profile_id = global_tax_profile_id()
+    db.execute("UPDATE tax_profiles SET rate = ?, name = ?, active = 1 WHERE id = ?",
+               (rate, f"VAT {rate:g}%", profile_id))
+    db.commit()
+
+
 def list_tax_profiles():
     return get_db().execute("SELECT * FROM tax_profiles ORDER BY is_default DESC, name").fetchall()
 
