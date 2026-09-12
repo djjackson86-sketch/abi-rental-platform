@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta
 
@@ -2662,7 +2663,6 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/Subtype /Image',
         b'/DCTDecode',
         b'/BaseFont /Helvetica-Bold',
-        b'25 714.00 cm /Im1 Do Q',
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
         b'INV-00001',
@@ -2706,6 +2706,15 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/F2 8.5 Tf 1 0 0 1 36.00 196.00 Tm (Banking details) Tj',
     ]:
         assert expected in pdf
+    # The logo box must clear the issuer/branch line, which is printed at y=715. Pin the
+    # relationship rather than one hardcoded coordinate: swapping in a tighter-cropped
+    # asset once dragged the artwork down onto that line without failing any test.
+    logo_draw = re.search(rb'q ([\d.]+) 0 0 ([\d.]+) ([\d.]+) ([\d.]+) cm /Im1 Do Q', pdf)
+    assert logo_draw, 'invoice PDF does not draw the logo'
+    logo_bottom = float(logo_draw.group(4))
+    logo_top = logo_bottom + float(logo_draw.group(2))
+    assert logo_bottom > 715, f'logo bottom {logo_bottom} collides with the issuer line at y=715'
+    assert logo_top < 842 - 40, f'logo top {logo_top} runs into the top page margin'
     for removed_label in [
         b'Issuer: Wonderboom',
         b'Customer: Order Customer',

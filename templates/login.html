@@ -3,7 +3,7 @@
 {% block body_class %}login-body{% endblock %}
 {% block body %}
 <main class="login-card">
-  <img class="brand-logo" src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers — hire, repairs, sales">
+  <img class="brand-logo" src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers">
   <h1>Sign in to Sano Trailers</h1>
   <p class="muted">Manage rentals, orders, customers, inventory and your online booking page.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}

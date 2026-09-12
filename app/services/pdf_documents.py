@@ -171,11 +171,14 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     draw_commands = []
     if logo_bytes:
         logo_width, logo_height = _jpeg_dimensions(logo_bytes)
-        display_width = 86
+        display_width = 92
         display_height = display_width * logo_height / logo_width
-        # The source logo image has built-in white padding. Shift the image left so
-        # the visible logo artwork aligns with the issuer/address wording below.
-        draw_commands.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 25 {A4_PORTRAIT_HEIGHT - 42 - display_height:.2f} cm /Im1 Do Q')
+        # The mark is a wide lockup (SANO tiles over TRAILERS) with a tight crop, so the
+        # image box is anchored so that the INK lands exactly where the old padded asset's
+        # ink sat (top-left, directly above the issuer/branch wording). Anchoring by the
+        # image edge instead would let the branch-name line collide with the artwork.
+        logo_bottom = A4_PORTRAIT_HEIGHT - 104
+        draw_commands.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 25 {logo_bottom:.2f} cm /Im1 Do Q')
         image_object = (
             f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
