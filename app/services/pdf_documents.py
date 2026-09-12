@@ -250,15 +250,18 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
     _add_pdf_lines(text_commands, 250, table_y, ['Qty'], size=7.5)
     _add_pdf_lines(text_commands, 305, table_y, ['Unit excl. VAT'], size=7.5)
+    _add_pdf_lines(text_commands, 372, table_y, ['Rental days'], size=7.5)
     _add_pdf_lines(text_commands, 430, table_y, ['Subtotal excl. VAT'], size=7.5)
     y = table_y - 24
     for index, item in enumerate(items[:8]):
         name = item['product_name'] or item['custom_name'] or 'Item'
         sku = item['product_sku'] or ''
-        line_view = tax_view['lines'][index] if index < len(tax_view['lines']) else {'unit_excl': 0.0, 'subtotal_excl': 0.0}
+        line_view = tax_view['lines'][index] if index < len(tax_view['lines']) else {'unit_excl': 0.0, 'subtotal_excl': 0.0, 'rental_days': None}
+        days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
         _add_pdf_lines(text_commands, 36, y, [name, sku], size=8, leading=11, max_lines=2)
         _add_pdf_lines(text_commands, 250, y, [str(item['quantity'])], size=8)
         _add_pdf_lines(text_commands, 305, y, [f"R{line_view['unit_excl']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, 372, y, [days_text], size=8)
         _add_pdf_lines(text_commands, 430, y, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
         y -= 36
 

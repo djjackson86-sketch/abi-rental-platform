@@ -2330,7 +2330,11 @@ def test_invoice_line_items_exclude_vat_and_summarise_it(client, app):
     assert b'<th>Unit excl. VAT</th>' in invoice.data
     assert b'<th>Subtotal excl. VAT</th>' in invoice.data
     assert b'<th>Tax</th>' not in invoice.data  # no per-line VAT column any more
-    assert b'<th>Rental days</th>' not in invoice.data
+    # the hire length sits between the unit price and the line subtotal
+    assert b'<th>Rental days</th>' in invoice.data
+    assert (invoice.data.index(b'<th>Unit excl. VAT</th>')
+            < invoice.data.index(b'<th>Rental days</th>')
+            < invoice.data.index(b'<th>Subtotal excl. VAT</th>'))
     assert b'Rental days 1' in invoice.data  # Order details keep rental dates/days visible.
     assert b'<span>Total without VAT</span>' in invoice.data
     assert b'<span>Total with VAT</span>' in invoice.data
@@ -2343,6 +2347,9 @@ def test_invoice_line_items_exclude_vat_and_summarise_it(client, app):
     assert b'Rental days 1' in pdf  # Order details keep rental dates/days visible.
     assert b'(Unit excl. VAT) Tj' in pdf
     assert b'(Subtotal excl. VAT) Tj' in pdf
+    assert b'(Rental days) Tj' in pdf
+    assert (pdf.index(b'(Unit excl. VAT) Tj') < pdf.index(b'(Rental days) Tj')
+            < pdf.index(b'(Subtotal excl. VAT) Tj'))
     assert b'(Tax) Tj' not in pdf  # the per-line Tax column is gone
     for label in (b'(Total without VAT) Tj', b'(Total with VAT) Tj', b'(Amount due) Tj'):
         assert label in pdf
@@ -4757,3 +4764,68 @@ def test_recovery_only_touches_the_main_profile(client, app):
 
     # the staff account keeps its own password
     assert b'Invalid name or password' not in login(client, name='Staff Two', password='staffpass').data
+
+
+
+def _invoice_row_cells(html, item_label):
+    """Cell text for one row of the document line-item table."""
+    row = re.search(r'<tr><td><strong>' + re.escape(item_label) + r'</strong>.*?</tr>', html, re.S)
+    assert row, f'no line-item row for {item_label}'
+    return [re.sub(r'<[^>]+>', '', cell).strip() for cell in re.findall(r'<td>(.*?)</td>', row.group(0), re.S)]
+
+
+def test_rental_days_column_only_fills_for_rental_lines(client, app):
+    """The rental-days column is filled for HIRE lines and blank for everything else.
+
+    The client asked for the column "for rental items". A sold item or a
+    fixed-fee line is not a hire, so it shows an em dash rather than a day
+    count that would imply it was rented.
+    """
+    login(client)
+    seed_customer_and_product(client)  # product 1: rental, R200/day
+    client.post('/inventory/new', data={
+        'name': 'Order Spare Wheel',
+        'sku': 'ORD-SPARE',
+        'quantity': '10',
+        'description': 'Sold outright.',
+        'product_type': 'sale',
+        'price_amount': '350',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': ['1', '2', '', ''],
+        'quantity': ['1', '1', '1', '1'],
+        'custom_name': ['', '', 'Delivery fee', 'Weekend hire'],
+        'custom_unit_price': ['', '', '150', '100'],
+        'custom_billing_mode': ['', '', 'fixed', 'rental_day'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+    }, follow_redirects=False)
+    assert res.status_code == 302
+    order_id = res.headers['Location'].rstrip('/').split('/')[-1]
+
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    html = invoice.data.decode('utf-8')
+    assert '<th>Rental days</th>' in html
+    assert html.index('<th>Unit excl. VAT</th>') < html.index('<th>Rental days</th>') < html.index('<th>Subtotal excl. VAT</th>')
+
+    # 2026-07-01 09:00 -> 2026-07-03 15:00 is 3 rental days
+    assert _invoice_row_cells(html, 'Order Trailer')[3] == '3'
+    assert _invoice_row_cells(html, 'Weekend hire')[3] == '3'
+    # not hires: sold stock and a fixed fee
+    assert _invoice_row_cells(html, 'Order Spare Wheel')[3] == '\u2014'
+    assert _invoice_row_cells(html, 'Delivery fee')[3] == '\u2014'
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf = document_pdf_bytes(1)
+    assert b'(Rental days) Tj' in pdf
+    assert b'(3) Tj' in pdf

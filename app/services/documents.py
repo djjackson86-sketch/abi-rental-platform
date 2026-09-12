@@ -208,9 +208,17 @@ def document_tax_view(document, items):
     summary (total without VAT / VAT / total with VAT). ``line_subtotal`` is the
     VAT-exclusive line amount in both tax modes; ``unit_price`` is only exclusive
     when prices exclude VAT, so it is converted when prices include VAT.
+
+    ``rental_days`` is the number of days a RENTAL line was charged for, and is
+    ``None`` for lines that are not rentals (sales, services, fixed-fee custom
+    lines) so the document leaves that column blank rather than implying a hire.
+    There is no per-line days column in ``order_items``: a rental line is priced
+    as unit x qty x the order's rental days, so the order's day count IS the
+    line's day count.
     """
     settings = get_company_settings()
     tax_mode = _row_get(settings, 'tax_mode', 'exclusive') or 'exclusive'
+    order_days = rental_days_for_document(document)
 
     lines = []
     for item in items:
@@ -219,7 +227,13 @@ def document_tax_view(document, items):
         tax = float(_row_get(item, 'line_tax', 0) or 0)
         if tax_mode == 'inclusive' and subtotal:
             unit = unit / (1 + (tax / subtotal))
-        lines.append({'unit_excl': round(unit, 2), 'subtotal_excl': round(subtotal, 2)})
+        is_rental = (_row_get(item, 'product_type', '') == 'rental'
+                     or _row_get(item, 'billing_mode', '') == 'rental_day')
+        lines.append({
+            'unit_excl': round(unit, 2),
+            'subtotal_excl': round(subtotal, 2),
+            'rental_days': order_days if is_rental else None,
+        })
 
     subtotal = round(float(_row_get(document, 'subtotal', 0) or 0), 2)
     discount = round(float(_row_get(document, 'discount_total', 0) or 0), 2)

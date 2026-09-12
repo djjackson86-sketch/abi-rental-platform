@@ -52,10 +52,10 @@
   {% endif %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Item</th><th>Qty</th><th>Unit excl. VAT</th><th>Subtotal excl. VAT</th></tr></thead>
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit excl. VAT</th><th>Rental days</th><th>Subtotal excl. VAT</th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].unit_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].subtotal_excl) }}</td></tr>
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].unit_excl) }}</td><td>{% if tax_view.lines[loop.index0].rental_days %}{{ tax_view.lines[loop.index0].rental_days }}{% else %}—{% endif %}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].subtotal_excl) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
