@@ -25,7 +25,7 @@
       <label>SKU<input name="sku" value="{{ product.sku if product else '' }}" placeholder="TRL-001"></label>
       <label>Product group<select name="product_group_id"><option value="">Ungrouped</option>{% for group in product_groups %}<option value="{{ group.id }}" {% if product and product.product_group_id==group.id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></label>
       <div class="span-2 stock-branch-field" data-stock-field>
-        <div class="stock-branch-head" style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><strong>Stock per branch</strong><span class="form-help">Total in stock: <b data-stock-total>{{ product.quantity if product else 1 }}</b></span></div>
+        <div class="stock-branch-head" style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><strong>Stock per branch</strong><span class="form-help">Total in stock: <b data-stock-total>{{ product.quantity if product else 1 }}</b> <span data-stock-mode>&mdash; one shared pool for all branches</span></span></div>
         {% if branches %}
         <div class="branch-stock-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:8px 0 0">
           {% for branch in branches %}
@@ -74,12 +74,18 @@
   const stockField=document.querySelector('[data-stock-field]');
   const branchInputs=[...document.querySelectorAll('[data-stock-field] input[name^="qty_branch_"]')];
   const totalOut=document.querySelector('[data-stock-total]');
+  const modeOut=document.querySelector('[data-stock-mode]');
   const sharedTotal={{ (product.quantity if product else 1) }};
   function syncTotal(){
     if(!totalOut) return;
     const entered=branchInputs.filter(input=>input.value!=='');
-    if(!entered.length){ totalOut.textContent=String(sharedTotal); return; }
+    if(!entered.length){
+      totalOut.textContent=String(sharedTotal);
+      if(modeOut) modeOut.textContent='\u2014 one shared pool for all branches';
+      return;
+    }
     totalOut.textContent=String(entered.reduce((sum,input)=>sum+Math.max(0,parseInt(input.value,10)||0),0));
+    if(modeOut) modeOut.textContent='\u2014 sum of the branch counts';
   }
   function syncStockField(){
     const selectedType=typeInputs.find(input=>input.checked);
