@@ -144,8 +144,10 @@ def test_saving_branch_counts_stores_rows_and_the_total(client):
     assert stored(client, product_id) == 5
 
     form = client.get(f'/inventory/{product_id}/edit').data
-    assert b'name="qty_branch_1" type="number" min="0" step="1" placeholder="Shared" value="3"' in form
-    assert b'value="2"' in form
+    assert b'name="qty_branch_1"' in form and b'name="qty_branch_2"' in form
+    assert re.search(rb'name="qty_branch_1"[^>]*value="3"', form)
+    assert re.search(rb'name="qty_branch_2"[^>]*value="2"', form)
+    assert re.search(rb'name="qty_branch_3"[^>]*value=""', form)
 
     listing = client.get('/inventory').data
     assert b'Branch 1 3' in listing and b'Branch 2 2' in listing
@@ -345,6 +347,17 @@ def test_calendar_availability_follows_the_branch_filter(client, app):
     page = client.get('/calendar?start_date=2026-07-01&end_date=2026-07-01&branch=2')
     assert page.status_code == 200
     assert b'Branch Trailer' in page.data
+
+
+def test_legacy_post_cannot_drift_the_total_away_from_the_rows(client):
+    """A caller that posts no per-branch boxes must not overwrite a split product's
+    computed total (products.quantity always equals the sum of the rows)."""
+    login(client)
+    product_id = create_product(client, qty_branch_1='3', qty_branch_2='2')
+    edit_product(client, product_id, quantity='99')
+    assert stored(client, product_id) == 5
+    with client.application.app_context():
+        assert product_branch_stock(product_id) == {1: 3, 2: 2}
 
 
 def test_migration_creates_the_branch_stock_table_on_an_existing_database(client, app):

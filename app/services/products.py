@@ -423,6 +423,12 @@ def update_product(product_id, form):
             # A branch-limited user only cleared their own depot's row, so the
             # shared total stays the sum of the rows that are left.
             data["quantity"] = sum(remaining.values())
+    else:
+        # No per-branch boxes in this post (a legacy/API caller) but the product
+        # is split: the total must stay the sum of the rows, never the posted box.
+        existing_rows = product_branch_stock(product_id)
+        if existing_rows:
+            data["quantity"] = sum(existing_rows.values())
     data["id"] = product_id
     get_db().execute(
         """UPDATE products SET
