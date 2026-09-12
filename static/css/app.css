@@ -276,3 +276,6 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .paid-stamp{position:absolute;top:32%;right:7%;transform:rotate(-18deg);border:4px solid #c81e1e;color:#c81e1e;font:800 34px/1 Arial,Helvetica,sans-serif;letter-spacing:.14em;padding:8px 18px;border-radius:6px;opacity:.85;pointer-events:none;z-index:2}
 @media print{.paid-stamp{opacity:.95}}
 @media (max-width:640px){.paid-stamp{font-size:22px;top:26%;right:4%}}
+
+.choice-card.disabled{opacity:.6;cursor:not-allowed}
+.choice-card.disabled input{cursor:not-allowed}

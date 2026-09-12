@@ -5,16 +5,16 @@
 <form method="post" class="settings-form panel product-form">
   <section class="form-section">
     <h2>Product type</h2>
-    {% if product %}<p class="form-help">Product type and tracking method cannot be changed after saving.</p>{% endif %}
+    {% if product and product_used_on_orders %}<p class="form-help">Product type and tracking method are locked once the product has been used on an order.</p>{% endif %}
     <div class="option-grid">
       {% for value,label,help in [('rental','Rental product','Items meant to be rented and returned.'),('sale','Sales item','Items intended for sale or giveaways.'),('service','Service','Services associated with rentals, like setup costs.')] %}
-      <label class="choice-card {% if product %}disabled{% endif %}">
-        <input type="radio" name="product_type" value="{{ value }}" {% if (product and product.product_type==value) or (not product and value=='rental') %}checked{% endif %} {% if product %}disabled{% endif %}>
+      <label class="choice-card {% if product and product_used_on_orders %}disabled{% endif %}">
+        <input type="radio" name="product_type" value="{{ value }}" {% if (product and product.product_type==value) or (not product and value=='rental') %}checked{% endif %} {% if product and product_used_on_orders %}disabled{% endif %}>
         <strong>{{ label }}</strong><span>{{ help }}</span>
       </label>
       {% endfor %}
     </div>
-    {% if product %}<input type="hidden" name="product_type" value="{{ product.product_type }}">{% endif %}
+    {% if product and product_used_on_orders %}<input type="hidden" name="product_type" value="{{ product.product_type }}">{% endif %}
   </section>
 
 
@@ -29,20 +29,20 @@
       <label class="span-2">Description<textarea name="description" rows="4" placeholder="Describe this product for staff and customers">{{ product.description if product else '' }}</textarea></label>
     </div>
     <p class="form-help"><a href="{{ url_for('inventory.new_group') }}">Create or edit product groups</a> to show category headings/folders in inventory.</p>
-    <p class="form-help">Unassigned products are available from all branches. Services do not need quantity/stock.</p>
+    <p class="form-help">Unassigned products are available from all branches. Services and products that don&rsquo;t track quantities do not need a stock count.</p>
   </section>
 
   <section class="form-section">
     <h2>Tracking method</h2>
     <div class="option-grid">
-      {% for value,label,help in [('bulk','Track quantities','Use one stock count for interchangeable items.'),('individual','Track individually','Use this for unique items with identifiers.')] %}
-      <label class="choice-card {% if product %}disabled{% endif %}">
-        <input type="radio" name="tracking_method" value="{{ value }}" {% if (product and product.tracking_method==value) or (not product and value=='bulk') %}checked{% endif %} {% if product %}disabled{% endif %}>
+      {% for value,label,help in [('bulk','Track quantities','Use one stock count for interchangeable items.'),('individual','Track individually','Use this for unique items with identifiers.'),('none',"Don’t track quantities",'Always bookable — no stock count kept.')] %}
+      <label class="choice-card {% if product and product_used_on_orders %}disabled{% endif %}">
+        <input type="radio" name="tracking_method" value="{{ value }}" {% if (product and product.tracking_method==value) or (not product and value=='bulk') %}checked{% endif %} {% if product and product_used_on_orders %}disabled{% endif %}>
         <strong>{{ label }}</strong><span>{{ help }}</span>
       </label>
       {% endfor %}
     </div>
-    {% if product %}<input type="hidden" name="tracking_method" value="{{ product.tracking_method }}">{% endif %}
+    {% if product and product_used_on_orders %}<input type="hidden" name="tracking_method" value="{{ product.tracking_method }}">{% endif %}
   </section>
 
   <section class="form-section">
@@ -58,16 +58,20 @@
 <script>
 (function(){
   const typeInputs=[...document.querySelectorAll('input[name="product_type"]')];
+  const trackingInputs=[...document.querySelectorAll('input[name="tracking_method"]')];
   const stockField=document.querySelector('[data-stock-field]');
   const qty=stockField&&stockField.querySelector('input[name="quantity"]');
-  function syncServiceStock(){
-    const selected=typeInputs.find(input=>input.checked);
-    const service=selected&&selected.value==='service';
-    if(stockField) stockField.hidden=!!service;
-    if(qty){ qty.disabled=!!service; if(service) qty.value='0'; }
+  function syncStockField(){
+    const selectedType=typeInputs.find(input=>input.checked);
+    const selectedTracking=trackingInputs.find(input=>input.checked);
+    // No stock count for services or for products set to "Don't track quantities".
+    const untracked=(selectedType&&selectedType.value==='service')||(selectedTracking&&selectedTracking.value==='none');
+    if(stockField) stockField.hidden=!!untracked;
+    if(qty){ qty.disabled=!!untracked; if(untracked) qty.value='0'; }
   }
-  typeInputs.forEach(input=>input.addEventListener('change',syncServiceStock));
-  syncServiceStock();
+  typeInputs.forEach(input=>input.addEventListener('change',syncStockField));
+  trackingInputs.forEach(input=>input.addEventListener('change',syncStockField));
+  syncStockField();
 })();
 </script>
 {% endblock %}

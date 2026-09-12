@@ -4,11 +4,17 @@ from app.services.settings import global_tax_profile_id
 
 VALID_TYPES = {"rental", "sale", "service"}
 VALID_UNITS = {"hour", "day", "week", "month", "fixed"}
-VALID_TRACKING_METHODS = {"bulk", "individual"}
+VALID_TRACKING_METHODS = {"bulk", "individual", "none"}
+
+TRACKING_LABELS = {
+    "individual": "Track individually",
+    "none": "Don\u2019t track quantities",
+}
 
 
 def tracking_label(value):
-    return "Track individually" if value == "individual" else "Track quantities"
+    """customer-facing name of a tracking method ('none' = never blocks a booking)."""
+    return TRACKING_LABELS.get(value, "Track quantities")
 
 
 def list_product_groups(include_inactive=True):
@@ -158,6 +164,13 @@ def product_filter_counts():
     }
 
 
+def _quantity_from_form(form):
+    try:
+        return max(0, int(form.get("quantity") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _clean(form):
     name = form.get("name", "").strip()
     if not name:
@@ -173,7 +186,9 @@ def _clean(form):
         tracking_method = "bulk"
     product_group_id = int(form.get("product_group_id") or 0) or None
     branch_id = int(form.get("branch_id") or 0) or None
-    quantity = 0 if product_type == "service" else max(0, int(form.get("quantity") or 0))
+    # Services and untracked products keep no stock count at all.
+    untracked = product_type == "service" or tracking_method == "none"
+    quantity = 0 if untracked else _quantity_from_form(form)
     return {
         "name": name,
         "product_type": product_type,
@@ -208,16 +223,33 @@ def create_product(form):
 
 
 def update_product(product_id, form):
+    """Save a product.
+
+    Product type and tracking method may only change while the product has never
+    been used on an order — the same guard that protects permanent delete. Once an
+    order (and therefore a quote or invoice) references the product, those two
+    fields stay locked, and the blocked attempt is reported back to the route.
+
+    The guard lives here, in the service layer: hiding or disabling the form
+    inputs is presentation, not a permission boundary.
+    """
     data = _clean(form)
     existing = get_product(product_id)
-    immutable_change_requested = False
+    blocked_change = False
     if existing:
-        immutable_change_requested = (
+        blocked_change = (
             data["product_type"] != existing["product_type"]
             or data["tracking_method"] != existing["tracking_method"]
         )
-        data["product_type"] = existing["product_type"]
-        data["tracking_method"] = existing["tracking_method"]
+        if blocked_change and product_order_item_count(product_id) > 0:
+            data["product_type"] = existing["product_type"]
+            data["tracking_method"] = existing["tracking_method"]
+            # _clean() zeroes the quantity of an untracked product; re-read the
+            # submitted count so a refused change cannot wipe a tracked stock count.
+            untracked = existing["product_type"] == "service" or existing["tracking_method"] == "none"
+            data["quantity"] = 0 if untracked else _quantity_from_form(form)
+        else:
+            blocked_change = False
     data["id"] = product_id
     get_db().execute(
         """UPDATE products SET
@@ -227,7 +259,7 @@ def update_product(product_id, form):
         data,
     )
     get_db().commit()
-    return immutable_change_requested
+    return blocked_change
 
 
 def archive_product(product_id):

@@ -6,7 +6,7 @@
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
   <section class="product-detail-card">
     <div class="product-image large">{{ product.name[:2].upper() }}</div>
-    <div><p class="eyebrow">Rental product</p><h1>Book {{ product.name }}</h1><p>{{ product.description }}</p>{% if settings.show_prices %}<b>R{{ '%.2f'|format(product.price_amount) }} / {{ product.price_unit }}</b><p class="muted">Security deposit: R{{ '%.2f'|format(product.security_deposit) }}</p>{% endif %}{% if settings.show_availability %}<p class="muted">{{ product.quantity }} available before existing reservations.</p>{% endif %}</div>
+    <div><p class="eyebrow">Rental product</p><h1>Book {{ product.name }}</h1><p>{{ product.description }}</p>{% if settings.show_prices %}<b>R{{ '%.2f'|format(product.price_amount) }} / {{ product.price_unit }}</b><p class="muted">Security deposit: R{{ '%.2f'|format(product.security_deposit) }}</p>{% endif %}{% if settings.show_availability %}<p class="muted">{% if product.product_type == 'service' or product.tracking_method == 'none' %}Available on request.{% else %}{{ product.quantity }} available before existing reservations.{% endif %}</p>{% endif %}</div>
   </section>
   <form method="post" action="{{ url_for('public.book_product', product_id=product.id) }}" class="panel checkout-form">
     <h2>Request this booking</h2>

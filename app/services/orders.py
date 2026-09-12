@@ -728,11 +728,13 @@ def availability_errors(order_id):
     for item in order_items(order_id):
         if not item["product_id"]:
             continue
-        product = db.execute("SELECT name, quantity, branch_id, product_type FROM products WHERE id = ?", (item["product_id"],)).fetchone()
+        product = db.execute("SELECT name, quantity, branch_id, product_type, tracking_method FROM products WHERE id = ?", (item["product_id"],)).fetchone()
         if not product:
             errors.append("One of the products on this order is no longer available")
             continue
-        if (product["product_type"] or "") == "service":
+        # Services and untracked products keep no stock count, so they are always
+        # bookable and must never be blocked by the availability check.
+        if (product["product_type"] or "") == "service" or (product["tracking_method"] or "") == "none":
             continue
         branch_clause = "" if product["branch_id"] is None else "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)"
         params = [item["product_id"], order_id]
@@ -1230,20 +1232,25 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
         total = int(product["quantity"] or 0)
         booked = int(booked or 0)
         available = max(total - booked, 0)
+        # Products set to "Don't track quantities" hold no stock count, so the
+        # calendar reports them as not tracked instead of 0 of 0.
+        untracked = (product["tracking_method"] or "") == "none"
         product_row = {
             "id": product["id"],
             "name": product["name"],
             "sku": product["sku"],
             "tracking_method": product["tracking_method"],
+            "untracked": untracked,
             "total_quantity": total,
             "booked_quantity": booked,
             "available_quantity": available,
             "reservations": reservations,
         }
         group["products"].append(product_row)
-        group["total_quantity"] += total
-        group["booked_quantity"] += booked
-        group["available_quantity"] += available
+        if not untracked:
+            group["total_quantity"] += total
+            group["booked_quantity"] += booked
+            group["available_quantity"] += available
 
     return {
         "start_date": range_start.date().isoformat(),

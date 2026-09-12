@@ -137,9 +137,13 @@
                   <tr>
                     <td><strong>{{ product.name }}</strong><small>{{ product.tracking_method|replace('_', ' ')|title }}</small></td>
                     <td>{{ product.sku or '—' }}</td>
+                    {% if product.untracked %}
+                    <td colspan="3"><span class="muted">Not tracked</span></td>
+                    {% else %}
                     <td>{{ product.total_quantity }}</td>
                     <td>{{ product.booked_quantity }}</td>
                     <td><strong>{{ product.available_quantity }}</strong></td>
+                    {% endif %}
                     <td>
                       {% if product.reservations %}
                         <div class="reservation-link-list">

@@ -171,10 +171,13 @@ def edit(product_id):
     _ensure_product_access(product)
     if request.method == "POST":
         try:
-            immutable_change_requested = update_product(product_id, _force_staff_product_branch(request.form))
+            blocked_change = update_product(product_id, _force_staff_product_branch(request.form))
             flash("Product saved", "success")
-            if immutable_change_requested:
-                flash("Product type and tracking method cannot be changed after saving", "info")
+            if blocked_change:
+                flash(
+                    "Product type and tracking method were not changed: this product has been used on an order",
+                    "info",
+                )
             return redirect(url_for("inventory.edit", product_id=product_id))
         except ValueError as exc:
             flash(str(exc), "error")

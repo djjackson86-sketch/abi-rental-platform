@@ -504,14 +504,15 @@ def test_editing_product_group_assignment_keeps_order_creation_working(client, a
         product = get_db().execute('SELECT product_group_id FROM products WHERE id=1').fetchone()
         assert product['product_group_id'] == 1
 
-def test_product_type_and_tracking_method_are_immutable_after_create(client, app):
+def test_product_type_and_tracking_method_stay_editable_while_the_product_is_unused(client, app):
+    """Clarification (b): type/tracking edits are allowed on products never used on an order."""
     login(client)
     res = client.post('/inventory/new', data={
-        'name': 'Immutable Trailer',
+        'name': 'Unused Trailer',
         'sku': 'IMM-TRL',
         'quantity': '2',
         'tracking_method': 'bulk',
-        'description': 'Booqable-style immutable type test.',
+        'description': 'Type and tracking may still change while unused.',
         'product_type': 'rental',
         'price_amount': '300',
         'price_unit': 'day',
@@ -523,11 +524,11 @@ def test_product_type_and_tracking_method_are_immutable_after_create(client, app
     product_id = res.headers['Location'].rstrip('/').split('/')[-2]
 
     edited = client.post(f'/inventory/{product_id}/edit', data={
-        'name': 'Immutable Trailer Updated',
+        'name': 'Unused Trailer Updated',
         'sku': 'IMM-TRL',
         'quantity': '4',
         'tracking_method': 'individual',
-        'description': 'Attempted to change type and tracking.',
+        'description': 'Type and tracking changed while unused.',
         'product_type': 'sale',
         'price_amount': '350',
         'price_unit': 'fixed',
@@ -537,14 +538,134 @@ def test_product_type_and_tracking_method_are_immutable_after_create(client, app
         'public_visible': '1',
     }, follow_redirects=True)
     assert b'Product saved' in edited.data
-    assert b'Product type and tracking method cannot be changed after saving' in edited.data
+    assert b'are locked once the product has been used on an order' not in edited.data
+    assert b'class="flash info"' not in edited.data
 
     with app.app_context():
         from app.db import get_db
         product = get_db().execute('SELECT product_type, tracking_method, quantity FROM products WHERE id = ?', (product_id,)).fetchone()
+        assert product['product_type'] == 'sale'
+        assert product['tracking_method'] == 'individual'
+        assert product['quantity'] == 4
+
+
+def test_product_type_and_tracking_method_lock_once_an_order_uses_the_product(client, app):
+    """Clarification (b): the guard is "never used on an order", same as permanent delete."""
+    login(client)
+    seed_customer_and_product(client)
+    create_order_for_status(client, quantity='1')
+
+    blocked = client.post('/inventory/1/edit', data={
+        'name': 'Order Trailer',
+        'sku': 'ORD-TRL',
+        'quantity': '9',
+        'tracking_method': 'none',
+        'description': 'Attempted to change type and tracking after an order used it.',
+        'product_type': 'sale',
+        'price_amount': '350',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    assert b'Product saved' in blocked.data
+    assert b'Product type and tracking method were not changed' in blocked.data
+    assert b'class="flash info"' in blocked.data
+
+    with app.app_context():
+        from app.db import get_db
+        product = get_db().execute('SELECT product_type, tracking_method, quantity FROM products WHERE id = 1').fetchone()
         assert product['product_type'] == 'rental'
         assert product['tracking_method'] == 'bulk'
-        assert product['quantity'] == 4
+        # The refused tracking change must not zero the stock count that was submitted.
+        assert product['quantity'] == 9
+
+
+def test_untracked_product_saves_without_a_stock_count_and_reads_not_tracked(client, app):
+    """'Don't track quantities' keeps no stock count and is always bookable."""
+    login(client)
+    res = client.post('/inventory/new', data={
+        'name': 'Always Bookable Trailer',
+        'sku': 'UNTRACKED-001',
+        'quantity': '7',
+        'tracking_method': 'none',
+        'description': 'No stock count is kept for this product.',
+        'product_type': 'rental',
+        'price_amount': '275',
+        'price_unit': 'day',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    assert b'Product created' in res.data
+    assert 'Don\u2019t track quantities'.encode() in res.data
+
+    with app.app_context():
+        from app.db import get_db
+        product = get_db().execute("SELECT tracking_method, quantity FROM products WHERE sku = 'UNTRACKED-001'").fetchone()
+        assert product['tracking_method'] == 'none'
+        assert product['quantity'] == 0
+        product_id = get_db().execute("SELECT id FROM products WHERE sku = 'UNTRACKED-001'").fetchone()['id']
+
+    inventory = client.get('/inventory')
+    assert 'Don\u2019t track quantities'.encode() in inventory.data
+    assert b'Not tracked' in inventory.data
+    # The dense inventory table must not print a bogus 0 stock count for it.
+    assert b'<td>0</td>' not in inventory.data
+
+    calendar = client.get('/calendar')
+    assert b'Not tracked' in calendar.data
+
+    store = client.get('/store')
+    assert b'Available on request' in store.data
+
+    detail = client.get(f'/store/products/{product_id}')
+    assert b'Available on request.' in detail.data
+
+
+def test_untracked_product_is_never_blocked_by_availability(client, app):
+    login(client)
+    client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Untracked Customer',
+        'email': 'untracked@example.com',
+    }, follow_redirects=True)
+    created = client.post('/inventory/new', data={
+        'name': 'Untracked Delivery Trailer',
+        'sku': 'UNTRACKED-002',
+        'quantity': '0',
+        'tracking_method': 'none',
+        'description': 'Always bookable, no stock count.',
+        'product_type': 'rental',
+        'price_amount': '275',
+        'price_unit': 'day',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=False)
+    product_id = created.headers['Location'].rstrip('/').split('/')[-2]
+
+    order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': str(product_id),
+        'quantity': '25',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+    }, follow_redirects=False)
+    assert order.status_code == 302
+    order_id = order.headers['Location'].rstrip('/').split('/')[-1]
+
+    with app.app_context():
+        from app.services.orders import availability_errors
+        assert availability_errors(order_id) == []
+
+    reserved = client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
+    assert b'Order reserved' in reserved.data
 
 
 def test_archived_product_hidden_from_store(client):
