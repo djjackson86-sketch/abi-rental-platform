@@ -47,6 +47,15 @@ STOP = {"street", "road", "avenue", "ave", "drive", "dr", "close", "crescent", "
 # Thulamela, Limpopo. A query is only trusted if it still contains a real place word.
 COUNTRY_WORDS = {"south", "africa", "rsa", "sa"}
 
+# A street line can only be trusted when the query we matched on actually contained a
+# street. A bare place query ("Midrand, 1685, South Africa") happily returns a highway or
+# an unrelated road - it produced "Old Pretoria Main Road" for dozens of Midrand
+# addresses, "Ben Schoeman Highway" for Olifantsfontein, and "1 Hospital Street" for a
+# phone number. Those must never overwrite address line 1.
+STREET_IN_QUERY = re.compile(
+    r"\b(street|st|road|rd|avenue|ave|drive|dr|close|crescent|cres|lane|way|place|"
+    r"court|ct|boulevard|blvd|highway|circle|square|walk|terrace|grove|pass|end)\b", re.I)
+
 
 def query_is_reliable(query):
     """False when the query has no meaningful place word left in it."""
@@ -132,6 +141,9 @@ def main():
             if not street_ok:
                 # the only acceptable unshared street is when the source had no street data at all
                 street_ok = not tokens(src)
+            if street_ok and not STREET_IN_QUERY.search(p.get("matched_query") or ""):
+                # matched on a bare place name: it cannot tell us the street
+                street_ok = False
 
         # Suburb is the least reliable field: Nominatim happily returns a neighbouring
         # suburb (Parklands -> Foreshore, Linbro Park -> Lakeside). Only keep it when the
