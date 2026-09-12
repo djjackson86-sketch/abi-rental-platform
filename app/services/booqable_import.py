@@ -305,3 +305,95 @@ def validate(payload):
     if not payload["created_at"]:
         problems.append("missing created_at")
     return problems
+
+
+# --------------------------------------------------------------------------- #
+# products (inventory) mapping - Booqable products export
+# --------------------------------------------------------------------------- #
+
+PRODUCT_TYPE_MAP = {"rental": "rental", "sales_item": "sale", "service": "service"}
+
+STOCK_ID = re.compile(
+    r"^\s*(\d{1,3})\s*[-–]?\s*(.+?)\s*(GP|FS|NW|LP|MP|KZN|EC|NC|WC)\s*(?:-\d)?\s*$")
+
+
+def parse_stock_identifier(value):
+    """'054 - MS 26 CS GP' -> ('054', 'MS 26 CS', 'GP')  (None when unparseable)."""
+    match = STOCK_ID.match((value or "").strip())
+    if not match:
+        return None
+    return ("%03d" % int(match.group(1)), re.sub(r"\s+", " ", match.group(2)).strip().upper(),
+            match.group(3))
+
+
+def _int(value, default=0):
+    try:
+        return int(str(value).strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def map_product_row(row, tax_profile_id=None):
+    """Booqable product row -> dict of products-column values (no id).
+
+    Rentals that Booqable tracks individually become ONE product row per physical
+    trailer, with the registration plate as the SKU - this matches how the client
+    already set trailers up in the app.
+    """
+    product_type = PRODUCT_TYPE_MAP.get((row.get("product_type") or "").strip(), "rental")
+    stock_identifier = (row.get("stock_identifier") or "").strip()
+    unit = parse_stock_identifier(stock_identifier) if stock_identifier else None
+    tracking = "individual" if stock_identifier else "bulk"
+
+    if stock_identifier:
+        sku = stock_identifier                      # plate identifies the trailer
+        quantity = 1
+        # Every physical trailer shares its parent product's Booqable id, so the
+        # row key must include the unit or the unique index would drop 63 of 87.
+        source_id = f"{norm(row.get('id'))}:{stock_identifier}"
+    else:
+        sku = (row.get("sku") or "").strip()
+        quantity = _int(row.get("quantity"), 0)
+        source_id = norm(row.get("id"))
+    if product_type == "service":
+        quantity = 0                                # services are never stock
+    quantity = max(0, quantity)
+
+    payload = {
+        "name": norm(row.get("name")),
+        "product_type": product_type,
+        "tracking_method": tracking,
+        "description": norm(row.get("description")),
+        "sku": sku,
+        "active": 1,
+        "public_visible": 1,
+        "price_amount": _as_float(row.get("base_price_as_decimal")),
+        "price_unit": "day" if product_type == "rental" else "fixed",
+        "security_deposit": _as_float(row.get("deposit_as_decimal")),
+        "hourly_extra_rate": 0.0,
+        "tax_profile_id": tax_profile_id,
+        "product_group_id": None,
+        "quantity": quantity,
+        "branch_id": None,                          # owner decision: branch left blank
+        "source_system": SOURCE_SYSTEM,
+        "source_id": source_id,
+    }
+    payload["_parent_source_id"] = norm(row.get("id"))
+    payload["_fleet_no"] = unit[0] if unit else ""
+    payload["_plate"] = unit[1] if unit else ""
+    payload["_stock_identifier"] = stock_identifier
+    payload["_booqable_status"] = (row.get("status") or "").strip()
+    payload["_booqable_sku"] = (row.get("sku") or "").strip()
+    payload["_raw_qty"] = _int(row.get("quantity"), 0)
+    return payload
+
+
+def validate_product(payload):
+    problems = []
+    if not payload["name"]:
+        problems.append("missing name")
+    if not payload["source_id"]:
+        problems.append("missing Booqable id")
+    if payload["price_amount"] < 0:
+        problems.append("negative price")
+    return problems
