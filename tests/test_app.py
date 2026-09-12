@@ -3699,6 +3699,158 @@ def test_late_return_breakdown_examples_and_started_revision_reprices_order(clie
         assert order['due_total'] == 1450
         assert any(item['custom_name'] == 'Extra hours' and item['quantity'] == 2 and item['line_total'] == 100 for item in items)
 
+    # Ticket ABI-341952934 (1): the Days column claimed 4 days while the money was
+    # 3 days + 2 hours. The displayed count must match what was charged.
+    order_page = client.get(f'/orders/{order_id}').data.decode('utf-8')
+    assert _invoice_row_cells(order_page, 'Order Trailer')[1] == '3'
+    invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    html = invoice.data.decode('utf-8')
+    assert '<th>Days</th>' in html
+    assert 'Rental days 3' in html
+    hire_row = _invoice_row_cells(html, 'Order Trailer')
+    assert hire_row[2] == '3'          # DAYS cell, not the ceil() count of 4
+    assert hire_row[4] == 'R600.00'    # 3 rental days x R200 - the money the days describe
+    assert 'R700.00' in html           # Total without VAT unchanged
+    assert 'R1450.00' in html          # Amount due unchanged (incl. the deposit)
+
+
+def test_billed_rental_days_shows_the_days_the_money_was_charged_for(client, app):
+    """Ticket ABI-341952934 (1): one day count for the booking, the order page and the invoice.
+
+    A booking that was never revised still rounds a partial day up, but once the
+    actual return is revised the order is re-priced in full 24h blocks plus extra
+    hours - so the day count shown must be the floor-based one or it is one day
+    ahead of the money (the client saw 4 days on a R700 / 3-day invoice).
+    """
+    from app.services.orders import billed_rental_days
+
+    # never revised: a partial day rounds up, exactly as the booking form says
+    assert billed_rental_days(datetime(2026, 9, 1, 9, 0), datetime(2026, 9, 2, 12, 0)) == 2
+    assert billed_rental_days(datetime(2026, 9, 1, 9, 0), datetime(2026, 9, 1, 11, 0)) == 1
+    # revised: 74 hours is 3 full days + 2 extra hours, whichever flag records it
+    assert billed_rental_days(datetime(2026, 9, 6, 8, 0), datetime(2026, 9, 9, 10, 0), extra_hours=2) == 3
+    assert billed_rental_days(datetime(2026, 9, 6, 8, 0), datetime(2026, 9, 9, 10, 0), revised=True) == 3
+
+    login(client)
+    seed_customer_and_product(client)  # product 1: rental, R200/day, R750 deposit
+    with app.app_context():
+        get_db().execute('UPDATE products SET hourly_extra_rate=50 WHERE id=1')
+        get_db().commit()
+    res = client.post('/orders/new', data={
+        'customer_id': '1', 'product_id': '1', 'quantity': '1',
+        'start_date': '2026-09-06', 'start_time': '08:00',
+        'end_date': '2026-09-07', 'end_time': '08:00',
+    }, follow_redirects=False)
+    assert res.status_code == 302
+    order_id = res.headers['Location'].rstrip('/').split('/')[-1]
+    # an unrevised 24h booking is 1 day everywhere
+    assert _invoice_row_cells(client.get(f'/orders/{order_id}').data.decode('utf-8'), 'Order Trailer')[1] == '1'
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    with app.app_context():
+        document_id = get_db().execute('SELECT id FROM documents WHERE order_id=?', (order_id,)).fetchone()['id']
+    client.post(f'/documents/{document_id}/finalize', follow_redirects=True)
+    client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/revise-return', data={'end_date': '2026-09-09', 'end_time': '10:00'}, follow_redirects=True)
+
+    order_page = client.get(f'/orders/{order_id}').data.decode('utf-8')
+    assert _invoice_row_cells(order_page, 'Order Trailer')[1] == '3'
+    assert _invoice_row_cells(order_page, 'Extra hours')[1] == '\u2014'  # not a hire line
+    invoice_page = client.get(f'/documents/{document_id}').data.decode('utf-8')
+    assert 'Rental days 3' in invoice_page
+    assert _invoice_row_cells(invoice_page, 'Order Trailer')[2] == '3'
+
+    # Settling the returned order rewrites orders.extra_hours back to 0. The day
+    # count must still follow the revision rather than drift back to 4.
+    client.post(f'/orders/{order_id}/return-checklist', data={'no_damages': '1'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/return', follow_redirects=True)
+    client.post(f'/orders/{order_id}/add-return-charges', data={'damage_charge': '250'}, follow_redirects=True)
+    with app.app_context():
+        order = get_db().execute('SELECT status, extra_hours, return_revised_at FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert order['status'] == 'returned'
+        assert order['extra_hours'] == 0
+        assert order['return_revised_at']
+    assert _invoice_row_cells(client.get(f'/orders/{order_id}').data.decode('utf-8'), 'Order Trailer')[1] == '3'
+    assert 'Rental days 3' in client.get(f'/documents/{document_id}').data.decode('utf-8')
+
+
+def _pdf_text_commands(pdf_bytes):
+    """Every drawn text run in the PDF: font, size, x, y and the text itself.
+
+    Read from the content stream rather than a rendered image, so a layout
+    assertion is exact and does not depend on a rasteriser being installed.
+    """
+    streams = re.findall(r'stream\r?\n(.*?)\r?\nendstream', pdf_bytes.decode('latin-1'), re.S)
+    content = next(stream for stream in streams if ' Tm ' in stream and ' Tj' in stream)
+    return [
+        {'font': match.group(1), 'size': float(match.group(2)), 'x': float(match.group(3)),
+         'y': float(match.group(4)), 'text': match.group(5)}
+        for match in re.finditer(r'/(F\d) ([\d.]+) Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \((.*?)\) Tj', content)
+    ]
+
+
+def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
+    """Ticket ABI-341952934 (2): the TAX figure sat almost touching TOTAL INCL. VAT.
+
+    Coordinates are pinned from the content stream with a deliberately large
+    amount in both money columns, because the last column must stay inside the
+    table edge however wide the figures get.
+    """
+    from app.services.pdf_documents import (
+        INVOICE_TABLE_RIGHT_EDGE, TAX_COLUMN_X, TOTAL_INCL_COLUMN_X, document_pdf_bytes,
+    )
+
+    login(client)
+    seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE products SET price_amount=? WHERE id=1', (1234567.89,))
+        db.execute('UPDATE tax_profiles SET rate=15 WHERE id=1')
+        db.execute("UPDATE company_settings SET tax_mode='exclusive', vat_rate=15 WHERE id=1")
+        db.commit()
+    res = client.post('/orders/new', data={
+        'customer_id': '1', 'product_id': '1', 'quantity': '1',
+        'start_date': '2026-09-01', 'start_time': '08:00',
+        'end_date': '2026-09-02', 'end_time': '08:00',
+    }, follow_redirects=False)
+    assert res.status_code == 302
+    order_id = res.headers['Location'].rstrip('/').split('/')[-1]
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    with app.app_context():
+        document_id = get_db().execute('SELECT id FROM documents WHERE order_id=?', (order_id,)).fetchone()['id']
+        commands = _pdf_text_commands(document_pdf_bytes(document_id))
+
+    tax_heading = next(c for c in commands if c['text'] == 'TAX')
+    total_heading = next(c for c in commands if c['text'] == 'TOTAL INCL. VAT')
+    assert tax_heading['x'] == TAX_COLUMN_X
+    assert total_heading['x'] == TOTAL_INCL_COLUMN_X
+    assert total_heading['x'] - tax_heading['x'] >= 55, 'the two money columns must keep a gutter'
+
+    # R1 234 567.89 at 15%: tax R185 185.18, total incl. VAT R1 419 753.07
+    tax_amount = next(c for c in commands if c['text'] == 'R185185.18' and c['x'] == TAX_COLUMN_X)
+    total_amount = next(c for c in commands if c['text'] == 'R1419753.07' and c['x'] == TOTAL_INCL_COLUMN_X)
+    assert tax_amount['y'] == total_amount['y'], 'both money columns must share the line'
+
+    # The widest glyphs we print are R (0.667 em) in money and O/N/C (0.778 em) in
+    # the headings, so these right-edge checks are upper bounds on the real widths.
+    money_right = max(
+        c['x'] + c['size'] * 0.667 * len(c['text']) for c in (tax_amount, total_amount)
+    )
+    heading_right = total_heading['x'] + total_heading['size'] * 0.778 * len(total_heading['text'])
+    assert money_right <= INVOICE_TABLE_RIGHT_EDGE
+    assert heading_right <= INVOICE_TABLE_RIGHT_EDGE
+
+
+def test_document_screen_table_mirrors_the_pdf_money_column_gutter():
+    """The on-screen invoice must show the same gutter as the PDF (screen parity)."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    template = (root / 'templates/admin/documents/detail.html').read_text()
+    css = (root / 'static/css/app.css').read_text()
+    assert 'class="data-table document-line-items"' in template
+    assert '.document-line-items td:nth-last-child(2){padding-right:18px}' in css
+    assert '.document-line-items td:last-child{padding-left:18px}' in css
+
 
 def test_settle_deposit_uses_balance_before_refund_and_shows_money_payout(client, app):
     login(client)

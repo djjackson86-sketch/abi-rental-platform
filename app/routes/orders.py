@@ -5,7 +5,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
@@ -275,7 +275,16 @@ def detail(order_id):
         flash("Order not found", "error")
         return redirect(url_for("orders.index"))
     try:
-        order_rental_days = rental_days(datetime.fromisoformat(order["start_at"]), datetime.fromisoformat(order["end_at"])) if order["start_at"] and order["end_at"] else 1
+        start_at = datetime.fromisoformat(order["start_at"]) if order["start_at"] else None
+        end_at = datetime.fromisoformat(order["end_at"]) if order["end_at"] else None
+        # A revised return is billed as full 24h blocks + extra hours, so the Days
+        # column must use the floor-based count, not the ceil() used at booking.
+        order_rental_days = billed_rental_days(
+            start_at,
+            end_at,
+            extra_hours=order["extra_hours"] or 0,
+            revised=bool(order["return_revised_at"] or ""),
+        ) if start_at and end_at else 1
     except ValueError:
         order_rental_days = 1
     documents = documents_for_order(order_id)

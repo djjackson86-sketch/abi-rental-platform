@@ -22,6 +22,13 @@ LEFT_BLOCK_X = round(LOGO_IMAGE_X + LOGO_INK_LEFT_RATIO * LOGO_IMAGE_WIDTH, 2)
 A4_PORTRAIT_WIDTH = 595
 A4_PORTRAIT_HEIGHT = 842
 A4_PORTRAIT_MEDIABOX = f'[0 0 {A4_PORTRAIT_WIDTH} {A4_PORTRAIT_HEIGHT}]'
+# Invoice table money columns. The table runs from x=36 to x=559; TAX and
+# TOTAL INCL. VAT were 35pt apart, so a TAX figure (R675.00 is ~30pt at 8pt)
+# ran into the column beside it. 396 and 462 give a 66pt gutter while the
+# widest amount the format can print still ends inside the table edge.
+TAX_COLUMN_X = 396
+TOTAL_INCL_COLUMN_X = 462
+INVOICE_TABLE_RIGHT_EDGE = 559
 
 
 def _escape_pdf_text(text):
@@ -293,16 +300,18 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Line items are quoted EXCLUDING VAT; the VAT is stated once in the summary.
     tax_view = document_tax_view(document, items)
     # Column headings as the client specified them (PRODUCT | QTY | DAYS | UNIT
-    # EXCL. VAT | SUBTOTAL EXCL. VAT | TAX | TOTAL INCL. VAT). Widths at 7.5pt:
-    # unit 58, subtotal 80, tax 15, total-incl 62 - the last column ends near
-    # x=502, inside the 559 table edge, so nothing collides.
+    # EXCL. VAT | SUBTOTAL EXCL. VAT | TAX | TOTAL INCL. VAT). The two money
+    # columns on the right need a real gutter: at 405/440 a line's TAX figure
+    # (e.g. R675.00 is ~30pt wide at 8pt) all but touched TOTAL INCL. VAT, so
+    # TAX sits at 396 and TOTAL INCL. VAT at 462 - a 66pt gutter, and the widest
+    # amount the format can produce still ends well inside the 559pt table edge.
     _add_pdf_lines(text_commands, 36, table_y, ['PRODUCT'], size=7.5)
     _add_pdf_lines(text_commands, 165, table_y, ['QTY'], size=7.5)
     _add_pdf_lines(text_commands, 200, table_y, ['DAYS'], size=7.5)
     _add_pdf_lines(text_commands, 235, table_y, ['UNIT EXCL. VAT'], size=7.5)
     _add_pdf_lines(text_commands, 310, table_y, ['SUBTOTAL EXCL. VAT'], size=7.5)
-    _add_pdf_lines(text_commands, 405, table_y, ['TAX'], size=7.5)
-    _add_pdf_lines(text_commands, 440, table_y, ['TOTAL INCL. VAT'], size=7.5)
+    _add_pdf_lines(text_commands, TAX_COLUMN_X, table_y, ['TAX'], size=7.5)
+    _add_pdf_lines(text_commands, TOTAL_INCL_COLUMN_X, table_y, ['TOTAL INCL. VAT'], size=7.5)
     y = table_y - 24
     for index, item in enumerate(items[:8]):
         name = item['product_name'] or item['custom_name'] or 'Item'
@@ -315,8 +324,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         _add_pdf_lines(text_commands, 200, y, [days_text], size=8)
         _add_pdf_lines(text_commands, 235, y, [f"R{line_view['unit_excl']:.2f}"], size=8)
         _add_pdf_lines(text_commands, 310, y, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
-        _add_pdf_lines(text_commands, 405, y, [f"R{line_view['tax']:.2f}"], size=8)
-        _add_pdf_lines(text_commands, 440, y, [f"R{line_view['total_incl']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, TAX_COLUMN_X, y, [f"R{line_view['tax']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, TOTAL_INCL_COLUMN_X, y, [f"R{line_view['total_incl']:.2f}"], size=8)
         y -= 36
 
     totals_y = max(170, y - 12)

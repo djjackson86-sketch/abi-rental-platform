@@ -212,6 +212,25 @@ def rental_days(start_at, end_at):
     return max(1, ceil(hours / 24))
 
 
+def billed_rental_days(start_at, end_at, extra_hours=0, revised=False):
+    """The day count a hire line was actually CHARGED for.
+
+    A normal booking bills ``rental_days()`` - whole 24h blocks with a partial
+    day rounding up. Once the actual return is revised the order is re-priced to
+    full 24h blocks plus extra hours (``late_return_breakdown()``), so the day
+    count shown must be the floor-based one or it disagrees with the money by a
+    day (06 08:00 -> 09 10:00 = 3 days + 2 hours, billed R600 + R100, while
+    ceil() would claim 4 days).
+
+    ``extra_hours`` and ``revised`` are the evidence that a revision happened.
+    ``revised`` (orders.return_revised_at) matters on its own because saving a
+    damage settlement rewrites orders.extra_hours back to 0 on a returned order.
+    """
+    if revised or float(extra_hours or 0) > 0:
+        return late_return_breakdown(start_at, end_at)["days"]
+    return rental_days(start_at, end_at)
+
+
 def calculate_line(product, quantity, days, tax_mode="exclusive"):
     product_type = product["product_type"] or "rental"
     qty = 1 if product_type == "service" else max(1, int(quantity or 1))
