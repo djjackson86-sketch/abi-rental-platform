@@ -52,21 +52,21 @@
   {% endif %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr></thead>
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit excl. VAT</th><th>Subtotal excl. VAT</th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.unit_price) }}</td><td>R{{ '%.2f'|format(item.line_subtotal) }}</td><td>R{{ '%.2f'|format(item.line_tax) }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].unit_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].subtotal_excl) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
   <div class="invoice-footer-grid">
     <div class="totals">
-      <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(document.subtotal or 0) }}</b></div>
-      {% if document.discount_total %}<div class="list-row"><span>Discount{% if document.discount_mode == 'percent' and document.discount_value %} ({{ '%.2f'|format(document.discount_value) }}%){% elif document.discount_mode == 'amount' and document.discount_value %} (R{{ '%.2f'|format(document.discount_value) }}){% endif %}</span><b>-R{{ '%.2f'|format(document.discount_total or 0) }}</b></div>{% endif %}
-      <div class="list-row"><span>Tax</span><b>R{{ '%.2f'|format(document.tax_total or 0) }}</b></div>
-      {% if (document.deposit_option or 'security_deposit') == 'security_deposit' %}<div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(document.deposit_total or 0) }}</b></div>{% endif %}
-      <div class="list-row total-row"><span>Total{% if (document.deposit_option or 'security_deposit') == 'security_deposit' and document.deposit_total %} incl. refundable deposit{% endif %}</span><b>R{{ '%.2f'|format(document.total or 0) }}</b></div>
+      <div class="list-row"><span>Total without VAT</span><b>R{{ '%.2f'|format(tax_view.net) }}</b></div>
+      {% if tax_view.discount %}<div class="list-row"><span>Discount{% if document.discount_mode == 'percent' and document.discount_value %} ({{ '%.2f'|format(document.discount_value) }}%){% elif document.discount_mode == 'amount' and document.discount_value %} (R{{ '%.2f'|format(document.discount_value) }}){% endif %}</span><b>-R{{ '%.2f'|format(tax_view.discount) }}</b></div>{% endif %}
+      <div class="list-row"><span>VAT{% if tax_view.rate %} ({{ '%g'|format(tax_view.rate) }}%){% endif %}</span><b>R{{ '%.2f'|format(tax_view.vat) }}</b></div>
+      <div class="list-row total-row"><span>Total with VAT</span><b>R{{ '%.2f'|format(tax_view.gross) }}</b></div>
+      {% if (document.deposit_option or 'security_deposit') == 'security_deposit' and document.deposit_total %}<div class="list-row"><span>Security deposit (refundable)</span><b>R{{ '%.2f'|format(document.deposit_total) }}</b></div>{% elif document.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(document.damage_waiver_amount) }}</b></div>{% endif %}
       <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(document.paid_total or 0) }}</b></div>
       <div class="list-row"><span>Amount due</span><b>R{{ '%.2f'|format(document.due_total or 0) }}</b></div>
     </div>

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.db import get_db, now
+from app.services.settings import get_company_settings
 from app.services.timezone import display_local_date, display_local_datetime, parse_iso_datetime
 from app.services.orders import get_order, order_items, rental_days
 
@@ -189,6 +190,49 @@ def rental_days_for_document(document):
 def rental_days_label(document):
     days = rental_days_for_document(document)
     return f"Rental days {days}"
+
+
+def _row_get(row, key, default=None):
+    """Read a column from a sqlite3.Row, a libsql Row or a dict alike."""
+    try:
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def document_tax_view(document, items):
+    """VAT figures for an invoice or quote.
+
+    Line items are always shown EXCLUDING VAT, with the VAT stated once in the
+    summary (total without VAT / VAT / total with VAT). ``line_subtotal`` is the
+    VAT-exclusive line amount in both tax modes; ``unit_price`` is only exclusive
+    when prices exclude VAT, so it is converted when prices include VAT.
+    """
+    settings = get_company_settings()
+    tax_mode = _row_get(settings, 'tax_mode', 'exclusive') or 'exclusive'
+
+    lines = []
+    for item in items:
+        unit = float(_row_get(item, 'unit_price', 0) or 0)
+        subtotal = float(_row_get(item, 'line_subtotal', 0) or 0)
+        tax = float(_row_get(item, 'line_tax', 0) or 0)
+        if tax_mode == 'inclusive' and subtotal:
+            unit = unit / (1 + (tax / subtotal))
+        lines.append({'unit_excl': round(unit, 2), 'subtotal_excl': round(subtotal, 2)})
+
+    subtotal = round(float(_row_get(document, 'subtotal', 0) or 0), 2)
+    discount = round(float(_row_get(document, 'discount_total', 0) or 0), 2)
+    vat = round(float(_row_get(document, 'tax_total', 0) or 0), 2)
+    net = round(subtotal - discount, 2)
+    return {
+        'lines': lines,
+        'net': net,
+        'discount': discount,
+        'vat': vat,
+        'gross': round(net + vat, 2),
+        'rate': round(vat / subtotal * 100, 2) if subtotal else 0.0,
+    }
 
 
 def printable_document(document_id):

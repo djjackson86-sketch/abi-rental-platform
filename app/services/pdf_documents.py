@@ -2,7 +2,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, label_for, printable_document, rental_days_label
+from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, document_tax_view, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 
@@ -245,22 +245,21 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Invoice table and totals.
     table_y = min(430, customer_bottom_y - 26)
     draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
+    # Line items are quoted EXCLUDING VAT; the VAT is stated once in the summary.
+    tax_view = document_tax_view(document, items)
     _add_pdf_lines(text_commands, 36, table_y, ['Item'], size=7.5)
-    _add_pdf_lines(text_commands, 220, table_y, ['Qty'], size=7.5)
-    _add_pdf_lines(text_commands, 270, table_y, ['Unit'], size=7.5)
-    _add_pdf_lines(text_commands, 335, table_y, ['Subtotal'], size=7.5)
-    _add_pdf_lines(text_commands, 415, table_y, ['Tax'], size=7.5)
-    _add_pdf_lines(text_commands, 510, table_y, ['Total'], size=7.5)
+    _add_pdf_lines(text_commands, 250, table_y, ['Qty'], size=7.5)
+    _add_pdf_lines(text_commands, 305, table_y, ['Unit excl. VAT'], size=7.5)
+    _add_pdf_lines(text_commands, 430, table_y, ['Subtotal excl. VAT'], size=7.5)
     y = table_y - 24
-    for item in items[:8]:
+    for index, item in enumerate(items[:8]):
         name = item['product_name'] or item['custom_name'] or 'Item'
         sku = item['product_sku'] or ''
+        line_view = tax_view['lines'][index] if index < len(tax_view['lines']) else {'unit_excl': 0.0, 'subtotal_excl': 0.0}
         _add_pdf_lines(text_commands, 36, y, [name, sku], size=8, leading=11, max_lines=2)
-        _add_pdf_lines(text_commands, 220, y, [str(item['quantity'])], size=8)
-        _add_pdf_lines(text_commands, 270, y, [f'R{float(item["unit_price"] or 0):.2f}'], size=8)
-        _add_pdf_lines(text_commands, 335, y, [f'R{float(item["line_subtotal"] or 0):.2f}'], size=8)
-        _add_pdf_lines(text_commands, 415, y, [f'R{float(item["line_tax"] or 0):.2f}'], size=8)
-        _add_pdf_lines(text_commands, 510, y, [f'R{float(item["line_total"] or 0):.2f}'], size=8)
+        _add_pdf_lines(text_commands, 250, y, [str(item['quantity'])], size=8)
+        _add_pdf_lines(text_commands, 305, y, [f"R{line_view['unit_excl']:.2f}"], size=8)
+        _add_pdf_lines(text_commands, 430, y, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
         y -= 36
 
     totals_y = max(170, y - 12)
@@ -275,28 +274,31 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ]:
         if value:
             bank_lines.append(f'{key}: {value}')
-    totals = [
-        ('Subtotal', f'R{float(document["subtotal"] or 0):.2f}'),
-    ]
-    if float(_doc_value(document, 'discount_total') or 0):
+    # Summary: total without VAT, the VAT itself, then the total with VAT.
+    totals = [('Total without VAT', f"R{tax_view['net']:.2f}")]
+    if tax_view['discount']:
         discount_label = 'Discount'
         if _doc_value(document, 'discount_mode', '') == 'percent' and float(_doc_value(document, 'discount_value') or 0):
             discount_label = f'Discount ({float(_doc_value(document, "discount_value") or 0):g}%)'
         elif _doc_value(document, 'discount_mode', '') == 'amount' and float(_doc_value(document, 'discount_value') or 0):
             discount_label = f'Discount (R{float(_doc_value(document, "discount_value") or 0):.2f})'
-        totals.append((discount_label, f'-R{float(_doc_value(document, "discount_total") or 0):.2f}'))
-    totals.append(('Tax', f'R{float(document["tax_total"] or 0):.2f}'))
+        totals.append((discount_label, f"-R{tax_view['discount']:.2f}"))
+    totals.append((f"VAT ({tax_view['rate']:g}%)" if tax_view['rate'] else 'VAT', f"R{tax_view['vat']:.2f}"))
+    totals.append(('Total with VAT', f"R{tax_view['gross']:.2f}"))
     if (_doc_value(document, 'deposit_option', 'security_deposit') or 'security_deposit') == 'security_deposit':
-        totals.append(('Security deposit', f'R{float(document["deposit_total"] or 0):.2f}'))
+        deposit_total = float(document["deposit_total"] or 0)
+        if deposit_total:
+            totals.append(('Security deposit', f'R{deposit_total:.2f}'))
+    elif float(_doc_value(document, 'damage_waiver_amount') or 0):
+        totals.append(('Damage waiver', f'R{float(_doc_value(document, "damage_waiver_amount") or 0):.2f}'))
     totals.extend([
-        ('Total', f'R{float(document["total"] or 0):.2f}'),
         ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
         ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
     ])
     draw_commands.append(_pdf_light_blue_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4))
     for index, (label, amount) in enumerate(totals):
         line_y = totals_y - (index * 14)
-        if label == 'Total':
+        if label == 'Total with VAT':
             draw_commands.append(_pdf_light_blue_rect(386, line_y - 5, 169, 16))
             text_commands.append('0.08 0.39 1 rg')
             text_commands.append(_pdf_text_command(390, line_y, label, size=8.8, font='F2'))
