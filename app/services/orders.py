@@ -3,6 +3,7 @@ from math import ceil
 import calendar as _month_calendar
 
 from app.db import get_db, now
+from app.services.numbering import next_in_sequence
 from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause
 from app.services.settings import global_vat_rate
 from app.services.timezone import local_now, local_now_iso
@@ -174,8 +175,16 @@ def order_items(order_id):
 
 
 def next_order_number():
-    row = get_db().execute("SELECT COUNT(*) c FROM orders").fetchone()
-    return f"ORD-{(row['c'] or 0) + 1:05d}"
+    """Next order number.
+
+    Follows the highest number actually in use rather than counting rows, so
+    deleting or cancelling an order can never hand out a number twice, and
+    continues the client's Booqable sequence (see app/services/numbering.py).
+    """
+    rows = get_db().execute(
+        "SELECT order_number FROM orders WHERE COALESCE(order_number, '') != ''"
+    ).fetchall()
+    return next_in_sequence([row["order_number"] for row in rows], "ORD")
 
 
 def _parse_dt(date_value, time_value, fallback_time):

@@ -736,13 +736,13 @@ def test_created_by_user_shows_for_customers_and_orders(client, app):
     assert b'Created by' in order_res.data
     assert b'Creator Staff' in order_res.data
     orders_page = client.get('/orders')
-    assert b'ORD-00001' in orders_page.data
+    assert b'ORD-10145' in orders_page.data
     assert b'by Creator Staff' in orders_page.data
 
     with app.app_context():
         db = get_db()
         customer = db.execute('SELECT created_by_user_id FROM customers WHERE name = ?', ('Creator Customer',)).fetchone()
-        order = db.execute('SELECT created_by_user_id FROM orders WHERE order_number = ?', ('ORD-00001',)).fetchone()
+        order = db.execute('SELECT created_by_user_id FROM orders WHERE order_number = ?', ('ORD-10145',)).fetchone()
         staff = db.execute('SELECT id FROM users WHERE name = ?', ('Creator Staff',)).fetchone()
         assert customer is not None
         assert order is not None
@@ -786,7 +786,7 @@ def test_order_draft_creation_and_totals(client):
     }, follow_redirects=True)
     assert res.status_code == 200
     assert b'Draft order created' in res.data
-    assert b'ORD-00001' in res.data
+    assert b'ORD-10145' in res.data
     assert b'Order Customer' in res.data
     assert b'Order Trailer' in res.data
     # 2 qty * R200 * 3 rounded rental days, no tax profile VAT in seed.
@@ -796,7 +796,7 @@ def test_order_draft_creation_and_totals(client):
     assert b'Total incl. taxes and refundable deposit' in res.data
 
     list_res = client.get('/orders')
-    assert b'ORD-00001' in list_res.data
+    assert b'ORD-10145' in list_res.data
     assert b'Order Customer' in list_res.data
     assert b'Total incl. deposit' in list_res.data
     assert b'built-in method items' not in list_res.data
@@ -815,8 +815,8 @@ def test_orders_date_range_filters_metrics_and_shows_deposit_to_process(client, 
     assert filtered.status_code == 200
     assert b'value="2026-07-01"' in filtered.data
     assert b'value="2026-07-31"' in filtered.data
-    assert b'ORD-00001' in filtered.data
-    assert b'ORD-00002' not in filtered.data
+    assert b'ORD-10145' in filtered.data
+    assert b'ORD-10146' not in filtered.data
     assert b'<small>Revenue</small><b>R1150.00</b>' in filtered.data
     assert b'Deposit to process' in filtered.data
     assert b'R750.00' in filtered.data
@@ -1548,7 +1548,7 @@ def test_draft_order_can_be_edited_without_creating_new_order(client, app):
 
     assert saved.status_code == 200
     assert b'Order saved' in saved.data
-    assert b'ORD-00001' in saved.data
+    assert b'ORD-10145' in saved.data
     assert b'Admin edit fee' in saved.data
     assert b'Edited order note' not in saved.data  # internal notes are saved but not shown on detail yet.
     # 3 * R200 * 3 days + R50 custom + R7.50 VAT on the custom line + R125 damage waiver.
@@ -2167,16 +2167,16 @@ def test_order_status_workflow_and_calendar(client):
     assert b'Start order' in reserve.data
 
     dashboard = client.get('/dashboard')
-    assert b'ORD-00001' in dashboard.data
+    assert b'ORD-10145' in dashboard.data
     assert b'Going out' in dashboard.data
     assert b'Coming back' in dashboard.data
-    assert b'<span><b>Order Customer</b><small>ORD-00001 \xc2\xb7 Order Trailer</small></span>' in dashboard.data
-    assert b'<span><b>ORD-00001</b><small>Order Trailer</small></span>' not in dashboard.data
+    assert b'<span><b>Order Customer</b><small>ORD-10145 \xc2\xb7 Order Trailer</small></span>' in dashboard.data
+    assert b'<span><b>ORD-10145</b><small>Order Trailer</small></span>' not in dashboard.data
 
     calendar = client.get('/calendar')
     assert calendar.status_code == 200
     assert b'Reservation calendar' in calendar.data
-    assert b'ORD-00001' in calendar.data
+    assert b'ORD-10145' in calendar.data
     assert b'Order Trailer' in calendar.data
 
     start = client.post(f'/orders/{order_id}/start', follow_redirects=True)
@@ -2203,14 +2203,14 @@ def test_dashboard_view_late_filters_only_started_overdue_returns(client):
 
     dashboard = client.get('/dashboard')
     assert b'href="/orders?status=started&amp;return_status=late"' in dashboard.data
-    assert b'<span><b>Order Customer</b><small>ORD-00001 \xc2\xb7 Order Trailer</small></span>' in dashboard.data
-    assert b'<span><b>ORD-00001</b><small>Order Trailer</small></span>' not in dashboard.data
+    assert b'<span><b>Order Customer</b><small>ORD-10145 \xc2\xb7 Order Trailer</small></span>' in dashboard.data
+    assert b'<span><b>ORD-10145</b><small>Order Trailer</small></span>' not in dashboard.data
 
     late_orders = client.get('/orders?status=started&return_status=late')
     assert late_orders.status_code == 200
-    assert b'ORD-00001' in late_orders.data
-    assert b'ORD-00002' not in late_orders.data
-    assert b'ORD-00003' not in late_orders.data
+    assert b'ORD-10145' in late_orders.data
+    assert b'ORD-10146' not in late_orders.data
+    assert b'ORD-10147' not in late_orders.data
     assert b'name="return_status" value="late" checked' in late_orders.data
     assert b'href="/orders?status=started&amp;return_status=late">Late</a>' in late_orders.data
 
@@ -2273,8 +2273,8 @@ def test_calendar_shows_grouped_trailer_availability_for_selected_range(client, 
     assert b'Flatbed Trailer' in body
     assert b'Ungrouped trailers' in body
     assert b'Loose Trailer' in body
-    assert 'ORD-00001 · 2 booked'.encode() in body
-    assert 'ORD-00002 · 1 booked'.encode() in body
+    assert 'ORD-10145 · 2 booked'.encode() in body
+    assert 'ORD-10146 · 1 booked'.encode() in body
     assert b'Delivery labour' not in body
     assert b'<span>Total <b>6</b></span>' in body
     assert b'<span>Booked <b>3</b></span>' in body
@@ -2403,8 +2403,8 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     assert b'Cc: info@abi-solutions.local' in draft.data
     assert b'X-Unsent: 1' in draft.data
     assert b'From:' not in draft.data
-    assert b'Subject: Proforma Invoice for order ORD-00001' in draft.data
-    assert b'Please find attached Proforma Invoice  for order ORD-00001.' in draft.data
+    assert b'Subject: Proforma Invoice for order ORD-10145' in draft.data
+    assert b'Please find attached Proforma Invoice  for order ORD-10145.' in draft.data
     from email import policy
     from email.parser import BytesParser
     parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
@@ -2478,7 +2478,7 @@ def test_invoice_email_default_message_can_be_configured(client, app):
     order_id = create_order_for_status(client, quantity='1')
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert b'Dear Order Customer,' in invoice.data
-    assert b'Please find attached Proforma Invoice  for order ORD-00001.' in invoice.data
+    assert b'Please find attached Proforma Invoice  for order ORD-10145.' in invoice.data
     assert b'please contact us at midrand@sanotrailers.test or +27 11 555 0199.' in invoice.data
     assert b'Default signature:' in invoice.data
     assert b'Accounts team' in invoice.data
@@ -2494,7 +2494,7 @@ def test_invoice_email_default_message_can_be_configured(client, app):
     assert len(html_parts) == 1
     html = html_parts[0].get_content()
     assert 'Dear Order Customer,' in html
-    assert 'Please find attached Proforma Invoice  for order ORD-00001.' in html
+    assert 'Please find attached Proforma Invoice  for order ORD-10145.' in html
     assert 'please contact us at midrand@sanotrailers.test or +27 11 555 0199.' in html
     assert 'Kind regards,' in html
     assert 'Accounts team' in html
@@ -2546,16 +2546,16 @@ def test_invoice_finalize_assigns_number_once(client, app):
     assert b'Invoice finalized and numbered' in finalized.data
     assert b'Finalize invoice' not in finalized.data
     assert b'Invoice' in finalized.data
-    assert b'INV-00001' in finalized.data
+    assert b'INV-10145' in finalized.data
 
     again = client.post('/documents/1/finalize', follow_redirects=True)
     assert again.status_code == 200
-    assert b'INV-00001' in again.data
+    assert b'INV-10145' in again.data
 
     with app.app_context():
         row = get_db().execute('SELECT status, number FROM documents WHERE id = 1').fetchone()
         assert row['status'] == 'finalized'
-        assert row['number'] == 'INV-00001'
+        assert row['number'] == 'INV-10145'
 
 
 
@@ -2722,7 +2722,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert customer_pos < table_pos < totals_pos < banking_pos
     assert b'Unnumbered' not in invoice.data
     assert invoice.data.index(b'Invoice date:') < invoice.data.index(invoice_date.encode())
-    assert invoice.data.index(b'ORD-00001') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'Rental days 2')
+    assert invoice.data.index(b'ORD-10145') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'Rental days 2')
     assert b'+27 12 999 0000 | wonderboom@example.test' not in invoice.data
     assert invoice.data.index(b'Wonderboom') < invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test') < invoice.data.index(b'22 Wonderboom Avenue')
 
@@ -2737,7 +2737,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'/BaseFont /Helvetica-Bold',
         b'/MediaBox [0 0 595 842]',
         b'Wonderboom',
-        b'INV-00001',
+        b'INV-10145',
         b'Invoice date:',
         invoice_date.encode(),
         b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj',
@@ -2759,7 +2759,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Alternative Contact Name: Jane Backup',
         b'Alternative Contact Number: +27 82 000 1111',
         b'Alternative Contact Relationship: Sister',
-        b'Order: ORD-00001',
+        b'Order: ORD-10145',
         b'Pickup: 2026-07-01',
         b'Return: 2026-07-02',
         b'Rental days 2',
@@ -2809,8 +2809,8 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'390.00 292.00 Tm (VAT)' in pdf
     assert b'505.00 292.00 Tm (R0.00)' in pdf
     assert b'390.00 278.00 Tm (Total with VAT)' in pdf
-    assert pdf.index(b'Order: ORD-00001') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'Rental days 2')
-    assert pdf.index(b'Invoice') < pdf.index(b'INV-00001') < pdf.index(b'Invoice date:') < pdf.index(invoice_date.encode()) < pdf.index(b'Order: ORD-00001') < pdf.index(b'Bill To:')
+    assert pdf.index(b'Order: ORD-10145') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'Rental days 2')
+    assert pdf.index(b'Invoice') < pdf.index(b'INV-10145') < pdf.index(b'Invoice date:') < pdf.index(invoice_date.encode()) < pdf.index(b'Order: ORD-10145') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
     assert pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj')
@@ -2855,23 +2855,23 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     download = client.get('/documents/1/download.pdf')
     assert download.status_code == 200
     assert download.mimetype == 'application/pdf'
-    assert download.headers['Content-Disposition'] == 'attachment; filename=QUOTE-QUO-00001.pdf'
+    assert download.headers['Content-Disposition'] == 'attachment; filename=QUOTE-QUO-10145.pdf'
     assert download.data.startswith(b'%PDF-')
 
     draft = client.post('/documents/1/send-email', data={'to_email': 'quote@example.com'}, follow_redirects=False)
     assert draft.status_code == 200
     assert draft.mimetype == 'message/rfc822'
-    assert draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-QUOTE-QUO-00001.eml'
+    assert draft.headers['Content-Disposition'] == 'attachment; filename=EMAIL-QUOTE-QUO-10145.eml'
     assert b'To: quote@example.com' in draft.data
     assert b'Cc: fallback@example.test' in draft.data
     assert b'X-Unsent: 1' in draft.data
     assert b'From:' not in draft.data
-    assert b'Subject: Quote QUO-00001 for order ORD-00001' in draft.data
-    assert b'Please find attached Quote QUO-00001 for order ORD-00001.' in draft.data
+    assert b'Subject: Quote QUO-10145 for order ORD-10145' in draft.data
+    assert b'Please find attached Quote QUO-10145 for order ORD-10145.' in draft.data
     from email import policy
     from email.parser import BytesParser
     parsed = BytesParser(policy=policy.default).parsebytes(draft.data)
-    pdf_parts = [part for part in parsed.iter_attachments() if part.get_filename() == 'QUOTE-QUO-00001.pdf']
+    pdf_parts = [part for part in parsed.iter_attachments() if part.get_filename() == 'QUOTE-QUO-10145.pdf']
     assert len(pdf_parts) == 1
     quote_pdf_payload = pdf_parts[0].get_payload(decode=True)
     assert isinstance(quote_pdf_payload, bytes)
@@ -2923,20 +2923,20 @@ def test_document_generation_list_and_printable_detail(client):
     created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
     assert b'Document created' in created.data
     assert b'Quote' in created.data
-    assert b'QUO-00001' in created.data
+    assert b'QUO-10145' in created.data
     assert b'Order Customer' in created.data
     assert b'Order Trailer' in created.data
     assert b'R1200.00' in created.data
 
     order_detail = client.get(f'/orders/{order_id}')
-    assert b'QUO-00001' in order_detail.data
+    assert b'QUO-10145' in order_detail.data
     assert b'Quote' in order_detail.data
 
     documents = client.get('/documents')
     assert documents.status_code == 200
     assert b'Documents' in documents.data
-    assert b'QUO-00001' in documents.data
-    assert b'ORD-00001' in documents.data
+    assert b'QUO-10145' in documents.data
+    assert b'ORD-10145' in documents.data
 
     invoice_created = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice_created.status_code == 200
@@ -2955,8 +2955,8 @@ def test_document_generation_list_and_printable_detail(client):
     assert export.status_code == 200
     assert export.mimetype == 'text/csv'
     assert b'number,document_type,order_number,customer_name,status,total,created_at' in export.data
-    assert b'QUO-00001' in export.data
-    assert b'ORD-00001' in export.data
+    assert b'QUO-10145' in export.data
+    assert b'ORD-10145' in export.data
 
 
 def test_document_type_validation(client):
@@ -3015,13 +3015,13 @@ def test_public_store_checkout_creates_draft_order(client):
     }, follow_redirects=True)
     assert confirmation.status_code == 200
     assert b'Booking request received' in confirmation.data
-    assert b'ORD-00001' in confirmation.data
+    assert b'ORD-10145' in confirmation.data
     assert b'Order Trailer' in confirmation.data
     assert b'R600.00' in confirmation.data
 
     login(client)
     orders = client.get('/orders?query=Public+Booker')
-    assert b'ORD-00001' in orders.data
+    assert b'ORD-10145' in orders.data
     assert b'Public Booker' in orders.data
 
 
@@ -3078,7 +3078,7 @@ def test_order_manual_payments_update_payment_status_and_history(client, app):
     ledger = client.get('/payments')
     assert ledger.status_code == 200
     assert b'Payments' in ledger.data
-    assert b'ORD-00001' in ledger.data
+    assert b'ORD-10145' in ledger.data
     assert b'Payment date' in ledger.data
     assert b'2026-07-05' in ledger.data
     assert b'2026-07-06' in ledger.data
@@ -3237,7 +3237,7 @@ def test_reports_orders_csv_export(client):
     assert 'attachment; filename=orders.csv' in response.headers['Content-Disposition']
     body = response.data.decode()
     assert 'order_number,customer,status,payment_status,total,due_total' in body
-    assert 'ORD-00001,Order Customer,draft,payment_due,1350.00,1350.00' in body
+    assert 'ORD-10145,Order Customer,draft,payment_due,1350.00,1350.00' in body
 
 
 def test_app_store_functionality(client):
@@ -3429,7 +3429,7 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
     client.post(f'/orders/{order_id}/payments', data={'amount': '1350', 'method': 'cash', 'reference': 'paid before refund'}, follow_redirects=True)
 
     due_before = client.get('/orders?payment_status=process_deposit')
-    assert b'ORD-00001' in due_before.data
+    assert b'ORD-10145' in due_before.data
 
     settled = client.post(f'/orders/{order_id}/settle-return', data={
         'extra_hours': '0',
@@ -3442,9 +3442,9 @@ def test_return_deposit_settlement_records_method_and_removes_from_due_filter(cl
     assert label in settled.data
 
     due_after = client.get('/orders?payment_status=process_deposit')
-    assert b'ORD-00001' not in due_after.data
+    assert b'ORD-10145' not in due_after.data
     returned = client.get('/orders?status=returned')
-    assert b'ORD-00001' in returned.data
+    assert b'ORD-10145' in returned.data
 
     with app.app_context():
         db = __import__('app.db', fromlist=['get_db']).get_db()
@@ -3532,7 +3532,7 @@ def test_historical_refunded_deposit_is_not_in_process_deposit_filter(client, ap
     assert b'Not recorded' in detail.data
 
     process_deposit = client.get('/orders?payment_status=process_deposit')
-    assert b'ORD-00001' not in process_deposit.data
+    assert b'ORD-10145' not in process_deposit.data
 
 
 def test_return_deposit_settlement_rejects_invalid_method(client):
@@ -3609,12 +3609,12 @@ def test_use_deposit_records_unprocessed_remaining_refund_then_method_processes_
         assert order['deposit_process_method'] == ''
         assert order['deposit_processed_at'] == ''
     process_deposit = client.get('/orders?payment_status=process_deposit')
-    assert b'ORD-00001' in process_deposit.data
+    assert b'ORD-10145' in process_deposit.data
     processed = client.post(f'/orders/{order_id}/settle-return', data={'deposit_process_method': 'eft', 'deposit_processed_at': '2026-08-20T14:45'}, follow_redirects=True)
     assert b'Deposit settled: R450.00 used; R300.00 refunded' in processed.data
     assert b'EFT' in processed.data
     after = client.get('/orders?payment_status=process_deposit')
-    assert b'ORD-00001' not in after.data
+    assert b'ORD-10145' not in after.data
 
 
 def test_damage_waiver_documents_hide_security_deposit_and_show_times(client, app):
@@ -4202,21 +4202,21 @@ def test_calendar_can_be_filtered_by_branch(client, app):
     assert b'North Depot' in body
     # Unfiltered: every branch's stock and every branch's booking shows up.
     assert b'Order Trailer' in body and b'North Trailer' in body
-    assert b'ORD-00001' in body and b'ORD-00002' in body
+    assert b'ORD-10145' in body and b'ORD-10146' in body
     assert b'Clear' not in client.get('/calendar').data
 
     north = client.get('/calendar' + query + '&branch=2')
     assert north.status_code == 200
     page = north.data
     assert b'<option value="2" selected>North Depot</option>' in page
-    assert b'North Trailer' in page and b'ORD-00002' in page
-    assert b'Order Trailer' not in page and b'ORD-00001' not in page
+    assert b'North Trailer' in page and b'ORD-10146' in page
+    assert b'Order Trailer' not in page and b'ORD-10145' not in page
     assert 'Booked and available rental stock for 2026-07-01 to 2026-07-01 · North Depot'.encode() in page
     assert b'Clear' in page
 
     central = client.get('/calendar' + query + '&branch=1').data
-    assert b'Order Trailer' in central and b'ORD-00001' in central
-    assert b'North Trailer' not in central and b'ORD-00002' not in central
+    assert b'Order Trailer' in central and b'ORD-10145' in central
+    assert b'North Trailer' not in central and b'ORD-10146' not in central
 
     # Branch names still show on each row, so the filter is legible.
     assert b'North Depot' in north.data
@@ -4244,8 +4244,8 @@ def test_calendar_branch_filter_cannot_widen_a_staff_members_scope(client, app):
 
     query = '?start_date=2026-07-01&end_date=2026-07-01'
     body = client.get('/calendar' + query).data
-    assert b'North Trailer' in body and b'ORD-00002' in body
-    assert b'Order Trailer' not in body and b'ORD-00001' not in body
+    assert b'North Trailer' in body and b'ORD-10146' in body
+    assert b'Order Trailer' not in body and b'ORD-10145' not in body
     # The control is shown fixed to the staff branch, never as a chooser.
     assert b'name="branch"' not in body
     assert b'North Depot' in body
@@ -4256,7 +4256,7 @@ def test_calendar_branch_filter_cannot_widen_a_staff_members_scope(client, app):
         assert page.status_code == 200, attempt
         assert b'North Trailer' in page.data, attempt
         assert b'Order Trailer' not in page.data, f'branch={attempt!r} leaked another branch'
-        assert b'ORD-00001' not in page.data, f'branch={attempt!r} leaked another branch'
+        assert b'ORD-10145' not in page.data, f'branch={attempt!r} leaked another branch'
 
 
 def test_calendar_date_filter_is_submitted_once(client):
@@ -4373,8 +4373,8 @@ def test_reports_can_filter_by_branch(client, app):
 
     # The CSV export honours the same filter.
     csv_north = client.get('/reports/orders.csv?branch=2').data.decode()
-    assert 'ORD-00002' in csv_north
-    assert 'ORD-00001' not in csv_north
+    assert 'ORD-10146' in csv_north
+    assert 'ORD-10145' not in csv_north
 
 
 def test_reports_branch_filter_never_widens_a_staff_scope(client, app):
@@ -4402,8 +4402,8 @@ def test_reports_branch_filter_never_widens_a_staff_scope(client, app):
         assert b'Order Trailer' not in page.data, f'branch={attempt!r} leaked another branch'
 
     csv_page = client.get('/reports/orders.csv?branch=1').data.decode()
-    assert 'ORD-00002' in csv_page
-    assert 'ORD-00001' not in csv_page
+    assert 'ORD-10146' in csv_page
+    assert 'ORD-10145' not in csv_page
 
 
 def test_reports_offer_quick_date_ranges(client):
@@ -4574,25 +4574,25 @@ def test_orders_can_be_filtered_by_branch(client, app):
     body = everything.data
     assert b'<option value="">All branches</option>' in body
     assert b'North Depot' in body
-    assert b'ORD-00001' in body and b'ORD-00002' in body
+    assert b'ORD-10145' in body and b'ORD-10146' in body
 
     north = client.get('/orders?branch=2')
     assert north.status_code == 200
     page = north.data
     assert b'<option value="2" selected>North Depot</option>' in page
-    assert b'ORD-00002' in page
-    assert b'ORD-00001' not in page
+    assert b'ORD-10146' in page
+    assert b'ORD-10145' not in page
     assert b'Clear branch' in page
 
     central = client.get('/orders?branch=1').data
-    assert b'ORD-00001' in central
-    assert b'ORD-00002' not in central
+    assert b'ORD-10145' in central
+    assert b'ORD-10146' not in central
 
     # An unknown or malformed branch id is ignored rather than trusted.
     for bogus in ['999', 'abc', '-1', '2 OR 1=1']:
         page = client.get('/orders?branch=' + bogus.replace(' ', '%20'))
         assert page.status_code == 200, bogus
-        assert b'ORD-00001' in page.data and b'ORD-00002' in page.data, bogus
+        assert b'ORD-10145' in page.data and b'ORD-10146' in page.data, bogus
 
 
 def test_orders_branch_filter_cannot_widen_a_staff_members_scope(client, app):
@@ -4610,8 +4610,8 @@ def test_orders_branch_filter_cannot_widen_a_staff_members_scope(client, app):
     login(client, 'North Staff', 'staff123')
 
     body = client.get('/orders').data
-    assert b'ORD-00002' in body
-    assert b'ORD-00001' not in body
+    assert b'ORD-10146' in body
+    assert b'ORD-10145' not in body
     # A fixed label, never a chooser or a hidden branch field to tamper with.
     assert b'name="branch"' not in body
     assert b'North Depot' in body
@@ -4619,8 +4619,8 @@ def test_orders_branch_filter_cannot_widen_a_staff_members_scope(client, app):
     for attempt in ['', '1', '2', '999', 'abc']:
         page = client.get('/orders?branch=' + attempt)
         assert page.status_code == 200, attempt
-        assert b'ORD-00002' in page.data, attempt
-        assert b'ORD-00001' not in page.data, f'branch={attempt!r} leaked another branch'
+        assert b'ORD-10146' in page.data, attempt
+        assert b'ORD-10145' not in page.data, f'branch={attempt!r} leaked another branch'
 
 
 def test_orders_metrics_toggle_is_wired_to_the_totals_row(client):
@@ -4829,3 +4829,56 @@ def test_rental_days_column_only_fills_for_rental_lines(client, app):
         pdf = document_pdf_bytes(1)
     assert b'(Rental days) Tj' in pdf
     assert b'(3) Tj' in pdf
+
+
+
+def test_numbering_continues_the_clients_booqable_sequence(client, app):
+    """Orders continue the client's sequence instead of restarting at 1.
+
+    Booqable order numbers had reached five digits, so the first order the app
+    creates carries on from there - and numbering follows the highest number in
+    use, so deleting or cancelling an order can never hand a number out twice.
+    """
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    with app.app_context():
+        from app.services.orders import next_order_number
+        db = get_db()
+        number = db.execute("SELECT order_number FROM orders WHERE id = ?", (order_id,)).fetchone()["order_number"]
+        assert number == 'ORD-10145'
+        assert next_order_number() == 'ORD-10146'
+
+        # a bare Booqable number living in the same table is followed, not ignored
+        db.execute("UPDATE orders SET order_number = '10160' WHERE id = ?", (order_id,))
+        db.commit()
+        assert next_order_number() == 'ORD-10161'
+
+        # and deleting the order must not reissue its number
+        db.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+        db.commit()
+        assert next_order_number() == 'ORD-10145'
+
+
+def test_quote_and_invoice_numbers_start_at_the_clients_number(client, app):
+    """Quotes and invoices share that sequence: first quote QUO-10145, first invoice INV-10145."""
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'}, follow_redirects=True)
+
+    with app.app_context():
+        db = get_db()
+        quotes = [row["number"] for row in db.execute(
+            "SELECT number FROM documents WHERE document_type = 'quote' ORDER BY id").fetchall()]
+        assert quotes == ['QUO-10145', 'QUO-10146']
+        invoice_id = db.execute("SELECT id FROM documents WHERE document_type = 'invoice'").fetchone()["id"]
+
+    client.post(f'/documents/{invoice_id}/finalize', follow_redirects=True)
+    with app.app_context():
+        number = get_db().execute("SELECT number FROM documents WHERE id = ?", (invoice_id,)).fetchone()["number"]
+    assert number == 'INV-10145'

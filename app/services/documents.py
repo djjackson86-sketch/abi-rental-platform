@@ -3,6 +3,7 @@ from datetime import datetime
 from app.db import get_db, now
 from app.services.settings import get_company_settings
 from app.services.timezone import display_local_date, display_local_datetime, parse_iso_datetime
+from app.services.numbering import next_in_sequence
 from app.services.orders import get_order, order_items, rental_days
 
 DOCUMENT_TYPES = {
@@ -18,13 +19,13 @@ def document_type_options():
 
 
 def _next_document_number(document_type):
+    """Next quote/invoice number, continuing the client's Booqable sequence."""
     prefix = DOCUMENT_TYPES[document_type]["prefix"]
-    row = get_db().execute(
-        """SELECT COALESCE(MAX(CAST(SUBSTR(number, ?) AS INTEGER)), 0) m
-        FROM documents WHERE document_type = ? AND number != ''""",
-        (len(prefix) + 2, document_type),
-    ).fetchone() or {'m': 0}
-    return f"{prefix}-{int(row['m'] or 0) + 1:05d}"
+    rows = get_db().execute(
+        "SELECT number FROM documents WHERE document_type = ? AND number != ''",
+        (document_type,),
+    ).fetchall()
+    return next_in_sequence([row["number"] for row in rows], prefix)
 
 
 def create_document(order_id, document_type):
