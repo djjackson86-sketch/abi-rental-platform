@@ -5,6 +5,7 @@ from app.services.access import (
     ADDITIONAL_USER_LIMIT,
     MODULES,
     additional_user_count,
+    change_own_password,
     create_additional_user,
     delete_additional_user,
     list_users,
@@ -72,6 +73,23 @@ def users_add():
         flash(error, "error")
     else:
         flash("Additional account created", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/me/password")
+@login_required
+@main_required
+def users_own_password():
+    """The main profile changing its own password - no other helper touches role 'owner'."""
+    error = change_own_password(
+        session.get("user_id"),
+        request.form.get("current_password"),
+        request.form.get("password"),
+    )
+    if error:
+        flash(error, "error")
+    else:
+        flash("Your password has been updated", "success")
     return redirect(url_for("settings.users"))
 
 

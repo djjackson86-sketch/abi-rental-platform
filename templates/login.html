@@ -16,5 +16,6 @@
     <label>Password <input name="password" type="password" required placeholder="Password"></label>
     <button class="btn primary" type="submit">Continue</button>
   </form>
+  <p class="muted login-recovery-link"><a href="{{ url_for('auth.recovery') }}">Lost access to the main profile?</a></p>
 </main>
 {% endblock %}

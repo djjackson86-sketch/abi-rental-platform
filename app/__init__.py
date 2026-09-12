@@ -49,6 +49,11 @@ def create_app(test_config=None):
         TURSO_AUTH_TOKEN=os.environ.get("TURSO_AUTH_TOKEN", ""),
         ADMIN_EMAIL=os.environ.get("ADMIN_EMAIL", "admin@abi.local"),
         ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD", "admin123"),
+        # Hash of the operator-held master password that can reset the main profile.
+        # Deliberately an environment secret: it is never stored in the database and
+        # cannot be read or changed from inside the app, so a client cannot lock the
+        # operator out and a database dump does not expose it.
+        RECOVERY_PASSWORD_HASH=os.environ.get("RECOVERY_PASSWORD_HASH", ""),
         ENV=os.environ.get("FLASK_ENV", "development"),
         TELEGRAM_BOT_TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),

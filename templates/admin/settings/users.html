@@ -28,6 +28,16 @@
   </form>
 </section>
 
+<section class="panel settings-form" id="your-password">
+  <h2>Your password</h2>
+  <p class="form-help">Change the password for the main profile. You stay signed in afterwards. If the main profile password is ever lost, use <strong>Lost access to the main profile?</strong> on the sign-in page with the master password.</p>
+  <form method="post" action="{{ url_for('settings.users_own_password') }}" class="form-grid">
+    <label>Current password<input type="password" name="current_password" required autocomplete="current-password" placeholder="Current password"></label>
+    <label>New password<input type="password" name="password" required minlength="6" autocomplete="new-password" placeholder="At least 6 characters"></label>
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Update my password</button></div>
+  </form>
+</section>
+
 <section class="panel settings-form">
   <h2>Accounts</h2>
   <div class="table-wrap">
@@ -53,7 +63,9 @@
           </td>
           <td>{% if user.active %}<span class="badge status-returned">Active</span>{% else %}<span class="badge status-canceled">Inactive</span>{% endif %}</td>
           <td>
-            {% if user.role != 'owner' %}
+            {% if user.role == 'owner' %}
+            <a class="btn ghost" href="#your-password">Change above</a>
+            {% else %}
             <form method="post" action="{{ url_for('settings.users_password', user_id=user.id) }}" class="inline-form">
               <input type="text" name="password" minlength="6" placeholder="New password" required>
               <button class="btn ghost" type="submit">Reset</button>

@@ -263,6 +263,17 @@ CREATE TABLE IF NOT EXISTS documents (
     revised_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+
+-- Every use (and failed attempt) of the master recovery password, so emergency
+-- access to the main profile is always attributable.
+CREATE TABLE IF NOT EXISTS recovery_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    ip TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    user_id INTEGER,
+    note TEXT NOT NULL DEFAULT ''
+);
 """
 
 

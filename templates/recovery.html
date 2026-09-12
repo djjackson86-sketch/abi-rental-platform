@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Recover access | Sano Trailers{% endblock %}
+{% block body_class %}login-body{% endblock %}
+{% block body %}
+<main class="login-card">
+  <img class="brand-logo" src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers">
+  <h1>Recover access</h1>
+  {% if not configured %}
+    <p class="muted">Recovery is not configured on this system. Ask your service provider to set the master password.</p>
+    <a class="btn ghost" href="{{ url_for('auth.login') }}">Back to sign in</a>
+  {% else %}
+    <p class="muted">This resets the <strong>main profile</strong> password using the master password held by your service provider. It does not sign anyone in and it cannot be used to read any data.</p>
+    {% if message %}<div class="flash {{ category }}">{{ message }}</div>{% endif %}
+    {% if category != 'success' %}
+    <form method="post" class="stack">
+      <label>Master password <input name="master_password" type="password" required autofocus autocomplete="off" placeholder="Master password"></label>
+      <label>New password for the main profile <input name="new_password" type="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters"></label>
+      <label>Confirm new password <input name="confirm_password" type="password" required minlength="8" autocomplete="new-password" placeholder="Repeat the new password"></label>
+      <button class="btn primary" type="submit">Reset main profile password</button>
+    </form>
+    {% endif %}
+    <a class="btn ghost" href="{{ url_for('auth.login') }}">Back to sign in</a>
+  {% endif %}
+</main>
+{% endblock %}

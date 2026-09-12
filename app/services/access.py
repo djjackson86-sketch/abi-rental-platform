@@ -18,7 +18,7 @@ import re
 import uuid
 
 from flask import has_request_context, session
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.db import get_db, now
 
@@ -241,6 +241,31 @@ def set_user_active(user_id, active):
     db.execute("UPDATE users SET active = ? WHERE id = ?", (1 if active else 0, user_id))
     db.commit()
     return True
+
+
+def change_own_password(user_id, current_password, new_password):
+    """Change the signed-in account's own password.
+
+    This is the one password change the main profile is allowed to make for
+    itself - every other account helper deliberately refuses to touch role
+    'owner', which previously left the main profile with no way to rotate its
+    own password. The current password is required so a hijacked session alone
+    cannot take the account over.
+    """
+    db = get_db()
+    row = db.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row is None:
+        return "Account not found"
+    if not check_password_hash(row["password_hash"], current_password or ""):
+        return "Current password is incorrect"
+    if not new_password or len(new_password) < 6:
+        return "New password must be at least 6 characters"
+    if new_password == current_password:
+        return "New password must be different from the current one"
+    db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+               (generate_password_hash(new_password), user_id))
+    db.commit()
+    return None
 
 
 def reset_user_password(user_id, password):

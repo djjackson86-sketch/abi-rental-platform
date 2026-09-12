@@ -4624,3 +4624,136 @@ def test_orders_metrics_toggle_is_wired_to_the_totals_row(client):
     assert b'aria-controls="orders-metrics"' in body
     assert b'id="orders-metrics"' in body
     assert b'metrics-toggle' in body
+
+
+
+# --- main profile password + master recovery password -------------------------
+
+MASTER = 'master-passphrase-123'
+
+
+def test_main_profile_can_change_its_own_password(client, app):
+    """Every other user helper refuses role 'owner', so the main profile had no way
+    to rotate its own password until this route existed."""
+    login(client)
+    res = client.post('/settings/users/me/password', data={
+        'current_password': 'admin123', 'password': 'newpass123',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Your password has been updated' in res.data
+
+    client.post('/logout')
+    assert b'Invalid name or password' not in login(client, password='newpass123').data
+
+    client.post('/logout')
+    assert b'Invalid name or password' in login(client, password='admin123').data
+
+
+def test_main_profile_password_change_requires_the_current_password(client):
+    login(client)
+    res = client.post('/settings/users/me/password', data={
+        'current_password': 'not-my-password', 'password': 'newpass123',
+    }, follow_redirects=True)
+    assert b'Current password is incorrect' in res.data
+
+
+def test_users_page_offers_the_main_profile_a_password_control(client):
+    login(client)
+    page = client.get('/settings/users')
+    assert b'Your password' in page.data
+    assert b'name="current_password"' in page.data
+
+
+def test_recovery_page_explains_itself_when_no_master_password_is_configured(client):
+    res = client.get('/recovery')
+    assert res.status_code == 200
+    assert b'Recovery is not configured' in res.data
+    assert b'name="master_password"' not in res.data
+
+
+def test_login_page_links_to_recovery(client):
+    assert b'/recovery' in client.get('/login').data
+
+
+def test_master_password_resets_the_main_profile(client, app):
+    from werkzeug.security import generate_password_hash
+    app.config['RECOVERY_PASSWORD_HASH'] = generate_password_hash(MASTER)
+
+    res = client.post('/recovery', data={
+        'master_password': MASTER, 'new_password': 'resetpass123', 'confirm_password': 'resetpass123',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Password reset' in res.data
+
+    with app.app_context():
+        row = get_db().execute("SELECT outcome FROM recovery_events ORDER BY id DESC LIMIT 1").fetchone()
+        assert row['outcome'] == 'success'
+
+    assert b'Invalid name or password' not in login(client, password='resetpass123').data
+
+
+def test_master_password_is_not_a_login(client, app):
+    """It must only be able to set a password - never sign anyone in."""
+    from werkzeug.security import generate_password_hash
+    app.config['RECOVERY_PASSWORD_HASH'] = generate_password_hash(MASTER)
+
+    assert b'Invalid name or password' in login(client, password=MASTER).data
+
+
+def test_wrong_master_password_is_rejected_logged_and_changes_nothing(client, app):
+    from werkzeug.security import generate_password_hash
+    app.config['RECOVERY_PASSWORD_HASH'] = generate_password_hash(MASTER)
+
+    res = client.post('/recovery', data={
+        'master_password': 'wrong-master', 'new_password': 'resetpass123', 'confirm_password': 'resetpass123',
+    }, follow_redirects=True)
+    assert b'not correct' in res.data
+
+    with app.app_context():
+        row = get_db().execute("SELECT outcome, note FROM recovery_events ORDER BY id DESC LIMIT 1").fetchone()
+        assert row['outcome'] == 'failed'
+
+    assert b'Invalid name or password' not in login(client, password='admin123').data
+
+
+def test_recovery_is_throttled_after_repeated_failures(client, app):
+    from werkzeug.security import generate_password_hash
+    app.config['RECOVERY_PASSWORD_HASH'] = generate_password_hash(MASTER)
+
+    for _ in range(5):
+        client.post('/recovery', data={
+            'master_password': 'wrong-master', 'new_password': 'resetpass123', 'confirm_password': 'resetpass123',
+        })
+
+    # even the CORRECT master password is refused once the address is locked out
+    res = client.post('/recovery', data={
+        'master_password': MASTER, 'new_password': 'resetpass123', 'confirm_password': 'resetpass123',
+    }, follow_redirects=True)
+    assert b'Too many failed attempts' in res.data
+
+
+def test_recovery_rejects_a_mismatched_confirmation(client, app):
+    from werkzeug.security import generate_password_hash
+    app.config['RECOVERY_PASSWORD_HASH'] = generate_password_hash(MASTER)
+
+    res = client.post('/recovery', data={
+        'master_password': MASTER, 'new_password': 'resetpass123', 'confirm_password': 'different123',
+    }, follow_redirects=True)
+    assert b'do not match' in res.data
+    assert b'Invalid name or password' not in login(client, password='admin123').data
+
+
+def test_recovery_only_touches_the_main_profile(client, app):
+    from werkzeug.security import generate_password_hash
+    login(client)
+    client.post('/settings/users/add', data={'name': 'Staff Two', 'password': 'staffpass', 'branch_id': ''},
+                follow_redirects=True)
+    client.post('/logout')
+    app.config['RECOVERY_PASSWORD_HASH'] = generate_password_hash(MASTER)
+
+    client.post('/recovery', data={
+        'master_password': MASTER, 'new_password': 'resetpass123', 'confirm_password': 'resetpass123',
+    }, follow_redirects=True)
+
+    # the staff account keeps its own password
+    assert b'Invalid name or password' not in login(client, name='Staff Two', password='staffpass').data
