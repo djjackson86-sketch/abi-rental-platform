@@ -47,6 +47,58 @@ STOP = {"street", "road", "avenue", "ave", "drive", "dr", "close", "crescent", "
 # Thulamela, Limpopo. A query is only trusted if it still contains a real place word.
 COUNTRY_WORDS = {"south", "africa", "rsa", "sa"}
 
+# South African place -> province, used to sanity check a match. In an SA address the
+# locality is normally the LAST place named, so the last match in the source wins: that
+# resolves "740 George nyanga drive tembisa 1632" to Gauteng (tembisa) rather than the
+# Western Cape town its street happens to be named after.
+PLACE_PROVINCE = {}
+for _province, _places in {
+    "Gauteng": ["diepsloot", "tembisa", "thembisa", "ivory park", "alexandra", "soweto", "cosmo city",
+                "midrand", "sandton", "randburg", "johannesburg", "joburg", "jhb", "pretoria", "centurion",
+                "kempton park", "roodepoort", "benoni", "germiston", "boksburg", "brakpan", "springs",
+                "nigel", "heidelberg", "vereeniging", "vanderbijlpark", "ekurhuleni", "tshwane",
+                "olievenhoutbosch", "clayville", "noordwyk", "vorna valley", "halfway house", "kyalami",
+                "fourways", "bryanston", "randjespark", "carlswald", "atteridgeville", "mamelodi",
+                "soshanguve", "orange farm", "lenasia", "protea glen", "meadowlands", "randfontein",
+                "krugersdorp", "alberton", "edenvale", "isando", "wonderboom", "silverton", "waterkloof"],
+    "Western Cape": ["cape town", "capetown", "stellenbosch", "paarl", "george", "knysna", "mossel bay",
+                     "worcester", "somerset west", "bellville", "durbanville", "mitchells plain",
+                     "khayelitsha", "hermanus", "oudtshoorn", "vredenburg", "malmesbury", "plettenberg bay"],
+    "KwaZulu-Natal": ["durban", "pietermaritzburg", "richards bay", "newcastle", "phoenix", "chatsworth",
+                      "umlazi", "tongaat", "ballito", "empangeni", "port shepstone", "ladysmith",
+                      "pinetown", "hillcrest", "verulam", "isipingo"],
+    "Eastern Cape": ["gqeberha", "port elizabeth", "east london", "mthatha", "uitenhage",
+                     "king william's town", "queenstown", "grahamstown", "despatch"],
+    "Free State": ["bloemfontein", "welkom", "sasolburg", "masilonyana", "botshabelo", "bethlehem",
+                   "harrismith", "kroonstad", "parys", "phuthaditjhaba"],
+    "Limpopo": ["polokwane", "pietersburg", "thohoyandou", "thulamela", "tzaneen", "mokopane",
+                "potgietersrus", "lephalale", "bendor", "phalaborwa", "musina", "venda", "giyani"],
+    "Mpumalanga": ["nelspruit", "mbombela", "witbank", "emalahleni", "middelburg", "secunda", "ermelo",
+                   "standerton", "thaba chweu", "sabie", "graskop", "komatipoort", "bethal"],
+    "North West": ["rustenburg", "mahikeng", "mafikeng", "potchefstroom", "klerksdorp", "brits",
+                   "madibeng", "lichtenburg", "zeerust"],
+    "Northern Cape": ["kimberley", "upington", "springbok", "kuruman", "de aar", "kathu"],
+}.items():
+    for _place in _places:
+        PLACE_PROVINCE[_place] = _province
+for _province in ("gauteng", "kwazulu-natal", "kwazulu natal", "western cape", "eastern cape",
+                  "free state", "limpopo", "mpumalanga", "north west", "northern cape"):
+    PLACE_PROVINCE[_province] = _province.title()
+
+
+def primary_source_province(text):
+    """Province implied by the LAST place named in the address, or None."""
+    low = (text or "").lower()
+    best_end, best_province = -1, None
+    for place, province in PLACE_PROVINCE.items():
+        last = None
+        for last in re.finditer(r"\b" + re.escape(place) + r"\b", low):
+            pass
+        if last is not None and last.end() > best_end:
+            best_end, best_province = last.end(), province
+    return best_province
+
+
 # A street line can only be trusted when the query we matched on actually contained a
 # street. A bare place query ("Midrand, 1685, South Africa") happily returns a highway or
 # an unrelated road - it produced "Old Pretoria Main Road" for dozens of Midrand
@@ -127,9 +179,15 @@ def main():
         p["city"] = clean_city(p["city"])
         src = p["raw_address"]
         src_low = src.lower()
-        src_prov = province_in(src)
-        if src_prov and p["province"] and p["province"].lower() not in [s.lower() for s in src_prov]:
-            rejected.append((p, f"province contradicts source ({p['province']} vs {src_prov})"))
+        # The last place named in the address is the locality, so its province is the
+        # strongest signal: a Diepsloot address must not come back in the Eastern Cape
+        # just because a street shares a name with a town somewhere else.
+        src_prov = primary_source_province(src)
+        if not src_prov:
+            named = province_in(src)
+            src_prov = named[0] if named else None
+        if src_prov and p["province"] and p["province"].lower() != src_prov.lower():
+            rejected.append((p, f"province contradicts the source ({p['province']} vs {src_prov})"))
             continue
 
         street = p["address_line1"].strip()
