@@ -5410,3 +5410,217 @@ def test_order_delete_dumps_a_backup_before_removing_rows(client, app, tmp_path,
     assert len(payload["payments"]) == 1
     with app.app_context():
         assert get_db().execute("SELECT id FROM orders WHERE id = ?", (order_id,)).fetchone() is None
+
+
+# --- Client Verified (ticket ABI-341952941) ---------------------------------
+# A nullable customers.client_verified: 1 = Yes, 0 = No, NULL = nobody has
+# answered yet. NULL must stay distinct from 0 so the thousands of imported
+# clients are never rendered as "No".
+
+
+def test_client_verified_round_trip_on_customer_forms(client, app):
+    login(client)
+    client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Verified Client',
+        'email': 'verified@example.test',
+        'client_verified': '1',
+    }, follow_redirects=True)
+    client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Refused Client',
+        'email': 'refused@example.test',
+        'client_verified': '0',
+    }, follow_redirects=True)
+    client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Unanswered Client',
+        'email': 'unanswered@example.test',
+    }, follow_redirects=True)
+
+    with app.app_context():
+        rows = {row['name']: row['client_verified'] for row in get_db().execute(
+            "SELECT name, client_verified FROM customers"
+        ).fetchall()}
+    assert rows['Verified Client'] == 1
+    assert rows['Refused Client'] == 0
+    assert rows['Unanswered Client'] is None
+
+    # Editing flips the stored answer in both directions.
+    with app.app_context():
+        customer_id = get_db().execute(
+            "SELECT id FROM customers WHERE name = 'Verified Client'"
+        ).fetchone()['id']
+    client.post(f'/customers/{customer_id}/edit', data={
+        'customer_type': 'individual',
+        'name': 'Verified Client',
+        'client_verified': '0',
+    }, follow_redirects=True)
+    with app.app_context():
+        assert get_db().execute(
+            "SELECT client_verified FROM customers WHERE id = ?", (customer_id,)
+        ).fetchone()['client_verified'] == 0
+
+    # The customer edit form renders the stored answer back.
+    page = client.get(f'/customers/{customer_id}/edit')
+    assert page.status_code == 200
+    body = page.data.decode()
+    assert 'Client Verified' in body
+    assert 'name="client_verified"' in body
+    assert 'value="0"' in body
+
+
+def test_client_verified_shows_on_customer_list_and_detail(client, app):
+    login(client)
+    client.post('/customers/new', data={
+        'customer_type': 'individual', 'name': 'Yes Client', 'client_verified': '1',
+    }, follow_redirects=True)
+    client.post('/customers/new', data={
+        'customer_type': 'individual', 'name': 'No Client', 'client_verified': '0',
+    }, follow_redirects=True)
+    client.post('/customers/new', data={
+        'customer_type': 'individual', 'name': 'Unset Client',
+    }, follow_redirects=True)
+
+    listing = client.get('/customers')
+    assert listing.status_code == 200
+    assert b'Client Verified' in listing.data
+    listing_body = listing.data.decode()
+    assert 'Yes Client' in listing_body and 'No Client' in listing_body
+
+    with app.app_context():
+        ids = {row['name']: row['id'] for row in get_db().execute(
+            "SELECT id, name FROM customers"
+        ).fetchall()}
+
+    yes_page = client.get(f'/customers/{ids["Yes Client"]}').data.decode()
+    no_page = client.get(f'/customers/{ids["No Client"]}').data.decode()
+    unset_page = client.get(f'/customers/{ids["Unset Client"]}').data.decode()
+    assert '<span>Client Verified</span><b>Yes</b>' in yes_page
+    assert '<span>Client Verified</span><b>No</b>' in no_page
+    # An unanswered client never renders as "No".
+    assert '<span>Client Verified</span><b>—</b>' in unset_page
+
+    # The list column follows the same rule.
+    assert '<th>Client Verified</th>' in listing_body
+    unset_listing = client.get('/customers?query=Unset Client').data.decode()
+    assert 'Unset Client' in unset_listing
+    assert '<td>—</td>' in unset_listing
+
+    with app.app_context():
+        assert get_db().execute(
+            "SELECT client_verified FROM customers WHERE id = ?", (ids['Unset Client'],)
+        ).fetchone()['client_verified'] is None
+
+
+def test_client_verified_saved_from_the_order_inline_customer(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/orders/new', data={
+        'order_action': 'create_customer_continue',
+        'customer_type': 'individual',
+        'name': 'Inline Verified Client',
+        'email': 'inline-verified@example.test',
+        'client_verified': '1',
+    }, follow_redirects=True)
+
+    assert res.status_code == 200
+    assert b'Customer created' in res.data
+    with app.app_context():
+        assert get_db().execute(
+            "SELECT client_verified FROM customers WHERE name = 'Inline Verified Client'"
+        ).fetchone()['client_verified'] == 1
+
+
+def test_client_verified_saved_from_the_order_attached_customer_card(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/orders/new', data=draft_customer_payload({
+        'client_verified': '1',
+        'name': 'Order Customer',
+    }), follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Draft order created' in res.data
+    with app.app_context():
+        assert get_db().execute(
+            "SELECT client_verified FROM customers WHERE id = 1"
+        ).fetchone()['client_verified'] == 1
+
+    # ...and editing the customer on a later draft can answer "No".
+    edit_order = client.post('/orders/new', data=draft_customer_payload({
+        'client_verified': '0',
+        'name': 'Order Customer',
+    }), follow_redirects=True)
+    assert b'Draft order created' in edit_order.data
+    with app.app_context():
+        assert get_db().execute(
+            "SELECT client_verified FROM customers WHERE id = 1"
+        ).fetchone()['client_verified'] == 0
+
+
+def test_order_form_renders_the_client_verified_control(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    page = client.get('/orders/new')
+    body = page.data.decode()
+    assert 'Client Verified' in body
+    assert body.count('name="client_verified"') >= 4  # attached card + add-customer section
+
+    attached = client.get('/orders/new?customer_id=1').data.decode()
+    assert 'Client Verified' in attached
+    assert 'data-customer-field="client_verified"' in attached
+
+    # The attached summary the picker uses carries the stored answer for the JS.
+    order = client.post('/orders/new', data=draft_customer_payload({'client_verified': '1'}), follow_redirects=True)
+    assert b'Draft order created' in order.data
+    with app.app_context():
+        order_id = get_db().execute("SELECT id FROM orders ORDER BY id LIMIT 1").fetchone()['id']
+    edited = client.get(f'/orders/{order_id}/edit')
+    assert edited.status_code == 200
+    edited_body = edited.data.decode()
+    assert '<span>Client Verified</span><b>Yes</b>' in edited_body
+
+
+def test_public_booking_creates_an_unverified_client(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/store/products/1/book', data={
+        'customer_name': 'Public Booking Client',
+        'customer_email': 'public@example.test',
+        'quantity': '1',
+        'start_date': '2026-08-03',
+        'start_time': '09:00',
+        'end_date': '2026-08-04',
+        'end_time': '09:00',
+    }, follow_redirects=True)
+    assert res.status_code == 200
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT client_verified FROM customers WHERE name = 'Public Booking Client'"
+        ).fetchone()
+        assert row is not None
+        assert row['client_verified'] is None
+
+
+def test_customer_csv_export_includes_client_verified(client, app):
+    login(client)
+    client.post('/customers/new', data={
+        'customer_type': 'individual', 'name': 'Csv Yes Client', 'client_verified': '1',
+    }, follow_redirects=True)
+    client.post('/customers/new', data={
+        'customer_type': 'individual', 'name': 'Csv Unset Client',
+    }, follow_redirects=True)
+
+    res = client.get('/customers/export.csv')
+    assert res.status_code == 200
+    csv_text = res.data.decode()
+    header = csv_text.splitlines()[0]
+    assert 'client_verified' in header
+    assert header.split(',').index('client_verified') == 5
+    rows = csv_text.splitlines()
+    assert any(line.startswith('Csv Yes Client') and ',Yes,' in line for line in rows)
+    assert any(line.startswith('Csv Unset Client') and ',—,' in line for line in rows)

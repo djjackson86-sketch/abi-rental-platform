@@ -22,7 +22,7 @@ CUSTOMER_EDIT_FIELD_KEYS = [
     "address_line1", "address_line2", "suburb", "city", "province", "postal_code", "country",
     "vehicle_make", "vehicle_color", "vehicle_reg_no",
     "alternative_contact_name", "alternative_contact_number", "alternative_contact_relationship",
-    "vat_number", "company_reg_no", "standard_discount_percent",
+    "vat_number", "company_reg_no", "standard_discount_percent", "client_verified",
 ]
 
 
@@ -34,6 +34,7 @@ def _customers():
     rows = get_db().execute("""
         SELECT id, customer_type, name, email, phone, marketing_opt_in,
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
+               client_verified,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance
         FROM customers

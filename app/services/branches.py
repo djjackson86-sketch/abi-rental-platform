@@ -1,5 +1,193 @@
 from app.db import get_db, now
 
+# Day numbering follows the app's existing global `operating_hours` table
+# (and `first_day_of_week` default): 0 = Sunday ... 6 = Saturday, which is what
+# the settings "Operating hours seed" already stores - so both tables agree.
+DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+WEEKEND_DAYS = (0, 6)
+DEFAULT_OPEN_TIME = "09:00"
+DEFAULT_CLOSE_TIME = "17:00"
+
+
+def _day_rows_for(branch_id):
+    rows = get_db().execute(
+        "SELECT * FROM branch_operating_hours WHERE branch_id = ? ORDER BY day_of_week",
+        (branch_id,),
+    ).fetchall()
+    by_day = {}
+    for row in rows:
+        try:
+            by_day[int(row["day_of_week"])] = row
+        except (TypeError, ValueError):
+            continue
+    return by_day
+
+
+def default_hours():
+    """Seven rows of default trading hours, seeded from the global settings.
+
+    Used for a branch that has never had hours saved (and for a brand-new
+    branch) so the page always shows a full week without an empty state.
+    """
+    rows = get_db().execute(
+        "SELECT day_of_week, open_time, close_time, closed FROM operating_hours ORDER BY day_of_week"
+    ).fetchall()
+    by_day = {}
+    for row in rows:
+        try:
+            by_day[int(row["day_of_week"])] = row
+        except (TypeError, ValueError):
+            continue
+    result = []
+    for day in range(7):
+        row = by_day.get(day)
+        result.append({
+            "day_of_week": day,
+            "day_label": DAY_LABELS[day],
+            "open_time": (row["open_time"] if row else None) or DEFAULT_OPEN_TIME,
+            "close_time": (row["close_time"] if row else None) or DEFAULT_CLOSE_TIME,
+            "closed": 1 if row and row["closed"] else (1 if not row and day in WEEKEND_DAYS else 0),
+            "saved": 0,
+        })
+    return result
+
+
+def list_branch_hours(branch_id):
+    """The branch's saved week, or the global defaults when nothing is saved."""
+    saved = _day_rows_for(branch_id)
+    if not saved:
+        return default_hours()
+    defaults = {row["day_of_week"]: row for row in default_hours()}
+    result = []
+    for day in range(7):
+        row = saved.get(day)
+        if row:
+            result.append({
+                "day_of_week": day,
+                "day_label": DAY_LABELS[day],
+                "open_time": row["open_time"] or DEFAULT_OPEN_TIME,
+                "close_time": row["close_time"] or DEFAULT_CLOSE_TIME,
+                "closed": 1 if row["closed"] else 0,
+                "saved": 1,
+            })
+        else:
+            result.append(dict(defaults[day], saved=0))
+    return result
+
+
+def hours_saved(branch_id):
+    return bool(_day_rows_for(branch_id))
+
+
+def _summarize(hours):
+    """Compact one-line summary for the branches table (e.g. 'Mon-Fri 09:00-17:00, Sat-Sun Closed')."""
+    if not hours:
+        return "Not set"
+    groups = []
+    for row in hours:
+        if row["closed"]:
+            key = ("Closed",)
+        else:
+            key = (row["open_time"], row["close_time"])
+        if groups and groups[-1][0] == key:
+            groups[-1][1].append(row["day_label"][:3])
+        else:
+            groups.append((key, [row["day_label"][:3]]))
+    parts = []
+    for key, days in groups:
+        days_label = days[0] if len(days) == 1 else f"{days[0]}-{days[-1]}"
+        if key == ("Closed",):
+            parts.append(f"{days_label} Closed")
+        else:
+            parts.append(f"{days_label} {key[0]}-{key[1]}")
+    return ", ".join(parts)
+
+
+def branch_hours_summaries():
+    """{branch_id: summary} for every branch that has saved hours."""
+    rows = get_db().execute("SELECT * FROM branch_operating_hours ORDER BY branch_id, day_of_week").fetchall()
+    by_branch = {}
+    for row in rows:
+        try:
+            branch_id = int(row["branch_id"])
+            day = int(row["day_of_week"])
+        except (TypeError, ValueError):
+            continue
+        by_branch.setdefault(branch_id, {})[day] = row
+    summaries = {}
+    for branch_id, by_day in by_branch.items():
+        hours = []
+        for day in range(7):
+            row = by_day.get(day)
+            if not row:
+                continue
+            hours.append({
+                "day_of_week": day,
+                "day_label": DAY_LABELS[day],
+                "open_time": row["open_time"] or DEFAULT_OPEN_TIME,
+                "close_time": row["close_time"] or DEFAULT_CLOSE_TIME,
+                "closed": 1 if row["closed"] else 0,
+            })
+        summaries[branch_id] = _summarize(hours)
+    return summaries
+
+
+def _time_value(raw, fallback):
+    value = (raw or "").strip()
+    if not value:
+        return fallback
+    parts = value.split(":")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError("Trading hours must be entered as HH:MM")
+    hour, minute = int(parts[0]), int(parts[1])
+    if hour > 23 or minute > 59:
+        raise ValueError("Trading hours must be entered as HH:MM")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def save_branch_hours(branch_id, form):
+    """Upsert the seven day rows for one branch from the submitted form."""
+    if not get_branch(branch_id):
+        raise ValueError("Branch not found")
+    db = get_db()
+    ts = now()
+    saved = _day_rows_for(branch_id)
+    for day in range(7):
+        closed = 1 if form.get(f"closed_{day}") else 0
+        open_time = _time_value(form.get(f"open_time_{day}"), DEFAULT_OPEN_TIME)
+        close_time = _time_value(form.get(f"close_time_{day}"), DEFAULT_CLOSE_TIME)
+        if not closed and open_time >= close_time:
+            raise ValueError(f"{DAY_LABELS[day]}: closing time must be after opening time")
+        row = saved.get(day)
+        if row:
+            db.execute(
+                """UPDATE branch_operating_hours SET open_time = ?, close_time = ?, closed = ?, updated_at = ?
+                WHERE branch_id = ? AND day_of_week = ?""",
+                (open_time, close_time, closed, ts, branch_id, day),
+            )
+        else:
+            db.execute(
+                """INSERT INTO branch_operating_hours (branch_id, day_of_week, open_time, close_time, closed, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (branch_id, day, open_time, close_time, closed, ts),
+            )
+    db.commit()
+
+
+def seed_branch_hours(branch_id):
+    """Give a brand-new branch its own copy of the default week."""
+    if _day_rows_for(branch_id):
+        return
+    db = get_db()
+    ts = now()
+    for row in default_hours():
+        db.execute(
+            """INSERT INTO branch_operating_hours (branch_id, day_of_week, open_time, close_time, closed, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (branch_id, row["day_of_week"], row["open_time"], row["close_time"], row["closed"], ts),
+        )
+    db.commit()
+
 
 def list_branches(active_only=False):
     sql = """
@@ -53,7 +241,11 @@ def create_branch(form):
     cur = get_db().execute("""INSERT INTO branches (name, code, phone, email, address_line1, address_line2, city, province, postal_code, bank_name, bank_account_name, bank_account_number, bank_branch_code, bank_account_type, bank_reference_note, active, created_at, updated_at)
         VALUES (:name, :code, :phone, :email, :address_line1, :address_line2, :city, :province, :postal_code, :bank_name, :bank_account_name, :bank_account_number, :bank_branch_code, :bank_account_type, :bank_reference_note, :active, :created_at, :updated_at)""", {**data, "created_at": ts, "updated_at": ts})
     get_db().commit()
-    return cur.lastrowid
+    branch_id = cur.lastrowid
+    # A brand-new branch starts with an editable copy of the default week so the
+    # trading-hours section is never blank.
+    seed_branch_hours(branch_id)
+    return branch_id
 
 
 def update_branch(branch_id, form):
@@ -87,6 +279,9 @@ def delete_branch(branch_id):
         "SELECT DISTINCT product_id FROM product_branch_stock WHERE branch_id = ?", (branch_id,)
     ).fetchall()]
     db.execute("DELETE FROM product_branch_stock WHERE branch_id = ?", (branch_id,))
+    # Trading hours belong to the depot that is being deleted (libsql
+    # autocommits, so children are deleted explicitly).
+    db.execute("DELETE FROM branch_operating_hours WHERE branch_id = ?", (branch_id,))
     for product_id in stock_products:
         # products.quantity stays the computed total of the rows that are left.
         total = db.execute(

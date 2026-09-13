@@ -159,6 +159,7 @@ def get_order(order_id):
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
             c.custom_fields_json AS custom_fields_json, c.standard_discount_percent AS customer_standard_discount_percent,
+            c.client_verified AS customer_client_verified,
             cb.name AS collect_branch_name, rb.name AS return_branch_name,
             cu.name AS created_by_name, cu.email AS created_by_email
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
@@ -673,6 +674,7 @@ def draft_order_form(order_id):
             "postal_code": order["customer_postal_code"],
             "country": order["customer_country"],
             "custom_fields_json": order["custom_fields_json"],
+            "client_verified": order["customer_client_verified"],
         })
     lines = []
     for item in order_items(order_id):

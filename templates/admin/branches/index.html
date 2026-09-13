@@ -1,7 +1,7 @@
 {% extends "admin/layout.html" %}
 {% set title='Branches' %}
 {% block admin_body %}
-<header class="page-header"><div><p class="eyebrow">Operations</p><h1>Branches</h1><p>Manage editable depot branches and the current stock location model.</p></div></header>
+<header class="page-header"><div><p class="eyebrow">Operations</p><h1>Branches</h1><p>Manage editable depot branches, their trading hours and the current stock location model.</p></div></header>
 <section class="two-col">
   <article class="panel settings-form">
     <h2>{{ 'Edit branch' if edit_branch else 'Add branch' }}</h2>
@@ -34,8 +34,33 @@
     <p class="form-help">Each physical rental product/trailer has a current branch. Return bookings stay at the same branch. One-way bookings move the item to the selected return branch when the order is returned.</p>
   </article>
 </section>
+{% if edit_branch %}
+<section class="panel settings-form" id="trading-hours">
+  <h2>Trading hours — {{ edit_branch.name }}</h2>
+  <p class="form-help">Opening hours for this depot. These are for reference only: they do not block bookings, the calendar or the online store.</p>
+  <form method="post" action="{{ url_for('branches.hours', branch_id=edit_branch.id) }}">
+    <div class="table-wrap">
+      <table class="data-table hours-table">
+        <thead><tr><th>Day</th><th>Opens</th><th>Closes</th><th>Closed</th></tr></thead>
+        <tbody>
+          {% for row in branch_hours %}
+          <tr>
+            <td><strong>{{ row.day_label }}</strong>{% if not row.saved %}<small>Not saved yet — showing default hours</small>{% endif %}</td>
+            <td><input type="time" name="open_time_{{ row.day_of_week }}" value="{{ row.open_time }}" aria-label="{{ row.day_label }} opening time"></td>
+            <td><input type="time" name="close_time_{{ row.day_of_week }}" value="{{ row.close_time }}" aria-label="{{ row.day_label }} closing time"></td>
+            <td><label class="switch"><input type="checkbox" name="closed_{{ row.day_of_week }}" value="1" {% if row.closed %}checked{% endif %}> Closed</label></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-actions"><button class="btn primary" type="submit">Save trading hours</button><a class="btn ghost" href="{{ url_for('branches.index') }}">Done</a></div>
+  </form>
+</section>
+{% endif %}
 <section class="panel">
   <h2>Depot branches</h2>
-  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Code</th><th>Contact</th><th>Linked</th><th>Status</th><th>Invoice bank</th><th></th></tr></thead><tbody>{% for branch in branches %}<tr><td><strong>{{ branch.name }}</strong><small>{{ branch.address_line1 or branch.city or '' }}</small></td><td>{{ branch.code or '—' }}</td><td>{{ branch.phone or branch.email or '—' }}</td><td>{{ branch.product_count }} item(s) · {{ branch.order_count }} order(s){% if branch.user_count %} · {{ branch.user_count }} user(s){% endif %}</td><td>{{ 'Active' if branch.active else 'Inactive' }}</td><td>{{ branch.bank_name or '—' }}</td><td><div class="header-actions"><a class="btn ghost" href="{{ url_for('branches.index', edit=branch.id) }}">Edit</a><form method="post" action="{{ url_for('branches.delete', branch_id=branch.id) }}" class="inline-form" onsubmit="return confirm('Delete this branch? Existing orders and products will keep working without this branch.');"><button class="btn ghost" type="submit">Delete</button></form></div></td></tr>{% endfor %}</tbody></table></div>
+  <p class="form-help">Use Edit on a branch to set its trading hours.</p>
+  <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Code</th><th>Contact</th><th>Linked</th><th>Status</th><th>Trading hours</th><th>Invoice bank</th><th></th></tr></thead><tbody>{% for branch in branches %}<tr><td><strong>{{ branch.name }}</strong><small>{{ branch.address_line1 or branch.city or '' }}</small></td><td>{{ branch.code or '—' }}</td><td>{{ branch.phone or branch.email or '—' }}</td><td>{{ branch.product_count }} item(s) · {{ branch.order_count }} order(s){% if branch.user_count %} · {{ branch.user_count }} user(s){% endif %}</td><td>{{ 'Active' if branch.active else 'Inactive' }}</td><td>{{ hours_summaries.get(branch.id) or 'Not set' }}</td><td>{{ branch.bank_name or '—' }}</td><td><div class="header-actions"><a class="btn ghost" href="{{ url_for('branches.index', edit=branch.id) }}">Edit</a><form method="post" action="{{ url_for('branches.delete', branch_id=branch.id) }}" class="inline-form" onsubmit="return confirm('Delete this branch? Existing orders and products will keep working without this branch.');"><button class="btn ghost" type="submit">Delete</button></form></div></td></tr>{% endfor %}</tbody></table></div>
 </section>
 {% endblock %}

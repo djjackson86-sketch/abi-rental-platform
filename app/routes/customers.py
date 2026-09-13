@@ -4,7 +4,7 @@ from io import StringIO
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
-from app.services.customers import create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_orders, get_customer, list_customers, update_customer
+from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_orders, get_customer, list_customers, update_customer
 from app.services.settings import get_company_settings
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
@@ -24,6 +24,7 @@ def index():
         counts=customer_counts(),
         filter_counts=customer_filter_counts(),
         filters={"query": query, "customer_type": customer_type, "marketing": marketing},
+        client_verified_label=client_verified_label,
     )
 
 
@@ -36,7 +37,7 @@ def export_csv():
     customers = list_customers(query=query, customer_type=customer_type, marketing=marketing)
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(["name", "customer_type", "email", "phone", "marketing_opt_in", "orders", "balance_due", "created_at"])
+    writer.writerow(["name", "customer_type", "email", "phone", "marketing_opt_in", "client_verified", "orders", "balance_due", "created_at"])
     for customer in customers:
         writer.writerow([
             customer["name"],
@@ -44,6 +45,7 @@ def export_csv():
             customer["email"],
             customer["phone"],
             customer["marketing_opt_in"],
+            client_verified_label(customer["client_verified"]),
             customer["order_count"],
             customer["balance_due"],
             customer["created_at"],
@@ -71,7 +73,7 @@ def detail(customer_id):
     if not customer:
         flash("Customer not found", "error")
         return redirect(url_for("customers.index"))
-    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=customer_orders(customer_id), custom_field_label=custom_field_label)
+    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=customer_orders(customer_id), custom_field_label=custom_field_label, client_verified_label=client_verified_label)
 
 
 @bp.route("/<int:customer_id>/edit", methods=["GET", "POST"])

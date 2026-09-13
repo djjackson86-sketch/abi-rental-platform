@@ -125,6 +125,17 @@ CREATE TABLE IF NOT EXISTS branches (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS branch_operating_hours (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    day_of_week INTEGER NOT NULL,
+    open_time TEXT NOT NULL DEFAULT '09:00',
+    close_time TEXT NOT NULL DEFAULT '17:00',
+    closed INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    UNIQUE(branch_id, day_of_week)
+);
+
 CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_type TEXT NOT NULL DEFAULT 'individual',
@@ -142,6 +153,7 @@ CREATE TABLE IF NOT EXISTS customers (
     custom_fields_json TEXT NOT NULL DEFAULT '{}',
     balance_due REAL NOT NULL DEFAULT 0,
     standard_discount_percent REAL NOT NULL DEFAULT 0,
+    client_verified INTEGER,
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
@@ -452,6 +464,27 @@ def run_migrations(db):
         UNIQUE(product_id, branch_id)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_product_branch_stock_product ON product_branch_stock(product_id)")
+
+    # --- Per-branch trading hours (additive, 2026-09-13) ----------------------
+    # Informational only: they are shown on the Branches page and never enforced
+    # on availability, the calendar or public bookings. A branch with no rows
+    # falls back to the global operating_hours defaults for display, so nothing
+    # has to be written for an existing branch to show sensible hours.
+    db.execute("""CREATE TABLE IF NOT EXISTS branch_operating_hours (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        day_of_week INTEGER NOT NULL,
+        open_time TEXT NOT NULL DEFAULT '09:00',
+        close_time TEXT NOT NULL DEFAULT '17:00',
+        closed INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        UNIQUE(branch_id, day_of_week)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_branch_operating_hours_branch ON branch_operating_hours(branch_id)")
+    # NULL means "not answered yet", so the thousands of imported clients that
+    # carry no verification value are never rendered as "No".
+    ensure_column(db, "customers", "client_verified", "INTEGER")
+
 
 def init_db():
     db = get_db()

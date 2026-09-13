@@ -92,6 +92,23 @@ def customer_orders(customer_id):
     return get_db().execute("SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC", (customer_id,)).fetchall()
 
 
+def _client_verified_value(form):
+    """Yes/No client verification: 1, 0, or None when nobody has answered yet.
+
+    None (NULL) is deliberately kept distinct from 0 so the thousands of
+    imported clients with no verification value are never shown as "No".
+    """
+    raw = form.get("client_verified")
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    if value in ("1", "yes", "true", "on"):
+        return 1
+    if value in ("0", "no", "false", "off"):
+        return 0
+    return None
+
+
 def _clean(form, existing_custom_fields=None):
     name = form.get("name", "").strip()
     if not name:
@@ -136,6 +153,7 @@ def _clean(form, existing_custom_fields=None):
         "country": form.get("country", "South Africa").strip() or "South Africa",
         "custom_fields_json": json.dumps(custom_fields, ensure_ascii=False),
         "standard_discount_percent": standard_discount_percent,
+        "client_verified": _client_verified_value(form),
     }
 
 
@@ -143,8 +161,8 @@ def create_customer(form):
     data = _clean(form)
     db = get_db()
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, created_by_user_id, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :created_by_user_id, :created_at)""",
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, created_by_user_id, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :created_by_user_id, :created_at)""",
         {**data, "created_by_user_id": current_session_user_id(), "created_at": now()},
     )
     db.commit()
@@ -161,11 +179,31 @@ def update_customer(customer_id, form):
     data = _clean(form, existing_custom_fields=raw_custom_fields_for(get_customer(customer_id)))
     data["id"] = customer_id
     get_db().execute(
-        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json, standard_discount_percent=:standard_discount_percent WHERE id=:id""",
+        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json, standard_discount_percent=:standard_discount_percent, client_verified=:client_verified WHERE id=:id""",
         data,
     )
     get_db().commit()
 
+
+
+def client_verified_label(value):
+    """'Yes' / 'No' / '—' for a stored client_verified value (None = not answered)."""
+    if value is None or value == "":
+        return "—"
+    try:
+        return "Yes" if int(value) else "No"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def client_verified_form_value(value):
+    """'1' / '0' / '' for the Yes/No control ('' = not answered)."""
+    if value is None or value == "":
+        return ""
+    try:
+        return "1" if int(value) else "0"
+    except (TypeError, ValueError):
+        return ""
 
 
 def customer_summary_for(customer):
@@ -195,11 +233,13 @@ def customer_summary_for(customer):
         "form": customer_form_values_for(customer),
         "standard_discount_percent": float(_customer_row_value(customer, "standard_discount_percent", 0) or 0),
         "previous_orders_balance": round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2),
+        "client_verified": _customer_row_value(customer, "client_verified", None),
+        "client_verified_label": client_verified_label(_customer_row_value(customer, "client_verified", None)),
         "display": display,
     }
 
 
-def _customer_row_value(customer, key, default=""):
+def _customer_row_value(customer, key, default=None):
     try:
         value = customer[key]
     except (KeyError, IndexError, TypeError):
@@ -232,6 +272,7 @@ def customer_form_values_for(customer):
         "postal_code": _customer_row_value(customer, "postal_code") or "",
         "country": _customer_row_value(customer, "country") or "South Africa",
         "standard_discount_percent": _customer_row_value(customer, "standard_discount_percent", 0) or 0,
+        "client_verified": client_verified_form_value(_customer_row_value(customer, "client_verified", None)),
     }
     for key in CUSTOM_FIELD_FORM_KEYS:
         values[key] = raw.get(key) or ""
