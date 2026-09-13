@@ -371,3 +371,49 @@ def test_migration_creates_the_branch_stock_table_on_an_existing_database(client
     assert columns == ['id', 'product_id', 'branch_id', 'quantity', 'updated_at']
     with app.app_context():
         init_db()  # second run must not raise
+
+
+def test_calendar_availability_batches_its_queries(client, app):
+    """The calendar must not run a query per rental product.
+
+    It used to run two per product, so a live page view (an Oregon app instance
+    talking to an Ireland database) cost ~180 Turso round trips and ~30s even
+    though production held three orders - the cost was round trips, not data.
+    The statement count has to stay flat as the catalogue grows; a per-product
+    query would push this well past the bound with a dozen products.
+    """
+    login(client)
+    for index in range(12):
+        create_product(client, name=f'Batch Trailer {index:02d}', sku=f'BATCH-{index:02d}')
+
+    import app.services.orders as orders_mod
+
+    counter = {'n': 0}
+    real_get_db = orders_mod.get_db
+
+    class CountingConnection:
+        """Counts statements while behaving exactly like the real connection."""
+
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, *args, **kwargs):
+            counter['n'] += 1
+            return self._conn.execute(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    orders_mod.get_db = lambda: CountingConnection(real_get_db())
+    try:
+        with app.app_context():
+            availability = calendar_group_availability(start_date='2026-07-01', end_date='2026-07-01')
+    finally:
+        orders_mod.get_db = real_get_db
+
+    listed = sum(len(group['products']) for group in availability['groups'])
+    assert listed >= 12, listed
+    # 1 products query + 3 per chunk (stock rows, booked totals, reservation rows).
+    # The lower bound keeps this from passing vacuously if the counter ever stops
+    # wrapping the connection.
+    assert 2 <= counter['n'] <= 5, f"{counter['n']} statements for {listed} products - batching regressed"

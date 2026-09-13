@@ -1199,6 +1199,13 @@ def _calendar_range(start_date=None, end_date=None):
     return range_start, range_end
 
 
+def _chunked(items, size):
+    """Yield ``items`` in slices of ``size`` (keeps an IN (...) list inside SQLite's
+    bound-parameter limit without turning it back into one query per row)."""
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
+
+
 def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
     range_start, range_end = _calendar_range(start_date, end_date)
     db = get_db()
@@ -1233,16 +1240,72 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
 
     groups = []
     groups_by_id = {}
-    # Per-branch counts for every product in the view (one query, not one per row).
+    product_ids = [int(product["id"]) for product in products]
+
+    # Per-branch counts, booked totals and the reservation rows are all fetched in ONE
+    # pass for the whole view. Until 2026-09-13 this looped per product and ran two
+    # queries each, which cost ~180 Turso round trips per page view (~30s live) even
+    # though production held 3 orders - the cost was round trips, not data. The list is
+    # chunked only to stay inside SQLite's bound-parameter limit.
     branch_stock = {}
-    product_ids = [product["id"] for product in products]
-    if product_ids:
-        placeholders = ",".join("?" for _ in product_ids)
+    branch_keys = {}
+    booked_by_product = {}
+    reservations_by_product = {}
+    for chunk in _chunked(product_ids, 400):
+        marks = ",".join("?" for _ in chunk)
         for row in db.execute(
-            f"SELECT product_id, branch_id, quantity FROM product_branch_stock WHERE product_id IN ({placeholders})",
-            product_ids,
+            f"SELECT product_id, branch_id, quantity FROM product_branch_stock WHERE product_id IN ({marks})",
+            chunk,
         ).fetchall():
             branch_stock.setdefault(int(row["product_id"]), {})[int(row["branch_id"])] = int(row["quantity"] or 0)
+        # A product holding per-branch counts is counted per collection branch; every
+        # other product keeps the all-branch behaviour, exactly as before.
+        for product_id in chunk:
+            branch_keys[product_id] = int(branch_id) if (branch_stock.get(product_id) and branch_id) else None
+
+        booking_params = [*chunk, range_end.isoformat(timespec="seconds"),
+                          range_start.isoformat(timespec="seconds")]
+        for row in db.execute(
+            f"""SELECT oi.product_id,
+                       COALESCE(o.collect_branch_id, 0) AS collect_branch_id,
+                       COALESCE(SUM(oi.quantity), 0) AS booked
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE oi.product_id IN ({marks})
+                  AND o.status IN ('reserved', 'started')
+                  AND o.start_at < ?
+                  AND o.end_at > ?
+                GROUP BY oi.product_id, COALESCE(o.collect_branch_id, 0)""",
+            booking_params,
+        ).fetchall():
+            booked_by_product.setdefault(int(row["product_id"]), {})[
+                int(row["collect_branch_id"])
+            ] = int(row["booked"] or 0)
+
+        for row in db.execute(
+            f"""SELECT oi.product_id, o.id, o.order_number, o.status, o.start_at, o.end_at,
+                       oi.quantity, COALESCE(o.collect_branch_id, 0) AS collect_branch_id
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE oi.product_id IN ({marks})
+                  AND o.status IN ('reserved', 'started')
+                  AND o.start_at < ?
+                  AND o.end_at > ?
+                ORDER BY o.start_at, o.id""",
+            booking_params,
+        ).fetchall():
+            product_key = int(row["product_id"])
+            branch_key = branch_keys.get(product_key)
+            if branch_key is not None and int(row["collect_branch_id"]) != branch_key:
+                continue
+            reservations_by_product.setdefault(product_key, []).append({
+                "id": row["id"],
+                "order_number": row["order_number"],
+                "status": row["status"],
+                "start_at": row["start_at"],
+                "end_at": row["end_at"],
+                "quantity": row["quantity"],
+            })
 
     for product in products:
         group_id = product["group_id"]
@@ -1259,41 +1322,17 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
             groups_by_id[group_id] = group
             groups.append(group)
 
-        stock_rows = branch_stock.get(int(product["id"]))
-        # A product with per-branch counts is counted per branch when a branch is
-        # selected, so its bookings must be counted per collection branch too.
-        # NOTE the placeholder order matches the SQL below: product id, the two
-        # date bounds, then the appended branch clause.
-        branch_booking_clause = ""
-        booking_params = [
-            product["id"],
-            range_end.isoformat(timespec="seconds"),
-            range_start.isoformat(timespec="seconds"),
-        ]
-        if stock_rows and branch_id:
-            branch_booking_clause = " AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)"
-            booking_params.append(branch_id)
-        booked = db.execute(
-            f"""SELECT COALESCE(SUM(oi.quantity), 0) AS booked
-            FROM order_items oi
-            JOIN orders o ON o.id = oi.order_id
-            WHERE oi.product_id = ?
-              AND o.status IN ('reserved', 'started')
-              AND o.start_at < ?
-              AND o.end_at > ?{branch_booking_clause}""",
-            booking_params,
-        ).fetchone()["booked"] or 0
-        reservations = db.execute(
-            f"""SELECT o.id, o.order_number, o.status, o.start_at, o.end_at, oi.quantity
-            FROM order_items oi
-            JOIN orders o ON o.id = oi.order_id
-            WHERE oi.product_id = ?
-              AND o.status IN ('reserved', 'started')
-              AND o.start_at < ?
-              AND o.end_at > ?{branch_booking_clause}
-            ORDER BY o.start_at, o.id""",
-            booking_params,
-        ).fetchall()
+        product_key = int(product["id"])
+        stock_rows = branch_stock.get(product_key)
+        # Bookings and reservations came from the single pass above: a branch-managed
+        # product counts only the selected branch's bookings, everything else counts
+        # across branches exactly as it did when this ran a query per product.
+        branch_key = branch_keys.get(product_key)
+        if branch_key is None:
+            booked = sum(booked_by_product.get(product_key, {}).values())
+        else:
+            booked = booked_by_product.get(product_key, {}).get(branch_key, 0)
+        reservations = reservations_by_product.get(product_key, [])
 
         if stock_rows:
             # Selected branch -> that branch's count; no filter -> the total of
