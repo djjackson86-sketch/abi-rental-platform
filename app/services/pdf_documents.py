@@ -1,4 +1,5 @@
 import math
+import unicodedata
 from pathlib import Path
 
 from flask import current_app
@@ -31,8 +32,60 @@ TOTAL_INCL_COLUMN_X = 462
 INVOICE_TABLE_RIGHT_EDGE = 559
 
 
+def _pdf_text(value):
+    """Make a string safe for the PDF's single-byte font.
+
+    The page stream is encoded as latin-1, so any character outside that range
+    used to be replaced with "?" — which is exactly what the client saw as a
+    question mark wherever a product name contained U+2044 FRACTION SLASH
+    ("2.4m Utility Trailer - 1⁄2 ton", 23 live products).
+
+    Typographic characters are transliterated to their plain ASCII equivalent
+    (so a fraction slash prints a real "/"), and anything left over is
+    decomposed and stripped of its accents before it can ever reach the stream.
+    Characters that already encode cleanly are passed through untouched, so no
+    existing document reflows.
+    """
+    text = str(value or '')
+    if not text or text.isascii():
+        return text
+    text = text.translate(_PDF_TEXT_SUBSTITUTIONS)
+    out = []
+    for char in text:
+        if ord(char) < 256:
+            out.append(char)
+            continue
+        decomposed = unicodedata.normalize('NFKD', char)
+        plain = ''.join(part for part in decomposed if not unicodedata.combining(part))
+        out.append(plain if plain.isascii() else '?')
+    return ''.join(out)
+
+
+# Non-ASCII characters that appear in the client's own data (or are likely to),
+# mapped to what they should look like in a printed document. ½ is a real
+# Latin-1 glyph, but 1/2 keeps a document's plain-text copy-and-paste honest.
+# str.maketrans keeps the readable character keys and builds the ordinal-keyed
+# table str.translate actually needs (a str-keyed dict silently no-ops).
+_PDF_TEXT_SUBSTITUTIONS = str.maketrans({
+    '\u2044': '/',   # fraction slash — 23 live product names carry this
+    '\u2215': '/',   # division slash
+    '\u00bd': '1/2',  # ½
+    '\u00bc': '1/4',
+    '\u00be': '3/4',
+    '\u2018': "'", '\u2019': "'",   # curly single quotes
+    '\u201c': '"', '\u201d': '"',   # curly double quotes
+    '\u2013': '-', '\u2014': '-',   # en/em dash
+    '\u2026': '...',
+    '\u00a0': ' ', '\u202f': ' ', '\u2009': ' ',   # non-breaking / thin spaces
+    '\u2022': '*',
+    '\u20ac': 'EUR',
+})
+
+
 def _escape_pdf_text(text):
-    return str(text or '').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+    # The single choke point every text command goes through, so transliterating
+    # here covers both page builders and the PAID stamp at once.
+    return _pdf_text(text).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
 
 
 def _jpeg_dimensions(image_bytes):
@@ -97,9 +150,9 @@ def _simple_pdf(lines, logo_bytes=None):
     if image_object:
         resources += b' /XObject << /Im1 7 0 R >>'
     objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox ' + A4_PORTRAIT_MEDIABOX.encode() + b' /Resources << ' + resources + b' >> /Contents 5 0 R >>')
-    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
+    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>')
     objects.append(b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream')
-    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>')
+    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>')
     if image_object:
         objects.append(image_object)
     out = bytearray(b'%PDF-1.4\n')
@@ -175,9 +228,9 @@ def _pdf_objects(stream, image_object=None):
     if image_object:
         resources += b' /XObject << /Im1 7 0 R >>'
     objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox ' + A4_PORTRAIT_MEDIABOX.encode() + b' /Resources << ' + resources + b' >> /Contents 5 0 R >>')
-    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
+    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>')
     objects.append(b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream')
-    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>')
+    objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>')
     if image_object:
         objects.append(image_object)
     out = bytearray(b'%PDF-1.4\n')

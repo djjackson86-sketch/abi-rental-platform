@@ -251,6 +251,7 @@ CREATE TABLE IF NOT EXISTS orders (
     due_total REAL NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT '',
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    picked_up_at TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -415,6 +416,10 @@ def run_migrations(db):
     ensure_column(db, "orders", "discount_mode", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "discount_value", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "orders", "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
+    # When the order was actually collected. Nullable: orders that predate the
+    # column fall back to their scheduled pickup where a "picked up today"
+    # figure needs a date (see reports.dashboard_day_metrics).
+    ensure_column(db, "orders", "picked_up_at", "TEXT")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")

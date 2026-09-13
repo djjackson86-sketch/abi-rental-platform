@@ -18,11 +18,12 @@
     {% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}"><span>≋</span><span>Reports</span></a>{% endif %}
     {% if user_can('scan_barcode') %}<a href="{{ url_for('admin.scan_barcode') }}"><span>▥</span><span>Scan a barcode</span></a>{% endif %}
     {% if user_can('settings') %}<a href="{{ url_for('settings.general') }}"><span>⚙</span><span>Settings</span></a>{% endif %}
+    {% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}"><span>⌂</span><span>Branch: {{ active_branch['name'] }} · Change</span></a>{% endif %}
     <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button type="submit"><span>↩</span><span>Log out</span></button></form>
   </aside>
   <main class="main">
     <nav class="mobile-nav">
-      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}
+      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}
     </nav>
     {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}

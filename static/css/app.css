@@ -292,3 +292,12 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .access-cell-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .access-cell-actions .btn{min-height:30px;padding:5px 10px;font-size:12px}
 .access-note{margin:0;color:var(--muted);font-size:11.5px;font-weight:650}
+
+/* Dashboard "for the day" cards + the session's active branch (ABI-341952946).
+   Ten cards: five across on a desktop (two tidy rows), falling back to the
+   existing .metrics breakpoints below 1101px, then one column on a phone. */
+.dashboard-day .section-heading{margin:0 0 10px;font-size:15px;letter-spacing:-.01em;color:var(--muted);text-transform:uppercase}
+.dashboard-day-metrics b{font-size:24px}
+@media(min-width:1101px){.dashboard-day-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}}
+.branch-context{background:linear-gradient(90deg,rgba(37,99,235,.1),transparent);font-weight:750}
+.branch-context span:last-child{font-size:12.5px}

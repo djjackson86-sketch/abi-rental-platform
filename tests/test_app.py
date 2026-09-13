@@ -4147,9 +4147,20 @@ def test_main_can_manage_users_and_staff_have_restricted_access(client, app):
     assert staff_login.status_code == 200
 
     dashboard = client.get('/dashboard')
-    assert b'Order for the day' in dashboard.data
-    assert b'Customer base for the day' in dashboard.data
+    # The day cards were renamed and expanded (ABI-341952946): "Order for the day"
+    # is now "New orders for the day" and only counts orders that have started.
+    assert b'New orders for the day' in dashboard.data
+    assert b'New customers for the day' in dashboard.data
     assert b'Revenue for the day' in dashboard.data
+    assert b'Total card payments' in dashboard.data
+    assert b'Total cash payments' in dashboard.data
+    assert b'Total EFT payments' in dashboard.data
+    assert b'Reservations for the day' in dashboard.data
+    assert b'Reservation pick ups for the day' in dashboard.data
+    assert b'Total no. of trailers out' in dashboard.data
+    assert b'Total no. of trailers in' in dashboard.data
+    assert b'Order for the day' not in dashboard.data
+    assert b'Customer base for the day' not in dashboard.data
     assert b'Total orders' not in dashboard.data
     assert b'Going out' not in dashboard.data
     assert b'Add order' not in dashboard.data
@@ -4811,6 +4822,18 @@ def test_reports_page_renders_when_the_database_returns_libsql_rows(client, monk
     class FakeDB:
         def execute(self, sql, params=None):
             statement = ' '.join(sql.split()).lower()
+            # The dashboard's "for the day" cards live in this module too
+            # (dashboard_day_metrics) and they render on the redirect that follows
+            # sign-in, so this double has to answer them. Each asks for a finished
+            # scalar, which is the point being guarded.
+            if 'product_groups pg' in statement:          # trailer out / in cards
+                return Cursor([_libsql_row(('c',), (2,))])
+            if 'lower(pay.method)' in statement:          # total X payments cards
+                return Cursor([_libsql_row(('s',), (500.0,))])
+            if 'substr(' in statement:                    # the day-windowed cards
+                if 'sum(o.total)' in statement:           # revenue for the day
+                    return Cursor([_libsql_row(('s',), (800.0,))])
+                return Cursor([_libsql_row(('c',), (1,))])
             if 'group by o.status' in statement:
                 return Cursor([
                     _libsql_row(('status', 'count', 'total'), ('reserved', 3, 900.0)),
@@ -4832,6 +4855,15 @@ def test_reports_page_renders_when_the_database_returns_libsql_rows(client, monk
 
     monkeypatch.setattr(reports, 'get_db', lambda: FakeDB())
     login(client)
+
+    # Signing in redirects through /dashboard, which renders the same
+    # production-shaped rows through the new day-card builder.
+    dashboard = client.get('/dashboard')
+    assert dashboard.status_code == 200
+    dashboard_body = dashboard.get_data(as_text=True)
+    assert 'Total card payments' in dashboard_body
+    assert 'R500.00' in dashboard_body
+    assert 'built-in method' not in dashboard_body
 
     page = client.get('/reports')
     assert page.status_code == 200

@@ -802,7 +802,13 @@ def transition_order(order_id, action):
         if errors:
             raise ValueError(errors[0])
     db = get_db()
-    db.execute("UPDATE orders SET status = ? WHERE id = ?", (transition["to"], order_id))
+    if action == "start":
+        # Record the real collection moment: "reservation pick ups for the day"
+        # is a day figure, and the scheduled pickup is only a proxy for it.
+        db.execute("UPDATE orders SET status = ?, picked_up_at = ? WHERE id = ?",
+                   (transition["to"], now(), order_id))
+    else:
+        db.execute("UPDATE orders SET status = ? WHERE id = ?", (transition["to"], order_id))
     if action == "return" and order["booking_type"] == "oneway" and order["return_branch_id"]:
         for item in order_items(order_id):
             if item["product_id"]:

@@ -6,9 +6,8 @@ from app.routes.auth import login_required
 from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, scheduled_events
-from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
+from app.services.reports import customer_summary, dashboard_day_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
-from app.services.timezone import local_now_iso
 from app.services.access import order_branch_clause, product_branch_clause, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 
@@ -53,18 +52,11 @@ def dashboard():
         "customers": db.execute("SELECT COUNT(*) c FROM customers").fetchone()[ "c"],
         "revenue": db.execute(f"SELECT COALESCE(SUM(o.total),0) s FROM orders o WHERE 1=1{order_scope_sql}", order_scope_params).fetchone()[ "s"],
     }
-    day_prefix = local_now_iso(timespec="seconds")[:10]
-    day_metrics = {
-        "orders": db.execute(f"SELECT COUNT(*) c FROM orders o WHERE substr(o.created_at, 1, 10) = ?{order_scope_sql}", [day_prefix, *order_scope_params]).fetchone()["c"],
-        "customers": db.execute("SELECT COUNT(*) c FROM customers WHERE substr(created_at, 1, 10) = ?", (day_prefix,)).fetchone()["c"],
-        "revenue": db.execute(f"SELECT COALESCE(SUM(o.total),0) s FROM orders o WHERE substr(o.created_at, 1, 10) = ?{order_scope_sql}", [day_prefix, *order_scope_params]).fetchone()["s"],
-        "day": day_prefix,
-    }
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
         metrics=metrics,
-        day_metrics=day_metrics,
+        day_metrics=dashboard_day_metrics(),
         schedule=dashboard_schedule(),
     )
 

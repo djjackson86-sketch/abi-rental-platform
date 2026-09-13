@@ -569,13 +569,99 @@ def current_session_user_id():
 
 
 def session_primary_branch_id():
-    """The session's own (primary) branch — the default for orders they create."""
+    """The branch this session acts as — the default for orders they create.
+
+    When a multi-depot account has chosen the branch it is managing for this
+    sign-in, that choice is the answer: the account may only see that depot, so
+    defaulting new work back to a different depot would hide the record the
+    moment it was saved. Otherwise it is the account's own primary branch.
+    """
     if not has_request_context():
         return None
+    active = session_active_branch_id()
+    if active:
+        return active
     try:
         return int(session.get("branch_id") or 0) or None
     except (TypeError, ValueError):
         return None
+
+
+def session_active_branch_id():
+    """The depot this sign-in chose to manage, or None when it manages all.
+
+    Only ever written by ``/select-branch`` after validating the id against the
+    depots the account may already reach, so it can narrow a session but never
+    widen one.
+    """
+    if not has_request_context():
+        return None
+    try:
+        return int(session.get("active_branch_id") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def session_active_branch():
+    """The active depot as ``{'id', 'name'}`` for the chrome, or None.
+
+    Read straight from the database when a choice exists (so a rename shows up
+    immediately) and skipped entirely otherwise, which keeps the common case at
+    zero extra queries.
+    """
+    branch_id = session_active_branch_id()
+    if not branch_id:
+        return None
+    row = get_db().execute("SELECT id, name FROM branches WHERE id = ?", (branch_id,)).fetchone()
+    if row is None:
+        return None
+    return {"id": int(row["id"]), "name": row["name"]}
+
+
+def _session_granted_branch_ids():
+    """Every depot this session may reach, or None when it may reach them all.
+
+    Deliberately independent of the active-branch choice: this is the *grant*,
+    and it is what both the scope and the chooser validate against.
+    """
+    if not has_request_context():
+        return None
+    if session.get("user_role") == "owner" or session.get("can_view_all_branches"):
+        return None
+    cleaned = []
+    raw = session.get("branch_ids")
+    if isinstance(raw, (list, tuple)):
+        for value in raw:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if value and value not in cleaned:
+                cleaned.append(value)
+    if cleaned:
+        return cleaned
+    # No extra-depot rows: the historic single branch (blank branch = all
+    # branches) still applies, so an existing account is unaffected.
+    try:
+        primary = int(session.get("branch_id") or 0) or None
+    except (TypeError, ValueError):
+        primary = None
+    return [primary] if primary else None
+
+
+def session_branch_choice_options():
+    """Depots a multi-depot account may choose between; [] when there is none.
+
+    The main profile, an all-branch account and a single-depot account have
+    nothing to choose, so they are never asked. The list is narrowed to the
+    account's own depots, which is also what makes a posted id safe.
+    """
+    granted = _session_granted_branch_ids()
+    if not granted or len(granted) < 2:
+        return []
+    from app.services.branches import branch_options
+
+    return [branch for branch in branch_options() if branch["id"] in granted]
 
 
 def session_branch_scope_ids():
@@ -585,27 +671,18 @@ def session_branch_scope_ids():
     non-request/public context). A list means restricted to exactly those depots;
     an empty list means restricted to nothing. The session value is written at
     sign-in, so a crafted ``?branch=`` or a posted branch id can never widen it.
+
+    A multi-depot account that chose the branch it is managing for this sign-in
+    is scoped to that one depot. The choice is validated against the granted set
+    here as well, so even a tampered session cannot escape it.
     """
-    if not has_request_context():
+    granted = _session_granted_branch_ids()
+    if granted is None:
         return None
-    if session.get("user_role") == "owner" or session.get("can_view_all_branches"):
-        return None
-    raw = session.get("branch_ids")
-    if isinstance(raw, (list, tuple)):
-        cleaned = []
-        for value in raw:
-            try:
-                value = int(value)
-            except (TypeError, ValueError):
-                continue
-            if value and value not in cleaned:
-                cleaned.append(value)
-        if cleaned:
-            return cleaned
-    # No extra-depot rows: the historic single branch (blank branch = all
-    # branches) still applies, so an existing account is unaffected.
-    primary = session_primary_branch_id()
-    return [primary] if primary else None
+    active = session_active_branch_id()
+    if active is not None and active in granted:
+        return [active]
+    return granted
 
 
 def session_branch_scope():

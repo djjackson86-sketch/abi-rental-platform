@@ -13,7 +13,7 @@ from .routes.documents import bp as documents_bp
 from .routes.payments import bp as payments_bp
 from .routes.branches import bp as branches_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
-from .services.access import is_main_session, module_for_endpoint, user_can_module
+from .services.access import is_main_session, module_for_endpoint, session_active_branch, user_can_module
 
 
 def _truthy_env(name):
@@ -96,6 +96,9 @@ def create_app(test_config=None):
         return {
             "current_user_is_main": is_main_session(session),
             "user_can": lambda module: user_can_module(session, module),
+            # The depot this sign-in is managing, for the "Branch: X · Change"
+            # control. None (and no query) unless a choice was actually made.
+            "active_branch": session_active_branch(),
         }
 
     return app

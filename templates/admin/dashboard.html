@@ -9,10 +9,9 @@
   </div>
 </header>
 
-<section class="metrics dashboard-metrics">
-  <div class="metric-card"><small>Order for the day</small><b>{{ day_metrics.orders }}</b><span>{{ day_metrics.day }}</span></div>
-  <div class="metric-card"><small>Customer base for the day</small><b>{{ day_metrics.customers }}</b><span>{{ day_metrics.day }}</span></div>
-  <div class="metric-card"><small>Revenue for the day</small><b>R{{ '%.2f'|format(day_metrics.revenue) }}</b><span>{{ day_metrics.day }}</span></div>
+<section class="dashboard-day">
+  <h2 class="section-heading">Today</h2>
+  {% include "admin/_dashboard_day_metrics.html" %}
 </section>
 {% else %}
 <header class="page-header dashboard-header">
@@ -37,6 +36,11 @@
   <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Products</span></div>
   <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Customers</span></div>
   <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Revenue</span></div>
+</section>
+
+<section class="dashboard-day">
+  <h2 class="section-heading">Today</h2>
+  {% include "admin/_dashboard_day_metrics.html" %}
 </section>
 
 <section class="dashboard-grid">

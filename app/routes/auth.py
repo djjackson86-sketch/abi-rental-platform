@@ -2,7 +2,13 @@ from functools import wraps
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from app.db import get_db
-from app.services.access import login_user_options, user_branch_ids, user_module_keys_from_row, staff_modules_from_settings
+from app.services.access import (
+    login_user_options,
+    session_branch_choice_options,
+    user_branch_ids,
+    user_module_keys_from_row,
+    staff_modules_from_settings,
+)
 from app.services.recovery import (
     RECOVERY_WINDOW_MINUTES,
     locked_out,
@@ -63,9 +69,47 @@ def login():
                 # The extra depots this account may see (empty = the historic
                 # single branch, or every branch when they are unrestricted).
                 session["branch_ids"] = user_branch_ids(user["id"])
+            if session_branch_choice_options():
+                # An account that manages several depots says which one it is
+                # managing for this sign-in before it lands on a screen. The
+                # choice can only narrow what it may already reach, and skipping
+                # it simply leaves the account with all of its own depots.
+                return redirect(url_for("auth.select_branch"))
             return redirect(url_for("admin.dashboard"))
         flash("Invalid name or password", "error")
     return render_template("login.html", users=login_user_options())
+
+
+@bp.route("/select-branch", methods=["GET", "POST"])
+def select_branch():
+    """Pick the depot this sign-in is managing.
+
+    Only offered to a multi-depot account and only ever lists (and accepts) the
+    depots that account may already reach, so this can narrow a session but
+    never widen one. Skipping it is allowed: the account then sees all of its
+    own depots, exactly as before this screen existed.
+    """
+    if not session.get("user_id"):
+        return redirect(url_for("auth.login"))
+    branches = session_branch_choice_options()
+    if not branches:
+        return redirect(url_for("admin.dashboard"))
+    allowed = [branch["id"] for branch in branches]
+    if request.method == "POST":
+        try:
+            branch_id = int(request.form.get("branch_id") or 0)
+        except (TypeError, ValueError):
+            branch_id = 0
+        if branch_id not in allowed:
+            flash("Choose one of the branches you manage", "error")
+        else:
+            session["active_branch_id"] = branch_id
+            return redirect(url_for("admin.dashboard"))
+    return render_template(
+        "select_branch.html",
+        branches=branches,
+        current=session.get("active_branch_id"),
+    )
 
 
 @bp.route("/recovery", methods=["GET", "POST"])

@@ -1,0 +1,13 @@
+{% macro money_card(label, amount) %}<div class="metric-card"><small>{{ label }}</small><b>R{{ '%.2f'|format(amount) }}</b><span>{{ day_metrics.day }}</span></div>{% endmacro %}
+<section class="metrics dashboard-metrics dashboard-day-metrics">
+  <div class="metric-card"><small>New orders for the day</small><b>{{ day_metrics.orders }}</b><span>{{ day_metrics.day }}</span></div>
+  <div class="metric-card"><small>New customers for the day</small><b>{{ day_metrics.customers }}</b><span>{{ day_metrics.day }}</span></div>
+  {{ money_card('Revenue for the day', day_metrics.revenue) }}
+  {{ money_card('Total card payments', day_metrics.card_payments) }}
+  {{ money_card('Total cash payments', day_metrics.cash_payments) }}
+  {{ money_card('Total EFT payments', day_metrics.eft_payments) }}
+  <div class="metric-card"><small>Reservations for the day</small><b>{{ day_metrics.reservations }}</b><span>{{ day_metrics.day }}</span></div>
+  <div class="metric-card"><small>Reservation pick ups for the day</small><b>{{ day_metrics.reservation_pickups }}</b><span>{{ day_metrics.day }}</span></div>
+  <div class="metric-card"><small>Total no. of trailers out</small><b>{{ day_metrics.trailers_out }}</b><span>{{ day_metrics.day }}</span></div>
+  <div class="metric-card"><small>Total no. of trailers in</small><b>{{ day_metrics.trailers_in }}</b><span>{{ day_metrics.day }}</span></div>
+</section>

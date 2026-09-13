@@ -1,5 +1,6 @@
 from app.db import get_db
 from app.services.access import order_branch_clause
+from app.services.timezone import local_now_iso
 
 
 def money(value):
@@ -124,6 +125,111 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
         "customers": customers["count"] or 0,
         "products": products["count"] or 0,
         "payment_split": payment_split(orders["revenue"], payments["paid"]),
+    }
+
+
+# Rental stock is counted per item, not per booking line, and the client's
+# "Other Rental Products" group (ratchets, straps, the non-trailer hire extras)
+# is deliberately excluded from both trailer cards.
+TRAILER_GROUPS_EXCLUDED = ("Other Rental Products",)
+
+# "New orders for the day" excludes everything that has not actually started:
+# a draft is not an order yet and a reservation is counted by its own card.
+_NOT_NEW_ORDER_STATUSES = ("draft", "reserved", "canceled", "cancelled", "archived")
+# Reserved earlier and collected today: the order exists and has been picked up.
+_PICKED_UP_STATUSES = ("started", "returned")
+
+
+def dashboard_day_metrics(day=None):
+    """Every "for the day" figure the dashboard shows, as finished scalars.
+
+    ``day`` is the business day (Africa/Johannesburg) and is compared as a
+    ``YYYY-MM-DD`` prefix on the stored timestamp, matching how the dashboard
+    has always decided "today". Orders and payments are branch-scoped, so these
+    cards follow the session scope and the branch filter exactly like the rest
+    of the dashboard; the customer count is master data and stays company-wide
+    (a customer row carries no branch).
+
+    Plain values only — production rows are libsql tuples, so nothing here
+    hands a row object to the template.
+    """
+    db = get_db()
+    day = day or local_now_iso(timespec="seconds")[:10]
+    scope_sql, scope_params = order_branch_clause("o")
+
+    def count(sql, params):
+        row = db.execute(sql, params).fetchone()
+        return int(row["c"] or 0)
+
+    def total(sql, params):
+        row = db.execute(sql, params).fetchone()
+        return money(row["s"])
+
+    new_orders = count(
+        f"""SELECT COUNT(*) c FROM orders o
+        WHERE substr(o.created_at, 1, 10) = ?
+          AND o.status NOT IN (?, ?, ?, ?, ?){scope_sql}""",
+        [day, *_NOT_NEW_ORDER_STATUSES, *scope_params],
+    )
+    new_customers = count(
+        "SELECT COUNT(*) c FROM customers WHERE substr(created_at, 1, 10) = ?",
+        (day,),
+    )
+    revenue = total(
+        f"SELECT COALESCE(SUM(o.total), 0) s FROM orders o WHERE substr(o.created_at, 1, 10) = ?{scope_sql}",
+        [day, *scope_params],
+    )
+    reservations = count(
+        f"""SELECT COUNT(*) c FROM orders o
+        WHERE substr(o.created_at, 1, 10) = ? AND o.status = 'reserved'{scope_sql}""",
+        [day, *scope_params],
+    )
+    # Created before today, collected today. ``picked_up_at`` is only written
+    # from the day it shipped, so an order that predates the column falls back
+    # to its scheduled pickup — a documented proxy, not a second date source.
+    reservation_pickups = count(
+        f"""SELECT COUNT(*) c FROM orders o
+        WHERE substr(o.created_at, 1, 10) < ?
+          AND o.status IN (?, ?)
+          AND substr(COALESCE(NULLIF(o.picked_up_at, ''), o.start_at), 1, 10) = ?{scope_sql}""",
+        [day, *_PICKED_UP_STATUSES, day, *scope_params],
+    )
+
+    def payment_total(method):
+        return total(
+            f"""SELECT COALESCE(SUM(pay.amount), 0) s
+            FROM payments pay JOIN orders o ON o.id = pay.order_id
+            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+              AND LOWER(pay.method) = ?
+              AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
+            [method, day, *scope_params],
+        )
+
+    def trailer_count(statuses):
+        marks = ", ".join("?" for _ in statuses)
+        return count(
+            f"""SELECT COALESCE(SUM(oi.quantity), 0) c
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            JOIN products p ON p.id = oi.product_id
+            LEFT JOIN product_groups pg ON pg.id = p.product_group_id
+            WHERE o.status IN ({marks}) AND p.product_type = 'rental'
+              AND COALESCE(pg.name, '') <> ?{scope_sql}""",
+            [*statuses, *TRAILER_GROUPS_EXCLUDED, *scope_params],
+        )
+
+    return {
+        "day": day,
+        "orders": new_orders,
+        "customers": new_customers,
+        "revenue": revenue,
+        "card_payments": payment_total("card"),
+        "cash_payments": payment_total("cash"),
+        "eft_payments": payment_total("eft"),
+        "reservations": reservations,
+        "reservation_pickups": reservation_pickups,
+        "trailers_out": trailer_count(("started",)),
+        "trailers_in": trailer_count(("draft", "reserved")),
     }
 
 

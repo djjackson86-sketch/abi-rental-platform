@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Which branch? | Sano Trailers{% endblock %}
+{% block body_class %}login-body{% endblock %}
+{% block body %}
+<main class="login-card">
+  <img class="brand-logo" src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers">
+  <h1>Which branch are you managing?</h1>
+  <p class="muted">Choose the depot for this sign-in. Your dashboard, orders, inventory, calendar and reports will show that branch only until you change it.</p>
+  {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
+  <form method="post" class="stack">
+    <label>Branch <select name="branch_id" required autofocus><option value="" {% if not current %}selected{% endif %} disabled>Select a branch</option>{% for branch in branches %}<option value="{{ branch['id'] }}" {% if current and current|int == branch['id'] %}selected{% endif %}>{{ branch['name'] }}</option>{% endfor %}</select></label>
+    <button class="btn primary" type="submit">Continue</button>
+  </form>
+  <p class="muted login-recovery-link"><a href="{{ url_for('admin.dashboard') }}">Skip — show all my branches</a></p>
+</main>
+{% endblock %}
