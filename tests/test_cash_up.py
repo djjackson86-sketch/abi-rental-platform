@@ -14,6 +14,7 @@ money if they drifted.
 All fixtures use fixed dates so nothing depends on the wall clock.
 """
 import os
+import re
 import tempfile
 
 import pytest
@@ -428,3 +429,80 @@ def test_the_cash_panel_renders_with_libsql_shaped_rows(client, app, monkeypatch
     assert isinstance(summary['used_count'], int)
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'built-in method' not in body
+
+
+def test_the_depot_chooser_appears_only_for_a_multi_depot_sign_in(client, app):
+    login(client)
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert 'name="cash_branch"' in body, 'an all-branch viewer picks which drawer to cash up'
+    assert body.count('name="cash_branch"') == 1, 'a hidden duplicate would win over the picker'
+    assert 'name="branch"' in body, 'each write form must carry the chosen depot'
+
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert 'name="cash_branch"' not in body, 'a single-depot account gets a fixed label, not a chooser'
+    assert 'Cash up · Branch 2' in body
+
+
+def test_a_chosen_depot_is_the_one_cashed_up(client, app):
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1, number='ORD-90001')
+    _seed_payment(app, 700.0, method='cash', day=TODAY, branch_id=2, number='ORD-90002')
+    login(client)
+    body = client.get('/dashboard?cash_branch=2').get_data(as_text=True)
+    assert 'Cash up · Branch 2' in body
+    assert re.search(r'Cash received</small>\s*<b>R700\.00</b>', body), 'depot 2 cash only'
+    # The chosen depot is what the form writes to, and the reply keeps showing it.
+    res = client.post('/cash-up', data={'day': '', 'branch': '2', 'counted_cash': '700.00'})
+    assert res.status_code == 302
+    assert 'cash_branch=2' in res.headers['Location'], res.headers['Location']
+    rows = {row['branch_id']: row for row in _cash_rows(app)}
+    assert rows[2]['counted_cash'] == 700.0
+    assert 1 not in rows, 'nothing was written for depot 1'
+    # Downloads follow the chosen depot, and the CSV figures match the panel.
+    csv_body = client.get('/cash-up/export.csv?branch=2').get_data(as_text=True)
+    assert 'Depot,Branch 2' in csv_body
+    assert 'Cash received for the day,R700.00' in csv_body
+
+
+def test_a_crafted_depot_can_never_widen_a_cash_up(client, app):
+    login(client)
+    client.post('/cash-up', data={'day': '', 'branch': '2', 'counted_cash': '300.00'},
+                follow_redirects=True)
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    # Their own depot renders even when the query string asks for another one,
+    # and a forged depot 1 post is ignored rather than honoured.
+    body = client.get('/dashboard?cash_branch=1').get_data(as_text=True)
+    assert 'Cash up · Branch 2' in body
+    assert 'name="cash_branch"' not in body, 'no depot chooser for a pinned account'
+    client.post('/cash-up', data={'day': '', 'branch': '1', 'counted_cash': '999.00'},
+                follow_redirects=True)
+    client.post('/cash-up', data={'day': '', 'branch': '999', 'counted_cash': '888.00'},
+                follow_redirects=True)
+    rows = {row['branch_id']: row for row in _cash_rows(app)}
+    assert 1 not in rows, 'depot 1 must be untouched by another depot'
+    assert rows[2]['counted_cash'] == 888.0, 'a junk id falls back to their own depot'
+    assert 999 not in rows
+
+
+def test_branch_for_request_resolves_inside_the_session_scope(app):
+    with app.test_request_context('/dashboard'):
+        flask_session['user_id'] = 1
+        flask_session['user_role'] = 'staff'
+        flask_session['branch_id'] = 2
+        flask_session['can_view_all_branches'] = 0
+        flask_session['branch_ids'] = []
+        assert [row['id'] for row in cash.cash_branches()] == [2]
+        assert cash.branch_for_request('1') == 2, 'another depot is refused, not honoured'
+        assert cash.branch_for_request('2') == 2
+        assert cash.branch_for_request('junk') == 2
+        assert cash.panel_state('1')['branch_name'] == 'Branch 2'
+    with app.test_request_context('/dashboard'):
+        flask_session['user_id'] = 1
+        flask_session['user_role'] = 'owner'
+        assert len(cash.cash_branches()) == 3
+        assert cash.branch_for_request('3') == 3
+        assert cash.branch_for_request('999') == 1, 'junk falls back to the acting depot'

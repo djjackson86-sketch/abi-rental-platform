@@ -117,6 +117,62 @@ def branch_name(branch_id):
     return str(_value(row, 'name') or '')
 
 
+def cash_branches():
+    """Depots this session may cash up, as ``[{'id', 'name'}]``.
+
+    Never widened by anything in the request: an all-branch viewer gets every
+    active depot, an account with a branch grant gets exactly its own depots, and
+    a depot-restricted account gets one (so its panel shows a fixed label rather
+    than a chooser).
+    """
+    scope = session_branch_scope_ids()
+    options = []
+    for row in branch_options():
+        branch_id = _value(row, 'id')
+        try:
+            branch_id = int(branch_id)
+        except (TypeError, ValueError):
+            continue
+        if scope is not None and branch_id not in scope:
+            continue
+        options.append({'id': branch_id, 'name': str(_value(row, 'name') or '')})
+    return options
+
+
+def branch_for_request(requested=''):
+    """The depot a cash-up action applies to.
+
+    A requested id is honoured only when it is one of the depots this session may
+    already reach, so a crafted ``?cash_branch=`` or posted ``branch`` can narrow
+    a cash up but never widen one. Anything else falls back to the depot the
+    sign-in is acting as, then to the first depot that is allowed.
+    """
+    allowed = [branch['id'] for branch in cash_branches()]
+    if not allowed:
+        return None
+    text = str(requested or '').strip()
+    if text.isdigit() and int(text) in allowed:
+        return int(text)
+    primary = acting_branch_id()
+    if primary in allowed:
+        return primary
+    return allowed[0]
+
+
+def panel_state(requested=''):
+    """Everything the dashboard's cash panel needs to pick a depot.
+
+    ``branches`` is the chooser's options (never more than the session may
+    reach), ``branch_id``/``branch_name`` are the depot the panel is showing.
+    """
+    branch_id = branch_for_request(requested)
+    return {
+        'branches': cash_branches(),
+        'branch_id': branch_id,
+        'branch_name': branch_name(branch_id) or '',
+    }
+
+
 def _closing_before(day, branch_id):
     """(day, closing) of the last cashed-up day before ``day``, else (``''``, 0.0)."""
     if not branch_id:

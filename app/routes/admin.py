@@ -10,7 +10,7 @@ from app.services.reports import customer_summary, dashboard_day_metrics, orders
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.access import order_branch_clause, product_branch_clause, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
-from app.services.cash import day_summary as cash_day_summary
+from app.services.cash import day_summary as cash_day_summary, panel_state as cash_panel_state
 
 bp = Blueprint("admin", __name__)
 
@@ -53,14 +53,17 @@ def dashboard():
         "customers": db.execute("SELECT COUNT(*) c FROM customers").fetchone()[ "c"],
         "revenue": db.execute(f"SELECT COALESCE(SUM(o.total),0) s FROM orders o WHERE 1=1{order_scope_sql}", order_scope_params).fetchone()[ "s"],
     }
+    # Cash up is per depot per day. The depot is chosen from the depots this
+    # session may already reach (?cash_branch= can only narrow), and for a
+    # depot-restricted account the session pins it.
+    cash_panel = cash_panel_state(request.args.get('cash_branch', ''))
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
         metrics=metrics,
         day_metrics=dashboard_day_metrics(),
-        # Cash up is per depot per day: the depot is the one this sign-in is
-        # acting as, never anything from the request.
-        cash_day=cash_day_summary(),
+        cash_panel=cash_panel,
+        cash_day=cash_day_summary(branch_id=cash_panel['branch_id']),
         schedule=dashboard_schedule(),
     )
 
