@@ -17,7 +17,7 @@ import pytest
 from app import create_app
 from app.db import get_db, init_db
 from app.services.orders import calendar_group_availability
-from app.services.products import product_branch_stock
+from app.services.products import product_branch_stock, set_product_branch_stock
 
 
 @pytest.fixture()
@@ -121,24 +121,111 @@ def stored(client, product_id):
         return get_db().execute('SELECT quantity FROM products WHERE id = ?', (product_id,)).fetchone()['quantity']
 
 
-# --- storage + form round trip ------------------------------------------------
+def field_tag(html, marker):
+    """The opening tag that carries ``marker`` (a data-* attr or an input name)."""
+    match = re.search(rb'<[^>]*' + marker + rb'[^>]*>', html)
+    return match.group(0) if match else b''
+
 
 def test_inventory_form_offers_one_stock_box_per_branch(client):
+    """A SALES ITEM keeps the per-branch grid (the only type that shows it)."""
     login(client)
-    form = client.get('/inventory/new')
-    assert form.status_code == 200
-    body = form.data
+    product_id = create_product(client, product_type='sale', sku='SALE-BR-1')
+    body = client.get(f'/inventory/{product_id}/edit').data
     assert b'name="qty_branch_1"' in body
     assert b'name="qty_branch_2"' in body
     assert b'name="qty_branch_3"' in body
-    assert b'name="quantity"' not in body          # the single box is gone
     assert b'Total in stock' in body
-    assert b'Leave every branch box empty' in body
+    assert b'Sales items only: leave every branch box empty' in body
+    # The branch block is the visible one and its boxes are enabled...
+    assert b'hidden' not in field_tag(body, b'data-stock-field')
+    for branch in (1, 2, 3):
+        assert b'disabled' not in field_tag(body, b'name="qty_branch_%d"' % branch)
+    # ...while the single box is there only for a type switch, hidden and disabled.
+    assert b'hidden' in field_tag(body, b'data-stock-quantity-field')
+    assert b'disabled' in field_tag(body, b'name="quantity"')
+
+
+def test_rental_form_offers_one_shared_quantity_box_and_no_branch_boxes(client):
+    """Rentals keep ONE shared count: the branch grid is hidden and disabled, so a
+    rental submit posts no ``qty_branch_*`` key at all (ABI-341952945)."""
+    login(client)
+    product_id = create_product(client, quantity='4')
+    body = client.get(f'/inventory/{product_id}/edit').data
+    assert b'name="quantity"' in body
+    assert b'hidden' not in field_tag(body, b'data-stock-quantity-field')
+    assert b'disabled' not in field_tag(body, b'name="quantity"')
+    assert b'hidden' in field_tag(body, b'data-stock-field')
+    for branch in (1, 2, 3):
+        assert b'disabled' in field_tag(body, b'name="qty_branch_%d"' % branch)
+    assert b'Per-branch stock counts are only offered on sales items' in body
+
+
+def test_new_product_form_defaults_to_the_shared_quantity_box(client):
+    login(client)
+    body = client.get('/inventory/new').data
+    assert b'hidden' in field_tag(body, b'data-stock-field')
+    assert b'hidden' not in field_tag(body, b'data-stock-quantity-field')
+    assert b'disabled' not in field_tag(body, b'name="quantity"')
+
+
+def test_saving_a_rental_stores_one_shared_count_and_no_branch_rows(client):
+    """Exactly what a rental now posts: the single quantity box, no branch boxes."""
+    login(client)
+    product_id = create_product(client, quantity='4')
+    assert stored(client, product_id) == 4
+    with client.application.app_context():
+        assert product_branch_stock(product_id) == {}
+
+    res = edit_product(client, product_id, quantity='9')
+    assert b'Product saved' in res.data
+    assert stored(client, product_id) == 9
+    with client.application.app_context():
+        assert product_branch_stock(product_id) == {}
+
+
+def test_saving_a_rental_never_clears_or_zeroes_existing_branch_rows(client):
+    """A hidden block must never wipe stock.
+
+    A product can still carry per-branch rows (a sales item changed to a rental),
+    and the rental form posts no branch boxes. Saving must leave those rows alone
+    and keep the total equal to the sum of them — never zero it.
+    """
+    login(client)
+    product_id = create_product(client, quantity='5')
+    with client.application.app_context():
+        set_product_branch_stock(product_id, {1: 3, 2: 2})
+    assert stored(client, product_id) == 5
+
+    res = edit_product(client, product_id, quantity='1')
+    assert b'Product saved' in res.data
+    with client.application.app_context():
+        assert product_branch_stock(product_id) == {1: 3, 2: 2}
+    assert stored(client, product_id) == 5
+
+
+def test_inventory_list_only_breaks_down_sales_item_stock(client):
+    """The per-branch breakdown text belongs beside a sales item, not a rental."""
+    login(client)
+    create_product(client, name='Branch Split Sale', sku='SALE-BR-2',
+                   product_type='sale', qty_branch_1='3', qty_branch_2='2')
+    sale = client.get('/inventory').data.decode()
+    assert 'Branch 1 3' in sale and 'Branch 2 2' in sale
+
+    # A rental that somehow carries rows must not sprout a branch breakdown.
+    rental_id = create_product(client, name='Branch Split Rental', sku='RENT-BR-1')
+    with client.application.app_context():
+        set_product_branch_stock(rental_id, {1: 3, 2: 2})
+    listing = client.get('/inventory').data.decode()
+    assert 'Branch Split Rental' in listing
+    rented = listing.split('Branch Split Rental', 1)[1].split('</tr>', 1)[0]
+    assert 'Branch 1 3' not in rented
+    assert 'Multiple branches' not in rented
 
 
 def test_saving_branch_counts_stores_rows_and_the_total(client):
     login(client)
-    product_id = create_product(client, qty_branch_1='3', qty_branch_2='2')
+    product_id = create_product(client, product_type='sale', qty_branch_1='3', qty_branch_2='2')
     with client.application.app_context():
         assert product_branch_stock(product_id) == {1: 3, 2: 2}
     assert stored(client, product_id) == 5

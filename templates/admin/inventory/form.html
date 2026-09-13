@@ -24,18 +24,32 @@
       <label class="span-2">Product name<input name="name" required value="{{ product.name if product else '' }}" placeholder="6m Trailer"></label>
       <label>SKU<input name="sku" value="{{ product.sku if product else '' }}" placeholder="TRL-001"></label>
       <label>Product group<select name="product_group_id"><option value="">Ungrouped</option>{% for group in product_groups %}<option value="{{ group.id }}" {% if product and product.product_group_id==group.id %}selected{% endif %}>{{ group.name }}</option>{% endfor %}</select></label>
-      <div class="span-2 stock-branch-field" data-stock-field>
+      {# Per-branch stock is a SALES ITEM feature (ABI-341952945): rentals keep one
+         shared count, services/untracked keep none. Both blocks stay in the markup so the
+         form can switch with the product type; the hidden one is disabled so it posts
+         nothing, and the server-rendered state is already right before the script runs. #}
+      {% set initial_type = product.product_type if product else 'rental' %}
+      {% set initial_tracking = product.tracking_method if product else 'bulk' %}
+      {% set stock_untracked = initial_type == 'service' or initial_tracking == 'none' %}
+      {% set branch_stock_mode = (not stock_untracked) and initial_type == 'sale' %}
+      {% set quantity_mode = (not stock_untracked) and initial_type != 'sale' %}
+      <div class="span-2 stock-branch-field" data-stock-field {% if not branch_stock_mode %}hidden{% endif %}>
         <div class="stock-branch-head" style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><strong>Stock per branch</strong><span class="form-help">Total in stock: <b data-stock-total>{{ product.quantity if product else 1 }}</b> <span data-stock-mode>&mdash; one shared pool for all branches</span></span></div>
         {% if branches %}
         <div class="branch-stock-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:8px 0 0">
           {% for branch in branches %}
-          <label>{{ branch.name }}<input class="branch-stock-input" name="qty_branch_{{ branch.id }}" type="number" min="0" step="1" placeholder="Shared" title="Leave blank to keep one shared stock pool across all branches" value="{{ branch_stock.get(branch.id, '') }}"></label>
+          <label>{{ branch.name }}<input class="branch-stock-input" name="qty_branch_{{ branch.id }}" type="number" min="0" step="1" placeholder="Shared" title="Leave blank to keep one shared stock pool across all branches" value="{{ branch_stock.get(branch.id, '') }}" {% if not branch_stock_mode %}disabled{% endif %}></label>
           {% endfor %}
         </div>
         {% else %}
         <p class="form-help">No branches yet &mdash; the product keeps one shared stock pool.</p>
         {% endif %}
-        <p class="form-help">Leave every branch box empty to keep one shared stock pool that is bookable from all branches. Enter a count to track this product per branch: a branch with no count (or 0) cannot be booked from that branch. The total above is the sum of the counts.</p>
+        <p class="form-help">Sales items only: leave every branch box empty to keep one shared stock pool that is bookable from all branches. Enter a count to track this product per branch: a branch with no count (or 0) cannot be booked from that branch. The total above is the sum of the counts.</p>
+      </div>
+      <div class="span-2 stock-quantity-field" data-stock-quantity-field {% if not quantity_mode %}hidden{% endif %}>
+        <div class="stock-branch-head" style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><strong>Stock</strong><span class="form-help">Total in stock: <b data-stock-single-total>{{ product.quantity if product else 1 }}</b> &mdash; one shared pool for all branches</span></div>
+        <div class="form-grid"><label>Quantity<input name="quantity" type="number" min="0" step="1" value="{{ product.quantity if product else 1 }}" {% if not quantity_mode %}disabled{% endif %}></label></div>
+        <p class="form-help">One shared stock count, bookable from every branch &mdash; this is what rentals use. Per-branch stock counts are only offered on sales items.</p>
       </div>
       <label>Current branch<select name="branch_id"><option value="">Unassigned (all branches)</option>{% for branch in branches %}<option value="{{ branch.id }}" {% if product and product.branch_id==branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}</select></label>
       <label class="span-2">Description<textarea name="description" rows="4" placeholder="Describe this product for staff and customers">{{ product.description if product else '' }}</textarea></label>
@@ -63,8 +77,9 @@
   </section>
   <section class="form-section"><h2>Visibility</h2><div class="form-grid"><label class="switch"><input type="checkbox" name="active" value="1" {% if not product or product.active %}checked{% endif %}> Active in back office</label><label class="switch"><input type="checkbox" name="public_visible" value="1" {% if not product or product.public_visible %}checked{% endif %}> Show in online store</label></div></section>
   {% if product and current_user_is_main and product_used_on_orders %}<p class="form-help">This product is used on an order, so it can only be archived. Permanent delete is blocked to protect that order, its quote and its invoice.</p>{% endif %}
-  <div class="form-actions"><button class="btn primary">Save product</button>{% if product %}<button form="archive-form" class="btn danger" type="submit">Archive</button>{% if current_user_is_main and not product_used_on_orders %}<button form="delete-form" class="btn danger" type="submit" onclick="return confirm('Permanently delete {{ product.name|e }}? This cannot be undone. Products that have been used on orders can only be archived.');">Delete product</button>{% endif %}{% endif %}</div>
+  <div class="form-actions"><button class="btn primary">Save product</button>{% if product %}<button form="duplicate-form" class="btn ghost" type="submit" onclick="return confirm('Duplicate {{ product.name|e }}? A new product \u201c{{ product.name|e }} (copy)\u201d will be created with the same details and stock.');">Duplicate product</button><button form="archive-form" class="btn danger" type="submit">Archive</button>{% if current_user_is_main and not product_used_on_orders %}<button form="delete-form" class="btn danger" type="submit" onclick="return confirm('Permanently delete {{ product.name|e }}? This cannot be undone. Products that have been used on orders can only be archived.');">Delete product</button>{% endif %}{% endif %}</div>
 </form>
+{% if product %}<form id="duplicate-form" method="post" action="{{ url_for('inventory.duplicate', product_id=product.id) }}"></form>{% endif %}
 {% if product %}<form id="archive-form" method="post" action="{{ url_for('inventory.archive', product_id=product.id) }}"></form>{% endif %}
 {% if product and current_user_is_main and not product_used_on_orders %}<form id="delete-form" method="post" action="{{ url_for('inventory.delete', product_id=product.id) }}"></form>{% endif %}
 <script>
@@ -72,6 +87,8 @@
   const typeInputs=[...document.querySelectorAll('input[name="product_type"]')];
   const trackingInputs=[...document.querySelectorAll('input[name="tracking_method"]')];
   const stockField=document.querySelector('[data-stock-field]');
+  const quantityField=document.querySelector('[data-stock-quantity-field]');
+  const quantityInput=quantityField?quantityField.querySelector('input[name="quantity"]'):null;
   const branchInputs=[...document.querySelectorAll('[data-stock-field] input[name^="qty_branch_"]')];
   const totalOut=document.querySelector('[data-stock-total]');
   const modeOut=document.querySelector('[data-stock-mode]');
@@ -90,10 +107,20 @@
   function syncStockField(){
     const selectedType=typeInputs.find(input=>input.checked);
     const selectedTracking=trackingInputs.find(input=>input.checked);
-    // No stock count for services or for products set to "Don't track quantities".
-    const untracked=(selectedType&&selectedType.value==='service')||(selectedTracking&&selectedTracking.value==='none');
-    if(stockField) stockField.hidden=!!untracked;
-    branchInputs.forEach(input=>{ input.disabled=!!untracked; if(untracked) input.value=''; });
+    const type=selectedType?selectedType.value:'rental';
+    const tracking=selectedTracking?selectedTracking.value:'bulk';
+    // No stock count at all for services or for products set to "Don't track quantities".
+    const untracked=(type==='service')||(tracking==='none');
+    // Per-branch counts belong to sales items only; rentals keep one shared count.
+    const branchMode=!untracked&&type==='sale';
+    const quantityMode=!untracked&&type!=='sale';
+    if(stockField) stockField.hidden=!branchMode;
+    branchInputs.forEach(input=>{
+      input.disabled=!branchMode;
+      if(untracked) input.value='';
+    });
+    if(quantityField) quantityField.hidden=!quantityMode;
+    if(quantityInput) quantityInput.disabled=!quantityMode;
     syncTotal();
   }
   typeInputs.forEach(input=>input.addEventListener('change',syncStockField));

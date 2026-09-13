@@ -485,6 +485,67 @@ def product_has_order_history(product_id):
     return product_order_item_count(product_id) > 0
 
 
+def duplicate_product(product_id):
+    """Copy a product into a brand-new row (ABI-341952945).
+
+    Additive by design: nothing on the source product changes. The copy is named
+    "<name> (copy)", keeps the type, tracking method, description, pricing,
+    deposit, hourly rate, group, branch and visibility, and inherits the source's
+    stock — one shared count (``quantity``) and any per-branch counts.
+
+    Two fields are deliberately NOT copied:
+
+    * ``sku`` is blanked. A SKU identifies a real item, so two rows sharing one
+      would be ambiguous in the fleet list and in every order/document lookup.
+    * ``source_system`` / ``source_id`` are left empty, so the copy is never
+      mistaken for an imported Booqable record (and cannot collide with the
+      partial unique index on those columns).
+
+    Per-branch counts are written through ``set_product_branch_stock`` with the
+    session's branch scope, so branch-limited staff cannot create another depot's
+    stock row. If the source is split, the copy's total is the sum of the rows
+    that were actually written, keeping ``products.quantity`` == the row total.
+    """
+    source = get_product(product_id)
+    if not source:
+        raise ValueError("Product not found")
+    db = get_db()
+    data = {
+        "name": f"{source['name']} (copy)",
+        "product_type": source["product_type"],
+        "tracking_method": source["tracking_method"],
+        "description": source["description"],
+        "sku": "",
+        "active": source["active"],
+        "public_visible": source["public_visible"],
+        "price_amount": source["price_amount"],
+        "price_unit": source["price_unit"],
+        "security_deposit": source["security_deposit"],
+        "hourly_extra_rate": source["hourly_extra_rate"],
+        # VAT is global: the copy joins the one profile rather than the source's row.
+        "tax_profile_id": global_tax_profile_id(),
+        "product_group_id": source["product_group_id"],
+        "quantity": source["quantity"],
+        "branch_id": source["branch_id"],
+        "created_at": now(),
+    }
+    cur = db.execute(
+        """INSERT INTO products
+        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
+        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
+        data,
+    )
+    db.commit()
+    new_id = cur.lastrowid
+    rows = product_branch_stock(product_id)
+    if rows:
+        set_product_branch_stock(new_id, rows, restrict_branch_id=session_branch_scope_ids())
+        copied = product_branch_stock(new_id)
+        db.execute("UPDATE products SET quantity = ? WHERE id = ?", (sum(copied.values()), new_id))
+        db.commit()
+    return new_id
+
+
 def delete_product(product_id):
     """Permanently delete a product that no order has ever used.
 

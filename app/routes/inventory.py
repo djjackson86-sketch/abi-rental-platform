@@ -10,6 +10,7 @@ from app.services.products import (
     create_product,
     create_product_group,
     delete_product,
+    duplicate_product,
     format_stock_breakdown,
     get_product,
     get_product_group,
@@ -230,6 +231,30 @@ def archive(product_id):
     archive_product(product_id)
     flash("Product archived and hidden from store", "success")
     return redirect(url_for("inventory.index"))
+
+
+@bp.route("/<int:product_id>/duplicate", methods=["POST"])
+@login_required
+def duplicate(product_id):
+    """Copy a product into a new row (ABI-341952945).
+
+    Additive: the source product is untouched and the copy is created with a
+    blank SKU, so there is no risk of an identifier or an order history being
+    cloned. The ``inventory.`` blueprint prefix already gates this to the
+    Inventory module; a crafted POST without it is refused by that gate.
+    """
+    product = get_product(product_id)
+    if not product:
+        flash("Product not found", "error")
+        return redirect(url_for("inventory.index"))
+    _ensure_product_access(product)
+    try:
+        new_id = duplicate_product(product_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("inventory.edit", product_id=product_id))
+    flash("Product duplicated", "success")
+    return redirect(url_for("inventory.edit", product_id=new_id))
 
 
 @bp.route("/<int:product_id>/delete", methods=["POST"])
