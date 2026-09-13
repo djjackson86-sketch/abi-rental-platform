@@ -342,5 +342,13 @@ def delete_branch(branch_id):
         ).fetchone()["c"]
         if int(remaining or 0) == 0:
             db.execute("UPDATE users SET can_view_all_branches = 1 WHERE id = ?", (user_id,))
+    # Cash-up history belongs to the depot being deleted: its cash-used lines
+    # first (libsql autocommits, so children are deleted explicitly), then the
+    # day rows themselves.
+    db.execute(
+        "DELETE FROM cash_used WHERE cash_up_id IN (SELECT id FROM cash_ups WHERE branch_id = ?)",
+        (branch_id,),
+    )
+    db.execute("DELETE FROM cash_ups WHERE branch_id = ?", (branch_id,))
     db.execute("DELETE FROM branches WHERE id = ?", (branch_id,))
     db.commit()

@@ -13,6 +13,11 @@
   <h2 class="section-heading">Today</h2>
   {% include "admin/_dashboard_day_metrics.html" %}
 </section>
+
+<section class="dashboard-day">
+  <h2 class="section-heading">Cash up · end of day</h2>
+  {% include "admin/_dashboard_cash.html" %}
+</section>
 {% else %}
 <header class="page-header dashboard-header">
   <div>
@@ -41,6 +46,11 @@
 <section class="dashboard-day">
   <h2 class="section-heading">Today</h2>
   {% include "admin/_dashboard_day_metrics.html" %}
+</section>
+
+<section class="dashboard-day">
+  <h2 class="section-heading">Cash up · end of day</h2>
+  {% include "admin/_dashboard_cash.html" %}
 </section>
 
 <section class="dashboard-grid">

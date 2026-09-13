@@ -280,6 +280,30 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at TEXT NOT NULL
 );
 
+-- Day-end cash reconciliation: one row per depot per business day. Purely
+-- additive — nothing reads these tables until a user cashes a day up.
+CREATE TABLE IF NOT EXISTS cash_ups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    business_day TEXT NOT NULL,
+    opening_cash REAL NOT NULL DEFAULT 0,
+    counted_cash REAL,
+    notes TEXT NOT NULL DEFAULT '',
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(branch_id, business_day)
+);
+
+-- Cash taken out of the drawer during the day, each line saying what it was for.
+CREATE TABLE IF NOT EXISTS cash_used (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cash_up_id INTEGER NOT NULL REFERENCES cash_ups(id) ON DELETE CASCADE,
+    amount REAL NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
@@ -516,6 +540,33 @@ def run_migrations(db):
         UNIQUE(user_id, branch_id)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_user_branch_access_user ON user_branch_access(user_id)")
+
+    # --- Day-end cash reconciliation (additive, 2026-09-13) -------------------
+    # One cash-up row per depot per business day (``counted_cash`` NULL means the
+    # day is not cashed up yet, so its lines can be captured before the count),
+    # plus the cash-taken-out lines belonging to it. Nothing else in the app
+    # changes: no payment, order or report row is read or written by this feature.
+    db.execute("""CREATE TABLE IF NOT EXISTS cash_ups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        business_day TEXT NOT NULL,
+        opening_cash REAL NOT NULL DEFAULT 0,
+        counted_cash REAL,
+        notes TEXT NOT NULL DEFAULT '',
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(branch_id, business_day)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_cash_ups_branch_day ON cash_ups(branch_id, business_day)")
+    db.execute("""CREATE TABLE IF NOT EXISTS cash_used (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cash_up_id INTEGER NOT NULL REFERENCES cash_ups(id) ON DELETE CASCADE,
+        amount REAL NOT NULL DEFAULT 0,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_cash_used_cash_up ON cash_used(cash_up_id)")
 
 
 def init_db():

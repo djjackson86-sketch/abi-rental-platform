@@ -134,10 +134,13 @@ def _simple_pdf(lines, logo_bytes=None):
             f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
         ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
-    stream_lines = content_lines + ['BT', '/F1 12 Tf']
+    stream_lines = content_lines + ['BT']
     for line in lines:
-        stream_lines.append(f'50 {y} Td ({_escape_pdf_text(line)}) Tj')
-        stream_lines.append(f'-50 -18 Td')
+        # Absolute positioning: ``Td`` is a RELATIVE translate, so the old
+        # ``50 {y} Td`` + ``-50 -18 Td`` pair walked the text matrix off the page
+        # after the first line and everything below it rendered invisibly (the
+        # text was in the stream, so a byte-level check could not see it).
+        stream_lines.append(_pdf_text_command(50, y, line, size=12))
         y -= 18
         if y < 60:
             break
@@ -169,6 +172,19 @@ def _simple_pdf(lines, logo_bytes=None):
     out.extend(f'trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode())
     return bytes(out)
 
+
+
+def report_pdf_bytes(lines):
+    """A plain text report PDF (the day's dashboard report), one page.
+
+    Deliberately goes through ``_simple_pdf`` -> ``_escape_pdf_text`` ->
+    ``_pdf_text``, the single choke point that transliterates characters the
+    single-byte font cannot print — the client's live product names carry U+2044
+    fraction slashes, which used to print as "?" on every document. There is no
+    logo and no page furniture here, and the caller caps the line count, because
+    ``_simple_pdf`` renders exactly one page.
+    """
+    return _simple_pdf([str(line) for line in lines])
 
 
 def _compact_address(parts):

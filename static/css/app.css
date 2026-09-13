@@ -301,3 +301,14 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 @media(min-width:1101px){.dashboard-day-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}}
 .branch-context{background:linear-gradient(90deg,rgba(37,99,235,.1),transparent);font-weight:750}
 .branch-context span:last-child{font-size:12.5px}
+
+/* --- Dashboard cash up / end of day panel (ticket ABI-341952951) -----------
+   The cash-used lines are a simple two-column row rather than a .data-table,
+   which carries a 680px min-width and would scroll sideways on a phone. */
+.cash-note{margin:0 0 14px;color:var(--muted);font-weight:650}
+.cash-used-lines{display:grid;gap:8px;margin:12px 0}
+.cash-used-line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 12px;border:1px solid var(--line-soft);border-radius:12px;background:#fff}
+.cash-used-line>span{min-width:0;overflow-wrap:anywhere;font-weight:700}
+.cash-used-line small{display:block;margin-top:3px;color:var(--muted);font-weight:650}
+.cash-used-line .btn{width:auto;min-height:34px;padding:7px 11px}
+.cash-total-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:11px;border-top:1px solid var(--line);font-weight:800}

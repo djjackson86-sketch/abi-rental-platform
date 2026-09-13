@@ -87,6 +87,9 @@ _ENDPOINT_MODULE_RULES = [
     ("admin.reports", "reports"),
     ("admin.reports_orders_csv", "reports"),
     ("admin.scan_barcode", "scan_barcode"),
+    # The dashboard's cash-up / end of day panel. Same module as the screen it
+    # lives on, so an account that may see the dashboard may cash its drawer up.
+    ("cash.", "dashboard"),
     ("customers.", "customers"),
     ("inventory.", "inventory"),
     ("branches.", "branches"),

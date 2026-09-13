@@ -10,6 +10,7 @@ from app.services.reports import customer_summary, dashboard_day_metrics, orders
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.access import order_branch_clause, product_branch_clause, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
+from app.services.cash import day_summary as cash_day_summary
 
 bp = Blueprint("admin", __name__)
 
@@ -57,6 +58,9 @@ def dashboard():
         settings=get_company_settings(),
         metrics=metrics,
         day_metrics=dashboard_day_metrics(),
+        # Cash up is per depot per day: the depot is the one this sign-in is
+        # acting as, never anything from the request.
+        cash_day=cash_day_summary(),
         schedule=dashboard_schedule(),
     )
 
