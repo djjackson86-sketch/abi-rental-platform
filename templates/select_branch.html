@@ -11,6 +11,5 @@
     <label>Branch <select name="branch_id" required autofocus><option value="" {% if not current %}selected{% endif %} disabled>Select a branch</option>{% for branch in branches %}<option value="{{ branch['id'] }}" {% if current and current|int == branch['id'] %}selected{% endif %}>{{ branch['name'] }}</option>{% endfor %}</select></label>
     <button class="btn primary" type="submit">Continue</button>
   </form>
-  <p class="muted login-recovery-link"><a href="{{ url_for('admin.dashboard') }}">Skip — show all my branches</a></p>
 </main>
 {% endblock %}

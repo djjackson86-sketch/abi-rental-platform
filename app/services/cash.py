@@ -8,6 +8,11 @@ Five client asks, one small model:
 4. **end of day notes** that show on the dashboard and in the day report;
 5. a **downloadable day report** for the dashboard figures.
 
+Ticket ABI-341952952 adds a **cash drop off (to bank)** section: money taken out
+of the drawer and banked during the day. It is amount-only on purpose ("Just the
+amount" per the client), and it reduces what is expected to be left in the drawer
+exactly like cash used does.
+
 Cash up is **per depot per business day** — the app is branch-scoped everywhere
 and each drawer cashes up its own day. The depot is the one this sign-in is
 acting as (``session_primary_branch_id``), which for a branch-limited account is
@@ -19,6 +24,7 @@ Arithmetic, documented on screen as well as here:
     opening   = the last recorded closing cash for this depot on an earlier day
                 (0 on a first-ever day, or before the previous day was cashed up)
     expected  = opening + cash payments received for the day - cash used
+                - dropped off at the bank
     variance  = counted (closing) - expected
 
 Every function returns **plain scalars and dicts**. Production rows are libsql
@@ -35,10 +41,12 @@ from app.services.timezone import local_now_iso
 
 # The report is rendered on one PDF page with a fixed line budget; the CSV
 # export always carries every line, so the PDF states what it left out rather
-# than dropping it silently. 40 lines is inside what _simple_pdf prints from its
-# starting y with 18pt leading.
+# than dropping it silently. ``_simple_pdf`` prints the first line at y=800 with
+# 18pt leading and stops once the next baseline would fall below y=60, so the
+# largest number of lines it will ever draw is 42 (last baseline y=62) — that is
+# the budget, and the day report stays inside it.
 MAX_NOTE_LINES_IN_PDF = 3
-MAX_PDF_LINES = 40
+MAX_PDF_LINES = 42
 
 
 def money(value):
@@ -238,6 +246,27 @@ def _used_lines(cash_up_id):
     return lines
 
 
+def _drop_lines(cash_up_id):
+    """The cash dropped off at the bank for this day, as plain dicts.
+
+    Amount-only by design: the client asked for "just the amount", so there is
+    deliberately no description column to fill in.
+    """
+    if not cash_up_id:
+        return []
+    lines = []
+    for row in get_db().execute(
+        'SELECT id, amount, created_at FROM cash_bank_drops WHERE cash_up_id = ? ORDER BY id',
+        (cash_up_id,),
+    ).fetchall():
+        lines.append({
+            'id': int(_value(row, 'id') or 0),
+            'amount': money(_value(row, 'amount')),
+            'created_at': str(_value(row, 'created_at') or ''),
+        })
+    return lines
+
+
 def _variance_text(variance, cashed_up):
     if not cashed_up:
         return '—'
@@ -279,9 +308,13 @@ def day_summary(day=None, branch_id=None):
     counted_value = money(counted) if cashed_up else None
     used_lines = _used_lines(cash_up_id)
     used_total = money(sum(line['amount'] for line in used_lines))
+    drop_lines = _drop_lines(cash_up_id)
+    drop_total = money(sum(line['amount'] for line in drop_lines))
     opening_from, opening = _closing_before(day, branch_id)
     received = cash_received(day, branch_id) if branch_id else 0.0
-    expected = money(opening + received - used_total)
+    # Cash banked during the day is no longer in the drawer, exactly like cash
+    # spent: it comes off the expected figure (ABI-341952952).
+    expected = money(opening + received - used_total - drop_total)
     variance = None
     if cashed_up:
         variance = money(float(counted_value or 0) - expected)
@@ -295,6 +328,9 @@ def day_summary(day=None, branch_id=None):
         'used_lines': used_lines,
         'used_count': len(used_lines),
         'used_total': used_total,
+        'drop_lines': drop_lines,
+        'drop_count': len(drop_lines),
+        'drop_total': drop_total,
         'counted': counted_value,
         'cashed_up': cashed_up,
         'expected': expected,
@@ -421,6 +457,49 @@ def delete_cash_used(entry_id, branch_id=None):
     return owner
 
 
+def add_bank_drop(day, amount, branch_id=None, user_id=None):
+    """Add one 'cash dropped off at the bank' line for the day.
+
+    Amount only — the client asked for just the amount, so there is no
+    description to capture. The line reduces the cash expected in the drawer.
+    """
+    if branch_id is None:
+        branch_id = acting_branch_id()
+    if not branch_id:
+        raise ValueError('No depot is available to record a bank drop off')
+    day = parse_business_day(day)
+    value = _parse_amount(amount, 'Enter the amount dropped off at the bank')
+    if value <= 0:
+        raise ValueError('The amount dropped off at the bank must be more than zero')
+    db = get_db()
+    cash_up_id = _ensure_day(day, branch_id, user_id)
+    db.execute(
+        'INSERT INTO cash_bank_drops (cash_up_id, amount, created_at) VALUES (?, ?, ?)',
+        (cash_up_id, value, now()),
+    )
+    db.commit()
+    return cash_up_id
+
+
+def delete_bank_drop(entry_id, branch_id=None):
+    """Delete one bank drop-off line, refusing a line from another depot."""
+    db = get_db()
+    row = db.execute(
+        """SELECT d.id AS id, c.branch_id AS branch_id FROM cash_bank_drops d
+        JOIN cash_ups c ON c.id = d.cash_up_id WHERE d.id = ?""",
+        (entry_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError('Bank drop off line not found')
+    owner = int(_value(row, 'branch_id') or 0)
+    if branch_id is not None and owner != int(branch_id):
+        # Same wording as "not found": never confirm another depot's records.
+        raise ValueError('Bank drop off line not found')
+    db.execute('DELETE FROM cash_bank_drops WHERE id = ?', (entry_id,))
+    db.commit()
+    return owner
+
+
 def day_report(day=None, branch_id=None):
     """The day's dashboard figures plus its cash reconciliation.
 
@@ -465,6 +544,7 @@ def day_report_rows(report):
         ('Cash up', opening_item, opening_value),
         ('Cash up', 'Cash received for the day', f"R{cash['cash_received']:.2f}"),
         ('Cash up', 'Cash used for the day', f"R{cash['used_total']:.2f}"),
+        ('Cash up', 'Total dropped at the bank', f"R{cash['drop_total']:.2f}"),
         ('Cash up', 'Expected cash in the drawer', f"R{cash['expected']:.2f}"),
         (
             'Cash up',
@@ -482,19 +562,55 @@ def day_report_rows(report):
         rows.append(('Cash used', line['description'] or 'No description', f"R{line['amount']:.2f}"))
     if not cash['used_lines']:
         rows.append(('Cash used', 'No cash used recorded', 'R0.00'))
+    # Amount-only lines: the timestamp is the only thing that tells two drop offs
+    # on the same day apart, and it is what the dashboard panel shows too.
+    for line in cash['drop_lines']:
+        stamped = line['created_at'][:16] if line['created_at'] else ''
+        item = f'Dropped at the bank {stamped}'.strip()
+        rows.append(('Cash drop off (to bank)', item, f"R{line['amount']:.2f}"))
+    if not cash['drop_lines']:
+        rows.append(('Cash drop off (to bank)', 'No cash dropped at the bank', 'R0.00'))
     notes = cash['notes'] or 'No end of day notes recorded'
     rows.append(('End of day notes', 'Notes', notes))
     return rows
+
+
+def _pdf_section_budget(drop_count, used_count, remaining):
+    """How many drop off / cash used lines the one-page PDF can print.
+
+    The two capped sections share the page budget fairly: the bank drop off
+    lines keep at least a slot each up to half of what is left, the described
+    cash-used lines take the rest, and slack in either goes back to the other —
+    so a day with a lot of banked cash cannot blank the cash-used section (or
+    the other way round). The returned counts INCLUDE the "... and N more" line
+    whenever a section overflows, so the two together can never exceed
+    ``remaining`` and the report cannot grow past the single page.
+    """
+    if used_count <= 0:
+        drop_shown = min(drop_count, remaining)
+    else:
+        drop_shown = min(drop_count, max(1, remaining // 2))
+    used_shown = min(used_count, max(0, remaining - drop_shown))
+    drop_shown = min(drop_count, max(0, remaining - used_shown))
+    drop_truncated = drop_shown < drop_count
+    used_truncated = used_shown < used_count
+    if drop_truncated:
+        # The "and N more" line itself needs a slot.
+        drop_shown -= 1
+    if used_truncated:
+        used_shown -= 1
+    return drop_shown, drop_truncated, used_shown, used_truncated
 
 
 def day_report_pdf_lines(report):
     """The report lines for the PDF, fitted to the single page it renders on.
 
     ``_simple_pdf`` writes exactly one page, so the budget is worked out here
-    rather than discovered by silent truncation: the cash-used lines are capped
-    first and the number left out is stated on the page, while the CSV export
-    always carries every line. The notes are free text and are printed as their
-    own lines, so a newline can never land inside a PDF string literal.
+    rather than discovered by silent truncation: the cash-used and bank drop off
+    lines are capped first and the number left out is stated on the page, while
+    the CSV export always carries every line. The notes are free text and are
+    printed as their own lines, so a newline can never land inside a PDF string
+    literal.
     """
     cash = report['cash']
     grouped = {}
@@ -506,19 +622,25 @@ def day_report_pdf_lines(report):
         f'{item}: {value}' for item, value in grouped.get('Cash used', [])
         if item != 'No cash used recorded'
     ]
+    drop_entries = [
+        f'{item}: {value}' for item, value in grouped.get('Cash drop off (to bank)', [])
+        if item != 'No cash dropped at the bank'
+    ]
     notes_value = grouped.get('End of day notes', [('Notes', '')])[0][1]
     note_lines = [line.strip() for line in str(notes_value).splitlines()] or ['']
 
-    # Blank line + section title per section, plus the header block.
-    fixed = 5 + (2 + len(dashboard_lines)) + (2 + len(cash_lines)) + 2 + 2
+    # Everything that is NOT a capped entry line, counted exactly: the six header
+    # lines (company, depot, business day, generated, blank, DASHBOARD), the
+    # dashboard figures, the cash-up figures, and a blank line + a title for each
+    # of the four sections (CASH UP, CASH USED, CASH DROP OFF, END OF DAY NOTES).
+    # Counting this exactly is what stops a full page silently dropping a line.
+    fixed = 6 + len(dashboard_lines) + len(cash_lines) + (4 * 2)
     budget = max(0, MAX_PDF_LINES - fixed)
     notes_shown = min(len(note_lines), MAX_NOTE_LINES_IN_PDF, max(1, budget - 1))
-    used_shown = min(len(used_entries), max(0, budget - notes_shown))
-    truncated_used = len(used_entries) - used_shown
-    if truncated_used:
-        # The "and N more" line itself needs a slot.
-        used_shown = max(0, used_shown - 1)
-        truncated_used = len(used_entries) - used_shown
+    # The two capped sections share what the notes left, in the order the
+    # sections print: a day with many drop offs cannot squeeze out the notes.
+    drop_shown, drop_truncated, used_shown, used_truncated = _pdf_section_budget(
+        len(drop_entries), len(used_entries), max(0, budget - notes_shown))
 
     header = [
         f"{report['company']} - daily dashboard report".strip(' -'),
@@ -530,8 +652,12 @@ def day_report_pdf_lines(report):
     ]
     lines = header + dashboard_lines + ['', 'CASH UP'] + cash_lines + ['', 'CASH USED']
     lines.extend(used_entries[:used_shown])
-    if truncated_used:
-        lines.append(f'... and {truncated_used} more cash used line(s) - see the CSV export')
+    if used_truncated:
+        lines.append(f'... and {len(used_entries) - used_shown} more cash used line(s) - see the CSV export')
+    lines.extend(['', 'CASH DROP OFF (TO BANK)'])
+    lines.extend(drop_entries[:drop_shown])
+    if drop_truncated:
+        lines.append(f'... and {len(drop_entries) - drop_shown} more bank drop off line(s) - see the CSV export')
     lines.extend(['', 'END OF DAY NOTES'])
     if len(note_lines) > notes_shown:
         lines.extend(note_lines[:max(0, notes_shown - 1)])

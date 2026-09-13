@@ -304,6 +304,16 @@ CREATE TABLE IF NOT EXISTS cash_used (
     created_at TEXT NOT NULL
 );
 
+-- Cash taken out of the drawer and dropped off at the bank (amount only —
+-- the client asked for "just the amount"). It reduces what is expected to be
+-- left in the drawer at the end of the day.
+CREATE TABLE IF NOT EXISTS cash_bank_drops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cash_up_id INTEGER NOT NULL REFERENCES cash_ups(id) ON DELETE CASCADE,
+    amount REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
@@ -567,6 +577,15 @@ def run_migrations(db):
         created_at TEXT NOT NULL
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_cash_used_cash_up ON cash_used(cash_up_id)")
+    # Cash dropped off at the bank (ABI-341952952). Additive: an existing day
+    # simply has no drop lines, so no historical figure changes.
+    db.execute("""CREATE TABLE IF NOT EXISTS cash_bank_drops (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cash_up_id INTEGER NOT NULL REFERENCES cash_ups(id) ON DELETE CASCADE,
+        amount REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_cash_bank_drops_cash_up ON cash_bank_drops(cash_up_id)")
 
 
 def init_db():

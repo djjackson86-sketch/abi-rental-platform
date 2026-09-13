@@ -301,6 +301,164 @@ def test_a_branch_limited_account_cashes_its_own_drawer_only(client, app):
     assert summary['branch_name'] == 'Branch 2'
 
 
+def _drop_rows(app):
+    with app.app_context():
+        return [dict(row) for row in get_db().execute('SELECT * FROM cash_bank_drops').fetchall()]
+
+
+def test_a_bank_drop_reduces_the_cash_expected_in_the_drawer(client, app):
+    """Ticket ABI-341952952 item 1: cash going to the bank comes off the drawer."""
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1)
+    login(client)
+    body = client.post('/cash-up/bank', data={'day': '', 'amount': '200'}, follow_redirects=True).get_data(as_text=True)
+    assert 'Bank drop off added' in body
+    summary = _summary(app)
+    # opening 0 + cash 500 - used 0 - banked 200 = 300 expected.
+    assert summary['drop_total'] == 200.0
+    assert summary['drop_count'] == 1
+    assert summary['expected'] == 300.0
+    # The panel shows the section, the line and its total.
+    assert 'Cash drop off (to bank)' in body
+    assert 'Dropped off at the bank' in body
+    assert 'Total dropped at the bank' in body
+
+    # Cash the drawer up at the reduced figure: it balances, which is the point.
+    client.post('/cash-up', data={'day': '', 'counted_cash': '300.00'}, follow_redirects=True)
+    summary = _summary(app)
+    assert summary['variance'] == 0.0
+    assert summary['variance_label'] == 'Balanced'
+
+    # Both downloads state what went to the bank, and the arithmetic on screen does too.
+    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    assert 'Total dropped at the bank,R200.00' in csv_body
+    assert 'Expected cash in the drawer,R300.00' in csv_body
+    assert 'Cash drop off (to bank),Dropped at the bank' in csv_body
+    pdf_text = client.get('/cash-up/report.pdf').data.decode('latin-1')
+    assert 'CASH DROP OFF \\(TO BANK\\)' in pdf_text
+    assert 'Expected cash in the drawer: R300.00' in pdf_text
+    assert 'Total dropped at the bank: R200.00' in pdf_text
+
+
+def test_a_bank_drop_needs_a_positive_amount(client, app):
+    login(client)
+    body = client.post('/cash-up/bank', data={'day': '', 'amount': 'x'},
+                       follow_redirects=True).get_data(as_text=True)
+    assert 'Enter the amount dropped off at the bank' in body
+    for value in ('0', '-20'):
+        body = client.post('/cash-up/bank', data={'day': '', 'amount': value},
+                           follow_redirects=True).get_data(as_text=True)
+        assert 'The amount dropped off at the bank must be more than zero' in body
+    assert _drop_rows(app) == []
+    assert _cash_rows(app) == [], 'a refused amount must not even open the day'
+
+
+def test_bank_drop_lines_can_be_added_and_removed(client, app):
+    login(client)
+    client.post('/cash-up/bank', data={'day': '', 'amount': '300'}, follow_redirects=True)
+    body = client.post('/cash-up/bank', data={'day': '', 'amount': '150.50'},
+                       follow_redirects=True).get_data(as_text=True)
+    assert '2 lines' in body
+    assert 'R450.50' in body, 'the two lines total R450.50'
+    assert _summary(app)['expected'] == -450.5, 'nothing received, so the drawer is short by what left it'
+
+    entry_id = _drop_rows(app)[0]['id']
+    client.post(f'/cash-up/bank/{entry_id}/delete', data={'day': ''}, follow_redirects=True)
+    remaining = _drop_rows(app)
+    assert [row['amount'] for row in remaining] == [150.5]
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert 'R150.50' in body
+    assert '1 line' in body
+    assert _summary(app)['drop_total'] == 150.5
+
+
+def test_another_depots_bank_drop_line_cannot_be_deleted(client, app):
+    login(client)  # owner (all depots) banks cash against depot 1
+    client.post('/cash-up/bank', data={'day': '', 'amount': '20', 'branch': '1'}, follow_redirects=True)
+    entry_id = _drop_rows(app)[0]['id']
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    body = client.post(f'/cash-up/bank/{entry_id}/delete', data={'day': ''},
+                       follow_redirects=True).get_data(as_text=True)
+    assert 'Bank drop off line not found' in body
+    assert len(_drop_rows(app)) == 1, "another depot's line must survive a crafted delete"
+
+
+def test_a_depot_can_only_bank_its_own_drawer(client, app):
+    login(client)
+    client.post('/cash-up/bank', data={'day': '', 'amount': '50', 'branch': '2'}, follow_redirects=True)
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    # A forged depot 1 post lands on their own drawer instead (never depot 1).
+    client.post('/cash-up/bank', data={'day': '', 'amount': '10', 'branch': '1'}, follow_redirects=True)
+    with app.app_context():
+        rows = [dict(row) for row in get_db().execute(
+            """SELECT d.amount AS amount, c.branch_id AS branch_id FROM cash_bank_drops d
+            JOIN cash_ups c ON c.id = d.cash_up_id ORDER BY d.id""").fetchall()]
+    assert [(row['branch_id'], row['amount']) for row in rows] == [(2, 50.0), (2, 10.0)]
+
+
+def test_the_pdf_stays_on_one_page_with_bank_drop_offs_too(client, app):
+    """The new section must not push the report off its single page."""
+    login(client)
+    for index in range(12):
+        client.post('/cash-up/bank', data={'day': '', 'amount': '10'}, follow_redirects=True)
+    text = client.get('/cash-up/report.pdf').data.decode('latin-1')
+    assert 'CASH DROP OFF \\(TO BANK\\)' in text
+    assert 'Dropped at the bank' in text
+    assert 'see the CSV export' in text, 'the PDF states what it left out'
+    with app.app_context():
+        lines = cash.day_report_pdf_lines(cash.day_report(day=TODAY, branch_id=1))
+    assert len(lines) <= cash.MAX_PDF_LINES
+    assert cash.MAX_PDF_LINES <= 42, "42 is the most _simple_pdf will ever draw on one page"
+    # Every drawn baseline stays inside the printable band (the last is y=62).
+    baselines = [float(match.group(1)) for match in
+                 re.finditer(r'/F1 12 Tf 1 0 0 1 50\.00 ([\d.]+) Tm', text)]
+    assert baselines, 'the report must draw its lines'
+    assert len(baselines) <= cash.MAX_PDF_LINES
+    assert min(baselines) >= 60, 'no line may be drawn below the printable band'
+    # The CSV export is uncapped, so all twelve drop offs survive.
+    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    assert csv_body.count('Cash drop off (to bank),Dropped at the bank') == 12
+
+
+def test_a_busy_day_keeps_both_capped_sections_on_the_page(client, app):
+    """A day full of banked cash must not blank the described cash-used lines."""
+    login(client)
+    for index in range(12):
+        client.post('/cash-up/used', data={'day': '', 'amount': '10', 'description': f'Line {index + 1}'},
+                    follow_redirects=True)
+        client.post('/cash-up/bank', data={'day': '', 'amount': '10'}, follow_redirects=True)
+    client.post('/cash-up/notes', data={'day': '', 'notes': 'One.\nTwo.\nThree.'},
+                follow_redirects=True)
+    text = client.get('/cash-up/report.pdf').data.decode('latin-1')
+    assert 'Line 3: R10.00' in text and 'Line 4: R10.00' not in text
+    assert text.count('Dropped at the bank') == 3, text.count('Dropped at the bank')
+    assert 'more cash used line' in text and 'more bank drop off line' in text
+    assert 'One.' in text and 'Three.' in text, 'the notes keep their slot'
+    with app.app_context():
+        lines = cash.day_report_pdf_lines(cash.day_report(day=TODAY, branch_id=1))
+    assert len(lines) <= cash.MAX_PDF_LINES
+    # The CSV export still carries every one of the 24 lines.
+    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    assert csv_body.count('Cash drop off (to bank),Dropped at the bank') == 12
+    assert csv_body.count('Cash used,Line ') == 12
+
+
+def test_deleting_a_depot_takes_its_bank_drop_lines_with_it(client, app):
+    login(client)
+    client.post('/cash-up/bank', data={'day': '', 'amount': '40', 'branch': '1'}, follow_redirects=True)
+    client.post('/cash-up/bank', data={'day': '', 'amount': '60', 'branch': '2'}, follow_redirects=True)
+    assert len(_drop_rows(app)) == 2
+    client.post('/branches/2/delete', data={}, follow_redirects=True)
+    with app.app_context():
+        remaining = [dict(row) for row in get_db().execute(
+            """SELECT d.amount AS amount, c.branch_id AS branch_id FROM cash_bank_drops d
+            JOIN cash_ups c ON c.id = d.cash_up_id""").fetchall()]
+    assert [(row['branch_id'], row['amount']) for row in remaining] == [(1, 40.0)]
+
+
 def test_the_csv_report_carries_the_dashboard_and_the_cash_figures(client, app):
     _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1)
     login(client)
@@ -409,6 +567,10 @@ def test_the_cash_panel_renders_with_libsql_shaped_rows(client, app, monkeypatch
                     Row(('id', 'amount', 'description', 'created_at'),
                         (1, 150.5, 'Diesel', '2026-09-13T09:00:00')),
                 ])
+            if 'from cash_bank_drops' in statement:
+                return Cursor([
+                    Row(('id', 'amount', 'created_at'), (1, 200.0, '2026-09-13T14:30:00')),
+                ])
             if 'sum(pay.amount)' in statement:
                 return Cursor([Row(('s',), (500.0,))])
             return Cursor([Row(('c',), (0,))])
@@ -420,10 +582,13 @@ def test_the_cash_panel_renders_with_libsql_shaped_rows(client, app, monkeypatch
         flask_session['user_role'] = 'owner'
         summary = cash.day_summary(day=TODAY, branch_id=1)
     assert summary['branch_name'] == 'Midrand'
-    assert summary['expected'] == 1349.5  # 1000 opening + 500 cash - 150.50 used
-    assert summary['variance'] == -1000.0  # counted 349.50 - expected 1349.50
+    assert summary['expected'] == 1149.5  # 1000 opening + 500 cash - 150.50 used - 200 banked
+    assert summary['variance'] == -800.0  # counted 349.50 - expected 1149.50
     assert summary['used_lines'] == [{'id': 1, 'amount': 150.5, 'description': 'Diesel',
                                       'created_at': '2026-09-13T09:00:00'}]
+    assert summary['drop_lines'] == [{'id': 1, 'amount': 200.0,
+                                      'created_at': '2026-09-13T14:30:00'}]
+    assert summary['drop_total'] == 200.0 and summary['drop_count'] == 1
     for value in (summary['opening'], summary['expected'], summary['counted'], summary['variance']):
         assert isinstance(value, float), value
     assert isinstance(summary['used_count'], int)

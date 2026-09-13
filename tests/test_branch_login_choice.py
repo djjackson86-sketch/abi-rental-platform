@@ -142,6 +142,22 @@ def test_the_screen_lists_only_the_depots_the_account_manages(client, app):
     assert b'Branch 2' not in page
 
 
+def test_a_multi_depot_account_is_not_offered_a_way_to_skip_the_choice(client, app):
+    """Ticket ABI-341952952 item 2: no "Skip - show all my branches" option."""
+    sign_in(client)
+    add_staff(client, app, 'Two Depot', [1, 2])
+    sign_in(client, 'Two Depot', 'staff123')
+    page = client.get('/select-branch').get_data(as_text=True)
+    assert 'Skip' not in page
+    assert 'show all my branches' not in page
+    assert 'name="branch_id"' in page, 'the depot chooser is still the way forward'
+    assert 'Continue' in page
+    # The choice still works end to end: only the option was removed.
+    res = client.post('/select-branch', data={'branch_id': '2'}, follow_redirects=False)
+    assert res.headers['Location'].endswith('/dashboard')
+    assert b'Branch: Branch 2' in client.get('/dashboard').data
+
+
 def test_choosing_a_depot_scopes_every_screen_to_it(client, app):
     sign_in(client)
     make_product(client, app, 'DEPOT-A', 1)

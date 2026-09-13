@@ -11,7 +11,7 @@
   <div class="metric-card"><small>Variance</small><b>{{ cash_day.variance_display }}</b><span>{{ cash_day.variance_label }}</span></div>
 </section>
 
-<p class="cash-note">Cash up is per depot: opening cash is {{ cash_day.branch_name }}'s previous recorded closing cash. Expected cash = opening + cash received − cash used; variance = counted − expected.</p>
+<p class="cash-note">Cash up is per depot: opening cash is {{ cash_day.branch_name }}'s previous recorded closing cash. Expected cash = opening + cash received − cash used − dropped off at the bank; variance = counted − expected.</p>
 
 <div class="two-col">
   <section class="panel">
@@ -80,6 +80,36 @@
         <label>What the cash was used for<input name="description" maxlength="200" placeholder="e.g. diesel, tolls, cleaning" required></label>
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Add cash used</button></div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title"><h2>Cash drop off (to bank)</h2><span class="pill">{{ cash_day.drop_count }} line{% if cash_day.drop_count != 1 %}s{% endif %}</span></div>
+    <p class="cash-note">Cash taken out of the drawer and banked during the day. It comes off the cash expected in the drawer.</p>
+    {% if cash_day.drop_lines %}
+    <div class="cash-used-lines">
+      {% for line in cash_day.drop_lines %}
+      <div class="cash-used-line">
+        <span>Dropped off at the bank<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ line.created_at[:16] }}{% endif %}</small></span>
+        <form method="post" action="{{ url_for('cash.delete_bank_drop', entry_id=line.id) }}">
+          <input type="hidden" name="day" value="{{ cash_day.day }}">
+          <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+          <button class="btn ghost" type="submit">Delete</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="cash-total-row"><span>Total dropped at the bank</span><b>R{{ '%.2f'|format(cash_day.drop_total) }}</b></div>
+    {% else %}
+    <div class="empty-results"><strong>No results</strong><span>No cash dropped off at the bank for {{ cash_day.day }}.</span></div>
+    {% endif %}
+    <form method="post" action="{{ url_for('cash.add_bank_drop') }}" class="payment-form">
+      <input type="hidden" name="day" value="{{ cash_day.day }}">
+      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <div class="form-grid compact">
+        <label>Amount<input type="number" step="0.01" min="0.01" name="amount" placeholder="0.00" required></label>
+      </div>
+      <div class="form-actions"><button class="btn primary" type="submit">Add bank drop off</button></div>
     </form>
   </section>
 </div>

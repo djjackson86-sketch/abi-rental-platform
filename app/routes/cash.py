@@ -132,6 +132,45 @@ def delete_used(entry_id):
     return _done(f"Cash used line removed for {day}", branch_id)
 
 
+@bp.post("/bank")
+@login_required
+def add_bank_drop():
+    """Record cash taken out of the drawer and dropped off at the bank.
+
+    Amount only — the client asked for just the amount, and the line reduces the
+    cash expected in the drawer exactly like cash used does.
+    """
+    day = _day_from_request()
+    branch_id = _target_branch()
+    try:
+        cash.guard_writable_day(day)
+        cash.add_bank_drop(
+            day,
+            request.form.get("amount", ""),
+            branch_id=branch_id,
+            user_id=_user_id(),
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(_dashboard_url(branch_id))
+    return _done(f"Bank drop off added for {day}", branch_id)
+
+
+@bp.post("/bank/<int:entry_id>/delete")
+@login_required
+def delete_bank_drop(entry_id):
+    day = _day_from_request()
+    branch_id = _target_branch()
+    try:
+        cash.guard_writable_day(day)
+        # Only ever the acting depot's own lines: the check is inside the service.
+        cash.delete_bank_drop(entry_id, branch_id=branch_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(_dashboard_url(branch_id))
+    return _done(f"Bank drop off line removed for {day}", branch_id)
+
+
 def _report():
     return cash.day_report(
         day=_day_from_request(),
