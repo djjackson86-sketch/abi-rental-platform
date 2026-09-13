@@ -3,10 +3,20 @@
 Two account kinds exist:
 - Main profile: role == 'owner' (seeded from ADMIN_EMAIL). Has every module and
   is the only account that can manage users/access from Settings.
-- Additional accounts: role == 'staff'. They share ONE global permission set
-  stored in company_settings.staff_permissions_json and are capped at
-  ADDITIONAL_USER_LIMIT. Their dashboard is always the reduced "for the day"
-  view and the Orders page never shows the top totals bar.
+- Additional accounts: role == 'staff'. They are capped at ADDITIONAL_USER_LIMIT.
+  Their dashboard is always the reduced "for the day" view and the Orders page
+  never shows the top totals bar.
+
+Modules: company_settings.staff_permissions_json holds the **shared default** set
+that every additional account inherits. An account may instead carry its own set
+in users.modules_json (NULL = inherit the shared default), which is what makes a
+per-account permission edit possible after the account was created.
+
+Branch access: users.branch_id + users.can_view_all_branches still describe the
+*primary* branch and the "every branch" flag. user_branch_access holds the extra
+branches an account may also see, so an account can manage two of three depots
+without seeing all of them. No rows + can_view_all_branches + a primary branch is
+exactly the old single-branch behaviour.
 
 Module keys are coarse top-level areas. Order-scoped document operations stay
 usable for accounts with the orders module even though the standalone Documents
@@ -128,6 +138,84 @@ def staff_modules_from_settings(settings_row):
     return parse_staff_modules(value)
 
 
+def user_module_keys_from_row(row):
+    """An account's OWN module list from a users row, or None when it inherits.
+
+    Unlike ``parse_staff_modules`` this distinguishes "never set" (NULL column,
+    inherit the shared default) from "saved as empty" (the account may open no
+    module at all) — the difference matters once an admin can edit one account's
+    modules after it was created.
+    """
+    if row is None:
+        return None
+    try:
+        value = row["modules_json"]
+    except (KeyError, IndexError, TypeError):
+        try:
+            value = row.asdict().get("modules_json")
+        except (AttributeError, TypeError):
+            return None
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return parse_staff_modules(value)
+
+
+def user_module_keys(user_id):
+    """An account's own module list, or None when it uses the shared default."""
+    row = get_db().execute("SELECT modules_json FROM users WHERE id = ?", (user_id,)).fetchone()
+    return user_module_keys_from_row(row)
+
+
+def user_module_assignments(users, default_keys):
+    """{user_id: {'own': bool, 'keys': [...]}} for the per-account module ticks.
+
+    ``own`` is False for an account still inheriting the shared default, so the
+    page can show its ticks without pretending they are a saved per-user choice.
+    """
+    assignments = {}
+    for user in users or []:
+        try:
+            user_id = int(user["id"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        own = user_module_keys_from_row(user)
+        assignments[user_id] = {
+            "own": own is not None,
+            "keys": own if own is not None else list(default_keys or []),
+        }
+    return assignments
+
+
+def save_user_modules(user_id, module_keys):
+    """Give one additional account its own module set. Returns (ok, keys|error).
+
+    Unknown keys are dropped. The main profile is deliberately refused: it always
+    has every module and cannot be restricted.
+    """
+    db = get_db()
+    row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row is None or row["role"] == "owner":
+        return False, "The main profile always has every function"
+    valid = []
+    for key in (module_keys or []):
+        if key in MODULE_KEYS and key not in valid:
+            valid.append(key)
+    db.execute("UPDATE users SET modules_json = ? WHERE id = ?", (json.dumps(valid), user_id))
+    db.commit()
+    return True, valid
+
+
+def clear_user_modules(user_id):
+    """Return an account to the shared default module set (the inverse of a save)."""
+    db = get_db()
+    row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row is None or row["role"] == "owner":
+        return False
+    db.execute("UPDATE users SET modules_json = NULL WHERE id = ?", (user_id,))
+    db.commit()
+    return True
+
+
 def user_can_module(session, module):
     """True when the current session may use module (main always can)."""
     if not session.get("user_id"):
@@ -160,11 +248,13 @@ def list_users():
     """All accounts with the main profile first, then additional accounts.
 
     Email is intentionally not selected: accounts sign in by name and the email
-    column is no longer surfaced anywhere in the UI.
+    column is no longer surfaced anywhere in the UI. ``modules_json`` rides along
+    so the Users page can render each account's own module ticks.
     """
     db = get_db()
     rows = db.execute(
         """SELECT u.id, u.name, u.initials, u.role, u.branch_id, u.can_view_all_branches, u.active, u.created_at,
+               u.modules_json,
                b.name AS branch_name
         FROM users u
         LEFT JOIN branches b ON b.id = u.branch_id
@@ -224,10 +314,12 @@ def _clean_branch_access(branch_id):
     return (branch_id or None, 0 if branch_id else 1)
 
 
-def create_additional_user(name, password, branch_id=None):
+def create_additional_user(name, password, branch_id=None, branch_ids=None):
     """Create an additional (staff) account. Returns (user_id, error).
 
     Accounts are identified by name only — no email is collected from the user.
+    ``branch_ids`` (optional) is the multi-branch selection; when it is given the
+    first entry is also the account's primary branch.
     """
     db = get_db()
     name = _normalise_name(name)
@@ -240,13 +332,32 @@ def create_additional_user(name, password, branch_id=None):
     if name_taken(name):
         return None, "An account with that name already exists"
     initials = "".join(part[0] for part in name.split() if part)[:2].upper() or "US"
+    selected = []
+    for value in (branch_ids or []):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            continue
+        if value and value not in selected:
+            selected.append(value)
+    if selected:
+        branch_id = selected[0]
     branch_id, can_view_all = _clean_branch_access(branch_id)
     cur = db.execute(
         "INSERT INTO users (email, password_hash, name, initials, role, branch_id, can_view_all_branches, active, created_at) VALUES (?, ?, ?, ?, 'staff', ?, ?, 1, ?)",
         (_placeholder_email(name), generate_password_hash(password), name, initials, branch_id, can_view_all, now()),
     )
+    user_id = cur.lastrowid
+    # Keep the multi-branch rows in step with the primary branch so a freshly
+    # created single-branch account looks the same as one saved on the Users page.
+    if selected:
+        for selected_id in selected:
+            db.execute(
+                "INSERT INTO user_branch_access (user_id, branch_id) VALUES (?, ?)",
+                (user_id, selected_id),
+            )
     db.commit()
-    return cur.lastrowid, None
+    return user_id, None
 
 
 def set_user_active(user_id, active):
@@ -301,6 +412,9 @@ def delete_additional_user(user_id):
     row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
     if row is None or row["role"] == "owner":
         return False
+    # libsql autocommits, so the branch rows are deleted explicitly rather than
+    # relying on the FK cascade.
+    db.execute("DELETE FROM user_branch_access WHERE user_id = ?", (user_id,))
     db.execute("DELETE FROM users WHERE id = ?", (user_id,))
     db.commit()
     return True
@@ -315,19 +429,133 @@ def save_staff_modules(module_keys):
     return valid
 
 
-def update_user_branch(user_id, branch_id):
-    """Assign an additional account to one branch, or all branches when blank."""
+def user_branch_ids(user_id):
+    """Branch ids an additional account is limited to (empty = every branch).
+
+    Reads the extra-depot rows. An account with no rows keeps the old
+    single-branch outcome through ``users.branch_id`` (see
+    ``session_branch_scope_ids``).
+    """
+    rows = get_db().execute(
+        "SELECT branch_id FROM user_branch_access WHERE user_id = ? ORDER BY branch_id",
+        (user_id,),
+    ).fetchall()
+    ids = []
+    for row in rows:
+        try:
+            value = int(row["branch_id"])
+        except (TypeError, ValueError):
+            continue
+        if value and value not in ids:
+            ids.append(value)
+    return ids
+
+
+def update_user_branches(user_id, branch_ids):
+    """Set an additional account's branch access. Returns False for the owner.
+
+    An empty selection means "all branches" (the historic default). With one or
+    more branches the account's existing primary branch stays the default for
+    orders they create, when it is still among the selected depots; otherwise the
+    first selected branch becomes the default. Selection order never leaks into
+    the stored primary, so re-saving the same ticks cannot silently move it.
+    """
     db = get_db()
-    row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    row = db.execute("SELECT role, branch_id FROM users WHERE id = ?", (user_id,)).fetchone()
     if row is None or row["role"] == "owner":
         return False
-    branch_id, can_view_all = _clean_branch_access(branch_id)
-    db.execute(
-        "UPDATE users SET branch_id = ?, can_view_all_branches = ? WHERE id = ?",
-        (branch_id, can_view_all, user_id),
-    )
+    known = set()
+    for branch in db.execute("SELECT id FROM branches").fetchall():
+        try:
+            known.add(int(branch["id"]))
+        except (TypeError, ValueError):
+            continue
+    wanted = []
+    for value in (branch_ids or []):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            continue
+        if value in known and value not in wanted:
+            wanted.append(value)
+    db.execute("DELETE FROM user_branch_access WHERE user_id = ?", (user_id,))
+    if not wanted:
+        db.execute(
+            "UPDATE users SET branch_id = NULL, can_view_all_branches = 1 WHERE id = ?",
+            (user_id,),
+        )
+    else:
+        try:
+            primary = int(row["branch_id"] or 0)
+        except (TypeError, ValueError):
+            primary = 0
+        if primary not in wanted:
+            primary = wanted[0]
+        for branch_id in wanted:
+            db.execute(
+                "INSERT INTO user_branch_access (user_id, branch_id) VALUES (?, ?)",
+                (user_id, branch_id),
+            )
+        db.execute(
+            "UPDATE users SET branch_id = ?, can_view_all_branches = 0 WHERE id = ?",
+            (primary, user_id),
+        )
     db.commit()
     return True
+
+
+def update_user_branch(user_id, branch_id):
+    """Assign an additional account to one branch, or all branches when blank.
+
+    Kept for the single-branch callers; it is now the one-branch case of
+    ``update_user_branches`` so both paths write the same rows.
+    """
+    branch_id, can_view_all = _clean_branch_access(branch_id)
+    return update_user_branches(user_id, [] if can_view_all else [branch_id])
+
+
+def user_branch_map(users):
+    """{user_id: {'ids': [...], 'all': bool, 'primary': id}} for the Users page.
+
+    One query for every account. An account with no extra-depot rows but a
+    primary branch is reported as that single branch, so its tick is shown
+    exactly where the historic single-branch select would have been.
+    """
+    mapping = {}
+    user_ids = []
+    for user in users or []:
+        try:
+            user_id = int(user["id"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        try:
+            primary = int(user["branch_id"] or 0) or None
+        except (TypeError, ValueError):
+            primary = None
+        mapping[user_id] = {
+            "ids": [],
+            "all": bool(user["can_view_all_branches"]),
+            "primary": primary,
+        }
+        user_ids.append(user_id)
+    if user_ids:
+        marks = ",".join("?" for _ in user_ids)
+        for row in get_db().execute(
+            f"SELECT user_id, branch_id FROM user_branch_access WHERE user_id IN ({marks}) ORDER BY branch_id",
+            user_ids,
+        ).fetchall():
+            try:
+                owner_id = int(row["user_id"])
+                branch_id = int(row["branch_id"])
+            except (TypeError, ValueError):
+                continue
+            info = mapping.get(owner_id)
+            if info is not None and branch_id not in info["ids"]:
+                info["ids"].append(branch_id)
+    for info in mapping.values():
+        if not info["ids"] and not info["all"] and info["primary"]:
+            info["ids"] = [info["primary"]]
+    return mapping
 
 
 def current_session_user_id():
@@ -340,11 +568,9 @@ def current_session_user_id():
         return None
 
 
-def session_branch_scope():
-    """Return branch_id for branch-limited staff, otherwise None (all branches)."""
+def session_primary_branch_id():
+    """The session's own (primary) branch — the default for orders they create."""
     if not has_request_context():
-        return None
-    if session.get("user_role") == "owner" or session.get("can_view_all_branches"):
         return None
     try:
         return int(session.get("branch_id") or 0) or None
@@ -352,12 +578,81 @@ def session_branch_scope():
         return None
 
 
+def session_branch_scope_ids():
+    """Branch ids this session may see, or None when it may see every branch.
+
+    None means unrestricted (the main profile, "all branches" accounts and every
+    non-request/public context). A list means restricted to exactly those depots;
+    an empty list means restricted to nothing. The session value is written at
+    sign-in, so a crafted ``?branch=`` or a posted branch id can never widen it.
+    """
+    if not has_request_context():
+        return None
+    if session.get("user_role") == "owner" or session.get("can_view_all_branches"):
+        return None
+    raw = session.get("branch_ids")
+    if isinstance(raw, (list, tuple)):
+        cleaned = []
+        for value in raw:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if value and value not in cleaned:
+                cleaned.append(value)
+        if cleaned:
+            return cleaned
+    # No extra-depot rows: the historic single branch (blank branch = all
+    # branches) still applies, so an existing account is unaffected.
+    primary = session_primary_branch_id()
+    return [primary] if primary else None
+
+
+def session_branch_scope():
+    """Return branch_id for branch-limited staff, otherwise None (all branches).
+
+    Single-branch callers keep working: for an account limited to several depots
+    this returns its primary branch, while the SQL helpers below use the full
+    list through ``session_branch_scope_ids()``.
+    """
+    ids = session_branch_scope_ids()
+    if not ids:
+        return None
+    primary = session_primary_branch_id()
+    if primary and primary in ids:
+        return primary
+    return ids[0]
+
+
+def _branch_id_list(branch_id=None):
+    """Branch ids a query is restricted to, or None when nothing restricts it.
+
+    An empty list is a real restriction (to nothing) and must render as an empty
+    result set, never as "no restriction". A requested ``branch_id`` can only ever
+    NARROW a session scope (and is ignored when it falls outside it), so a crafted
+    ``?branch=`` can never widen what a limited account sees.
+    """
+    scope = session_branch_scope_ids()
+    if scope is None:
+        return [branch_id] if branch_id else None
+    scope = list(scope)
+    if branch_id:
+        try:
+            requested = int(branch_id)
+        except (TypeError, ValueError):
+            return scope
+        return [requested] if requested in scope else scope
+    return scope
+
+
 def resolve_branch_filter(requested=""):
     """Resolve a branch-aware screen's ``?branch=`` filter.
 
-    Returns ``(selected, branch_id, label, branches, scope)``. Branch-limited
-    staff are already pinned to their branch by the session, so their filter is
-    always empty: a crafted ``?branch=`` must never widen what they see. For an
+    Returns ``(selected, branch_id, label, branches, scope)``. A single-depot
+    account is pinned to its branch by the session, so its filter is always
+    empty and the template renders a *disabled, fixed* label instead of a
+    chooser. An account with several depots gets a chooser narrowed to those
+    depots — still a filter that can only narrow, never a way to widen. For an
     all-branch viewer an unknown id is ignored rather than trusted.
 
     Shared by /calendar, /reports and /orders — reuse it rather than re-deriving
@@ -365,33 +660,54 @@ def resolve_branch_filter(requested=""):
     """
     from app.services.branches import branch_options
 
-    scope = session_branch_scope()
+    scope_ids = session_branch_scope_ids()
     branches = branch_options()
-    if scope:
-        branches = [branch for branch in branches if branch["id"] == scope]
-        selected = ""
-    else:
+    if scope_ids is not None:
+        branches = [branch for branch in branches if branch["id"] in scope_ids]
+        if len(branches) == 1:
+            return "", None, "", branches, branches[0]["id"]
+        if not branches:
+            # Restricted to nothing: no chooser, and the SQL clause returns no rows.
+            return "", None, "", [], 1
         allowed = {str(branch["id"]) for branch in branches}
         requested = (requested or "").strip()
         selected = requested if requested in allowed else ""
+        branch_id = int(selected) if selected else None
+        label = next((branch["name"] for branch in branches if str(branch["id"]) == selected), "")
+        return selected, branch_id, label, branches, None
+    allowed = {str(branch["id"]) for branch in branches}
+    requested = (requested or "").strip()
+    selected = requested if requested in allowed else ""
     branch_id = int(selected) if selected else None
     label = next((branch["name"] for branch in branches if str(branch["id"]) == selected), "")
-    return selected, branch_id, label, branches, scope
+    return selected, branch_id, label, branches, scope_ids
 
 
 def order_branch_clause(alias="o", branch_id=None):
     """SQL restriction for an orders query (collection or return branch).
 
-    Branch-limited staff are pinned to their own branch by the session. A caller
-    may also pass an explicit ``branch_id`` for a UI branch filter; the session
-    scope always wins, so a filter can only ever narrow a view, never widen it.
+    Branch-limited staff are pinned to their depots by the session; an account
+    limited to several branches matches any of them. A caller may also pass an
+    explicit ``branch_id`` for a UI branch filter; the session scope always wins,
+    so a filter can only ever narrow a view, never widen it.
+
+    The single-branch clause is byte-identical to the pre-multi-branch version so
+    that path stays provably unchanged.
     """
-    scope = session_branch_scope()
-    target = scope or branch_id
-    if not target:
+    targets = _branch_id_list(branch_id)
+    if targets is None:
         return "", []
     prefix = f"{alias}." if alias else ""
-    return f" AND ({prefix}collect_branch_id = ? OR {prefix}return_branch_id = ?)", [target, target]
+    if not targets:
+        return " AND 0=1", []
+    if len(targets) == 1:
+        target = targets[0]
+        return f" AND ({prefix}collect_branch_id = ? OR {prefix}return_branch_id = ?)", [target, target]
+    marks = ",".join("?" for _ in targets)
+    return (
+        f" AND ({prefix}collect_branch_id IN ({marks}) OR {prefix}return_branch_id IN ({marks}))",
+        [*targets, *targets],
+    )
 
 
 def product_branch_clause(alias="p", include_unassigned=True, branch_id=None):
@@ -400,21 +716,37 @@ def product_branch_clause(alias="p", include_unassigned=True, branch_id=None):
     Unassigned stock only rides along on the staff branch-scope view: choosing a
     specific branch in a filter means that branch's stock, not "that branch plus
     anything not allocated yet".
+
+    The single-branch clause is byte-identical to the pre-multi-branch version.
     """
-    scope = session_branch_scope()
-    target = scope or branch_id
-    if not target:
+    targets = _branch_id_list(branch_id)
+    if targets is None:
         return "", []
     prefix = f"{alias}." if alias else ""
+    if not targets:
+        return " AND 0=1", []
+    if len(targets) == 1:
+        target = targets[0]
+        if include_unassigned and not branch_id:
+            return f" AND ({prefix}branch_id = ? OR {prefix}branch_id IS NULL)", [target]
+        return f" AND {prefix}branch_id = ?", [target]
+    marks = ",".join("?" for _ in targets)
     if include_unassigned and not branch_id:
-        return f" AND ({prefix}branch_id = ? OR {prefix}branch_id IS NULL)", [target]
-    return f" AND {prefix}branch_id = ?", [target]
+        return f" AND ({prefix}branch_id IN ({marks}) OR {prefix}branch_id IS NULL)", list(targets)
+    return f" AND {prefix}branch_id IN ({marks})", list(targets)
 
 
 def user_can_access_order(order):
-    branch_id = session_branch_scope()
-    if not branch_id:
+    targets = _branch_id_list()
+    if targets is None:
         return True
     if not order:
         return False
-    return order["collect_branch_id"] == branch_id or order["return_branch_id"] == branch_id
+    if not targets:
+        return False
+    try:
+        collect = order["collect_branch_id"]
+        returning = order["return_branch_id"]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return collect in targets or returning in targets

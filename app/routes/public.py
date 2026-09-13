@@ -2,7 +2,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.db import get_db
 from app.services.customers import create_customer
-from app.services.orders import create_order, get_order, order_items
+from app.services.orders import _build_order_payload, create_order, get_order, order_items
 from app.services.settings import get_company_settings
 
 bp = Blueprint("public", __name__)
@@ -51,7 +51,20 @@ def book_product(product_id):
     if not customer_name or not customer_email:
         flash("Name and email are required", "error")
         return render_template("public/product.html", settings=get_company_settings(), product=product), 400
+    order_form = {
+        "product_id": str(product_id),
+        "quantity": request.form.get("quantity", "1"),
+        "start_date": request.form.get("start_date", ""),
+        "start_time": request.form.get("start_time", ""),
+        "end_date": request.form.get("end_date", ""),
+        "end_time": request.form.get("end_time", ""),
+        "notes": f"Public booking request. {request.form.get('notes', '').strip()}".strip(),
+    }
     try:
+        # Validate the booking before the customer row is created, so a refused
+        # request (e.g. a pickup outside the branch's trading hours) leaves no
+        # stray customer behind.
+        _build_order_payload(order_form)
         customer_id = create_customer({
             "customer_type": "individual",
             "name": customer_name,
@@ -59,16 +72,8 @@ def book_product(product_id):
             "phone": request.form.get("customer_phone", ""),
             "marketing_opt_in": request.form.get("marketing_opt_in", ""),
         })
-        order_id = create_order({
-            "customer_id": str(customer_id),
-            "product_id": str(product_id),
-            "quantity": request.form.get("quantity", "1"),
-            "start_date": request.form.get("start_date", ""),
-            "start_time": request.form.get("start_time", ""),
-            "end_date": request.form.get("end_date", ""),
-            "end_time": request.form.get("end_time", ""),
-            "notes": f"Public booking request. {request.form.get('notes', '').strip()}".strip(),
-        })
+        order_form["customer_id"] = str(customer_id)
+        order_id = create_order(order_form)
     except ValueError as exc:
         flash(str(exc), "error")
         return render_template("public/product.html", settings=get_company_settings(), product=product), 400

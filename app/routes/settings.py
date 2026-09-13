@@ -6,14 +6,18 @@ from app.services.access import (
     MODULES,
     additional_user_count,
     change_own_password,
+    clear_user_modules,
     create_additional_user,
     delete_additional_user,
     list_users,
     reset_user_password,
     save_staff_modules,
-    update_user_branch,
+    save_user_modules,
     set_user_active,
     staff_modules_from_settings,
+    update_user_branches,
+    user_branch_map,
+    user_module_assignments,
 )
 from app.services.settings import (
     get_company_settings, update_company_settings, list_tax_profiles, create_tax_profile,
@@ -48,14 +52,19 @@ def general():
 @main_required
 def users():
     settings = get_company_settings()
+    accounts = list_users()
+    shared_modules = staff_modules_from_settings(settings)
     return render_template(
         "admin/settings/users.html",
         settings=settings,
-        users=list_users(),
+        users=accounts,
         additional_count=additional_user_count(),
         additional_limit=ADDITIONAL_USER_LIMIT,
         modules=MODULES,
-        active_staff_modules=staff_modules_from_settings(settings),
+        active_staff_modules=shared_modules,
+        # Per-account ticks: {'own': bool, 'keys': [...]} keyed by account id.
+        user_modules=user_module_assignments(accounts, shared_modules),
+        branch_map=user_branch_map(accounts),
         branches=branch_options(),
     )
 
@@ -64,10 +73,12 @@ def users():
 @login_required
 @main_required
 def users_add():
+    branch_ids = request.form.getlist("branch_ids")
     user_id, error = create_additional_user(
         request.form.get("name"),
         request.form.get("password"),
         request.form.get("branch_id"),
+        branch_ids=branch_ids,
     )
     if error:
         flash(error, "error")
@@ -109,10 +120,45 @@ def users_password(user_id):
 @login_required
 @main_required
 def users_branch(user_id):
-    if not update_user_branch(user_id, request.form.get("branch_id")):
+    """Set an account's branch access: one depot, several depots, or all.
+
+    Ticking nothing means all branches. ``branches_edited`` marks the multi-tick
+    form, so a stale single ``branch_id`` field cannot resurrect a branch the
+    admin just unticked.
+    """
+    submitted = request.form.getlist("branch_ids")
+    if not submitted and request.form.get("branches_edited") != "1":
+        single = (request.form.get("branch_id") or "").strip()
+        submitted = [single] if single else []
+    if not update_user_branches(user_id, submitted):
         flash("Main profile always has access to all branches", "error")
     else:
         flash("Account branch access updated. It applies on the next sign-in.", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/<int:user_id>/modules")
+@login_required
+@main_required
+def users_modules(user_id):
+    """Give one additional account its own module set (editable after it exists)."""
+    ok, detail = save_user_modules(user_id, request.form.getlist("module"))
+    if not ok:
+        flash(str(detail), "error")
+    else:
+        flash("Account modules saved. They apply on the next sign-in.", "success")
+    return redirect(url_for("settings.users"))
+
+
+@bp.post("/users/<int:user_id>/modules/reset")
+@login_required
+@main_required
+def users_modules_reset(user_id):
+    """Return an account to the shared default module set."""
+    if not clear_user_modules(user_id):
+        flash("The main profile always has every function", "error")
+    else:
+        flash("Account now uses the shared default modules", "success")
     return redirect(url_for("settings.users"))
 
 

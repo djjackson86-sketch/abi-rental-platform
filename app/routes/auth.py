@@ -2,7 +2,7 @@ from functools import wraps
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from app.db import get_db
-from app.services.access import login_user_options, staff_modules_from_settings
+from app.services.access import login_user_options, user_branch_ids, user_module_keys_from_row, staff_modules_from_settings
 from app.services.recovery import (
     RECOVERY_WINDOW_MINUTES,
     locked_out,
@@ -51,8 +51,18 @@ def login():
             session["user_role"] = user["role"]
             if user["role"] == "owner":
                 session["staff_modules"] = []
+                session["branch_ids"] = []
             else:
-                session["staff_modules"] = staff_modules_from_settings(get_company_settings())
+                # An account's own module set wins; a NULL column keeps the shared
+                # default, so every existing account behaves exactly as before.
+                own_modules = user_module_keys_from_row(user)
+                if own_modules is None:
+                    session["staff_modules"] = staff_modules_from_settings(get_company_settings())
+                else:
+                    session["staff_modules"] = own_modules
+                # The extra depots this account may see (empty = the historic
+                # single branch, or every branch when they are unrestricted).
+                session["branch_ids"] = user_branch_ids(user["id"])
             return redirect(url_for("admin.dashboard"))
         flash("Invalid name or password", "error")
     return render_template("login.html", users=login_user_options())

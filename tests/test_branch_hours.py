@@ -1,12 +1,13 @@
-"""Per-branch trading hours (ticket ABI-341952941).
+"""Per-branch trading hours (tickets ABI-341952941 and ABI-341952942).
 
 A depot branch can hold one opening/closing time per weekday in
-``branch_operating_hours``. The hours are **informational only** - they are shown
-on the Branches page and deliberately never enforced on availability, the
-calendar or public bookings, so no existing workflow changes. A branch with no
-saved rows falls back to the global ``operating_hours`` defaults for display
-(weekends closed), which is why nothing had to be written for the existing
-live branches.
+``branch_operating_hours``. The hours are shown on the Branches page and, since
+ABI-341952942, a **pickup outside the collection branch's saved hours is
+refused**. Enforcement only starts for a branch that has SAVED rows, so a branch
+with nothing saved (every existing live branch) keeps its old behaviour: the
+display falls back to the global ``operating_hours`` defaults (weekends closed)
+and no booking is ever blocked. The calendar and availability remain untouched -
+only the pickup time is validated.
 """
 import os
 import tempfile
@@ -288,44 +289,187 @@ def test_branches_table_summarises_the_saved_hours(client, app):
         assert summaries[branch_id] == 'Sun Closed, Mon-Fri 09:00-17:00, Sat Closed'
 
 
-def test_trading_hours_are_informational_and_never_block_a_booking(client, app):
-    """A branch closed every day still books: hours are display-only."""
-    login(client)
-    branch_id = branch_id_by_name(app, 'Branch 1')
+def create_rental_product(client, app, sku='CBT-1', name='Closed Branch Trailer'):
+    """A tracked rental product the order tests can book (branch left unassigned)."""
     client.post('/inventory/new', data={
-        'name': 'Closed Branch Trailer', 'sku': 'CBT-1', 'quantity': '3',
-        'description': 'Informational hours test.', 'product_type': 'rental',
+        'name': name, 'sku': sku, 'quantity': '3',
+        'description': 'Trading hours test.', 'product_type': 'rental',
         'price_amount': '200', 'price_unit': 'day', 'security_deposit': '0',
         'tax_profile_id': '1', 'active': '1', 'public_visible': '1',
     }, follow_redirects=True)
-
-    closed_week = hours_payload(closed_days=tuple(range(7)))
-    res = client.post(f'/branches/{branch_id}/hours', data=closed_week, follow_redirects=True)
-    assert b'Trading hours saved' in res.data
-
     with app.app_context():
-        assert [row['closed'] for row in list_branch_hours(branch_id)] == [1] * 7
-        product_id = get_db().execute("SELECT id FROM products WHERE sku = 'CBT-1'").fetchone()['id']
+        row = get_db().execute("SELECT id FROM products WHERE sku = ?", (sku,)).fetchone()
+        return row['id'] if row else None
 
-    order = client.post('/orders/new', data={
+
+def book_order(client, product_id, collect_branch_id, start_date, start_time,
+               end_date, end_time, name='Closed Branch Client'):
+    """Post the new-order form and return the response."""
+    return client.post('/orders/new', data={
         'customer_type': 'individual',
-        'name': 'Closed Branch Client',
-        'email': 'closed@example.test',
+        'name': name,
+        'email': f'{name.lower().replace(" ", ".")}@example.test',
         'product_id': str(product_id),
         'quantity': '1',
-        'start_date': '2026-08-03',
-        'start_time': '09:00',
-        'end_date': '2026-08-04',
-        'end_time': '09:00',
-        'collect_branch_id': str(branch_id),
-        'return_branch_id': str(branch_id),
+        'start_date': start_date,
+        'start_time': start_time,
+        'end_date': end_date,
+        'end_time': end_time,
+        'collect_branch_id': str(collect_branch_id),
+        'return_branch_id': str(collect_branch_id),
         'deposit_option': 'no_deposit',
     }, follow_redirects=True)
-    assert order.status_code == 200
-    assert b'Draft order created' in order.data
+
+
+def order_count(app):
+    with app.app_context():
+        return get_db().execute("SELECT COUNT(*) AS c FROM orders").fetchone()['c']
+
+
+def customer_count(app):
+    with app.app_context():
+        return get_db().execute("SELECT COUNT(*) AS c FROM customers").fetchone()['c']
+
+
+def test_pickup_outside_the_branch_trading_hours_is_refused(client, app):
+    """Ticket ABI-341952942 (3): the pickup must fall inside the branch's hours."""
+    login(client)
+    branch_id = branch_id_by_name(app, 'Branch 1')
+    product_id = create_rental_product(client, app)
+
+    # Monday-Friday 08:30-16:30, weekend closed.
+    saved = client.post(f'/branches/{branch_id}/hours', data=hours_payload(), follow_redirects=True)
+    assert b'Trading hours saved' in saved.data
+
+    # Monday 2026-08-03, pickup 17:30 - after the branch has closed.
+    late = book_order(client, product_id, branch_id, '2026-08-03', '17:30', '2026-08-04', '10:00')
+    assert late.status_code == 200
+    assert b'Pickup must be between 08:30 and 16:30' in late.data
+    assert b'Draft order created' not in late.data
+    assert order_count(app) == 0
+    # A refused draft leaves nothing behind - not even the inline customer, which
+    # used to be created before the order payload was validated.
+    assert customer_count(app) == 0
+
+    # Monday 2026-08-03, pickup 10:00 - inside the trading hours.
+    inside = book_order(client, product_id, branch_id, '2026-08-03', '10:00', '2026-08-04', '10:00')
+    assert b'Draft order created' in inside.data
+    assert order_count(app) == 1
+    assert customer_count(app) == 1
 
     with app.app_context():
-        assert get_db().execute("SELECT COUNT(*) AS c FROM orders").fetchone()['c'] == 1
+        row = get_db().execute("SELECT start_at, collect_branch_id FROM orders").fetchone()
+        assert row['start_at'].startswith('2026-08-03T10:00')
+        assert row['collect_branch_id'] == branch_id
+
+
+def test_pickup_on_a_closed_day_is_refused(client, app):
+    """A branch closed on the pickup's weekday refuses that pickup outright."""
+    login(client)
+    branch_id = branch_id_by_name(app, 'Branch 1')
+    product_id = create_rental_product(client, app)
+    # Only the weekend is closed by default here, so close the Wednesday too.
+    payload = hours_payload()
+    payload['closed_3'] = '1'
+    client.post(f'/branches/{branch_id}/hours', data=payload, follow_redirects=True)
+
+    # Wednesday 2026-08-05 is closed.
+    assert client.get('/health').status_code == 200
+    refused = book_order(client, product_id, branch_id, '2026-08-05', '10:00', '2026-08-06', '10:00')
+    assert b'is closed on Wednesday' in refused.data
+    assert b'Draft order created' not in refused.data
+    assert order_count(app) == 0
+
+    # The same trailer on an open day still books.
+    allowed = book_order(client, product_id, branch_id, '2026-08-06', '10:00', '2026-08-07', '10:00')
+    assert b'Draft order created' in allowed.data
+    assert order_count(app) == 1
+
+
+def test_a_branch_without_saved_hours_still_books(client, app):
+    """Enforcement only starts once the client saves hours for that depot.
+
+    This is the behaviour-preserving half of the ticket: every existing branch has
+    no saved rows, so nothing changes until real hours are entered.
+    """
+    login(client)
+    branch_id = branch_id_by_name(app, 'Branch 1')
+    product_id = create_rental_product(client, app)
+    with app.app_context():
+        assert hours_saved(branch_id) is False
+
+    # Sunday 2026-08-09 at 22:00 would be outside the default week, yet it books
+    # because this branch has no saved hours.
+    order = book_order(client, product_id, branch_id, '2026-08-09', '22:00', '2026-08-10', '09:00')
+    assert b'Draft order created' in order.data
+    assert order_count(app) == 1
+
+
+def test_the_public_store_booking_respects_the_collection_branch_hours(client, app):
+    """The storefront funnel goes through the same payload check."""
+    login(client)
+    branch_id = branch_id_by_name(app, 'Branch 1')
+    product_id = create_rental_product(client, app, sku='CBT-STORE', name='Store Trailer')
+    payload = hours_payload()
+    payload['closed_3'] = '1'
+    client.post(f'/branches/{branch_id}/hours', data=payload, follow_redirects=True)
+    client.post('/logout')
+
+    # The store's default collection branch is the first active branch.
+    closed_day = client.post(f'/store/products/{product_id}/book', data={
+        'customer_name': 'Store Client',
+        'customer_email': 'store.client@example.test',
+        'quantity': '1',
+        'start_date': '2026-08-05',
+        'start_time': '10:00',
+        'end_date': '2026-08-06',
+        'end_time': '10:00',
+    }, follow_redirects=True)
+    assert closed_day.status_code == 400
+    assert b'is closed on Wednesday' in closed_day.data
+    assert order_count(app) == 0
+    # The refused store booking creates no customer either.
+    assert customer_count(app) == 0
+
+    open_day = client.post(f'/store/products/{product_id}/book', data={
+        'customer_name': 'Store Client',
+        'customer_email': 'store.client@example.test',
+        'quantity': '1',
+        'start_date': '2026-08-06',
+        'start_time': '10:00',
+        'end_date': '2026-08-07',
+        'end_time': '10:00',
+    }, follow_redirects=True)
+    assert order_count(app) == 1
+
+
+def test_pickup_hours_error_helper_reads_the_saved_week(app):
+    """Unit level: no branch, no saved hours, inside hours, closed, out of hours."""
+    from datetime import datetime
+
+    from app.services.branches import pickup_hours_error
+
+    branch_id = branch_id_by_name(app, 'Branch 1')
+    monday_in = datetime(2026, 8, 3, 10, 0)
+    monday_late = datetime(2026, 8, 3, 17, 30)
+    saturday = datetime(2026, 8, 8, 10, 0)
+    with app.app_context():
+        init_db()
+        # Nothing saved yet: no opinion at all.
+        assert pickup_hours_error(branch_id, monday_late) is None
+        assert pickup_hours_error(None, monday_late) is None
+        assert pickup_hours_error(branch_id, None) is None
+
+        save_branch_hours(branch_id, hours_payload())
+        assert pickup_hours_error(branch_id, monday_in) is None
+        late_message = pickup_hours_error(branch_id, monday_late)
+        assert 'Pickup must be between 08:30 and 16:30' in late_message
+        assert 'Branch 1' in late_message and 'Monday' in late_message
+        closed_message = pickup_hours_error(branch_id, saturday)
+        assert 'is closed on Saturday' in closed_message
+
+        # An unknown branch has no rows, so it never blocks.
+        assert pickup_hours_error(9999, monday_late) is None
 
 
 def test_default_hours_helper_reads_the_global_settings(app):

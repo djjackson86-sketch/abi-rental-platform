@@ -2,18 +2,18 @@
 {% set title='Users & access' %}
 {% block admin_body %}
 <header class="page-header">
-  <div><p class="eyebrow">Settings</p><h1>Users & access</h1><p>Add additional accounts and set what they can see and use. Permissions apply to all additional accounts on their next sign-in.</p></div>
+  <div><p class="eyebrow">Settings</p><h1>Users & access</h1><p>Add additional accounts and set what they can see and use. Permissions and branch access apply to an account on its next sign-in.</p></div>
 </header>
 {% include "admin/settings/nav.html" %}
 
 <section class="panel settings-form">
-  <h2>Permissions for additional accounts</h2>
-  <p class="form-help">The main profile always has all functions. Tick the modules that additional accounts may open. Their Dashboard only shows the “for the day” cards and the Orders list does not show the totals bar.</p>
+  <h2>Shared default permissions</h2>
+  <p class="form-help">The main profile always has all functions. Tick the modules additional accounts may open <strong>unless the account has its own set in the Accounts table below</strong>. Their Dashboard only shows the “for the day” cards and the Orders list does not show the totals bar.</p>
   <form method="post" action="{{ url_for('settings.users_permissions') }}" class="form-grid">
     {% for key, label in modules %}
       <label class="check-row"><input type="checkbox" name="module" value="{{ key }}" {% if key in active_staff_modules %}checked{% endif %}><span>{{ label }}</span></label>
     {% endfor %}
-    <div class="form-actions span-2"><button class="btn primary" type="submit">Save permissions</button></div>
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Save shared default</button></div>
   </form>
 </section>
 
@@ -23,7 +23,15 @@
   <form method="post" action="{{ url_for('settings.users_add') }}" class="form-grid">
     <label>Name<input name="name" required placeholder="e.g. Sipho Admin"></label>
     <label>Password<input type="text" name="password" required minlength="6" placeholder="At least 6 characters"></label>
-    <label>Branch access<select name="branch_id"><option value="">All branches</option>{% for branch in branches %}<option value="{{ branch.id }}">{{ branch.name }}</option>{% endfor %}</select></label>
+    <div class="span-2">
+      <p class="form-help" style="margin:0 0 8px">Branch access — tick the depots this account may manage. Tick none for every branch.</p>
+      <div class="access-ticks">
+        {% for branch in branches %}
+        <label class="access-tick"><input type="checkbox" name="branch_ids" value="{{ branch.id }}"><span>{{ branch.name }}</span></label>
+        {% endfor %}
+      </div>
+      <p class="access-note">The first ticked depot becomes the account's default branch for orders it creates.</p>
+    </div>
     <div class="form-actions span-2"><button class="btn primary" type="submit">Add account</button></div>
   </form>
 </section>
@@ -40,11 +48,14 @@
 
 <section class="panel settings-form">
   <h2>Accounts</h2>
+  <p class="form-help"><strong>Branch access</strong> — tick one depot for a single branch, two or more to let the account manage just those depots, or none for all branches. The depot already set as their default stays the default for orders they create while it is still ticked. <strong>Modules</strong> — an account's own ticks override the shared default above; use “Use shared default” to put it back on the shared set.</p>
   <div class="table-wrap">
-    <table class="data-table">
-      <thead><tr><th>Name</th><th>Profile</th><th>Branch access</th><th>Status</th><th>Password</th><th></th></tr></thead>
+    <table class="data-table access-table">
+      <thead><tr><th>Name</th><th>Profile</th><th>Branch access</th><th>Modules</th><th>Status</th><th>Password</th><th></th></tr></thead>
       <tbody>
       {% for user in users %}
+        {% set bmap = branch_map.get(user.id, {'ids': [], 'all': False, 'primary': None}) %}
+        {% set umod = user_modules.get(user.id, {'own': False, 'keys': []}) %}
         <tr>
           <td><strong>{{ user.name }}</strong>{% if user.initials %}<small>{{ user.initials }}</small>{% endif %}</td>
           <td>{% if user.role == 'owner' %}<span class="badge status-reserved">Main profile</span>{% else %}<span class="badge status-returned">Additional</span>{% endif %}</td>
@@ -52,12 +63,38 @@
             {% if user.role == 'owner' %}
               <span class="badge status-reserved">All branches</span>
             {% else %}
-              <form method="post" action="{{ url_for('settings.users_branch', user_id=user.id) }}" class="inline-form">
-                <select name="branch_id" aria-label="Branch access for {{ user.name }}">
-                  <option value="" {% if user.can_view_all_branches %}selected{% endif %}>All branches</option>
-                  {% for branch in branches %}<option value="{{ branch.id }}" {% if user.branch_id == branch.id %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
-                </select>
-                <button class="btn ghost" type="submit">Save</button>
+              <form method="post" action="{{ url_for('settings.users_branch', user_id=user.id) }}" class="access-cell-form">
+                <input type="hidden" name="branches_edited" value="1">
+                <div class="access-ticks">
+                  {% for branch in branches %}
+                  <label class="access-tick"><input type="checkbox" name="branch_ids" value="{{ branch.id }}" {% if branch.id in bmap['ids'] %}checked{% endif %}><span>{{ branch.name }}</span></label>
+                  {% endfor %}
+                </div>
+                <div class="access-cell-actions">
+                  <button class="btn ghost" type="submit">Save</button>
+                  <span class="access-note">{% if bmap['all'] %}All branches{% elif bmap['ids']|length == 1 %}One depot{% elif bmap['ids'] %}Several depots{% else %}No branch{% endif %}</span>
+                </div>
+              </form>
+            {% endif %}
+          </td>
+          <td>
+            {% if user.role == 'owner' %}
+              <span class="badge status-reserved">All functions</span>
+            {% else %}
+              <form method="post" action="{{ url_for('settings.users_modules', user_id=user.id) }}" class="access-cell-form">
+                <div class="access-ticks">
+                  {% for key, label in modules %}
+                  <label class="access-tick"><input type="checkbox" name="module" value="{{ key }}" {% if key in umod['keys'] %}checked{% endif %}><span>{{ label }}</span></label>
+                  {% endfor %}
+                </div>
+                <div class="access-cell-actions">
+                  <button class="btn ghost" type="submit">Save</button>
+                  {% if umod['own'] %}
+                  <button class="btn ghost" type="submit" formaction="{{ url_for('settings.users_modules_reset', user_id=user.id) }}">Use shared default</button>
+                  {% else %}
+                  <span class="access-note">Using shared default</span>
+                  {% endif %}
+                </div>
               </form>
             {% endif %}
           </td>

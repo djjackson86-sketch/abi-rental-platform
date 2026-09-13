@@ -27,31 +27,48 @@ from app.services.products import (
 )
 from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
-from app.services.access import main_required, session_branch_scope
+from app.services.access import main_required, session_branch_scope_ids, session_primary_branch_id
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
 
 def _scoped_branch_options():
-    branch_id = session_branch_scope()
+    scope_ids = session_branch_scope_ids()
     branches = branch_options()
-    if not branch_id:
+    if scope_ids is None:
         return branches
-    return [branch for branch in branches if branch["id"] == branch_id]
+    return [branch for branch in branches if branch["id"] in scope_ids]
 
 
 def _force_staff_product_branch(form):
-    branch_id = session_branch_scope()
-    if not branch_id:
+    """Keep a branch-limited session inside its own depots (server-side)."""
+    scope_ids = session_branch_scope_ids()
+    if not scope_ids:
         return form
     mutable = MultiDict(form)
-    mutable["branch_id"] = str(branch_id)
+    try:
+        submitted = int(mutable.get("branch_id") or 0)
+    except (TypeError, ValueError):
+        submitted = 0
+    primary = session_primary_branch_id()
+    chosen = submitted if submitted in scope_ids else (primary if primary in scope_ids else scope_ids[0])
+    mutable["branch_id"] = str(chosen)
     return mutable
 
 
 def _ensure_product_access(product):
-    branch_id = session_branch_scope()
-    if branch_id and product and product["branch_id"] not in (None, branch_id):
+    scope_ids = session_branch_scope_ids()
+    if not scope_ids or not product:
+        return
+    current = product["branch_id"]
+    if current is None:
+        # Unassigned stock is visible to every branch.
+        return
+    try:
+        current = int(current)
+    except (TypeError, ValueError):
+        return
+    if current not in scope_ids:
         abort(404)
 
 

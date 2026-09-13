@@ -79,6 +79,40 @@ def hours_saved(branch_id):
     return bool(_day_rows_for(branch_id))
 
 
+def pickup_hours_error(branch_id, when):
+    """Refuse a pickup outside the collection branch's saved trading hours.
+
+    Returns None - meaning "no objection" - when the branch has no SAVED hours
+    (enforcement only starts once the client has set real hours for that depot),
+    when there is no branch/time, or when the time sits inside the branch's
+    trading window for that weekday.
+
+    Day numbering is Sunday-first to match the table (see DAY_LABELS), so a
+    Monday pickup maps to day_of_week 1.
+    """
+    if not branch_id or when is None:
+        return None
+    saved = _day_rows_for(branch_id)
+    if not saved:
+        return None
+    day = (when.weekday() + 1) % 7
+    row = saved.get(day)
+    if row is None:
+        return None
+    branch = get_branch(branch_id)
+    label = (branch["name"] if branch else "") or "This branch"
+    if row["closed"]:
+        return f"{label} is closed on {DAY_LABELS[day]}. Choose another pickup date."
+    open_time = row["open_time"] or DEFAULT_OPEN_TIME
+    close_time = row["close_time"] or DEFAULT_CLOSE_TIME
+    if not (open_time <= when.strftime("%H:%M") <= close_time):
+        return (
+            f"Pickup must be between {open_time} and {close_time} — {label} trades "
+            f"{open_time} to {close_time} on {DAY_LABELS[day]}."
+        )
+    return None
+
+
 def _summarize(hours):
     """Compact one-line summary for the branches table (e.g. 'Mon-Fri 09:00-17:00, Sat-Sun Closed')."""
     if not hours:
@@ -294,5 +328,19 @@ def delete_branch(branch_id):
         (branch_id, branch_id, branch_id, branch_id),
     )
     db.execute("UPDATE users SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
+    # Multi-branch rows for the deleted depot go with it (libsql autocommits, so
+    # the delete is explicit). An account left with no rows would fall back to
+    # the historic "blank branch = all branches" rule, which would silently WIDEN
+    # its visibility — so such an account is explicitly made all-branches instead.
+    affected_users = [row["user_id"] for row in db.execute(
+        "SELECT user_id FROM user_branch_access WHERE branch_id = ?", (branch_id,)
+    ).fetchall()]
+    db.execute("DELETE FROM user_branch_access WHERE branch_id = ?", (branch_id,))
+    for user_id in affected_users:
+        remaining = db.execute(
+            "SELECT COUNT(*) AS c FROM user_branch_access WHERE user_id = ?", (user_id,)
+        ).fetchone()["c"]
+        if int(remaining or 0) == 0:
+            db.execute("UPDATE users SET can_view_all_branches = 1 WHERE id = ?", (user_id,))
     db.execute("DELETE FROM branches WHERE id = ?", (branch_id,))
     db.commit()

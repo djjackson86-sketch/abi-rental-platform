@@ -6,7 +6,8 @@ import os
 
 from app.db import get_db, now
 from app.services.numbering import next_in_sequence
-from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause, session_branch_scope
+from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause, session_branch_scope_ids
+from app.services.branches import pickup_hours_error
 from app.services.settings import global_vat_rate
 from app.services.products import product_branch_stock
 from app.services.timezone import local_now, local_now_iso
@@ -413,6 +414,14 @@ def _build_order_payload(form):
         raise ValueError("Pickup and return dates are required")
     if end_dt <= start_dt:
         raise ValueError("Return must be after pickup")
+
+    # The pickup has to fall inside the collection branch's trading hours. Only
+    # branches that have SAVED hours enforce this, so nothing changes for a depot
+    # the client has not set hours for yet. Applies to staff orders and to public
+    # storefront bookings alike, because both routes end up here.
+    hours_error = pickup_hours_error(collect_branch_id, start_dt)
+    if hours_error:
+        raise ValueError(hours_error)
 
     days = rental_days(start_dt, end_dt)
     lines = []
@@ -1198,15 +1207,19 @@ def calendar_group_availability(start_date=None, end_date=None, branch_id=None):
     )
     # With a branch selected, a product that holds a per-branch count for that
     # branch is stock for it even when the product's own branch differs — the
-    # session scope still wins, so this can only ever narrow. Products without
-    # per-branch rows keep the plain clause (unchanged behaviour).
-    branch_target = session_branch_scope() or branch_id
-    if branch_target and product_branch_clause:
+    # session scope still wins, so this can only ever narrow. A session limited to
+    # several depots matches any of them. Products without per-branch rows keep
+    # the plain clause (unchanged behaviour).
+    branch_targets = session_branch_scope_ids()
+    if branch_targets is None:
+        branch_targets = [branch_id] if branch_id else []
+    if branch_targets and product_branch_clause:
+        marks = ",".join("?" for _ in branch_targets)
         product_branch_clause = (
-            " AND (p.branch_id = ? OR EXISTS (SELECT 1 FROM product_branch_stock s"
-            " WHERE s.product_id = p.id AND s.branch_id = ?))"
+            f" AND (p.branch_id IN ({marks}) OR EXISTS (SELECT 1 FROM product_branch_stock s"
+            f" WHERE s.product_id = p.id AND s.branch_id IN ({marks})))"
         )
-        product_branch_params = [branch_target, branch_target]
+        product_branch_params = [*branch_targets, *branch_targets]
     products = db.execute(
         f"""SELECT p.id, p.name, p.sku, p.quantity, p.tracking_method,
                COALESCE(pg.id, 0) AS group_id,

@@ -9,19 +9,19 @@ from app.services.orders import calendar_group_availability, calendar_month_over
 from app.services.reports import customer_summary, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.timezone import local_now_iso
-from app.services.access import order_branch_clause, product_branch_clause, resolve_branch_filter, session_branch_scope
+from app.services.access import order_branch_clause, product_branch_clause, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 
 bp = Blueprint("admin", __name__)
 
 
 def _scoped_branch_options():
-    """Branches this session may filter by: all of them, or just the staff branch."""
-    branch_id = session_branch_scope()
+    """Branches this session may filter by: all of them, or its own depots."""
+    scope_ids = session_branch_scope_ids()
     branches = branch_options()
-    if not branch_id:
+    if scope_ids is None:
         return branches
-    return [branch for branch in branches if branch["id"] == branch_id]
+    return [branch for branch in branches if branch["id"] in scope_ids]
 
 def _branch_filter():
     """Resolve the ``?branch=`` filter for a branch-aware screen.

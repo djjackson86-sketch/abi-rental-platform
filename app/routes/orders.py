@@ -10,9 +10,9 @@ from app.services.documents import create_document, documents_for_order, documen
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
-from app.services.branches import branch_options, default_branch_id
+from app.services.branches import branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
-from app.services.access import main_required, resolve_branch_filter, session_branch_scope, user_can_access_order
+from app.services.access import main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -54,9 +54,15 @@ def _selected_customer_summary(customers, selected_customer_id):
 
 
 def _products():
-    branch_id = session_branch_scope()
-    scope_sql = " AND (p.branch_id = ? OR p.branch_id IS NULL)" if branch_id else ""
-    params = [branch_id] if branch_id else []
+    scope_ids = session_branch_scope_ids()
+    if scope_ids is None:
+        scope_sql, params = "", []
+    elif not scope_ids:
+        scope_sql, params = " AND 0=1", []
+    else:
+        marks = ",".join("?" for _ in scope_ids)
+        scope_sql = f" AND (p.branch_id IN ({marks}) OR p.branch_id IS NULL)"
+        params = list(scope_ids)
     return get_db().execute(f"""
         SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
                p.security_deposit, p.hourly_extra_rate, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
@@ -71,25 +77,53 @@ def _products():
 
 
 def _scoped_branch_options():
-    branch_id = session_branch_scope()
+    """Branches this session may choose from — its own depots, or every branch."""
+    scope_ids = session_branch_scope_ids()
     branches = branch_options()
-    if not branch_id:
+    if scope_ids is None:
         return branches
-    return [branch for branch in branches if branch["id"] == branch_id]
+    return [branch for branch in branches if branch["id"] in scope_ids]
 
 
 def _scoped_default_branch_id(fallback=None):
-    return session_branch_scope() or fallback or default_branch_id()
+    scope_ids = session_branch_scope_ids()
+    if not scope_ids:
+        return fallback or default_branch_id()
+    primary = session_primary_branch_id()
+    if primary and primary in scope_ids:
+        return primary
+    return scope_ids[0]
 
 
 def _force_staff_collection_branch(form):
-    branch_id = session_branch_scope()
-    if not branch_id:
+    """Keep a branch-limited session inside its own depots.
+
+    One depot behaves exactly as before (the branch is forced). With several
+    depots the submitted collection branch is honoured when it is one of them and
+    otherwise replaced by the session's primary branch, so a crafted POST cannot
+    book against a depot the account cannot see. Validation is server-side; the
+    narrowed dropdown is only a convenience.
+    """
+    scope_ids = session_branch_scope_ids()
+    if not scope_ids:
         return form
     mutable = MultiDict(form)
-    mutable["collect_branch_id"] = str(branch_id)
-    if mutable.get("booking_type") != "oneway":
-        mutable["return_branch_id"] = str(branch_id)
+    try:
+        submitted = int(mutable.get("collect_branch_id") or 0)
+    except (TypeError, ValueError):
+        submitted = 0
+    chosen = submitted if submitted in scope_ids else (session_primary_branch_id() or scope_ids[0])
+    mutable["collect_branch_id"] = str(chosen)
+    if mutable.get("booking_type") == "oneway":
+        if len(scope_ids) > 1:
+            try:
+                submitted_return = int(mutable.get("return_branch_id") or 0)
+            except (TypeError, ValueError):
+                submitted_return = 0
+            if submitted_return not in scope_ids:
+                mutable["return_branch_id"] = str(chosen)
+    else:
+        mutable["return_branch_id"] = str(chosen)
     return mutable
 
 
@@ -180,7 +214,14 @@ def new():
                         _build_order_payload(request.form)
                         if customer_fields_changed(stored, request.form):
                             update_customer(stored["id"], request.form)
-                form = _force_staff_collection_branch(_form_with_inline_customer(request.form))
+                form = _force_staff_collection_branch(request.form)
+                # Validate before the inline customer is created: create_order()
+                # validates the same payload anyway, but by then a new customer
+                # would already exist, so a refused draft (a pickup outside the
+                # branch's trading hours, a return before the pickup) would leave
+                # a stray customer record with no order behind it.
+                _build_order_payload(form)
+                form = _form_with_inline_customer(form)
                 order_id = create_order(form)
                 flash("Draft order created", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
@@ -208,6 +249,7 @@ def new():
         time_options=_time_options(15),
         branches=_scoped_branch_options(),
         default_branch_id=_scoped_default_branch_id(),
+        branch_hours=branch_hours_summaries(),
         form_mode="new",
         form_action=url_for("orders.new"),
         custom_field_label=custom_field_label,
@@ -236,7 +278,12 @@ def edit(order_id):
                 form_data = None
         else:
             try:
-                form = _force_staff_collection_branch(_form_with_inline_customer(request.form))
+                form = _force_staff_collection_branch(request.form)
+                # Same guard as /orders/new: validate the order fields before the
+                # inline customer row is created, so a refused save cannot leave a
+                # customer with no order behind it.
+                _build_order_payload(form)
+                form = _form_with_inline_customer(form)
                 update_draft_order(order_id, form)
                 flash("Order saved", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
@@ -261,6 +308,7 @@ def edit(order_id):
         time_options=_time_options(15),
         branches=_scoped_branch_options(),
         default_branch_id=_scoped_default_branch_id(form_data.get("collect_branch_id")),
+        branch_hours=branch_hours_summaries(),
         form_mode="edit",
         form_action=url_for("orders.edit", order_id=order_id),
         custom_field_label=custom_field_label,

@@ -1,5 +1,5 @@
 from app.db import get_db, now
-from app.services.access import product_branch_clause, session_branch_scope
+from app.services.access import product_branch_clause, session_branch_scope_ids
 from app.services.settings import global_tax_profile_id
 
 VALID_TYPES = {"rental", "sale", "service"}
@@ -262,9 +262,10 @@ def set_product_branch_stock(product_id, counts, restrict_branch_id=None):
 
     ``counts`` maps branch id -> whole quantity; an empty mapping clears the
     split and returns the product to the single shared pool. ``restrict_branch_id``
-    narrows the write to one branch and preserves every other branch's row — the
-    server-side guard for branch-limited staff, so a scoped user can only ever
-    edit their own depot's count.
+    narrows the write to the branches a session may touch — a single id or a list
+    of ids — and preserves every other branch's row. That is the server-side guard
+    for branch-limited staff, so a scoped user can only ever edit their own
+    depot's count, whatever the form posts.
     """
     db = get_db()
     cleaned = {}
@@ -276,11 +277,26 @@ def set_product_branch_stock(product_id, counts, restrict_branch_id=None):
             continue
         if branch_id > 0 and amount >= 0:
             cleaned[branch_id] = amount
+    allowed = []
     if restrict_branch_id:
-        cleaned = {b: q for b, q in cleaned.items() if b == int(restrict_branch_id)}
+        raw = restrict_branch_id if isinstance(restrict_branch_id, (list, tuple, set)) else [restrict_branch_id]
+        for value in raw:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if value and value not in allowed:
+                allowed.append(value)
+        if not allowed:
+            # A scoped caller with no usable branch id must never fall through to
+            # the unrestricted branch and clear every other depot's rows.
+            return {}
+    if allowed:
+        cleaned = {b: q for b, q in cleaned.items() if b in allowed}
+        marks = ",".join("?" for _ in allowed)
         db.execute(
-            "DELETE FROM product_branch_stock WHERE product_id = ? AND branch_id = ?",
-            (product_id, restrict_branch_id),
+            f"DELETE FROM product_branch_stock WHERE product_id = ? AND branch_id IN ({marks})",
+            [product_id, *allowed],
         )
     else:
         db.execute("DELETE FROM product_branch_stock WHERE product_id = ?", (product_id,))
@@ -291,7 +307,7 @@ def set_product_branch_stock(product_id, counts, restrict_branch_id=None):
             VALUES (?, ?, ?, ?)""",
             (product_id, branch_id, amount, timestamp),
         )
-    if cleaned or not restrict_branch_id:
+    if cleaned or not allowed:
         # products.quantity stays the computed total of the branch rows.
         total = sum(product_branch_stock(product_id).values())
         db.execute("UPDATE products SET quantity = ? WHERE id = ?", (total, product_id))
@@ -370,7 +386,7 @@ def create_product(form):
     product_id = cur.lastrowid
     if branch_counts:
         set_product_branch_stock(
-            product_id, branch_counts, restrict_branch_id=session_branch_scope()
+            product_id, branch_counts, restrict_branch_id=session_branch_scope_ids()
         )
     return product_id
 
@@ -409,7 +425,7 @@ def update_product(product_id, form):
     # Per-branch counts are written before the product row so the total stored in
     # products.quantity is the one we intend: the sum of the rows for a split
     # product, or the single shared pool when every branch box was left blank.
-    scope = session_branch_scope()
+    scope = session_branch_scope_ids()
     if untracked:
         set_product_branch_stock(product_id, {})
         data["quantity"] = 0

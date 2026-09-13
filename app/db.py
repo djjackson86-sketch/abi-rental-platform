@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
     branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     can_view_all_branches INTEGER NOT NULL DEFAULT 1,
     active INTEGER NOT NULL DEFAULT 1,
+    -- NULL = inherit the shared default set in company_settings.staff_permissions_json
+    modules_json TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -134,6 +136,15 @@ CREATE TABLE IF NOT EXISTS branch_operating_hours (
     closed INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL,
     UNIQUE(branch_id, day_of_week)
+);
+
+-- Extra depots an additional account may see. No rows = the historic single
+-- branch (users.branch_id) or all branches when can_view_all_branches is set.
+CREATE TABLE IF NOT EXISTS user_branch_access (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    UNIQUE(user_id, branch_id)
 );
 
 CREATE TABLE IF NOT EXISTS customers (
@@ -484,6 +495,22 @@ def run_migrations(db):
     # NULL means "not answered yet", so the thousands of imported clients that
     # carry no verification value are never rendered as "No".
     ensure_column(db, "customers", "client_verified", "INTEGER")
+
+    # --- Per-account modules + multi-branch access (additive, 2026-09-13) -----
+    # modules_json NULL keeps the account on the shared default set, so the
+    # existing global permission panel keeps working exactly as before; a saved
+    # value gives that one account its own (editable after the account exists).
+    ensure_column(db, "users", "modules_json", "TEXT")
+    # Extra depots per account. No rows = the historic single-branch behaviour
+    # (users.branch_id, or all branches when can_view_all_branches is set), so
+    # every existing account keeps its current visibility.
+    db.execute("""CREATE TABLE IF NOT EXISTS user_branch_access (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        UNIQUE(user_id, branch_id)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_user_branch_access_user ON user_branch_access(user_id)")
 
 
 def init_db():
