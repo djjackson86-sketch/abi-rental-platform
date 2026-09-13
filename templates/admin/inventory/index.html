@@ -15,6 +15,7 @@
     {% if filters.product_type %}<input type="hidden" name="product_type" value="{{ filters.product_type }}">{% endif %}
     {% if filters.visibility %}<input type="hidden" name="visibility" value="{{ filters.visibility }}">{% endif %}
     {% if filters.product_group_id %}<input type="hidden" name="product_group_id" value="{{ filters.product_group_id }}">{% endif %}
+    {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
   </form>
   <div class="inventory-actions">
     <a class="btn ghost" href="{{ url_for('inventory.new_group') }}">Add group</a>
@@ -27,8 +28,20 @@
     <form method="get" class="inventory-filter-form">
       {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
       <div class="filter-group">
+        <div class="filter-group-head"><strong>Branch</strong></div>
+        {% if branch_scope %}
+        <label class="filter-fixed" title="Your account only sees this branch">{{ branches[0].name if branches else 'Your branch' }}</label>
+        {% else %}
+        <select name="branch" aria-label="Branch" onchange="this.form.submit()">
+          <option value="">All branches</option>
+          {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        {% if filters.branch %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">Clear branch</a>{% endif %}
+      </div>
+      <div class="filter-group">
         <div class="filter-group-head"><strong>Product group</strong></div>
-        <a class="select-like {% if not filters.product_group_id %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility) }}">All groups</a>
+        <a class="select-like {% if not filters.product_group_id %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, branch=filters.branch or None) }}">All groups</a>
         {% for group in product_groups %}
           <label class="filter-check">
             <input type="radio" name="product_group_id" value="{{ group.id }}" {% if filters.product_group_id|string==group.id|string %}checked{% endif %} onchange="this.form.submit()">
@@ -43,24 +56,24 @@
       </div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>Product type</strong></div>
-        <a class="select-like {% if not filters.product_type %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">All</a>
+        <a class="select-like {% if not filters.product_type %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id, branch=filters.branch or None) }}">All</a>
         {% for type_value,label in [('rental','Rental products'),('sale','Sales items'),('service','Services')] %}
           <label class="filter-check">
             <input type="radio" name="product_type" value="{{ type_value }}" {% if filters.product_type==type_value %}checked{% endif %} onchange="this.form.submit()">
             <span>{{ label }}</span>
           </label>
         {% endfor %}
-        {% if filters.product_type %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">Clear</a>{% endif %}
+        {% if filters.product_type %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id, branch=filters.branch or None) }}">Clear</a>{% endif %}
       </div>
 
       <button class="btn ghost import-btn" type="button" disabled title="CSV import is planned for a later pass">Import</button>
-      <a class="btn ghost export-btn" href="{{ url_for('inventory.export_csv', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">Export</a>
+      <a class="btn ghost export-btn" href="{{ url_for('inventory.export_csv', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, product_group_id=filters.product_group_id, branch=filters.branch or None) }}">Export</a>
     </form>
   </nav>
 
   <main class="inventory-workspace">
     <section class="panel inventory-list-panel">
-      {% if filters.query or filters.product_type or filters.visibility or filters.product_group_id %}
+      {% if filters.query or filters.product_type or filters.visibility or filters.product_group_id or filters.branch %}
         <div class="active-filter-line">
           <span>Showing filtered products</span>
           <a href="{{ url_for('inventory.index') }}">Clear all filters</a>

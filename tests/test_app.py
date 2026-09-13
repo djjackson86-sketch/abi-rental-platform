@@ -4826,7 +4826,9 @@ def test_reports_page_renders_when_the_database_returns_libsql_rows(client, monk
             # (dashboard_day_metrics) and they render on the redirect that follows
             # sign-in, so this double has to answer them. Each asks for a finished
             # scalar, which is the point being guarded.
-            if 'product_groups pg' in statement:          # trailer out / in cards
+            if 'sum(p.quantity)' in statement:            # fleet -> "trailers in" card
+                return Cursor([_libsql_row(('c',), (10,))])
+            if 'product_groups pg' in statement:          # trailer out card
                 return Cursor([_libsql_row(('c',), (2,))])
             if 'lower(pay.method)' in statement:          # total X payments cards
                 return Cursor([_libsql_row(('s',), (500.0,))])
@@ -4863,6 +4865,11 @@ def test_reports_page_renders_when_the_database_returns_libsql_rows(client, monk
     dashboard_body = dashboard.get_data(as_text=True)
     assert 'Total card payments' in dashboard_body
     assert 'R500.00' in dashboard_body
+    # The "trailers in" card is now the fleet (10) less what is on hire (2), and
+    # it has to arrive as a plain integer — a raw libsql row would render as a
+    # bound method here.
+    card = re.search(r'Total no\. of trailers in</small><b>(\d+)</b>', dashboard_body)
+    assert card and card.group(1) == '8', dashboard_body[-2000:]
     assert 'built-in method' not in dashboard_body
 
     page = client.get('/reports')

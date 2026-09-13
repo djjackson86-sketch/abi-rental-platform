@@ -84,7 +84,13 @@ def update_product_group(group_id, form):
         raise
 
 
-def list_products(query="", product_type="", visibility="", product_group_id=""):
+def list_products(query="", product_type="", visibility="", product_group_id="", branch_id=None):
+    """Every product the session may see, narrowed by the screen's filters.
+
+    ``branch_id`` is the inventory page's Branch filter. It is handed straight to
+    ``product_branch_clause`` so the session scope stays authoritative: a filter
+    can only ever narrow what a branch-limited account sees, never widen it.
+    """
     sql = """SELECT p.*, t.name AS tax_name, t.rate AS tax_rate, b.name AS branch_name,
         g.name AS product_group_name, g.description AS product_group_description, g.sort_order AS product_group_sort_order
         FROM products p
@@ -93,7 +99,7 @@ def list_products(query="", product_type="", visibility="", product_group_id="")
         LEFT JOIN product_groups g ON g.id = p.product_group_id
         WHERE 1=1"""
     params = []
-    branch_sql, branch_params = product_branch_clause("p", include_unassigned=True)
+    branch_sql, branch_params = product_branch_clause("p", include_unassigned=True, branch_id=branch_id)
     sql += branch_sql
     params.extend(branch_params)
     if query:

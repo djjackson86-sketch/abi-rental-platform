@@ -28,7 +28,7 @@ from app.services.products import (
 )
 from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
-from app.services.access import main_required, session_branch_scope_ids, session_primary_branch_id
+from app.services.access import main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -80,7 +80,11 @@ def index():
     product_type = request.args.get("product_type", "")
     visibility = request.args.get("visibility", "")
     product_group_id = request.args.get("product_group_id", "")
-    products = list_products(query=query, product_type=product_type, visibility=visibility, product_group_id=product_group_id)
+    # Branch filter. The shared resolver keeps the session scope authoritative, so
+    # a ?branch= outside it is ignored (and a single-depot account is pinned).
+    selected_branch, branch_id, branch_label, branches, branch_scope = resolve_branch_filter(request.args.get("branch", ""))
+    products = list_products(query=query, product_type=product_type, visibility=visibility,
+                             product_group_id=product_group_id, branch_id=branch_id)
     breakdown = stock_breakdown_rows([product["id"] for product in products])
     return render_template(
         "admin/inventory/index.html",
@@ -90,7 +94,10 @@ def index():
         product_groups=list_product_groups(),
         counts=product_counts(),
         filter_counts=product_filter_counts(),
-        filters={"query": query, "product_type": product_type, "visibility": visibility, "product_group_id": product_group_id},
+        branches=branches,
+        branch_scope=branch_scope,
+        branch_label=branch_label,
+        filters={"query": query, "product_type": product_type, "visibility": visibility, "product_group_id": product_group_id, "branch": selected_branch},
         tracking_label=tracking_label,
         stock_breakdown={pid: format_stock_breakdown(rows) for pid, rows in breakdown.items()},
         branch_split={pid for pid, rows in breakdown.items() if len(rows) > 1},
@@ -141,7 +148,10 @@ def export_csv():
     product_type = request.args.get("product_type", "")
     visibility = request.args.get("visibility", "")
     product_group_id = request.args.get("product_group_id", "")
-    products = list_products(query=query, product_type=product_type, visibility=visibility, product_group_id=product_group_id)
+    # Same resolver as the list, so the file matches the view exactly.
+    _selected_branch, branch_id, _label, _branches, _scope = resolve_branch_filter(request.args.get("branch", ""))
+    products = list_products(query=query, product_type=product_type, visibility=visibility,
+                             product_group_id=product_group_id, branch_id=branch_id)
     breakdown = stock_breakdown_rows([product["id"] for product in products])
     output = StringIO()
     writer = csv.writer(output)

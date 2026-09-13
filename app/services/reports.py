@@ -1,5 +1,5 @@
 from app.db import get_db
-from app.services.access import order_branch_clause
+from app.services.access import order_branch_clause, product_branch_clause
 from app.services.timezone import local_now_iso
 
 
@@ -130,7 +130,7 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
 
 # Rental stock is counted per item, not per booking line, and the client's
 # "Other Rental Products" group (ratchets, straps, the non-trailer hire extras)
-# is deliberately excluded from both trailer cards.
+# is deliberately excluded from the trailer cards.
 TRAILER_GROUPS_EXCLUDED = ("Other Rental Products",)
 
 # "New orders for the day" excludes everything that has not actually started:
@@ -150,12 +150,18 @@ def dashboard_day_metrics(day=None):
     of the dashboard; the customer count is master data and stays company-wide
     (a customer row carries no branch).
 
+    The two trailer cards are a snapshot, not a day figure: **out** is what is on
+    hire (a ``started`` order), and **in** is the rest of the yard — the active
+    rental fleet less what is currently out. "Other Rental Products" (ratchets,
+    straps) is not trailer stock and is excluded from both.
+
     Plain values only — production rows are libsql tuples, so nothing here
     hands a row object to the template.
     """
     db = get_db()
     day = day or local_now_iso(timespec="seconds")[:10]
     scope_sql, scope_params = order_branch_clause("o")
+    product_scope_sql, product_scope_params = product_branch_clause("p", include_unassigned=True)
 
     def count(sql, params):
         row = db.execute(sql, params).fetchone()
@@ -218,6 +224,22 @@ def dashboard_day_metrics(day=None):
             [*statuses, *TRAILER_GROUPS_EXCLUDED, *scope_params],
         )
 
+    # The fleet: every active rental unit the business owns, in units (a row may
+    # carry more than one), minus the non-trailer hire extras. Branch-scoped with
+    # the same clause the dashboard's product count uses, and the session scope
+    # still wins, so a depot-scoped account sees its own yard.
+    fleet = count(
+        f"""SELECT COALESCE(SUM(p.quantity), 0) c
+        FROM products p
+        LEFT JOIN product_groups pg ON pg.id = p.product_group_id
+        WHERE p.product_type = 'rental' AND p.active = 1
+          AND COALESCE(pg.name, '') <> ?{product_scope_sql}""",
+        [*TRAILER_GROUPS_EXCLUDED, *product_scope_params],
+    )
+    # On hire: a started order has the trailer out; a returned one is back in the
+    # yard, and a reserved-but-uncollected booking is still standing in it.
+    on_hire = trailer_count(("started",))
+
     return {
         "day": day,
         "orders": new_orders,
@@ -228,8 +250,13 @@ def dashboard_day_metrics(day=None):
         "eft_payments": payment_total("eft"),
         "reservations": reservations,
         "reservation_pickups": reservation_pickups,
-        "trailers_out": trailer_count(("started",)),
-        "trailers_in": trailer_count(("draft", "reserved")),
+        "trailers_out": on_hire,
+        # Never negative: bad data (more on hire than on the books) shows 0, not a
+        # negative count of trailers.
+        "trailers_in": max(0, fleet - on_hire),
+        # Both plain ints, for the tests and any future card that wants them.
+        "fleet": fleet,
+        "on_hire": on_hire,
     }
 
 

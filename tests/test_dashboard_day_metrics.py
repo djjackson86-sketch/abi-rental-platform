@@ -61,29 +61,34 @@ def login(client, name=None, password='admin123'):
 
 
 def _seed_catalogue(db):
-    """One hire group, the excluded group, and a service + sale product."""
+    """One hire group, the excluded group, and a service + sale product.
+
+    The hire group carries a realistic yard (10 units on one row) and the
+    excluded group a deliberately larger count, so the fleet assertion proves the
+    "Other Rental Products" units are not counted as trailers.
+    """
     def group(name):
         db.execute(
             "INSERT INTO product_groups (name, description, active, sort_order, created_at, updated_at)"
             " VALUES (?, '', 1, 0, ?, ?)", (name, TODAY, TODAY))
         return db.execute("SELECT id FROM product_groups WHERE name = ?", (name,)).fetchone()['id']
 
-    def product(name, product_type, group_id=None):
+    def product(name, product_type, group_id=None, quantity=1):
         db.execute(
             """INSERT INTO products (name, product_type, description, sku, active, public_visible,
             price_amount, price_unit, security_deposit, hourly_extra_rate, product_group_id, quantity,
             tracking_method, branch_id, created_at)
-            VALUES (?, ?, '', '', 1, 1, 200, 'day', 0, 0, ?, 1, 'bulk', NULL, ?)""",
-            (name, product_type, group_id, TODAY))
+            VALUES (?, ?, '', '', 1, 1, 200, 'day', 0, 0, ?, ?, 'bulk', NULL, ?)""",
+            (name, product_type, group_id, quantity, TODAY))
         return db.execute("SELECT id FROM products WHERE name = ?", (name,)).fetchone()['id']
 
     hire_group = group(HIRE_GROUP)
     other_group = group(OTHER_GROUP)
     return {
-        'hire': product('2.6m Utility Trailer - 1\u20442 ton', 'rental', hire_group),
-        'extra': product('Ratchet + Strap Rental', 'rental', other_group),
+        'hire': product('2.6m Utility Trailer - 1\u20442 ton', 'rental', hire_group, quantity=10),
+        'extra': product('Ratchet + Strap Rental', 'rental', other_group, quantity=25),
         'service': product('Damage Waiver', 'service', None),
-        'sale': product('Tow Ball', 'sale', hire_group),
+        'sale': product('Tow Ball', 'sale', hire_group, quantity=6),
     }
 
 
@@ -197,8 +202,68 @@ def test_trailer_cards_count_rental_items_and_skip_the_other_rental_group(app):
     # Products line, the draft, the reservation, the returned and the archived
     # order are all excluded.
     assert day['trailers_out'] == 6
-    # In: draft + reserved (ORD-2 hire line + ORD-3), again without the extras.
-    assert day['trailers_in'] == 2
+    # The fleet is the hire group's 10 units — not the 25 ratchet/strap units in
+    # the excluded group, and not the service or the sale item.
+    assert day['fleet'] == 10
+    assert day['on_hire'] == 6
+    # In = the rest of the yard. A draft and a reservation are still standing in
+    # it (nothing has been collected), and a returned trailer is back in it too.
+    assert day['trailers_in'] == 4
+    assert isinstance(day['fleet'], int) and isinstance(day['on_hire'], int)
+
+
+def test_trailers_in_is_the_whole_yard_less_what_is_on_hire(app):
+    """The card is a snapshot: whole fleet minus the trailers currently out."""
+    with app.app_context():
+        db = get_db()
+        products = _seed_catalogue(db)
+        order_id = _order(db, 'ORD-40', 'reserved', f'{TODAY}T09:00:00',
+                          start_at='2030-01-02T09:00', end_at='2030-01-03T09:00')
+        _item(db, order_id, products['hire'], 3)
+        db.commit()
+    day = metrics(app, user_id=1, user_role='owner')
+    # Reserved but not collected: nothing has left the yard yet.
+    assert day['trailers_out'] == 0
+    assert day['trailers_in'] == 10
+
+
+def test_trailers_in_never_goes_negative(app):
+    """More on hire than on the books shows 0, never a negative count."""
+    with app.app_context():
+        db = get_db()
+        products = _seed_catalogue(db)
+        db.execute("UPDATE products SET quantity = 1 WHERE id = ?", (products['hire'],))
+        order_id = _order(db, 'ORD-41', 'started', f'{TODAY}T09:00:00')
+        _item(db, order_id, products['hire'], 5)
+        db.commit()
+    day = metrics(app, user_id=1, user_role='owner')
+    assert day['fleet'] == 1
+    assert day['on_hire'] == 5
+    assert day['trailers_in'] == 0
+
+
+def test_the_fleet_follows_the_branch_scope(app):
+    """A depot-scoped account counts its own yard (plus unassigned stock)."""
+    with app.app_context():
+        db = get_db()
+        _seed_catalogue(db)
+        group_id = db.execute("SELECT id FROM product_groups WHERE name = ?",
+                              (HIRE_GROUP,)).fetchone()['id']
+        db.execute(
+            """INSERT INTO products (name, product_type, description, sku, active, public_visible,
+            price_amount, price_unit, security_deposit, hourly_extra_rate, product_group_id, quantity,
+            tracking_method, branch_id, created_at)
+            VALUES ('Depot Two Trailer', 'rental', '', '', 1, 1, 200, 'day', 0, 0, ?, 3, 'bulk', 2, ?)""",
+            (group_id, TODAY))
+        db.commit()
+    all_branches = metrics(app, user_id=1, user_role='owner')
+    depot_two = metrics(app, user_id=2, user_role='staff', can_view_all_branches=False,
+                        branch_id=2, branch_ids=[2])
+    depot_one = metrics(app, user_id=3, user_role='staff', can_view_all_branches=False,
+                        branch_id=1, branch_ids=[1])
+    assert all_branches['fleet'] == 13
+    assert depot_two['fleet'] == 13      # its own 3 units + the 10 unassigned
+    assert depot_one['fleet'] == 10      # never the other depot's 3 units
 
 
 def test_a_service_or_sale_line_is_never_a_trailer(app):
