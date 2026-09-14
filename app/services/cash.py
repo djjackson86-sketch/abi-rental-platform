@@ -36,17 +36,15 @@ from datetime import date
 from app.db import get_db, now
 from app.services.access import order_branch_clause, session_branch_scope_ids, session_primary_branch_id
 from app.services.branches import branch_options
-from app.services.timezone import local_now_iso
+from app.services.timezone import display_local_datetime, local_now_iso
 
 
-# The report is rendered on one PDF page with a fixed line budget; the CSV
-# export always carries every line, so the PDF states what it left out rather
-# than dropping it silently. ``_simple_pdf`` prints the first line at y=800 with
-# 18pt leading and stops once the next baseline would fall below y=60, so the
-# largest number of lines it will ever draw is 42 (last baseline y=62) — that is
-# the budget, and the day report stays inside it.
+# The report is rendered on one PDF page, laid out in cards and panels
+# (app/services/pdf_documents.py) — that layout budgets its own geometry exactly
+# instead of counting lines. The only cap left here is how many end of day note
+# lines the notes panel prints; the CSV export always carries every line, and the
+# PDF states what it left out rather than dropping it silently.
 MAX_NOTE_LINES_IN_PDF = 3
-MAX_PDF_LINES = 42
 
 
 def money(value):
@@ -563,9 +561,12 @@ def day_report_rows(report):
     if not cash['used_lines']:
         rows.append(('Cash used', 'No cash used recorded', 'R0.00'))
     # Amount-only lines: the timestamp is the only thing that tells two drop offs
-    # on the same day apart, and it is what the dashboard panel shows too.
+    # on the same day apart, and it is what the dashboard panel shows too. It is
+    # printed as the app prints every other date+time (YYYY-MM-DD  HH:MM) — the
+    # stored ISO string's "T" has no place on a printed report or a CSV a depot
+    # opens in Excel.
     for line in cash['drop_lines']:
-        stamped = line['created_at'][:16] if line['created_at'] else ''
+        stamped = display_local_datetime(line['created_at']) if line['created_at'] else ''
         item = f'Dropped at the bank {stamped}'.strip()
         rows.append(('Cash drop off (to bank)', item, f"R{line['amount']:.2f}"))
     if not cash['drop_lines']:
@@ -575,96 +576,100 @@ def day_report_rows(report):
     return rows
 
 
-def _pdf_section_budget(drop_count, used_count, remaining):
-    """How many drop off / cash used lines the one-page PDF can print.
+def day_report_pdf_cards(report, user_name='', user_role=''):
+    """The day report as the card sections the PDF draws.
 
-    The two capped sections share the page budget fairly: the bank drop off
-    lines keep at least a slot each up to half of what is left, the described
-    cash-used lines take the rest, and slack in either goes back to the other —
-    so a day with a lot of banked cash cannot blank the cash-used section (or
-    the other way round). The returned counts INCLUDE the "... and N more" line
-    whenever a section overflows, so the two together can never exceed
-    ``remaining`` and the report cannot grow past the single page.
-    """
-    if used_count <= 0:
-        drop_shown = min(drop_count, remaining)
-    else:
-        drop_shown = min(drop_count, max(1, remaining // 2))
-    used_shown = min(used_count, max(0, remaining - drop_shown))
-    drop_shown = min(drop_count, max(0, remaining - used_shown))
-    drop_truncated = drop_shown < drop_count
-    used_truncated = used_shown < used_count
-    if drop_truncated:
-        # The "and N more" line itself needs a slot.
-        drop_shown -= 1
-    if used_truncated:
-        used_shown -= 1
-    return drop_shown, drop_truncated, used_shown, used_truncated
+    ``day_report_rows`` stays the one source of truth for every figure — this
+    only regroups those rows into cards (the dashboard figures and the cash up)
+    and panels (cash used, bank drop offs, end of day notes), so the PDF and the
+    CSV export can never disagree about a number.
 
+    Each list section carries every one of its lines plus the wording of the row
+    that stands in for the lines that did not fit. The renderer knows how much of
+    the single page is actually left and fills in the count, so a busy day states
+    what it left out instead of dropping it silently.
 
-def day_report_pdf_lines(report):
-    """The report lines for the PDF, fitted to the single page it renders on.
-
-    ``_simple_pdf`` writes exactly one page, so the budget is worked out here
-    rather than discovered by silent truncation: the cash-used and bank drop off
-    lines are capped first and the number left out is stated on the page, while
-    the CSV export always carries every line. The notes are free text and are
-    printed as their own lines, so a newline can never land inside a PDF string
-    literal.
+    ``user_name``/``user_role`` come from the signed-in session and print in the
+    header as "Prepared by: <name>" — the client asked for the report to say who
+    ran the day.
     """
     cash = report['cash']
     grouped = {}
     for section, item, value in day_report_rows(report):
         grouped.setdefault(section, []).append((item, value))
-    dashboard_lines = [f'{item}: {value}' for item, value in grouped.get('Dashboard', [])]
-    cash_lines = [f'{item}: {value}' for item, value in grouped.get('Cash up', [])]
-    used_entries = [
-        f'{item}: {value}' for item, value in grouped.get('Cash used', [])
-        if item != 'No cash used recorded'
-    ]
-    drop_entries = [
-        f'{item}: {value}' for item, value in grouped.get('Cash drop off (to bank)', [])
-        if item != 'No cash dropped at the bank'
-    ]
+
+    def cards_for(section_name):
+        return [{'label': item, 'value': value} for item, value in grouped.get(section_name, [])]
+
+    dashboard_cards = cards_for('Dashboard')
+    cash_cards = cards_for('Cash up')
+    # The variance is the figure a manager scans for, so it is the one card that
+    # is allowed to change colour (green over/balanced, red short).
+    tone = _variance_tone(cash)
+    if tone:
+        for card in cash_cards:
+            if card['label'].startswith('Variance'):
+                card['tone'] = tone
+
     notes_value = grouped.get('End of day notes', [('Notes', '')])[0][1]
-    note_lines = [line.strip() for line in str(notes_value).splitlines()] or ['']
+    note_rows = [{'label': line} for line in ([line.strip() for line in str(notes_value).splitlines()] or [''])]
 
-    # Everything that is NOT a capped entry line, counted exactly: the six header
-    # lines (company, depot, business day, generated, blank, DASHBOARD), the
-    # dashboard figures, the cash-up figures, and a blank line + a title for each
-    # of the four sections (CASH UP, CASH USED, CASH DROP OFF, END OF DAY NOTES).
-    # Counting this exactly is what stops a full page silently dropping a line.
-    fixed = 6 + len(dashboard_lines) + len(cash_lines) + (4 * 2)
-    budget = max(0, MAX_PDF_LINES - fixed)
-    notes_shown = min(len(note_lines), MAX_NOTE_LINES_IN_PDF, max(1, budget - 1))
-    # The two capped sections share what the notes left, in the order the
-    # sections print: a day with many drop offs cannot squeeze out the notes.
-    drop_shown, drop_truncated, used_shown, used_truncated = _pdf_section_budget(
-        len(drop_entries), len(used_entries), max(0, budget - notes_shown))
+    prepared_by = str(user_name or '').strip()
+    role_label = {'owner': 'Main profile', 'staff': 'Staff'}.get(str(user_role or '').strip())
+    if prepared_by and role_label:
+        prepared_by = f'{prepared_by} ({role_label})'
 
-    header = [
-        f"{report['company']} - daily dashboard report".strip(' -'),
-        f"Depot: {cash['branch_name']}",
-        f"Business day: {cash['day']}",
-        f"Generated: {report['generated_at']}",
-        '',
-        'DASHBOARD',
-    ]
-    lines = header + dashboard_lines + ['', 'CASH UP'] + cash_lines + ['', 'CASH USED']
-    lines.extend(used_entries[:used_shown])
-    if used_truncated:
-        lines.append(f'... and {len(used_entries) - used_shown} more cash used line(s) - see the CSV export')
-    lines.extend(['', 'CASH DROP OFF (TO BANK)'])
-    lines.extend(drop_entries[:drop_shown])
-    if drop_truncated:
-        lines.append(f'... and {len(drop_entries) - drop_shown} more bank drop off line(s) - see the CSV export')
-    lines.extend(['', 'END OF DAY NOTES'])
-    if len(note_lines) > notes_shown:
-        lines.extend(note_lines[:max(0, notes_shown - 1)])
-        lines.append('... more notes in the CSV export')
-    else:
-        lines.extend(note_lines[:notes_shown])
-    return lines[:MAX_PDF_LINES]
+    return {
+        'meta': {
+            'company': report['company'],
+            'depot': cash['branch_name'],
+            'day': cash['day'],
+            'generated_at': report['generated_at'],
+            'prepared_by': prepared_by,
+        },
+        # Section titles match the CSV export's own section names on purpose: the
+        # two downloads are the same report, so they should read the same.
+        'sections': [
+            {'kind': 'cards', 'title': 'Dashboard', 'cards': dashboard_cards},
+            {'kind': 'cards', 'title': 'Cash up', 'cards': cash_cards},
+            {
+                'kind': 'list',
+                'title': 'Cash used',
+                'rows': _pdf_list_rows(grouped.get('Cash used', []), 'No cash used recorded'),
+                'overflow': '... and {remaining} more cash used line(s) - see the CSV export',
+            },
+            {
+                'kind': 'list',
+                'title': 'Cash drop off (to bank)',
+                'rows': _pdf_list_rows(grouped.get('Cash drop off (to bank)', []), 'No cash dropped at the bank'),
+                'overflow': '... and {remaining} more bank drop off line(s) - see the CSV export',
+            },
+            {
+                'kind': 'list',
+                'title': 'End of day notes',
+                'rows': note_rows,
+                'cap': MAX_NOTE_LINES_IN_PDF,
+                'overflow': '... more notes in the CSV export',
+            },
+        ],
+    }
+
+
+def _pdf_list_rows(rows, empty_label):
+    """A list section's lines, or the one row that says nothing was recorded."""
+    entries = [{'label': item, 'value': value} for item, value in rows if item != empty_label]
+    return entries or [{'label': empty_label, 'value': ''}]
+
+
+def _variance_tone(cash):
+    """``short`` / ``over`` / ``balanced`` for the variance card, '' if open."""
+    if not cash['cashed_up']:
+        return ''
+    if cash['variance'] < -0.005:
+        return 'short'
+    if cash['variance'] > 0.005:
+        return 'over'
+    return 'balanced'
 
 
 def day_report_csv_rows(report):

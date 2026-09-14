@@ -181,11 +181,19 @@ def _report():
 @bp.get("/report.pdf")
 @login_required
 def report_pdf():
-    """Download the day's dashboard report (figures + cash up + notes)."""
+    """Download the day's dashboard report (cards + cash up + notes).
+
+    The figures come from the same ``day_report_rows`` the CSV export reads; the
+    layout is a branded one-pager (logo, cards, "Prepared by: <user>").
+    """
     report = _report()
     day = report["cash"]["day"]
     return Response(
-        report_pdf_bytes(cash.day_report_pdf_lines(report)),
+        report_pdf_bytes(cash.day_report_pdf_cards(
+            report,
+            user_name=session.get("user_name") or "",
+            user_role=session.get("user_role") or "",
+        )),
         mimetype="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=dashboard-report-{day}.pdf"},
     )

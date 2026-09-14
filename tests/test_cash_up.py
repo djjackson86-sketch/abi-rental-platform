@@ -22,12 +22,51 @@ from flask import session as flask_session
 
 from app import create_app
 from app.db import get_db
-from app.services import cash
+from app.services import cash, pdf_documents
 from app.services.access import create_additional_user
 
 TODAY = cash.today_iso()
 YESTERDAY = '2026-09-12'
 FUTURE = '2030-01-01'
+
+# Every text run the card report actually draws: (font, size, x, y, text).
+# Parentheses inside a string are escaped in the PDF literal, so the pattern
+# accepts an escaped pair rather than stopping at the first ")".
+_TEXT_RUN = re.compile(r'/(F\d) ([\d.]+) Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \(((?:[^()\\]|\\.)*)\) Tj')
+
+
+def _unescape(value):
+    return value.replace('\\(', '(').replace('\\)', ')').replace('\\\\', '\\')
+
+
+def _runs(pdf_bytes):
+    """(x, y, size, text) for every run drawn on the page, in draw order."""
+    return [(float(x), float(y), float(size), _unescape(text))
+            for _font, size, x, y, text in _TEXT_RUN.findall(pdf_bytes.decode('latin-1'))]
+
+
+def _drawn_text(pdf_bytes):
+    """The text actually drawn, so a card's label and value are read separately."""
+    return [run[3] for run in _runs(pdf_bytes)]
+
+
+def _card_values(pdf_bytes):
+    """{label: value} as the cards draw them — a card's value sits 15pt below it.
+
+    Positional on purpose: it reads what the renderer put on the page instead of
+    assuming a label and its figure were concatenated into one string.
+    """
+    runs = _runs(pdf_bytes)
+    values = {}
+    for index, (x, y, _size, text) in enumerate(runs[:-1]):
+        next_x, next_y, _next_size, next_text = runs[index + 1]
+        if abs(next_x - x) < 0.01 and abs((y - next_y) - 15) < 0.01:
+            values[text] = next_text
+    return values
+
+
+def _baselines(pdf_bytes):
+    return [y for _x, y, _size, _text in _runs(pdf_bytes)]
 
 
 @pytest.fixture()
@@ -333,10 +372,12 @@ def test_a_bank_drop_reduces_the_cash_expected_in_the_drawer(client, app):
     assert 'Total dropped at the bank,R200.00' in csv_body
     assert 'Expected cash in the drawer,R300.00' in csv_body
     assert 'Cash drop off (to bank),Dropped at the bank' in csv_body
-    pdf_text = client.get('/cash-up/report.pdf').data.decode('latin-1')
-    assert 'CASH DROP OFF \\(TO BANK\\)' in pdf_text
-    assert 'Expected cash in the drawer: R300.00' in pdf_text
-    assert 'Total dropped at the bank: R200.00' in pdf_text
+    blob = client.get('/cash-up/report.pdf').data
+    assert 'CASH DROP OFF \\(TO BANK\\)' in blob.decode('latin-1')
+    # The cards draw the label and its figure separately, so read them as drawn.
+    cards = _card_values(blob)
+    assert cards['Expected cash in the drawer'] == 'R300.00'
+    assert cards['Total dropped at the bank'] == 'R200.00'
 
 
 def test_a_bank_drop_needs_a_positive_amount(client, app):
@@ -400,25 +441,25 @@ def test_a_depot_can_only_bank_its_own_drawer(client, app):
 
 
 def test_the_pdf_stays_on_one_page_with_bank_drop_offs_too(client, app):
-    """The new section must not push the report off its single page."""
+    """A dozen drop offs still fit the one-page report without losing a line."""
     login(client)
     for index in range(12):
         client.post('/cash-up/bank', data={'day': '', 'amount': '10'}, follow_redirects=True)
-    text = client.get('/cash-up/report.pdf').data.decode('latin-1')
+    blob = client.get('/cash-up/report.pdf').data
+    text = blob.decode('latin-1')
     assert 'CASH DROP OFF \\(TO BANK\\)' in text
-    assert 'Dropped at the bank' in text
-    assert 'see the CSV export' in text, 'the PDF states what it left out'
-    with app.app_context():
-        lines = cash.day_report_pdf_lines(cash.day_report(day=TODAY, branch_id=1))
-    assert len(lines) <= cash.MAX_PDF_LINES
-    assert cash.MAX_PDF_LINES <= 42, "42 is the most _simple_pdf will ever draw on one page"
-    # Every drawn baseline stays inside the printable band (the last is y=62).
-    baselines = [float(match.group(1)) for match in
-                 re.finditer(r'/F1 12 Tf 1 0 0 1 50\.00 ([\d.]+) Tm', text)]
+    assert text.count('/Type /Page ') == 1, 'the report renders exactly one page'
+    # The card layout has room for far more than the old 42-line page: every one
+    # of the twelve fits, so nothing needs to be declared as left out.
+    assert text.count('Dropped at the bank') == 12, text.count('Dropped at the bank')
+    assert 'see the CSV export' not in text
+    # Nothing is drawn outside the printable band (the page footer is the only
+    # run below the content floor, and it is a fixed part of the layout).
+    baselines = _baselines(blob)
     assert baselines, 'the report must draw its lines'
-    assert len(baselines) <= cash.MAX_PDF_LINES
-    assert min(baselines) >= 60, 'no line may be drawn below the printable band'
-    # The CSV export is uncapped, so all twelve drop offs survive.
+    assert min(baselines) >= pdf_documents.REPORT_FOOTER_Y
+    assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
+    # The CSV export is uncapped, so all twelve drop offs survive there too.
     csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
     assert csv_body.count('Cash drop off (to bank),Dropped at the bank') == 12
 
@@ -432,14 +473,19 @@ def test_a_busy_day_keeps_both_capped_sections_on_the_page(client, app):
         client.post('/cash-up/bank', data={'day': '', 'amount': '10'}, follow_redirects=True)
     client.post('/cash-up/notes', data={'day': '', 'notes': 'One.\nTwo.\nThree.'},
                 follow_redirects=True)
-    text = client.get('/cash-up/report.pdf').data.decode('latin-1')
-    assert 'Line 3: R10.00' in text and 'Line 4: R10.00' not in text
-    assert text.count('Dropped at the bank') == 3, text.count('Dropped at the bank')
+    blob = client.get('/cash-up/report.pdf').data
+    text = blob.decode('latin-1')
+    drawn = _drawn_text(blob)
+    # 24 lines cannot all fit: both capped sections share the page evenly and
+    # each states how many of its own lines went to the CSV instead.
+    assert 'Line 1' in drawn and 'Line 6' in drawn and 'Line 7' not in drawn
+    assert text.count('Dropped at the bank') == 6, text.count('Dropped at the bank')
     assert 'more cash used line' in text and 'more bank drop off line' in text
-    assert 'One.' in text and 'Three.' in text, 'the notes keep their slot'
-    with app.app_context():
-        lines = cash.day_report_pdf_lines(cash.day_report(day=TODAY, branch_id=1))
-    assert len(lines) <= cash.MAX_PDF_LINES
+    # The end of day notes keep their slot in the same round-robin share.
+    assert 'One.' in drawn and 'Three.' in drawn
+    assert text.count('/Type /Page ') == 1
+    baselines = _baselines(blob)
+    assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
     # The CSV export still carries every one of the 24 lines.
     csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
     assert csv_body.count('Cash drop off (to bank),Dropped at the bank') == 12
@@ -493,29 +539,63 @@ def test_the_pdf_report_renders_the_day_figures(client, app):
     assert res.data.startswith(b'%PDF-')
     assert res.data.rstrip().endswith(b'%%EOF')
     assert f'dashboard-report-{TODAY}.pdf' in res.headers['Content-Disposition']
-    text = res.data.decode('latin-1')
-    for expected in ['daily dashboard report', 'DASHBOARD', 'Total cash payments: R500.00',
-                     'CASH UP', 'Expected cash in the drawer: R349.50',
-                     'CASH USED', 'Diesel: R150.50', 'END OF DAY NOTES', 'Drawer counted twice.']:
-        assert expected in text, expected
+    drawn = _drawn_text(res.data)
+    for expected in ['Daily dashboard report', 'DASHBOARD', 'CASH UP', 'CASH USED',
+                     'CASH DROP OFF (TO BANK)', 'END OF DAY NOTES', 'Diesel', 'R150.50',
+                     'Drawer counted twice.']:
+        assert expected in drawn, expected
+    cards = _card_values(res.data)
+    assert cards['Total cash payments'] == 'R500.00'
+    assert cards['Expected cash in the drawer'] == 'R349.50'
+    assert cards['Closing cash (counted)'] == 'R400.00'
     # Em dashes and other non-ASCII characters from the notes must not arrive as "?".
-    assert '?' not in text.split('END OF DAY NOTES')[1][:200]
+    notes_index = drawn.index('END OF DAY NOTES')
+    assert '?' not in ''.join(drawn[notes_index:])
 
 
 def test_the_pdf_stays_on_one_page_and_says_what_it_left_out(client, app):
     login(client)
-    for index in range(12):
+    for index in range(16):
         client.post('/cash-up/used', data={'day': '', 'amount': '10', 'description': f'Line {index + 1}'},
                     follow_redirects=True)
-    text = client.get('/cash-up/report.pdf').data.decode('latin-1')
-    assert 'Line 9: R10.00' in text
-    assert 'Line 10: R10.00' not in text
+    blob = client.get('/cash-up/report.pdf').data
+    drawn = _drawn_text(blob)
+    assert 'Line 14' in drawn and 'Line 15' not in drawn
     # Parentheses are escaped in the PDF stream, so match the plain wording.
-    assert '... and 3 more cash used line' in text
-    assert 'see the CSV export' in text
+    assert '... and 2 more cash used line' in blob.decode('latin-1')
+    assert 'see the CSV export' in blob.decode('latin-1')
+    assert blob.decode('latin-1').count('/Type /Page ') == 1
     # The CSV export is uncapped, so nothing is actually lost.
     csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
-    assert 'Line 12,R10.00' in csv_body
+    assert 'Line 16,R10.00' in csv_body
+
+
+def test_the_pdf_report_is_branded_and_names_the_user_who_ran_it(client, app):
+    """Ticket ABI-341952956: the day report carries the logo, cards and the user."""
+    login(client)
+    client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
+    blob = client.get('/cash-up/report.pdf').data
+    text = blob.decode('latin-1')
+    # The SANO wordmark is embedded as a JPEG XObject and actually drawn.
+    assert '/Subtype /Image' in text and '/Filter /DCTDecode' in text
+    assert '/XObject << /Im1 7 0 R >>' in text
+    assert 'cm /Im1 Do Q' in text
+    drawn = _drawn_text(blob)
+    assert 'Sano Trailers' in drawn
+    assert 'Daily dashboard report' in drawn
+    assert f'Business day: {TODAY}' in drawn
+    assert 'Prepared by: Head office admin (Main profile)' in drawn
+    # The figures are cards with their own panel, not a plain list of lines.
+    assert text.count(' re B Q') >= 12, 'the report draws card panels'
+    cards = _card_values(blob)
+    assert cards['New orders for the day'] == '0'
+    assert cards['Closing cash (counted)'] == 'R100.00'
+    # A depot user's own name is what prints, not a fixed label.
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    text = client.get('/cash-up/report.pdf').data.decode('latin-1')
+    assert 'Prepared by: Depot Two Clerk \\(Staff\\)' in text
 
 
 def test_the_cash_panel_renders_with_libsql_shaped_rows(client, app, monkeypatch):
