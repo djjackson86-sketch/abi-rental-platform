@@ -6,9 +6,9 @@ from app.routes.auth import login_required
 from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, scheduled_events
-from app.services.reports import customer_summary, dashboard_day_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
+from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
-from app.services.access import order_branch_clause, product_branch_clause, resolve_branch_filter, session_branch_scope_ids
+from app.services.access import resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 from app.services.cash import day_summary as cash_day_summary, panel_state as cash_panel_state
 
@@ -44,18 +44,14 @@ def index():
 @bp.route("/dashboard")
 @login_required
 def dashboard():
-    db = get_db()
     # The dashboard's own branch filter, resolved by the shared resolver so the
     # session scope always wins and ?branch= can only ever NARROW the view.
     selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
-    order_scope_sql, order_scope_params = order_branch_clause("o", branch_id=branch_id)
-    product_scope_sql, product_scope_params = product_branch_clause("p", include_unassigned=True, branch_id=branch_id)
-    metrics = {
-        "orders": db.execute(f"SELECT COUNT(*) c FROM orders o WHERE 1=1{order_scope_sql}", order_scope_params).fetchone()[ "c"],
-        "products": db.execute(f"SELECT COUNT(*) c FROM products p WHERE 1=1{product_scope_sql}", product_scope_params).fetchone()[ "c"],
-        "customers": db.execute("SELECT COUNT(*) c FROM customers").fetchone()[ "c"],
-        "revenue": db.execute(f"SELECT COALESCE(SUM(o.total),0) s FROM orders o WHERE 1=1{order_scope_sql}", order_scope_params).fetchone()[ "s"],
-    }
+    # Quick ranges for the four headline cards, defaulting to This month.
+    range_presets, range_key, range_start, range_end, range_label = _dashboard_range()
+    metrics = dashboard_period_metrics(
+        start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
+    )
     # Cash up is per depot per day. The depot is chosen from the depots this
     # session may already reach (?cash_branch= can only narrow), and for a
     # depot-restricted account the session pins it.
@@ -71,7 +67,9 @@ def dashboard():
         branches=branches,
         branch_label=branch_label,
         branch_scope=branch_scope,
-        filters={"branch": selected_branch},
+        range_presets=range_presets,
+        range_label=range_label,
+        filters={"branch": selected_branch, "range": range_key},
     )
 
 @bp.route("/coupons", methods=["GET", "POST"])
@@ -186,6 +184,46 @@ def _report_presets(today=None):
         {"label": "Last month", "start": last_month_end.replace(day=1).isoformat(), "end": last_month_end.isoformat()},
         {"label": "Year to date", "start": date(today.year, 1, 1).isoformat(), "end": today.isoformat()},
     ]
+
+
+#: The dashboard's four headline cards open on the client's requested default.
+DASHBOARD_RANGE_DEFAULT = "this_month"
+
+
+def _range_presets():
+    """The reports quick ranges with slug keys, for the dashboard KPI pills."""
+    presets = []
+    for preset in _report_presets():
+        presets.append({
+            "key": preset["label"].strip().lower().replace(" ", "_"),
+            "label": preset["label"],
+            "start": preset["start"],
+            "end": preset["end"],
+        })
+    return presets
+
+
+def _dashboard_range():
+    """Resolve the quick range that windows the four headline dashboard cards.
+
+    ``?range=`` is matched against the reports presets (``this_month``,
+    ``all_time``, ...). Absent *or* unrecognised falls back to the default —
+    *This month*, per the ticket — so a junk value can never silently widen the
+    figures back to all time. Explicit ``start_date``/``end_date`` are honoured
+    for a deep link and leave no pill active.
+
+    Returns ``(presets, key, start_date, end_date, label)``.
+    """
+    presets = _range_presets()
+    default = next((p for p in presets if p["key"] == DASHBOARD_RANGE_DEFAULT), presets[0])
+    requested = (request.args.get("range") or "").strip()
+    chosen = next((p for p in presets if p["key"] == requested), None)
+    start_date = (request.args.get("start_date") or "").strip()
+    end_date = (request.args.get("end_date") or "").strip()
+    if chosen is None and (start_date or end_date):
+        return presets, "", start_date, end_date, _period_label(start_date, end_date)
+    chosen = chosen or default
+    return presets, chosen["key"], chosen["start"], chosen["end"], chosen["label"]
 
 
 @bp.route("/reports")

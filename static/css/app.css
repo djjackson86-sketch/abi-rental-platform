@@ -323,7 +323,6 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
    fallback behave exactly as before. ------------------------------------ */
 .dashboard-hero{display:flex;align-items:center;justify-content:space-between;gap:22px;flex-wrap:wrap;margin:26px 0 26px;padding:22px 24px;border:1px solid var(--line-soft);border-radius:var(--radius-lg);background:linear-gradient(135deg,#fff,#eef5ff);box-shadow:var(--shadow-sm)}
 .dashboard-hero-brand{display:flex;align-items:center;gap:20px;min-width:0}
-.dashboard-hero-logo{height:62px;width:auto;max-width:100%;flex:0 0 auto}
 .dashboard-hero-copy{min-width:0}
 .dashboard-hero-copy .eyebrow{margin:0 0 4px!important}
 .dashboard-hero-copy h1{margin:0;font-size:27px;line-height:1.12;letter-spacing:-.04em;font-weight:760}
@@ -340,5 +339,15 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .dashboard-card-section{margin:0 0 26px}
 .dashboard-card-section .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 0 10px}
 .dashboard-card-section .section-heading{margin:0}
-@media(max-width:860px){.dashboard-hero{margin:20px 0;padding:18px}.dashboard-hero-brand{gap:14px}.dashboard-hero-logo{height:48px}.dashboard-hero-copy h1{font-size:22px}.dashboard-hero-side{gap:14px}}
+@media(max-width:860px){.dashboard-hero{margin:20px 0;padding:18px}.dashboard-hero-brand{gap:14px}.dashboard-hero-copy h1{font-size:22px}.dashboard-hero-side{gap:14px}}
 @media(max-width:620px){.dashboard-hero-side,.dashboard-hero-actions{width:100%}.dashboard-hero-actions .btn{width:auto}.dashboard-branch-filter{width:100%}.dashboard-branch-filter select,.dashboard-branch-filter .filter-fixed{width:100%;max-width:none}}
+
+/* --- Dashboard quick ranges for the four headline cards -------------------
+   Reuses the reports .report-presets pills, laid across the page instead of
+   the rail's two-column grid: auto-fit keeps two pills per row on a phone
+   without ever scrolling sideways. --------------------------------------- */
+.dashboard-ranges{margin:0 0 12px}
+.dashboard-ranges .filter-group-head{display:flex;align-items:baseline;justify-content:flex-start;gap:10px;flex-wrap:wrap;margin:0 0 9px}
+.dashboard-ranges .filter-group-head strong{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.dashboard-ranges-note{font-size:12.5px;font-weight:650;color:var(--muted-2)}
+.dashboard-ranges .report-presets{grid-template-columns:repeat(auto-fit,minmax(118px,1fr))}

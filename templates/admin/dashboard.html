@@ -3,7 +3,6 @@
 {% block admin_body %}
 <header class="dashboard-hero">
   <div class="dashboard-hero-brand">
-    <img class="dashboard-hero-logo" src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers">
     <div class="dashboard-hero-copy">
       <p class="eyebrow">Dashboard</p>
       <h1>Welcome back, {{ current_user_name or 'there' }}</h1>
@@ -12,6 +11,7 @@
   </div>
   <div class="dashboard-hero-side">
     <form class="dashboard-branch-filter" id="dashboard-branch-filter" method="get" action="{{ url_for('admin.dashboard') }}">
+      {% if current_user_is_main and filters.range %}<input type="hidden" name="range" value="{{ filters.range }}">{% endif %}
       <div class="filter-group">
         <div class="filter-group-head"><strong>Branch</strong></div>
         {% if branch_scope %}
@@ -23,7 +23,7 @@
         </select>
         {% endif %}
       </div>
-      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('admin.dashboard') }}">Clear branch</a>{% endif %}
+      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('admin.dashboard', range=filters.range or None) }}">Clear branch</a>{% endif %}
     </form>
     <div class="dashboard-hero-actions">
       {% if user_can('new_order') %}<a class="btn primary" href="{{ url_for('orders.new') }}">Create order</a>{% endif %}
@@ -33,11 +33,17 @@
 </header>
 
 {% if current_user_is_main %}
+<div class="dashboard-ranges">
+  <div class="filter-group-head"><strong>Quick ranges</strong><span class="dashboard-ranges-note">applies to the four cards below</span></div>
+  <div class="report-presets">
+    {% for preset in range_presets %}<a class="report-preset{{ ' is-active' if filters.range == preset.key }}" href="{{ url_for('admin.dashboard', branch=filters.branch or None, range=preset.key) }}">{{ preset.label }}</a>{% endfor %}
+  </div>
+</div>
 <section class="metrics dashboard-metrics">
-  <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Orders</span></div>
-  <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Products</span></div>
-  <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Customers</span></div>
-  <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Revenue</span></div>
+  <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Created · {{ range_label }}</span></div>
+  <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Added · {{ range_label }}</span></div>
+  <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Added · {{ range_label }}</span></div>
+  <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Booked · {{ range_label }}</span></div>
 </section>
 {% endif %}
 

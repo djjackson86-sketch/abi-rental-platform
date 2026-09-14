@@ -128,6 +128,61 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
     }
 
 
+def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
+    """The four headline dashboard cards, restricted to a period (and branch).
+
+    Definitions are the ones the dashboard has always used, only windowed:
+
+    * ``orders``   — orders **created** in the period (``orders.created_at``)
+    * ``revenue``  — the sum of those orders' totals
+    * ``products`` — catalogue rows **added** in the period (``products.created_at``);
+      like the pre-ticket card this counts every row, archived included
+    * ``customers``— customer records **added** in the period (``customers.created_at``)
+
+    With ``start_date``/``end_date`` of ``None`` the window is off and the four
+    numbers are byte-for-byte the all-time figures the page showed before the
+    quick ranges existed, so the "All time" pill is a true baseline.
+
+    Rows come back as plain ints/float — production returns libsql tuple rows,
+    which is why nothing here builds a dict from a raw row without ``row_dict``.
+    """
+    db = get_db()
+
+    order_sql = "SELECT COUNT(*) AS count, COALESCE(SUM(o.total), 0) AS revenue FROM orders o WHERE 1=1"
+    order_params = []
+    window_sql, window_params = _window("o.created_at", start_date, end_date)
+    order_sql += window_sql
+    order_params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    order_sql += scope_sql
+    order_params.extend(scope_params)
+    orders = row_dict(db.execute(order_sql, order_params).fetchone())
+
+    product_sql = "SELECT COUNT(*) AS count FROM products p WHERE 1=1"
+    product_params = []
+    window_sql, window_params = _window("p.created_at", start_date, end_date)
+    product_sql += window_sql
+    product_params.extend(window_params)
+    scope_sql, scope_params = product_branch_clause("p", include_unassigned=True, branch_id=branch_id)
+    product_sql += scope_sql
+    product_params.extend(scope_params)
+    products = row_dict(db.execute(product_sql, product_params).fetchone())
+
+    customer_sql = "SELECT COUNT(*) AS count FROM customers WHERE 1=1"
+    customer_params = []
+    window_sql, window_params = _window("created_at", start_date, end_date)
+    customer_sql += window_sql
+    customer_params.extend(window_params)
+    customers = row_dict(db.execute(customer_sql, customer_params).fetchone())
+
+    return {
+        "orders": int(orders.get("count") or 0),
+        "revenue": money(orders.get("revenue")),
+        "products": int(products.get("count") or 0),
+        "customers": int(customers.get("count") or 0),
+    }
+
+
 # Rental stock is counted per item, not per booking line, and the client's
 # "Other Rental Products" group (ratchets, straps, the non-trailer hire extras)
 # is deliberately excluded from the trailer cards.

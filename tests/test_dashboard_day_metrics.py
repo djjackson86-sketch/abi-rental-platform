@@ -343,6 +343,10 @@ def test_restricted_staff_see_the_same_day_cards(client, app):
     assert b'Total card payments' in page
     assert b'Total no. of trailers out' in page
     assert b'Total orders' not in page  # the totals row stays main-profile only
+    # The quick ranges belong to that same main-profile row.
+    assert b'Quick ranges' not in page
+    assert b'report-preset' not in page
+    assert b'name="range"' not in page
 
 
 # --- the dashboard's own branch filter + the branded greeting ---------------
@@ -527,7 +531,214 @@ def test_the_dashboard_greets_the_signed_in_user_with_the_branded_hero(client, a
     assert f'Welcome back, {name}' in page
     assert '· all branches —' in page, 'the hero note names the scope of the figures'
     assert 'class="dashboard-hero"' in page
-    assert 'sano-trailers-logo-trimmed.png' in page, 'the client logo heads the dashboard'
+    # The client asked for their logo OFF the dashboard hero (ticket
+    # ABI-341952957). The sidebar wordmark is the SAME file, so the old
+    # filename assertion passed even when the hero image was still there —
+    # assert on the hero class itself.
+    assert 'dashboard-hero-logo' not in page, 'the logo came off the dashboard hero'
+    assert 'class="logo"' in page and 'sano-trailers-logo-trimmed.png' in page, \
+        'the sidebar wordmark stays'
     # The day cards and the totals row are still the same cards.
     assert 'Total no. of trailers out' in page
     assert 'Total orders' in page
+
+
+# --- quick ranges on the four headline cards (ticket ABI-341952957) ---------
+# The client asked for the reports page's quick ranges on the main profile's
+# four KPI cards, opening on This month, with their logo removed from the
+# dashboard (it must stay on the PDF documents, which this file never touches).
+
+def _ranged_fixtures(app):
+    """Orders/products/customers inside and outside the CURRENT month.
+
+    The pills resolve against the LIVE business day, so the fixed ``TODAY``
+    fixture cannot be used for a range assertion — it is "last month" as soon
+    as the suite runs in a later month. Returns ``(today, first_of_month, old)``.
+    """
+    today = local_now_iso()[:10]
+    first = today[:8] + '01'
+    old = '2021-03-04'
+    with app.app_context():
+        db = get_db()
+        for number, created, total, branch in (
+            ('ORD-R1', f'{today}T09:00:00', 100.0, 1),
+            ('ORD-R2', f'{first}T09:00:00', 250.0, 1),
+            ('ORD-R3', f'{old}T09:00:00', 5.0, 1),
+            ('ORD-R4', f'{today}T10:00:00', 50.0, 2),
+        ):
+            db.execute(
+                """INSERT INTO orders (order_number, booking_type, collect_branch_id, return_branch_id,
+                status, payment_status, subtotal, tax_total, deposit_total, total, due_total, notes,
+                created_at) VALUES (?, 'return', ?, ?, 'started', 'paid', 0, 0, 0, ?, 0, '', ?)""",
+                (number, branch, branch, total, created))
+        for name, created in (('Range Today A', f'{today}T08:00:00'),
+                              ('Range Today B', f'{today}T08:30:00'),
+                              ('Range Old', f'{old}T08:00:00')):
+            db.execute("INSERT INTO products (name, product_type, created_at) VALUES (?, 'sale', ?)",
+                       (name, created))
+        for name, created in (('Range Customer Today', f'{today}T08:00:00'),
+                              ('Range Customer Old', f'{old}T08:00:00')):
+            db.execute("INSERT INTO customers (name, created_at) VALUES (?, ?)", (name, created))
+        db.commit()
+    return today, first, old
+
+
+def _window_counts(app, start, end, branch_id=None):
+    """The four card numbers read straight from the fixtures.
+
+    These are the *legacy* queries (the ones the dashboard ran before the
+    ranges existed); ``start``/``end`` of ``''`` is the all-time baseline.
+    """
+    order_where, order_params = '', []
+    for column, value, operator in (('o.created_at', start, '>='), ('o.created_at', end, '<=')):
+        if value:
+            order_where += f' AND DATE({column}) {operator} ?'
+            order_params.append(value)
+    if branch_id is not None:
+        order_where += ' AND (o.collect_branch_id = ? OR o.return_branch_id = ?)'
+        order_params += [branch_id, branch_id]
+
+    product_where, product_params = '', []
+    if start:
+        product_where += ' AND DATE(p.created_at) >= ?'
+        product_params.append(start)
+    if end:
+        product_where += ' AND DATE(p.created_at) <= ?'
+        product_params.append(end)
+    if branch_id is not None:
+        product_where += ' AND p.branch_id = ?'
+        product_params.append(branch_id)
+
+    customer_where, customer_params = '', []
+    if start:
+        customer_where += ' AND DATE(created_at) >= ?'
+        customer_params.append(start)
+    if end:
+        customer_where += ' AND DATE(created_at) <= ?'
+        customer_params.append(end)
+
+    with app.app_context():
+        db = get_db()
+        row = db.execute(
+            f"SELECT COUNT(*) AS c, COALESCE(SUM(o.total), 0) AS s FROM orders o WHERE 1=1{order_where}",
+            order_params).fetchone()
+        counts = {'orders': row['c'], 'revenue': round(float(row['s'] or 0), 2)}
+        counts['products'] = db.execute(
+            f"SELECT COUNT(*) AS c FROM products p WHERE 1=1{product_where}",
+            product_params).fetchone()['c']
+        counts['customers'] = db.execute(
+            f"SELECT COUNT(*) AS c FROM customers WHERE 1=1{customer_where}",
+            customer_params).fetchone()['c']
+    return counts
+
+
+CARD_LABELS = ('Total orders', 'Catalog size', 'Customer base', 'Gross revenue')
+
+
+def card_values(page):
+    """The four headline card values, read from the rendered page."""
+    values = {}
+    for label in CARD_LABELS:
+        match = re.search(re.escape(label) + r'</small><b>(.*?)</b>', page)
+        assert match, f'the {label} card is missing'
+        values[label] = match.group(1)
+    return values
+
+
+def expected_cards(counts):
+    return {
+        'Total orders': str(counts['orders']),
+        'Catalog size': str(counts['products']),
+        'Customer base': str(counts['customers']),
+        'Gross revenue': 'R%.2f' % counts['revenue'],
+    }
+
+
+def active_pill(page):
+    """The single quick range the page marks as active."""
+    matches = re.findall(r'<a class="report-preset is-active"[^>]*>([^<]+)</a>', page)
+    assert len(matches) == 1, f'expected exactly one active pill, got {matches}'
+    return matches[0]
+
+
+def pill_href(page, label):
+    match = re.search(r'<a class="report-preset[^"]*" href="([^"]+)">' + re.escape(label) + r'</a>', page)
+    assert match, f'the {label} pill is missing'
+    return match.group(1).replace('&amp;', '&')
+
+
+def test_the_four_cards_open_on_this_month(client, app):
+    today, first, _old = _ranged_fixtures(app)
+    login(client)
+
+    page = client.get('/dashboard').get_data(as_text=True)
+    assert card_values(page) == expected_cards(_window_counts(app, first, today))
+    assert active_pill(page) == 'This month'
+    # The sub-caption names the window, so a windowed catalogue count cannot be
+    # mistaken for the whole catalogue.
+    assert 'Created · This month' in page
+    assert 'Added · This month' in page
+    assert 'Booked · This month' in page
+
+
+def test_all_time_is_the_pre_ticket_baseline(client, app):
+    today, first, _old = _ranged_fixtures(app)
+    login(client)
+
+    all_time = _window_counts(app, '', '')
+    this_month = _window_counts(app, first, today)
+    page = client.get('/dashboard?range=all_time').get_data(as_text=True)
+    assert card_values(page) == expected_cards(all_time)
+    assert active_pill(page) == 'All time'
+    assert 'Created · All time' in page
+    # The fixtures reach back beyond the month, so the two windows really differ.
+    assert all_time['orders'] > this_month['orders']
+    assert all_time['products'] > this_month['products']
+    assert all_time['customers'] > this_month['customers']
+
+
+def test_the_today_pill_narrows_to_the_day(client, app):
+    today, _first, _old = _ranged_fixtures(app)
+    login(client)
+
+    page = client.get('/dashboard?range=today').get_data(as_text=True)
+    assert card_values(page) == expected_cards(_window_counts(app, today, today))
+    assert active_pill(page) == 'Today'
+    assert 'Created · Today' in page
+
+
+def test_an_unknown_range_falls_back_to_the_default(client, app):
+    _ranged_fixtures(app)
+    login(client)
+
+    default = client.get('/dashboard').get_data(as_text=True)
+    for crafted in ('abc', '', 'THIS MONTH', '999', 'all time', 'last year', '2 OR 1=1'):
+        page = client.get('/dashboard?range=' + crafted)
+        assert page.status_code == 200, crafted
+        body = page.get_data(as_text=True)
+        assert card_values(body) == card_values(default), crafted
+        assert active_pill(body) == 'This month', crafted
+
+
+def test_the_branch_and_the_range_survive_each_other(client, app):
+    _ranged_fixtures(app)
+    login(client)
+
+    page = client.get('/dashboard?range=all_time&branch=2').get_data(as_text=True)
+    assert card_values(page) == expected_cards(_window_counts(app, '', '', branch_id=2))
+    assert active_pill(page) == 'All time'
+
+    form = filter_form(page)
+    assert form.count('name="branch"') == 1, 'a hidden duplicate would win over the picker'
+    assert form.count('name="range"') == 1, 'the picker submits the range it is showing'
+    assert 'value="all_time"' in form
+
+    # Each pill links back with the chosen branch intact.
+    today_pill = pill_href(page, 'Today')
+    assert 'range=today' in today_pill and 'branch=2' in today_pill
+    month_pill = pill_href(page, 'This month')
+    assert 'range=this_month' in month_pill and 'branch=2' in month_pill
+    # ...and clearing the branch keeps the range.
+    clear_href = re.search(r'<a class="filter-clear" href="([^"]+)"', page)
+    assert clear_href, 'the Clear branch link is missing'
+    assert 'range=all_time' in clear_href.group(1).replace('&amp;', '&')
