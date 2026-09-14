@@ -157,6 +157,27 @@ def href_of(body, text):
     return match.group(1)
 
 
+def order_id_for(app, order_number):
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT id FROM orders WHERE order_number = ?", (order_number,)
+        ).fetchone()
+        assert row, f'order {order_number} was not seeded'
+        return row['id']
+
+
+SALES_REPAIRS_DETAIL_BUTTON = (
+    '<a class="btn ghost" href="/orders?status=sales_repairs" '
+    'title="View all sales and repairs orders">Sales/Repairs</a>'
+)
+
+
+def detail_body(client, app, order_number):
+    response = client.get(f'/orders/{order_id_for(app, order_number)}')
+    assert response.status_code == 200
+    return response.get_data(as_text=True)
+
+
 # --- what the folder contains ------------------------------------------------
 
 def test_sales_repairs_view_lists_orders_without_rental_items(client, app):
@@ -238,6 +259,40 @@ def test_the_sales_repairs_button_shows_active_and_clears_back_to_all(client, ap
     assert 'Showing filtered orders' not in cleared
     assert listed_orders(cleared) == ['ORD-9008', 'ORD-9007', 'ORD-9006', 'ORD-9005',
                                       'ORD-9004', 'ORD-9003', 'ORD-9002', 'ORD-9001']
+
+
+@pytest.mark.parametrize('order_number', ['ORD-9001', 'ORD-9002', 'ORD-9003'])
+def test_sales_repairs_button_renders_on_sale_service_and_custom_order_details(client, app, order_number):
+    seed_orders(app)
+    login(client)
+
+    body = detail_body(client, app, order_number)
+
+    assert SALES_REPAIRS_DETAIL_BUTTON in body
+
+
+@pytest.mark.parametrize('order_number', ['ORD-9004', 'ORD-9005', 'ORD-9006', 'ORD-9007', 'ORD-9008'])
+def test_sales_repairs_button_does_not_render_on_rental_mixed_or_empty_order_details(client, app, order_number):
+    seed_orders(app)
+    login(client)
+
+    body = detail_body(client, app, order_number)
+
+    assert SALES_REPAIRS_DETAIL_BUTTON not in body
+
+
+def test_branch_limited_staff_order_detail_guard_still_blocks_other_depots_sales_repairs(client, app):
+    seed_orders(app)
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+
+    own_response = client.get(f'/orders/{order_id_for(app, "ORD-9002")}')
+    other_depot_response = client.get(f'/orders/{order_id_for(app, "ORD-9001")}')
+
+    assert own_response.status_code == 200
+    assert SALES_REPAIRS_DETAIL_BUTTON in own_response.get_data(as_text=True)
+    assert other_depot_response.status_code == 404
 
 
 # --- the branch rules still hold --------------------------------------------

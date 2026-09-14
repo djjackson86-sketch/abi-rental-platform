@@ -350,6 +350,8 @@ def detail(order_id):
         order=order,
         items=items,
         has_rental_items=has_rental_items,
+        is_sales_repairs_order=bool(items) and not has_rental_items,
+        sales_repairs_label=SALES_REPAIRS_LABEL,
         actions=status_actions(order["status"]),
         documents=documents,
         has_invoice=has_invoice,

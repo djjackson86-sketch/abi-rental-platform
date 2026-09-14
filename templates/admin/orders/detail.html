@@ -8,6 +8,7 @@
     <p>{{ order.customer_name or 'No customer' }} · {{ order.status|title }}</p>
   </div>
   <div class="header-actions">
+    {% if is_sales_repairs_order %}<a class="btn ghost" href="{{ url_for('orders.index', status='sales_repairs') }}" title="View all sales and repairs orders">{{ sales_repairs_label }}</a>{% endif %}
     <a class="btn ghost" href="{{ url_for('orders.index') }}">Back</a>
     {% if order.status not in ['canceled', 'cancelled', 'archived'] %}<a class="btn primary" href="{{ url_for('orders.edit', order_id=order.id) }}">Edit order</a>{% endif %}
     {% for action, label, style in actions %}
