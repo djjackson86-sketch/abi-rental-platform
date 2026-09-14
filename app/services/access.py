@@ -816,6 +816,30 @@ def product_branch_clause(alias="p", include_unassigned=True, branch_id=None):
     return f" AND {prefix}branch_id IN ({marks})", list(targets)
 
 
+def customer_branch_clause(alias="c", branch_id=None):
+    """SQL restriction for a customers query, by the branch that created them.
+
+    Deliberately NO unassigned ride-along (unlike stock): a depot's "customers
+    added by this branch" figure must not be inflated by head-office rows, and
+    imported/legacy customers carry no branch, so they belong to nobody's depot
+    figure. With no restriction at all (main profile, no filter) nothing is
+    appended, so the company-wide count stays exactly what it always was.
+
+    Same non-negotiable rule as the other scopes: the session scope always wins,
+    so a requested branch can only ever NARROW the view.
+    """
+    targets = _branch_id_list(branch_id)
+    if targets is None:
+        return "", []
+    prefix = f"{alias}." if alias else ""
+    if not targets:
+        return " AND 0=1", []
+    if len(targets) == 1:
+        return f" AND {prefix}branch_id = ?", [targets[0]]
+    marks = ", ".join("?" for _ in targets)
+    return f" AND {prefix}branch_id IN ({marks})", list(targets)
+
+
 def user_can_access_order(order):
     targets = _branch_id_list()
     if targets is None:

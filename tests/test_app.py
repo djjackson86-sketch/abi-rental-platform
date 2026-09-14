@@ -4923,9 +4923,12 @@ def test_reports_page_renders_when_the_database_returns_libsql_rows(client, monk
                 return Cursor([_libsql_row(('c',), (2,))])
             if 'lower(pay.method)' in statement:          # total X payments cards
                 return Cursor([_libsql_row(('s',), (500.0,))])
+            if 'sum(pay.amount)' in statement and 'substr(' in statement:
+                # Revenue for the day is money RECEIVED, across every method
+                # (ticket ABI-341952962) — so it needs the same scalar shape the
+                # per-method cards return, not a count.
+                return Cursor([_libsql_row(('s',), (500.0,))])
             if 'substr(' in statement:                    # the day-windowed cards
-                if 'sum(o.total)' in statement:           # revenue for the day
-                    return Cursor([_libsql_row(('s',), (800.0,))])
                 return Cursor([_libsql_row(('c',), (1,))])
             if 'group by o.status' in statement:
                 return Cursor([

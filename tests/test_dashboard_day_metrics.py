@@ -162,10 +162,15 @@ def seed_days(app):
         _payment(db, collected_today, 700.0, 'eft', '', created_at=f'{TODAY}T08:36:00')
         _payment(db, collected_before, 99.0, 'card', f'{YESTERDAY}T08:00:00')
 
-        # Customers created today vs earlier.
+        # Customers created today vs earlier, each filed under the branch that
+        # added it (ticket ABI-341952962: "New customers for the day = customers
+        # added by that particular branch"). The yesterday row carries no branch:
+        # legacy/imported rows belong to no depot.
         for index in range(2):
-            db.execute("INSERT INTO customers (name, created_at) VALUES (?, ?)",
+            db.execute("INSERT INTO customers (name, branch_id, created_at) VALUES (?, 1, ?)",
                        (f'Today Customer {index}', f'{TODAY}T0{index + 8}:00:00'))
+        db.execute("INSERT INTO customers (name, branch_id, created_at) VALUES ('Today Depot Two Customer', 2, ?)",
+                   (f'{TODAY}T09:30:00',))
         db.execute("INSERT INTO customers (name, created_at) VALUES (?, ?)",
                    ('Yesterday Customer', f'{YESTERDAY}T08:00:00'))
         db.commit()
@@ -186,7 +191,8 @@ def test_the_day_cards_count_what_the_client_asked_for(app):
     assert day['day'] == TODAY
     # New orders = started today. Draft, reserved and archived are not orders yet.
     assert day['orders'] == 2
-    assert day['customers'] == 2
+    # Customers ADDED today: 2 at depot 1 + 1 at depot 2 (ticket ABI-341952962).
+    assert day['customers'] == 3
     assert day['reservations'] == 1
     # Reserved earlier, collected today: the real stamp and the schedule proxy.
     assert day['reservation_pickups'] == 2
@@ -194,6 +200,11 @@ def test_the_day_cards_count_what_the_client_asked_for(app):
     assert day['card_payments'] == 500.0
     assert day['cash_payments'] == 250.0
     assert day['eft_payments'] == 700.0
+    # Revenue for the day is money RECEIVED today, not the value of the orders
+    # raised today: 500 card + 250 cash + 700 EFT. The pending payment on the
+    # draft, the archived payment and yesterday's card payment are all out.
+    assert day['revenue'] == 1450.0
+    assert day['revenue'] == day['card_payments'] + day['cash_payments'] + day['eft_payments']
 
 
 def test_trailer_cards_count_rental_items_and_skip_the_other_rental_group(app):
@@ -289,6 +300,10 @@ def test_the_day_cards_follow_the_branch_scope(app):
     assert scoped['reservations'] == 0
     assert scoped['card_payments'] == 0.0
     assert scoped['trailers_out'] == 0
+    # A depot's figures are its own: depot 2 has no takings and only the one
+    # customer it added today.
+    assert scoped['revenue'] == 0.0
+    assert scoped['customers'] == 1
     # ...and the active branch narrows it further without hiding its own depot.
     other = metrics(app, user_id=2, user_role='staff', can_view_all_branches=False,
                     branch_id=2, branch_ids=[2, 1], active_branch_id=1)
@@ -296,6 +311,8 @@ def test_the_day_cards_follow_the_branch_scope(app):
     assert other['reservations'] == 1
     assert other['card_payments'] == 500.0
     assert other['trailers_out'] == 6
+    assert other['revenue'] == 1450.0
+    assert other['customers'] == 2
 
 
 def test_starting_an_order_records_when_it_was_collected(app):
@@ -347,6 +364,57 @@ def test_restricted_staff_see_the_same_day_cards(client, app):
     assert b'Quick ranges' not in page
     assert b'report-preset' not in page
     assert b'name="range"' not in page
+
+
+# --- the branch a customer was created at (ticket ABI-341952962) -------------
+
+def day_card(app, day, **session_values):
+    with app.test_request_context():
+        session.clear()
+        session.update(session_values)
+        return dashboard_day_metrics(day=day)
+
+
+def test_a_created_customer_is_filed_under_the_branch_that_created_it(client, app):
+    """The day card counts customers ADDED by the branch, from real sign-ins.
+
+    A depot account's customer lands on its depot; head office (every branch, but
+    attached to branch 1 as the order form's default) lands on branch 1. A legacy
+    or imported row with no branch belongs to nobody's depot figure.
+    """
+    login(client)
+    client.post('/settings/users/permissions', data={'module': ['dashboard', 'customers']},
+                follow_redirects=True)
+    client.post('/settings/users/add',
+                data={'name': 'Depot Two Clerk', 'password': 'staff123', 'branch_id': '2'},
+                follow_redirects=True)
+
+    # A depot account creating a customer files it under ITS depot...
+    client.post('/logout')
+    login(client, 'Depot Two Clerk', 'staff123')
+    client.post('/customers/new',
+                data={'name': 'Depot Two Walk In', 'customer_type': 'individual'},
+                follow_redirects=True)
+    # ...while head office, which may see every branch but is attached to branch 1
+    # (the same default its new orders are filed under), files it there.
+    client.post('/logout')
+    login(client)
+    client.post('/customers/new',
+                data={'name': 'Head Office Walk In', 'customer_type': 'individual'},
+                follow_redirects=True)
+
+    with app.app_context():
+        rows = {row['name']: row['branch_id'] for row in get_db().execute(
+            "SELECT name, branch_id FROM customers WHERE name LIKE '% Walk In'").fetchall()}
+    assert rows == {'Depot Two Walk In': 2, 'Head Office Walk In': 1}
+
+    today = local_now_iso(timespec='seconds')[:10]
+    depot_two = day_card(app, today, user_id=2, user_role='staff',
+                         can_view_all_branches=False, branch_id=2, branch_ids=[2])
+    everything = day_card(app, today, user_id=1, user_role='owner')
+    # Only the depot's own customer counts for it; an unrestricted view counts both.
+    assert depot_two['customers'] == 1
+    assert everything['customers'] == 2
 
 
 # --- the dashboard's own branch filter + the branded greeting ---------------
@@ -431,10 +499,14 @@ def test_the_branch_filter_narrows_every_day_card(app):
 
     # Every narrowed figure is the two depots added back together.
     for key in ('orders', 'reservations', 'reservation_pickups', 'trailers_out',
-                'card_payments', 'cash_payments', 'eft_payments'):
+                'card_payments', 'cash_payments', 'eft_payments', 'revenue', 'customers'):
         assert midrand[key] + pretoria[key] == everything[key], key
-    # The customer count is master data: it never narrows.
-    assert midrand['customers'] == everything['customers'] == 2
+    # Revenue is money received (500 card + 250 cash + 700 EFT), all of it at
+    # depot 1 today, and the new-customer count is the branch that added them.
+    assert everything['revenue'] == 1450.0
+    assert (midrand['revenue'], pretoria['revenue']) == (1450.0, 0.0)
+    assert (midrand['customers'], pretoria['customers']) == (2, 1)
+    assert everything['customers'] == 3
 
 
 def test_the_fleet_card_counts_the_chosen_depots_yard(app):

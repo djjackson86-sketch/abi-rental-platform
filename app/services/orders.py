@@ -12,8 +12,17 @@ from app.services.settings import global_vat_rate
 from app.services.products import product_branch_stock
 from app.services.timezone import local_now, local_now_iso
 
+# "Sales/Repairs" is a REAL stored order status (ticket ABI-341952962): a draft
+# order that hires nothing out is marked Sales/Repairs the moment the
+# Sales/Repairs button is selected. It is deliberately NOT derived from the order
+# lines any more — an order whose lines are all sales/service/custom work stays a
+# plain draft until someone marks it.
+SALES_REPAIRS_STATUS = "sales_repairs"
+SALES_REPAIRS_LABEL = "Sales/Repairs"
+
 STATUS_LABELS = {
     "draft": "Draft",
+    "sales_repairs": SALES_REPAIRS_LABEL,
     "reserved": "Reserved",
     "started": "Started",
     "returned": "Returned",
@@ -24,12 +33,11 @@ STATUS_LABELS = {
 BLOCKED_EDIT_STATUSES = {"archived", "canceled", "cancelled"}
 BLOCKED_EDIT_MESSAGE = "Canceled and archived orders cannot be edited"
 
-# A derived Orders-view filter, deliberately NOT a stored order status: an order
-# whose lines never hire anything out (sales, service/repair and custom fixed
-# work). Kept out of STATUS_LABELS because that dict enumerates stored
-# lifecycle statuses used by transitions and error messages.
-SALES_REPAIRS_STATUS = "sales_repairs"
-SALES_REPAIRS_LABEL = "Sales/Repairs"
+
+def status_label(status):
+    """Display label for a stored status ("sales_repairs" -> "Sales/Repairs")."""
+    value = (status or "").strip()
+    return STATUS_LABELS.get(value) or value.replace("_", " ").title()
 
 
 def can_edit_order_status(status):
@@ -53,36 +61,12 @@ def _process_deposit_clause(alias="o"):
     )
 
 
-def _sales_repairs_clause(alias="o"):
-    """Orders with lines, none of which is rental-like.
-
-    The SQL twin of ``order_has_rental_items()``: custom lines billed by rental
-    day and catalogue lines whose product is a rental are hire lines, everything
-    else (catalogue sales, services/repairs, custom fixed work) is not. An order
-    must have at least one line so empty drafts never land in the folder.
-
-    Subquery aliases are deliberately distinct (``sr``/``rr``/``rp``) so this
-    clause stays safe to splice into queries that already join ``order_items``.
-    """
-    prefix = f"{alias}." if alias else ""
-    return (
-        f"EXISTS (SELECT 1 FROM order_items sr WHERE sr.order_id = {prefix}id) "
-        f"AND NOT EXISTS ("
-        f"SELECT 1 FROM order_items rr LEFT JOIN products rp ON rp.id = rr.product_id "
-        f"WHERE rr.order_id = {prefix}id "
-        f"AND (COALESCE(rp.product_type, '') = 'rental' OR COALESCE(rr.billing_mode, '') = 'rental_day'))"
-    )
-
-
 def _status_clause(status, alias="o"):
     """(sql, params) for one Orders status filter value.
 
-    ``sales_repairs`` is the derived grouping; the value can never collide with a
-    stored status (draft/reserved/started/returned/archived/canceled), so the
-    same sentinel drives the list, the counts and the label.
+    Every value is a stored status now — ``sales_repairs`` included — so the
+    list, the count badges, the CSV export and the rail all read the same column.
     """
-    if status == SALES_REPAIRS_STATUS:
-        return _sales_repairs_clause(alias), []
     return f"{alias}.status = ?", [status]
 
 
@@ -187,10 +171,12 @@ def order_filter_counts(branch_id=None):
     payment_rows = db.execute(f"SELECT o.payment_status AS payment_status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.payment_status", scope_params).fetchall()
     process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_process_deposit_clause('o')}", scope_params).fetchone()
     late_return_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND o.status = 'started' AND o.end_at < ?", [*scope_params, now()]).fetchone()
-    sales_repairs_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_sales_repairs_clause('o')}", scope_params).fetchone()
+    sales_repairs_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND o.status = ?", [*scope_params, SALES_REPAIRS_STATUS]).fetchone()
     payment_counts = {row["payment_status"]: row["count"] for row in payment_rows}
     payment_counts["process_deposit"] = process_deposit_row["count"] if process_deposit_row else 0
     status_counts = {row["status"]: row["count"] for row in status_rows}
+    # Sales/Repairs is a stored status, so the GROUP BY above already carries it;
+    # the explicit read only guarantees a 0 badge before anything is marked.
     status_counts[SALES_REPAIRS_STATUS] = sales_repairs_row["count"] if sales_repairs_row else 0
     return {
         "status": status_counts,
@@ -792,8 +778,12 @@ def draft_order_form(order_id):
 TRANSITIONS = {
     "reserve": {"from": {"draft"}, "to": "reserved", "message": "Order reserved"},
     "start": {"from": {"draft", "reserved"}, "to": "started", "message": "Order started / picked up"},
+    # Ticket ABI-341952962: selecting Sales/Repairs STORES the status, and the
+    # inverse keeps "Save as draft" available on a Sales/Repairs order.
+    "sales_repairs": {"from": {"draft"}, "to": SALES_REPAIRS_STATUS, "message": f"Order marked {SALES_REPAIRS_LABEL}"},
+    "draft": {"from": {SALES_REPAIRS_STATUS}, "to": "draft", "message": "Order saved as draft"},
     "return": {"from": {"started"}, "to": "returned", "message": "Order returned"},
-    "archive": {"from": {"returned"}, "to": "archived", "message": "Order archived"},
+    "archive": {"from": {"returned", SALES_REPAIRS_STATUS}, "to": "archived", "message": "Order archived"},
     "cancel": {"from": {"draft", "reserved"}, "to": "canceled", "message": "Order canceled"},
 }
 
@@ -862,6 +852,10 @@ def transition_order(order_id, action):
         raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
     if action == "return":
         validate_return_ready(order_id)
+    if action == "sales_repairs" and order_has_rental_items(order_items(order_id)):
+        # Server-side rule, not just a hidden button: a hire order is never a
+        # sales/repairs order (ticket ABI-341952960/962).
+        raise ValueError(f"{SALES_REPAIRS_LABEL} applies to orders without rental items")
     if action in {"reserve", "start"}:
         if not order["customer_id"]:
             raise ValueError("Add customer details before reserving or pickup")
@@ -884,12 +878,24 @@ def transition_order(order_id, action):
     return transition["message"]
 
 
-def status_actions(status):
+def status_actions(status, has_rental_items=False):
+    """Order-detail buttons for a stored status, as (action, label, style).
+
+    ``Sales/Repairs`` is offered on a draft that hires nothing out and stores the
+    Sales/Repairs status (ticket ABI-341952962). Draft stays a valid status, so an
+    unmarked sale order is still a draft — and a Sales/Repairs order keeps
+    "Save as draft" (plus archive once the sale is done).
+    """
     actions = []
     if status == "draft":
         actions.append(("reserve", "Reserve order", "primary"))
+        if not has_rental_items:
+            actions.append(("sales_repairs", SALES_REPAIRS_LABEL, "ghost"))
         actions.append(("start", "Pick up now", "ghost"))
         actions.append(("cancel", "Cancel order", "danger"))
+    elif status == SALES_REPAIRS_STATUS:
+        actions.append(("draft", "Save as draft", "ghost"))
+        actions.append(("archive", "Archive order", "ghost"))
     elif status == "reserved":
         actions.append(("start", "Start order", "primary"))
         actions.append(("cancel", "Cancel order", "danger"))

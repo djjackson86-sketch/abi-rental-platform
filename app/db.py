@@ -464,6 +464,10 @@ def run_migrations(db):
     ensure_column(db, "customers", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     ensure_column(db, "customers", "standard_discount_percent", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "customers", "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
+    # The branch a customer was created at, so a depot's "New customers for the
+    # day" figure is the customers added by THAT branch (ticket ABI-341952962).
+    # Additive and nullable: imported/legacy rows claim no branch.
+    ensure_column(db, "customers", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
     ensure_column(db, "payments", "payment_date", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "payments", "deleted_at", "TEXT NOT NULL DEFAULT ''")

@@ -1,5 +1,5 @@
 from app.db import get_db
-from app.services.access import order_branch_clause, product_branch_clause
+from app.services.access import customer_branch_clause, order_branch_clause, product_branch_clause
 from app.services.timezone import local_now_iso
 
 
@@ -200,12 +200,19 @@ def dashboard_day_metrics(day=None, branch_id=None):
 
     ``day`` is the business day (Africa/Johannesburg) and is compared as a
     ``YYYY-MM-DD`` prefix on the stored timestamp, matching how the dashboard
-    has always decided "today". Orders and payments are branch-scoped, so these
-    cards follow the session scope and the dashboard's own ``branch_id`` filter
-    exactly like the rest of the dashboard — through ``order_branch_clause`` /
-    ``product_branch_clause``, where the session scope always wins, so the
-    filter can only ever NARROW. The customer count is master data and stays
-    company-wide (a customer row carries no branch).
+    has always decided "today". Orders, payments and the new-customer count are
+    branch-scoped, so these cards follow the session scope and the dashboard's own
+    ``branch_id`` filter exactly like the rest of the dashboard — through
+    ``order_branch_clause`` / ``product_branch_clause`` /
+    ``customer_branch_clause``, where the session scope always wins, so the filter
+    can only ever NARROW. "New customers for the day" counts the customers added
+    by the branch in view (ticket ABI-341952962); an unrestricted view still
+    counts the whole company.
+
+    Revenue for the day is money RECEIVED today (paid payments, by payment date),
+    not the value of the orders raised today — the client asked for "actual
+    payments received, not just created orders". The three method cards add up to
+    it exactly.
 
     The two trailer cards are a snapshot, not a day figure: **out** is what is on
     hire (a ``started`` order), and **in** is the rest of the yard — the active
@@ -228,20 +235,44 @@ def dashboard_day_metrics(day=None, branch_id=None):
         row = db.execute(sql, params).fetchone()
         return money(row["s"])
 
+    def payment_total(method=None):
+        """Money RECEIVED for the day: paid, not archived, by payment date.
+
+        With no ``method`` this is the day's revenue (ticket ABI-341952962:
+        "actual payments received, not just created orders"), so the revenue card
+        is exactly the method cards added up and the two can never disagree. One
+        depot's takings stay that depot's: the order join carries the same branch
+        scope as every other day card.
+        """
+        method_sql = " AND LOWER(pay.method) = ?" if method else ""
+        method_params = [method] if method else []
+        return total(
+            f"""SELECT COALESCE(SUM(pay.amount), 0) s
+            FROM payments pay JOIN orders o ON o.id = pay.order_id
+            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+              {method_sql}
+              AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
+            [*method_params, day, *scope_params],
+        )
+
     new_orders = count(
         f"""SELECT COUNT(*) c FROM orders o
         WHERE substr(o.created_at, 1, 10) = ?
           AND o.status NOT IN (?, ?, ?, ?, ?){scope_sql}""",
         [day, *_NOT_NEW_ORDER_STATUSES, *scope_params],
     )
+    # Customers added by THIS branch (ticket ABI-341952962): a depot's figure is
+    # the customers created at that depot. An unrestricted view keeps the
+    # company-wide count it always had, and the branch filter can only narrow it.
+    customer_scope_sql, customer_scope_params = customer_branch_clause("c", branch_id=branch_id)
     new_customers = count(
-        "SELECT COUNT(*) c FROM customers WHERE substr(created_at, 1, 10) = ?",
-        (day,),
+        f"""SELECT COUNT(*) c FROM customers c
+        WHERE substr(c.created_at, 1, 10) = ?{customer_scope_sql}""",
+        [day, *customer_scope_params],
     )
-    revenue = total(
-        f"SELECT COALESCE(SUM(o.total), 0) s FROM orders o WHERE substr(o.created_at, 1, 10) = ?{scope_sql}",
-        [day, *scope_params],
-    )
+    # Revenue for the day = money actually received today (paid payments, by
+    # payment date), not the value of the orders raised today.
+    revenue = payment_total()
     reservations = count(
         f"""SELECT COUNT(*) c FROM orders o
         WHERE substr(o.created_at, 1, 10) = ? AND o.status = 'reserved'{scope_sql}""",
@@ -257,16 +288,6 @@ def dashboard_day_metrics(day=None, branch_id=None):
           AND substr(COALESCE(NULLIF(o.picked_up_at, ''), o.start_at), 1, 10) = ?{scope_sql}""",
         [day, *_PICKED_UP_STATUSES, day, *scope_params],
     )
-
-    def payment_total(method):
-        return total(
-            f"""SELECT COALESCE(SUM(pay.amount), 0) s
-            FROM payments pay JOIN orders o ON o.id = pay.order_id
-            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
-              AND LOWER(pay.method) = ?
-              AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
-            [method, day, *scope_params],
-        )
 
     def trailer_count(statuses):
         marks = ", ".join("?" for _ in statuses)

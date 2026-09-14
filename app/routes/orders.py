@@ -5,7 +5,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import SALES_REPAIRS_LABEL, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
@@ -149,6 +149,19 @@ def _form_with_inline_customer(form):
     return mutable_form
 
 
+def _wants_sales_repairs(form, order_id):
+    """True when the order form was submitted with the Sales/Repairs button.
+
+    Server-side guard on top of the hidden button: the Sales/Repairs status is
+    only ever applied to an order that hires nothing out — the same rule the
+    Sales/Repairs folder has always used — so a crafted POST cannot label a
+    rental order as sales/repairs (ticket ABI-341952962).
+    """
+    if (form.get("order_action") or "").strip() != SALES_REPAIRS_STATUS:
+        return False
+    return not order_has_rental_items(order_items(order_id))
+
+
 def _time_options(increment=15):
     return [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in range(0, 60, increment)]
 
@@ -176,6 +189,7 @@ def index():
         filters={"query": query, "status": status, "payment_status": payment_status, "return_status": return_status, "start_date": start_date, "end_date": end_date, "branch": selected_branch},
         deposit_to_process_amount=deposit_to_process_amount,
         sales_repairs_label=SALES_REPAIRS_LABEL,
+        status_label=status_label,
     )
 
 
@@ -224,7 +238,14 @@ def new():
                 _build_order_payload(form)
                 form = _form_with_inline_customer(form)
                 order_id = create_order(form)
-                flash("Draft order created", "success")
+                if _wants_sales_repairs(form, order_id):
+                    # "Save as Sales/Repairs" on the form: the order is stored as
+                    # a draft first, then the real Sales/Repairs status is applied
+                    # (ticket ABI-341952962). "Save as draft" is untouched.
+                    transition_order(order_id, SALES_REPAIRS_STATUS)
+                    flash(f"Order saved as {SALES_REPAIRS_LABEL}", "success")
+                else:
+                    flash("Draft order created", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
             except ValueError as exc:
                 flash(str(exc), "error")
@@ -254,6 +275,10 @@ def new():
         form_mode="new",
         form_action=url_for("orders.new"),
         custom_field_label=custom_field_label,
+        # A brand-new order is always a draft, so Sales/Repairs can be selected
+        # straight away (ticket ABI-341952962); "Save as draft" stays beside it.
+        sales_repairs_available=True,
+        sales_repairs_label=SALES_REPAIRS_LABEL,
     )
 
 
@@ -286,7 +311,11 @@ def edit(order_id):
                 _build_order_payload(form)
                 form = _form_with_inline_customer(form)
                 update_draft_order(order_id, form)
-                flash("Order saved", "success")
+                if _wants_sales_repairs(form, order_id):
+                    transition_order(order_id, SALES_REPAIRS_STATUS)
+                    flash(f"Order saved as {SALES_REPAIRS_LABEL}", "success")
+                else:
+                    flash("Order saved", "success")
                 return redirect(url_for("orders.detail", order_id=order_id))
             except ValueError as exc:
                 flash(str(exc), "error")
@@ -297,6 +326,13 @@ def edit(order_id):
         except ValueError:
             form_data = {"order": _ensure_order_access(order_id), "lines": []}
     has_rental_items = order_has_rental_items(order_items(order_id))
+    # The form's Sales/Repairs button stores the status, so it is only offered
+    # while the order is still a draft and hires nothing out (ticket ABI-341952962).
+    form_order = form_data.get("order") if isinstance(form_data, dict) else None
+    try:
+        form_order_status = form_order["status"] if form_order is not None else ""
+    except (KeyError, IndexError, TypeError):
+        form_order_status = ""
     return render_template(
         "admin/orders/form.html",
         settings=get_company_settings(),
@@ -316,6 +352,8 @@ def edit(order_id):
         custom_field_label=custom_field_label,
         order_form=form_data,
         has_rental_items=has_rental_items,
+        sales_repairs_available=(form_order_status == "draft") and not has_rental_items,
+        sales_repairs_label=SALES_REPAIRS_LABEL,
     )
 
 
@@ -350,9 +388,12 @@ def detail(order_id):
         order=order,
         items=items,
         has_rental_items=has_rental_items,
-        is_sales_repairs_order=bool(items) and not has_rental_items,
+        # The badge means the real stored status now (ticket ABI-341952962) — a
+        # draft sale-only order gets the Sales/Repairs ACTION button instead.
+        is_sales_repairs_order=(order["status"] or "") == SALES_REPAIRS_STATUS,
         sales_repairs_label=SALES_REPAIRS_LABEL,
-        actions=status_actions(order["status"]),
+        status_label=status_label,
+        actions=status_actions(order["status"], has_rental_items=has_rental_items),
         documents=documents,
         has_invoice=has_invoice,
         finalized_invoice_exists=finalized_invoice_exists,

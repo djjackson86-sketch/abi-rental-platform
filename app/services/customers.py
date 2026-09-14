@@ -1,7 +1,7 @@
 import json
 
 from app.db import get_db, now
-from app.services.access import current_session_user_id
+from app.services.access import current_session_user_id, session_active_branch_id, session_primary_branch_id
 
 VALID_TYPES = {"individual", "company"}
 HIDDEN_CUSTOM_FIELD_KEYS = {
@@ -80,9 +80,10 @@ def customer_filter_counts():
 
 def get_customer(customer_id):
     return get_db().execute(
-        """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email
+        """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email, b.name AS branch_name
         FROM customers c
         LEFT JOIN users u ON u.id = c.created_by_user_id
+        LEFT JOIN branches b ON b.id = c.branch_id
         WHERE c.id = ?""",
         (customer_id,),
     ).fetchone()
@@ -157,13 +158,25 @@ def _clean(form, existing_custom_fields=None):
     }
 
 
+def customer_branch_id():
+    """The branch a customer being created right now belongs to.
+
+    Ticket ABI-341952962: "New customers for the day" for a depot means the
+    customers added by THAT branch, so every customer row records where it was
+    created — the depot the sign-in chose to manage, otherwise the account's own
+    primary branch. An all-branch account (head office) with no branch of its own
+    stores NULL: it claims no depot, so no depot's figure is inflated by it.
+    """
+    return session_active_branch_id() or session_primary_branch_id()
+
+
 def create_customer(form):
     data = _clean(form)
     db = get_db()
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, created_by_user_id, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :created_by_user_id, :created_at)""",
-        {**data, "created_by_user_id": current_session_user_id(), "created_at": now()},
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, created_by_user_id, branch_id, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :created_by_user_id, :branch_id, :created_at)""",
+        {**data, "created_by_user_id": current_session_user_id(), "branch_id": customer_branch_id(), "created_at": now()},
     )
     db.commit()
     customer_id = cur.lastrowid

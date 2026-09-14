@@ -328,6 +328,9 @@ def delete_branch(branch_id):
         (branch_id, branch_id, branch_id, branch_id),
     )
     db.execute("UPDATE users SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
+    # Customers remember the branch that created them, so a delete must detach
+    # that pointer too (no orphaned branch ids). The customer itself survives.
+    db.execute("UPDATE customers SET branch_id = NULL WHERE branch_id = ?", (branch_id,))
     # Multi-branch rows for the deleted depot go with it (libsql autocommits, so
     # the delete is explicit). An account left with no rows would fall back to
     # the historic "blank branch = all branches" rule, which would silently WIDEN

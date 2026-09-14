@@ -190,7 +190,7 @@
     <p class="form-help">Estimate updates before saving. Security-deposit mode includes the refundable deposit in the estimated order total. Saved orders are still recalculated on the server.</p>
   </section>
   <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional internal notes for this order">{{ order_form.get('notes', '') }}</textarea></label></section>
-  <div class="form-actions"><button class="btn primary" type="submit" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save order changes' if editing else 'Save as draft' }}</button></div>
+  <div class="form-actions"><button class="btn primary" type="submit" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save order changes' if editing else 'Save as draft' }}</button>{% if sales_repairs_available %}<button class="btn ghost" type="submit" onclick="if(this.form.order_action){this.form.order_action.value='sales_repairs'}">Save as {{ sales_repairs_label }}</button>{% endif %}</div>
 </form>
 <script>
 (function(){
