@@ -1468,8 +1468,14 @@ def calendar_month_overview(month=None, branch_id=None, start_date=None, end_dat
     }
 
 
-def dashboard_schedule():
-    events = scheduled_events(limit=100)
+def dashboard_schedule(branch_id=None):
+    """Today's going-out / coming-back lists for the dashboard.
+
+    ``branch_id`` is the dashboard's own branch filter; it goes through
+    ``order_branch_clause`` like every other branch-aware query, so the session
+    scope still wins and the filter can only narrow.
+    """
+    events = scheduled_events(limit=100, branch_id=branch_id)
     return {
         "going_out": [event for event in events if event["status"] == "reserved"][:5],
         "coming_back": [event for event in events if event["status"] in {"reserved", "started"}][:5],

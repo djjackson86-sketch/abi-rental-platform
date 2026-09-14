@@ -10,6 +10,7 @@ it.
 All fixtures use a fixed business day so nothing depends on the wall clock.
 """
 import os
+import re
 import tempfile
 
 import pytest
@@ -19,6 +20,7 @@ from app import create_app
 from app.db import get_db
 from app.services.orders import transition_order
 from app.services.reports import dashboard_day_metrics
+from app.services.timezone import local_now_iso
 
 TODAY = '2026-09-13'
 YESTERDAY = '2026-09-12'
@@ -341,3 +343,191 @@ def test_restricted_staff_see_the_same_day_cards(client, app):
     assert b'Total card payments' in page
     assert b'Total no. of trailers out' in page
     assert b'Total orders' not in page  # the totals row stays main-profile only
+
+
+# --- the dashboard's own branch filter + the branded greeting ---------------
+# (ticket ABI-341952954: a modern dashboard with the client's logo, the signed-in
+# name, and a branch filter on the main profile.)
+
+def day_cards(app, filter_branch=None, **session_values):
+    """``dashboard_day_metrics`` with the branch filter the dashboard passes.
+
+    ``filter_branch`` is the UI filter (``?branch=``); a session's own
+    ``branch_id`` travels in ``session_values`` as usual.
+    """
+    with app.test_request_context():
+        session.clear()
+        session.update(session_values)
+        return dashboard_day_metrics(day=TODAY, branch_id=filter_branch)
+
+
+def today_depot_orders(app, number_a='ORD-90001', number_b='ORD-90002'):
+    """One reservation per depot, dated the REAL business day.
+
+    ``dashboard_day_metrics`` compares against the live business day, so a
+    page-level day-card assertion cannot use the fixed fixture date.
+    """
+    today = local_now_iso()[:10]
+    with app.app_context():
+        db = get_db()
+        one = _order(db, number_a, 'reserved', f'{today}T08:00:00', branch_id=1,
+                     start_at=f'{today}T09:00', end_at=f'{today}T17:00')
+        _payment(db, one, 500.0, 'card', f'{today}T09:10:00')
+        _order(db, number_b, 'reserved', f'{today}T08:30:00', branch_id=2,
+               start_at=f'{today}T10:00', end_at=f'{today}T18:00')
+        db.commit()
+    return number_a, number_b
+
+
+def branch_product(app, name, branch_id, quantity):
+    with app.app_context():
+        db = get_db()
+        group_id = db.execute("SELECT id FROM product_groups WHERE name = ?",
+                              (HIRE_GROUP,)).fetchone()['id']
+        db.execute(
+            """INSERT INTO products (name, product_type, description, sku, active, public_visible,
+            price_amount, price_unit, security_deposit, hourly_extra_rate, product_group_id, quantity,
+            tracking_method, branch_id, created_at)
+            VALUES (?, 'rental', '', '', 1, 1, 200, 'day', 0, 0, ?, ?, 'bulk', ?, ?)""",
+            (name, group_id, quantity, branch_id, TODAY))
+        db.commit()
+
+
+def owner_session(**extra):
+    values = {'user_id': 1, 'user_role': 'owner'}
+    values.update(extra)
+    return values
+
+
+def filter_form(page):
+    """The dashboard's own branch filter form, not the cash-up write forms."""
+    match = re.search(r'<form class="dashboard-branch-filter".*?</form>', page, re.S)
+    assert match, 'the dashboard branch filter form is missing'
+    return match.group(0)
+
+
+def test_the_branch_filter_narrows_every_day_card(app):
+    """?branch= narrows the day cards and adds back up to the unfiltered view."""
+    seed_days(app)
+    everything = day_cards(app, **owner_session())
+    midrand = day_cards(app, filter_branch=1, **owner_session())
+    pretoria = day_cards(app, filter_branch=2, **owner_session())
+
+    # Only ORD-9 was raised at depot 2; ORD-1 (started, today) is depot 1's.
+    assert everything['orders'] == 2
+    assert (midrand['orders'], pretoria['orders']) == (1, 1)
+    assert (midrand['reservations'], pretoria['reservations']) == (1, 0)
+    # Money: card/cash/EFT today all sit on depot 1's orders.
+    assert (midrand['card_payments'], midrand['cash_payments'],
+            midrand['eft_payments']) == (500.0, 250.0, 700.0)
+    assert (pretoria['card_payments'], pretoria['cash_payments'],
+            pretoria['eft_payments']) == (0.0, 0.0, 0.0)
+    assert (midrand['reservation_pickups'], pretoria['reservation_pickups']) == (2, 0)
+    assert (midrand['trailers_out'], pretoria['trailers_out']) == (6, 0)
+
+    # Every narrowed figure is the two depots added back together.
+    for key in ('orders', 'reservations', 'reservation_pickups', 'trailers_out',
+                'card_payments', 'cash_payments', 'eft_payments'):
+        assert midrand[key] + pretoria[key] == everything[key], key
+    # The customer count is master data: it never narrows.
+    assert midrand['customers'] == everything['customers'] == 2
+
+
+def test_the_fleet_card_counts_the_chosen_depots_yard(app):
+    """A chosen branch means that branch's stock — unassigned units do not ride along."""
+    seed_days(app)
+    branch_product(app, 'Depot Two Trailer', 2, 4)
+    everything = day_cards(app, **owner_session())
+    depot_two = day_cards(app, filter_branch=2, **owner_session())
+    depot_one = day_cards(app, filter_branch=1, **owner_session())
+
+    # The catalogue products are unassigned, so only the filtered depot's own
+    # units are its yard (the staff scope view keeps letting unassigned ride).
+    assert everything['fleet'] == 14
+    assert depot_two['fleet'] == 4
+    assert depot_one['fleet'] == 0
+
+
+def test_the_day_cards_session_scope_still_beats_the_branch_filter(app):
+    """A crafted ?branch= can only ever narrow a depot-scoped account."""
+    seed_days(app)
+    scoped = {'user_id': 2, 'user_role': 'staff', 'can_view_all_branches': False,
+              'branch_id': 2, 'branch_ids': [2]}
+    own = day_cards(app, **scoped)
+    assert own['orders'] == 1 and own['trailers_out'] == 0
+    # Asking for depot 1 — which this account may not see — changes nothing.
+    crafted = day_cards(app, filter_branch=1, **scoped)
+    assert crafted['orders'] == own['orders']
+    assert crafted['reservations'] == own['reservations']
+    assert crafted['card_payments'] == own['card_payments']
+    # ...and its own depot can still be selected explicitly.
+    assert day_cards(app, filter_branch=2, **scoped)['orders'] == 1
+
+
+def test_the_dashboard_branch_filter_narrows_the_page_and_submits_branch_once(client, app):
+    one, two = today_depot_orders(app)
+    login(client)
+
+    everything = client.get('/dashboard').get_data(as_text=True)
+    assert 'id="dashboard-branch-filter"' in everything
+    assert filter_form(everything).count('name="branch"') == 1, \
+        'a hidden duplicate would win over the picker'
+    assert re.search(r'Reservations for the day</small><b>2</b>', everything)
+    assert re.search(r'Total card payments</small><b>R500\.00</b>', everything)
+    assert f'>{one}<' in everything and f'>{two}<' in everything
+
+    narrowed = client.get('/dashboard?branch=2').get_data(as_text=True)
+    # The picker keeps the chosen depot, and the day cards follow it.
+    assert '<option value="2" selected>' in narrowed
+    assert filter_form(narrowed).count('name="branch"') == 1
+    assert re.search(r'Reservations for the day</small><b>1</b>', narrowed)
+    assert re.search(r'Total card payments</small><b>R0\.00</b>', narrowed)
+    # Only depot 2's booking is left in the movement lists (a reserved order
+    # shows in both halves: going out and coming back).
+    assert f'>{one}<' not in narrowed and f'>{two}<' in narrowed
+    assert 'No reserved pickups scheduled yet.' not in narrowed
+
+    for crafted in ('', '1', '2', '3', '999', 'abc', '2 OR 1=1'):
+        page = client.get('/dashboard?branch=' + crafted)
+        assert page.status_code == 200, crafted
+
+
+def test_a_depot_scoped_account_gets_a_fixed_branch_label(client, app):
+    one, two = today_depot_orders(app)
+    login(client)
+    client.post('/settings/users/permissions', data={'module': ['dashboard']},
+                follow_redirects=True)
+    client.post('/settings/users/add',
+                data={'name': 'Depot Clerk', 'password': 'staff123', 'branch_id': '2'},
+                follow_redirects=True)
+    client.post('/logout')
+    login(client, 'Depot Clerk', 'staff123')
+
+    # Their own depot renders even when the query string asks for another one.
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
+    # The control is a fixed label for them, never a chooser to tamper with.
+    assert 'class="filter-fixed"' in filter_form(body)
+    assert 'name="branch"' not in filter_form(body)
+    assert 'name="cash_branch"' not in body
+    assert 'Total no. of trailers out' in body
+    # Their own depot's day figures, never depot 1's (whose booking carries the
+    # R500 card payment).
+    assert re.search(r'Reservations for the day</small><b>1</b>', body)
+    assert re.search(r'Total card payments</small><b>R0\.00</b>', body)
+    # A staff dashboard keeps its historic shape: day cards and cash up only.
+    assert 'Total orders' not in body and 'Going out' not in body
+
+
+def test_the_dashboard_greets_the_signed_in_user_with_the_branded_hero(client, app):
+    login(client)
+    with app.app_context():
+        name = get_db().execute(
+            "SELECT name FROM users WHERE role = 'owner' ORDER BY id LIMIT 1").fetchone()['name']
+    page = client.get('/dashboard').get_data(as_text=True)
+    assert f'Welcome back, {name}' in page
+    assert '· all branches —' in page, 'the hero note names the scope of the figures'
+    assert 'class="dashboard-hero"' in page
+    assert 'sano-trailers-logo-trimmed.png' in page, 'the client logo heads the dashboard'
+    # The day cards and the totals row are still the same cards.
+    assert 'Total no. of trailers out' in page
+    assert 'Total orders' in page

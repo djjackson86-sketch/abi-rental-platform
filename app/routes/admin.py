@@ -45,8 +45,11 @@ def index():
 @login_required
 def dashboard():
     db = get_db()
-    order_scope_sql, order_scope_params = order_branch_clause("o")
-    product_scope_sql, product_scope_params = product_branch_clause("p", include_unassigned=True)
+    # The dashboard's own branch filter, resolved by the shared resolver so the
+    # session scope always wins and ?branch= can only ever NARROW the view.
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    order_scope_sql, order_scope_params = order_branch_clause("o", branch_id=branch_id)
+    product_scope_sql, product_scope_params = product_branch_clause("p", include_unassigned=True, branch_id=branch_id)
     metrics = {
         "orders": db.execute(f"SELECT COUNT(*) c FROM orders o WHERE 1=1{order_scope_sql}", order_scope_params).fetchone()[ "c"],
         "products": db.execute(f"SELECT COUNT(*) c FROM products p WHERE 1=1{product_scope_sql}", product_scope_params).fetchone()[ "c"],
@@ -61,10 +64,14 @@ def dashboard():
         "admin/dashboard.html",
         settings=get_company_settings(),
         metrics=metrics,
-        day_metrics=dashboard_day_metrics(),
+        day_metrics=dashboard_day_metrics(branch_id=branch_id),
         cash_panel=cash_panel,
         cash_day=cash_day_summary(branch_id=cash_panel['branch_id']),
-        schedule=dashboard_schedule(),
+        schedule=dashboard_schedule(branch_id=branch_id),
+        branches=branches,
+        branch_label=branch_label,
+        branch_scope=branch_scope,
+        filters={"branch": selected_branch},
     )
 
 @bp.route("/coupons", methods=["GET", "POST"])

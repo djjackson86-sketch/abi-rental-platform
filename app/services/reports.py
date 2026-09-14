@@ -140,15 +140,17 @@ _NOT_NEW_ORDER_STATUSES = ("draft", "reserved", "canceled", "cancelled", "archiv
 _PICKED_UP_STATUSES = ("started", "returned")
 
 
-def dashboard_day_metrics(day=None):
+def dashboard_day_metrics(day=None, branch_id=None):
     """Every "for the day" figure the dashboard shows, as finished scalars.
 
     ``day`` is the business day (Africa/Johannesburg) and is compared as a
     ``YYYY-MM-DD`` prefix on the stored timestamp, matching how the dashboard
     has always decided "today". Orders and payments are branch-scoped, so these
-    cards follow the session scope and the branch filter exactly like the rest
-    of the dashboard; the customer count is master data and stays company-wide
-    (a customer row carries no branch).
+    cards follow the session scope and the dashboard's own ``branch_id`` filter
+    exactly like the rest of the dashboard — through ``order_branch_clause`` /
+    ``product_branch_clause``, where the session scope always wins, so the
+    filter can only ever NARROW. The customer count is master data and stays
+    company-wide (a customer row carries no branch).
 
     The two trailer cards are a snapshot, not a day figure: **out** is what is on
     hire (a ``started`` order), and **in** is the rest of the yard — the active
@@ -160,8 +162,8 @@ def dashboard_day_metrics(day=None):
     """
     db = get_db()
     day = day or local_now_iso(timespec="seconds")[:10]
-    scope_sql, scope_params = order_branch_clause("o")
-    product_scope_sql, product_scope_params = product_branch_clause("p", include_unassigned=True)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    product_scope_sql, product_scope_params = product_branch_clause("p", include_unassigned=True, branch_id=branch_id)
 
     def count(sql, params):
         row = db.execute(sql, params).fetchone()

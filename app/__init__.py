@@ -98,6 +98,10 @@ def create_app(test_config=None):
         return {
             "current_user_is_main": is_main_session(session),
             "user_can": lambda module: user_can_module(session, module),
+            # Who is signed in, for the dashboard's greeting. Both fall back to
+            # "" so a session without a recorded name renders cleanly.
+            "current_user_name": session.get("user_name") or "",
+            "current_user_initials": session.get("initials") or "",
             # The depot this sign-in is managing, for the "Branch: X · Change"
             # control. None (and no query) unless a choice was actually made.
             "active_branch": session_active_branch(),

@@ -21,6 +21,7 @@
     </div>
     {% if cash_panel.branches|length > 1 %}
     <form class="cash-branch-picker" method="get" action="{{ url_for('admin.dashboard') }}">
+      {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
       <label>Depot
         <select name="cash_branch" onchange="this.form.submit()">
           {% for branch in cash_panel.branches %}
