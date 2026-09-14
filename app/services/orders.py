@@ -24,6 +24,13 @@ STATUS_LABELS = {
 BLOCKED_EDIT_STATUSES = {"archived", "canceled", "cancelled"}
 BLOCKED_EDIT_MESSAGE = "Canceled and archived orders cannot be edited"
 
+# A derived Orders-view filter, deliberately NOT a stored order status: an order
+# whose lines never hire anything out (sales, service/repair and custom fixed
+# work). Kept out of STATUS_LABELS because that dict enumerates stored
+# lifecycle statuses used by transitions and error messages.
+SALES_REPAIRS_STATUS = "sales_repairs"
+SALES_REPAIRS_LABEL = "Sales/Repairs"
+
 
 def can_edit_order_status(status):
     return status not in BLOCKED_EDIT_STATUSES
@@ -46,6 +53,39 @@ def _process_deposit_clause(alias="o"):
     )
 
 
+def _sales_repairs_clause(alias="o"):
+    """Orders with lines, none of which is rental-like.
+
+    The SQL twin of ``order_has_rental_items()``: custom lines billed by rental
+    day and catalogue lines whose product is a rental are hire lines, everything
+    else (catalogue sales, services/repairs, custom fixed work) is not. An order
+    must have at least one line so empty drafts never land in the folder.
+
+    Subquery aliases are deliberately distinct (``sr``/``rr``/``rp``) so this
+    clause stays safe to splice into queries that already join ``order_items``.
+    """
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"EXISTS (SELECT 1 FROM order_items sr WHERE sr.order_id = {prefix}id) "
+        f"AND NOT EXISTS ("
+        f"SELECT 1 FROM order_items rr LEFT JOIN products rp ON rp.id = rr.product_id "
+        f"WHERE rr.order_id = {prefix}id "
+        f"AND (COALESCE(rp.product_type, '') = 'rental' OR COALESCE(rr.billing_mode, '') = 'rental_day'))"
+    )
+
+
+def _status_clause(status, alias="o"):
+    """(sql, params) for one Orders status filter value.
+
+    ``sales_repairs`` is the derived grouping; the value can never collide with a
+    stored status (draft/reserved/started/returned/archived/canceled), so the
+    same sentinel drives the list, the counts and the label.
+    """
+    if status == SALES_REPAIRS_STATUS:
+        return _sales_repairs_clause(alias), []
+    return f"{alias}.status = ?", [status]
+
+
 def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         cu.name AS created_by_name, cu.email AS created_by_email,
@@ -63,8 +103,9 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
         needle = f"%{query.lower()}%"
         params.extend([needle, needle, needle])
     if status:
-        sql += " AND o.status = ?"
-        params.append(status)
+        status_clause, status_params = _status_clause(status, "o")
+        sql += f" AND {status_clause}"
+        params.extend(status_params)
     if return_status == "late":
         sql += " AND o.status = 'started' AND o.end_at < ?"
         params.append(now())
@@ -95,8 +136,9 @@ def _order_filter_where(query="", status="", payment_status="", return_status=""
         needle = f"%{query.lower()}%"
         params.extend([needle, needle, needle])
     if status:
-        clauses.append("o.status = ?")
-        params.append(status)
+        status_clause, status_params = _status_clause(status, "o")
+        clauses.append(status_clause)
+        params.extend(status_params)
     if return_status == "late":
         clauses.append("o.status = 'started' AND o.end_at < ?")
         params.append(now())
@@ -145,10 +187,13 @@ def order_filter_counts(branch_id=None):
     payment_rows = db.execute(f"SELECT o.payment_status AS payment_status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.payment_status", scope_params).fetchall()
     process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_process_deposit_clause('o')}", scope_params).fetchone()
     late_return_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND o.status = 'started' AND o.end_at < ?", [*scope_params, now()]).fetchone()
+    sales_repairs_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_sales_repairs_clause('o')}", scope_params).fetchone()
     payment_counts = {row["payment_status"]: row["count"] for row in payment_rows}
     payment_counts["process_deposit"] = process_deposit_row["count"] if process_deposit_row else 0
+    status_counts = {row["status"]: row["count"] for row in status_rows}
+    status_counts[SALES_REPAIRS_STATUS] = sales_repairs_row["count"] if sales_repairs_row else 0
     return {
-        "status": {row["status"]: row["count"] for row in status_rows},
+        "status": status_counts,
         "payment_status": payment_counts,
         "return_status": {"late": late_return_row["count"] if late_return_row else 0},
     }

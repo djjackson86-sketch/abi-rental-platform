@@ -50,6 +50,11 @@
             <em>({{ filter_counts.status.get(s, 0) }})</em>
           </label>
         {% endfor %}
+        <label class="filter-check" title="Orders with no rental items — sales, repairs/service and custom work only">
+          <input type="radio" name="status" value="sales_repairs" {% if filters.status=='sales_repairs' %}checked{% endif %} onchange="this.form.submit()">
+          <span>{{ sales_repairs_label }}</span>
+          <em>({{ filter_counts.status.get('sales_repairs', 0) }})</em>
+        </label>
         {% if filters.status %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, payment_status=filters.payment_status, return_status=filters.return_status, branch=filters.branch or None) }}">Clear status</a>{% endif %}
       </div>
 
@@ -97,6 +102,7 @@
         <a href="#">Upcoming</a>
         <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
         <a href="#">With shortage</a>
+        <a class="{% if filters.status=='sales_repairs' %}active{% endif %}" href="{{ url_for('orders.index', status='sales_repairs', branch=filters.branch or None) }}">{{ sales_repairs_label }}</a>
       </nav>
       <button class="btn ghost metrics-toggle" type="button" aria-expanded="true" aria-controls="orders-metrics" title="Collapse or expand the totals row above the order list">Hide metrics⌃</button>
     </div>
@@ -114,6 +120,7 @@
         <a href="#">Upcoming</a>
         <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
         <a href="#">With shortage</a>
+        <a class="{% if filters.status=='sales_repairs' %}active{% endif %}" href="{{ url_for('orders.index', status='sales_repairs', branch=filters.branch or None) }}">{{ sales_repairs_label }}</a>
       </nav>
     </div>
     {% endif %}
