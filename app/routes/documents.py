@@ -11,6 +11,7 @@ from app.services.documents import (
     document_date,
     document_datetime,
     document_filter_counts,
+    document_has_rental_items,
     document_paid_stamp,
     document_tax_view,
     finalize_document,
@@ -153,11 +154,13 @@ def detail(document_id):
         _email_context(document, settings),
     )
     email_signature = render_email_template(settings['invoice_email_signature'], _email_context(document, settings))
+    has_rental_items = document_has_rental_items(items)
     return render_template(
         "admin/documents/detail.html",
         settings=settings,
         document=document,
         items=items,
+        has_rental_items=has_rental_items,
         tax_view=document_tax_view(document, items),
         is_paid=document_paid_stamp(document),
         label=label_for(document["document_type"]),

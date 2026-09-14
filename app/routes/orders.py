@@ -5,7 +5,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, transition_order, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
@@ -295,6 +295,7 @@ def edit(order_id):
             form_data = draft_order_form(order_id)
         except ValueError:
             form_data = {"order": _ensure_order_access(order_id), "lines": []}
+    has_rental_items = order_has_rental_items(order_items(order_id))
     return render_template(
         "admin/orders/form.html",
         settings=get_company_settings(),
@@ -313,6 +314,7 @@ def edit(order_id):
         form_action=url_for("orders.edit", order_id=order_id),
         custom_field_label=custom_field_label,
         order_form=form_data,
+        has_rental_items=has_rental_items,
     )
 
 
@@ -336,6 +338,8 @@ def detail(order_id):
         ) if start_at and end_at else 1
     except ValueError:
         order_rental_days = 1
+    items = order_items(order_id)
+    has_rental_items = order_has_rental_items(items)
     documents = documents_for_order(order_id)
     has_invoice = any(document["document_type"] == "invoice" for document in documents)
     finalized_invoice_exists = has_finalized_invoice(order_id)
@@ -343,7 +347,8 @@ def detail(order_id):
         "admin/orders/detail.html",
         settings=get_company_settings(),
         order=order,
-        items=order_items(order_id),
+        items=items,
+        has_rental_items=has_rental_items,
         actions=status_actions(order["status"]),
         documents=documents,
         has_invoice=has_invoice,

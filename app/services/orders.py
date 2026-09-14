@@ -179,6 +179,28 @@ def order_items(order_id):
     ).fetchall()
 
 
+def order_has_rental_items(items):
+    """True when an order/document contains at least one hire-period line.
+
+    Catalogue rental products are rental items. A custom line explicitly set to
+    multiply by rental days is also treated as rental-like, because its price and
+    displayed days depend on the pickup/return period. Sales and services are not.
+    """
+    def item_value(item, key):
+        if isinstance(item, dict):
+            return item.get(key, "")
+        try:
+            return item[key]
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+    return any(
+        (item_value(item, "product_type") or "") == "rental"
+        or (item_value(item, "billing_mode") or "") == "rental_day"
+        for item in items
+    )
+
+
 ORDER_DELETE_BACKUP_DIR = os.path.join(os.path.expanduser("~"), "abi-backups")
 
 

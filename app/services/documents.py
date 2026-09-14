@@ -4,7 +4,7 @@ from app.db import get_db, now
 from app.services.settings import get_company_settings
 from app.services.timezone import display_local_date, display_local_datetime, parse_iso_datetime
 from app.services.numbering import next_in_sequence
-from app.services.orders import billed_rental_days, get_order, order_items
+from app.services.orders import billed_rental_days, get_order, order_has_rental_items, order_items
 
 DOCUMENT_TYPES = {
     "quote": {"label": "Quote", "prefix": "QUO"},
@@ -202,6 +202,10 @@ def rental_days_for_document(document):
 def rental_days_label(document):
     days = rental_days_for_document(document)
     return f"Rental days {days}"
+
+
+def document_has_rental_items(items):
+    return order_has_rental_items(items)
 
 
 def _row_get(row, key, default=None):

@@ -2485,6 +2485,97 @@ def test_invoice_line_items_exclude_vat_and_summarise_it(client, app):
     assert pdf.index(b'(Total without VAT) Tj') < pdf.index(b'(Amount due) Tj')
 
 
+
+def test_sale_only_order_hides_pickup_return_on_detail_edit_and_document(client, app):
+    login(client)
+    client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Sale Only Customer',
+        'email': 'sale-only@example.test',
+        'phone': '+270****2222',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Tow Hitch Cover',
+        'sku': 'SALE-HITCH',
+        'quantity': '10',
+        'description': 'Retail accessory.',
+        'product_type': 'sale',
+        'price_amount': '125',
+        'price_unit': 'each',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': '1',
+        'quantity': '2',
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }, follow_redirects=False)
+    assert created.status_code == 302
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+
+    detail = client.get(f'/orders/{order_id}')
+    assert detail.status_code == 200
+    assert b'Tow Hitch Cover' in detail.data
+    assert b'<h2>Rental period</h2>' not in detail.data
+    assert b'<span>Pickup</span>' not in detail.data
+    assert b'<span>Return</span>' not in detail.data
+
+    edit = client.get(f'/orders/{order_id}/edit')
+    assert edit.status_code == 200
+    assert b'<h2>Pickup and return</h2>' not in edit.data
+    assert b'id="rental-days-card"' not in edit.data
+    assert b'type="hidden" name="start_date" id="start-date" value="2026-07-01"' in edit.data
+    assert b'type="hidden" name="end_time" id="end-time" value="09:00"' in edit.data
+
+    document = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert document.status_code == 200
+    assert b'Tow Hitch Cover' in document.data
+    assert b'Pickup:' not in document.data
+    assert b'Return:' not in document.data
+    assert b'Rental days' not in document.data
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf = document_pdf_bytes(1)
+    assert b'Pickup:' not in pdf
+    assert b'Return:' not in pdf
+    assert b'Rental days' not in pdf
+
+
+def test_rental_order_still_shows_pickup_return_on_detail_edit_and_document(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    detail = client.get(f'/orders/{order_id}')
+    assert b'<h2>Rental period</h2>' in detail.data
+    assert b'<span>Pickup</span>' in detail.data
+    assert b'<span>Return</span>' in detail.data
+
+    edit = client.get(f'/orders/{order_id}/edit')
+    assert b'<h2>Pickup and return</h2>' in edit.data
+    assert b'id="rental-days-card"' in edit.data
+
+    document = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert b'Pickup:' in document.data
+    assert b'Return:' in document.data
+    assert b'Rental days' in document.data
+
+    with app.app_context():
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf = document_pdf_bytes(1)
+    assert b'Pickup:' in pdf
+    assert b'Return:' in pdf
+    assert b'Rental days' in pdf
+
 def test_invoice_can_be_saved_as_pdf(client):
     login(client)
     seed_customer_and_product(client)

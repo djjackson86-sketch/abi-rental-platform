@@ -4,7 +4,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
+from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, document_has_rental_items, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 from app.services.timezone import display_local_datetime
@@ -652,12 +652,14 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     _add_pdf_lines(text_commands, detail_x, 746, invoice_lines, size=8.5, leading=14)
 
     text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
-    _add_pdf_lines(text_commands, detail_x, 611, [
-        f'Order: {document["order_number"]}',
-        f'Pickup: {document_datetime(document["start_at"])}',
-        f'Return: {document_datetime(document["end_at"])}',
-        rent_label,
-    ], size=8.5, leading=14)
+    order_lines = [f'Order: {document["order_number"]}']
+    if document_has_rental_items(items):
+        order_lines.extend([
+            f'Pickup: {document_datetime(document["start_at"])}',
+            f'Return: {document_datetime(document["end_at"])}',
+            rent_label,
+        ])
+    _add_pdf_lines(text_commands, detail_x, 611, order_lines, size=8.5, leading=14)
 
     customer_lines = [
         'Bill To:',
@@ -806,8 +808,10 @@ def document_pdf_bytes(document_id):
     if issuer_phone:
         lines.append(f'Issuer phone: {issuer_phone}')
     lines.extend([line for line in issuer_address if line])
-    lines.extend([f'Order: {document["order_number"]}', f'Pickup: {document_datetime(document["start_at"])}', f'Return: {document_datetime(document["end_at"])}'])
-    if document['document_type'] == 'invoice':
+    lines.append(f'Order: {document["order_number"]}')
+    if document_has_rental_items(items):
+        lines.extend([f'Pickup: {document_datetime(document["start_at"])}', f'Return: {document_datetime(document["end_at"])}'])
+    if document['document_type'] == 'invoice' and document_has_rental_items(items):
         lines.append(rental_days_label(document))
         bank_lines = [
             ('Bank', document['branch_bank_name']),
