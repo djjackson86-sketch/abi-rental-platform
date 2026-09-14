@@ -1,4 +1,5 @@
 import math
+import textwrap
 import unicodedata
 from pathlib import Path
 
@@ -564,17 +565,40 @@ def _add_pdf_lines(commands, x, y, lines, size: int | float = 9, leading=14, max
         commands.append(_pdf_text_command(x, y - (index * leading), line, size=size, font=font))
 
 
+def _wrap_pdf_cell_text(value, max_chars=27, max_lines=2):
+    """Wrap a PDF table cell without letting text run into the next column.
+
+    The hand-built invoice PDF has fixed columns and Helvetica, so this uses a
+    conservative character budget instead of pretending PDF has table layout.
+    """
+    text = ' '.join(str(value or '').split())
+    if not text:
+        return ['']
+    return textwrap.wrap(text, width=max_chars, max_lines=max_lines, placeholder='…') or ['']
+
+
 def _pdf_objects(stream, image_object=None):
+    streams = stream if isinstance(stream, (list, tuple)) else [stream]
+    page_ids = [3 + (index * 2) for index in range(len(streams))]
+    content_ids = [page_id + 1 for page_id in page_ids]
+    font_regular_id = 3 + (len(streams) * 2)
+    font_bold_id = font_regular_id + 1
+    image_id = font_bold_id + 1 if image_object else None
+    resources = f'/Font << /F1 {font_regular_id} 0 R /F2 {font_bold_id} 0 R >>'.encode()
+    if image_id:
+        resources += f' /XObject << /Im1 {image_id} 0 R >>'.encode()
+
     objects = [
         b'<< /Type /Catalog /Pages 2 0 R >>',
-        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        f'<< /Type /Pages /Kids [{" ".join(f"{page_id} 0 R" for page_id in page_ids)}] /Count {len(streams)} >>'.encode(),
     ]
-    resources = b'/Font << /F1 4 0 R /F2 6 0 R >>'
-    if image_object:
-        resources += b' /XObject << /Im1 7 0 R >>'
-    objects.append(b'<< /Type /Page /Parent 2 0 R /MediaBox ' + A4_PORTRAIT_MEDIABOX.encode() + b' /Resources << ' + resources + b' >> /Contents 5 0 R >>')
+    for page_id, content_id, page_stream in zip(page_ids, content_ids, streams):
+        objects.append(
+            b'<< /Type /Page /Parent 2 0 R /MediaBox ' + A4_PORTRAIT_MEDIABOX.encode()
+            + b' /Resources << ' + resources + b' >> /Contents ' + f'{content_id} 0 R'.encode() + b' >>'
+        )
+        objects.append(b'<< /Length ' + str(len(page_stream)).encode() + b' >>\nstream\n' + page_stream + b'\nendstream')
     objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>')
-    objects.append(b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream')
     objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>')
     if image_object:
         objects.append(image_object)
@@ -613,6 +637,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     custom_fields = custom_fields_for(document)
     rent_label = rental_days_label(document)
     image_object = None
+    logo_draw_command = None
     draw_commands = []
     if logo_bytes:
         logo_width, logo_height = _jpeg_dimensions(logo_bytes)
@@ -623,7 +648,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         # ink sat (top-left, directly above the issuer/branch wording). Anchoring by the
         # image edge instead would let the branch-name line collide with the artwork.
         logo_bottom = A4_PORTRAIT_HEIGHT - 104
-        draw_commands.append(f'q {display_width:.2f} 0 0 {display_height:.2f} {LOGO_IMAGE_X} {logo_bottom:.2f} cm /Im1 Do Q')
+        logo_draw_command = f'q {display_width:.2f} 0 0 {display_height:.2f} {LOGO_IMAGE_X} {logo_bottom:.2f} cm /Im1 Do Q'
+        draw_commands.append(logo_draw_command)
         image_object = (
             f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
@@ -695,40 +721,68 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     customer_bottom_y = 625 - ((len(visible_customer_lines) - 1) * 13 if visible_customer_lines else 0)
 
     # Invoice table and totals.
-    table_y = min(430, customer_bottom_y - 26)
-    draw_commands.append(_pdf_light_blue_rect(36, table_y - 5, 523, 18))
-    # Line items are quoted EXCLUDING VAT; the VAT is stated once in the summary.
+    # Move the table up under the address blocks; if there are more than six
+    # line items, page 1 stays readable and the remaining rows continue on page 2
+    # with the same column headings before the summary/banking block.
+    table_y = min(545, customer_bottom_y - 28)
     tax_view = document_tax_view(document, items)
-    # Column headings as the client specified them (PRODUCT | QTY | DAYS | UNIT
-    # EXCL. VAT | SUBTOTAL EXCL. VAT | TAX | TOTAL INCL. VAT). The two money
-    # columns on the right need a real gutter: at 405/440 a line's TAX figure
-    # (e.g. R675.00 is ~30pt wide at 8pt) all but touched TOTAL INCL. VAT, so
-    # TAX sits at 396 and TOTAL INCL. VAT at 462 - a 66pt gutter, and the widest
-    # amount the format can produce still ends well inside the 559pt table edge.
-    _add_pdf_lines(text_commands, 36, table_y, ['PRODUCT'], size=7.5)
-    _add_pdf_lines(text_commands, 165, table_y, ['QTY'], size=7.5)
-    _add_pdf_lines(text_commands, 200, table_y, ['DAYS'], size=7.5)
-    _add_pdf_lines(text_commands, 235, table_y, ['UNIT EXCL. VAT'], size=7.5)
-    _add_pdf_lines(text_commands, 310, table_y, ['SUBTOTAL EXCL. VAT'], size=7.5)
-    _add_pdf_lines(text_commands, TAX_COLUMN_X, table_y, ['TAX'], size=7.5)
-    _add_pdf_lines(text_commands, TOTAL_INCL_COLUMN_X, table_y, ['TOTAL INCL. VAT'], size=7.5)
-    y = table_y - 24
-    for index, item in enumerate(items[:8]):
-        name = item['product_name'] or item['custom_name'] or 'Item'
-        sku = item['product_sku'] or ''
-        line_view = tax_view['lines'][index] if index < len(tax_view['lines']) else {
-            'unit_excl': 0.0, 'subtotal_excl': 0.0, 'tax': 0.0, 'total_incl': 0.0, 'rental_days': None}
-        days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
-        _add_pdf_lines(text_commands, 36, y, [name, sku], size=8, leading=11, max_lines=2)
-        _add_pdf_lines(text_commands, 165, y, [str(item['quantity'])], size=8)
-        _add_pdf_lines(text_commands, 200, y, [days_text], size=8)
-        _add_pdf_lines(text_commands, 235, y, [f"R{line_view['unit_excl']:.2f}"], size=8)
-        _add_pdf_lines(text_commands, 310, y, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
-        _add_pdf_lines(text_commands, TAX_COLUMN_X, y, [f"R{line_view['tax']:.2f}"], size=8)
-        _add_pdf_lines(text_commands, TOTAL_INCL_COLUMN_X, y, [f"R{line_view['total_incl']:.2f}"], size=8)
-        y -= 36
 
-    totals_y = max(170, y - 12)
+    def add_table_header(draw, text, header_y):
+        draw.append(_pdf_light_blue_rect(36, header_y - 5, 523, 18))
+        _add_pdf_lines(text, 36, header_y, ['PRODUCT'], size=7.5)
+        _add_pdf_lines(text, 165, header_y, ['QTY'], size=7.5)
+        _add_pdf_lines(text, 200, header_y, ['DAYS'], size=7.5)
+        _add_pdf_lines(text, 235, header_y, ['UNIT EXCL. VAT'], size=7.5)
+        _add_pdf_lines(text, 310, header_y, ['SUBTOTAL EXCL. VAT'], size=7.5)
+        _add_pdf_lines(text, TAX_COLUMN_X, header_y, ['TAX'], size=7.5)
+        _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, header_y, ['TOTAL INCL. VAT'], size=7.5)
+
+    def add_item_rows(text, page_items, start_index, first_row_y):
+        y_pos = first_row_y
+        for offset, item in enumerate(page_items):
+            line_index = start_index + offset
+            name = item['product_name'] or item['custom_name'] or 'Item'
+            sku = item['product_sku'] or ''
+            line_view = tax_view['lines'][line_index] if line_index < len(tax_view['lines']) else {
+                'unit_excl': 0.0, 'subtotal_excl': 0.0, 'tax': 0.0, 'total_incl': 0.0, 'rental_days': None}
+            days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
+            product_lines = _wrap_pdf_cell_text(name, max_chars=27, max_lines=2)
+            if sku and len(product_lines) < 2:
+                product_lines.append(str(sku)[:30])
+            _add_pdf_lines(text, 36, y_pos, product_lines, size=8, leading=11, max_lines=2)
+            _add_pdf_lines(text, 165, y_pos, [str(item['quantity'])], size=8)
+            _add_pdf_lines(text, 200, y_pos, [days_text], size=8)
+            _add_pdf_lines(text, 235, y_pos, [f"R{line_view['unit_excl']:.2f}"], size=8)
+            _add_pdf_lines(text, 310, y_pos, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
+            _add_pdf_lines(text, TAX_COLUMN_X, y_pos, [f"R{line_view['tax']:.2f}"], size=8)
+            _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, y_pos, [f"R{line_view['total_incl']:.2f}"], size=8)
+            y_pos -= 36
+        return y_pos
+
+    visible_items = items[:8]
+    first_page_limit = 6
+    first_page_items = visible_items[:first_page_limit] if len(visible_items) > first_page_limit else visible_items
+    continuation_items = visible_items[first_page_limit:] if len(visible_items) > first_page_limit else []
+    add_table_header(draw_commands, text_commands, table_y)
+    y = add_item_rows(text_commands, first_page_items, 0, table_y - 24)
+
+    streams = []
+    if continuation_items:
+        text_commands.append('ET')
+        streams.append('\n'.join(draw_commands + text_commands).encode('latin-1', 'replace'))
+        page_draw_commands = [logo_draw_command] if logo_draw_command else []
+        page_text_commands = ['BT']
+        page_text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
+        page_text_commands.append(_pdf_text_command(455, 746, 'Page 2', size=8.5))
+        page_table_y = 675
+        add_table_header(page_draw_commands, page_text_commands, page_table_y)
+        y = add_item_rows(page_text_commands, continuation_items, first_page_limit, page_table_y - 24)
+        draw_commands = page_draw_commands
+        text_commands = page_text_commands
+
+    # Keep the summary attached to the visible line items on the page that holds
+    # the final item rows, clamped only far enough to keep Amount due on-page.
+    totals_y = y - 12
     bank_lines = ['Banking details']
     for key, value in [
         ('Bank', document['branch_bank_name']),
@@ -761,6 +815,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
         ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
     ])
+    summary_min_y = 58 + ((len(totals) - 1) * 14)
+    totals_y = max(summary_min_y, totals_y)
     draw_commands.append(_pdf_light_blue_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4))
     for index, (label, amount) in enumerate(totals):
         line_y = totals_y - (index * 14)
@@ -774,12 +830,27 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             text_commands.append(_pdf_text_command(390, line_y, label, size=8.8))
             text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8))
     bank_y = totals_y - (len(totals) * 14) - 26
+    bank_detail_lines = bank_lines[1:]
+    bank_last_y = bank_y - 13 - ((len(bank_detail_lines) - 1) * 13 if bank_detail_lines else 0)
+    if bank_last_y < 58:
+        text_commands.append('ET')
+        streams.append('\n'.join(draw_commands + text_commands).encode('latin-1', 'replace'))
+        bank_draw_commands = [logo_draw_command] if logo_draw_command else []
+        bank_text_commands = ['BT']
+        bank_text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
+        bank_text_commands.append(_pdf_text_command(455, 746, f'Page {len(streams) + 1}', size=8.5))
+        bank_text_commands.append(_pdf_text_command(36, 715, 'Thank you for your business.', size=8.8, font='F2'))
+        bank_text_commands.append(_pdf_text_command(36, 690, 'Banking details', size=8.5, font='F2'))
+        _add_pdf_lines(bank_text_commands, 36, 675, bank_detail_lines, size=8.5, leading=13, max_lines=7)
+        bank_text_commands.append('ET')
+        streams.append('\n'.join(bank_draw_commands + bank_text_commands).encode('latin-1', 'replace'))
+        return _pdf_objects(streams, image_object=image_object)
     text_commands.append(_pdf_text_command(36, bank_y + 18, 'Thank you for your business.', size=8.8, font='F2'))
     text_commands.append(_pdf_text_command(36, bank_y, 'Banking details', size=8.5, font='F2'))
-    _add_pdf_lines(text_commands, 36, bank_y - 13, bank_lines[1:], size=8.5, leading=13, max_lines=7)
+    _add_pdf_lines(text_commands, 36, bank_y - 13, bank_detail_lines, size=8.5, leading=13, max_lines=7)
     text_commands.append('ET')
-    stream = '\n'.join(draw_commands + text_commands).encode('latin-1', 'replace')
-    return _pdf_objects(stream, image_object=image_object)
+    streams.append('\n'.join(draw_commands + text_commands).encode('latin-1', 'replace'))
+    return _pdf_objects(streams, image_object=image_object)
 
 
 def document_pdf_bytes(document_id):

@@ -18,7 +18,7 @@ import tempfile
 import pytest
 
 from app import create_app
-from app.services.pdf_documents import _escape_pdf_text, _invoice_template_pdf, _pdf_text
+from app.services.pdf_documents import _escape_pdf_text, _invoice_template_pdf, _pdf_text, _wrap_pdf_cell_text
 
 FRACTION_SLASH_NAME = '2.6m Utility Trailer - 1\u20442 ton'
 
@@ -89,10 +89,24 @@ def test_escaping_still_happens_after_the_transliteration():
 
 def _drawn_texts(pdf_bytes):
     """Every text string actually drawn on the page, in order."""
+    return [entry['text'] for entry in _drawn_text_positions(pdf_bytes)]
+
+
+def _drawn_text_positions(pdf_bytes):
+    """Every text string with its PDF coordinates and 1-based page number."""
     decoded = pdf_bytes.decode('latin-1')
     streams = re.findall(r'stream\n(.*?)\nendstream', decoded, re.DOTALL)
-    content = next(s for s in streams if ' Tj' in s)
-    return re.findall(r'/F\d [\d.]+ Tf 1 0 0 1 [\d.]+ [\d.]+ Tm \((.*?)\) Tj', content)
+    entries = []
+    page_number = 0
+    for content in streams:
+        if ' Tj' not in content:
+            continue
+        page_number += 1
+        for font, size, x, y, text in re.findall(
+            r'/(F\d) ([\d.]+) Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \((.*?)\) Tj', content
+        ):
+            entries.append({'page': page_number, 'font': font, 'size': float(size), 'x': float(x), 'y': float(y), 'text': text})
+    return entries
 
 
 def build_invoice_texts(app):
@@ -136,13 +150,121 @@ def build_invoice_texts(app):
             _drawn_texts(_invoice_template_pdf(document, items, settings))
 
 
+def _sample_document(document_type='invoice'):
+    return {
+        'document_type': document_type, 'status': 'finalized', 'number': 'INV-10145',
+        'order_number': 'ORD-10145', 'created_at': '2026-09-13T10:00:00',
+        'start_at': '2026-09-13T10:30:00', 'end_at': '2026-09-14T10:30:00',
+        'branch_name': 'Midrand', 'branch_email': 'info@sanotrailers.co.za',
+        'branch_phone': '+27 82 123 4567', 'branch_address_line1': '12 Industrial Road',
+        'branch_address_line2': None, 'branch_city': 'Johannesburg',
+        'branch_province': 'Gauteng', 'branch_postal_code': '2001',
+        'branch_bank_name': 'FNB', 'branch_bank_account_name': 'Sano Trailers',
+        'branch_bank_account_number': '62012345678', 'branch_bank_branch_code': '250655',
+        'branch_bank_account_type': 'Business Cheque', 'branch_bank_reference_note': '',
+        'customer_name': 'Thabisile Skosana', 'customer_email': 'client@example.test',
+        'customer_phone': '+27 71 987 6543', 'customer_address_line1': '45 Main Street',
+        'customer_address_line2': None, 'customer_suburb': 'Vorna Valley',
+        'customer_city': 'Midrand', 'customer_province': 'Gauteng',
+        'customer_postal_code': '1685', 'customer_country': 'South Africa',
+        'custom_fields_json': '{}', 'deposit_option': 'security_deposit',
+        'subtotal': 4800.0, 'tax_total': 720.0, 'deposit_total': 0.0,
+        'discount_total': 0.0, 'total': 5520.0, 'paid_total': 0.0, 'due_total': 5520.0,
+        'payment_status': 'payment_due',
+    }
+
+
+def _sample_settings():
+    return {
+        'company_name': 'Sano Trailers', 'email': 'info@sanotrailers.co.za',
+        'phone': '+27 82 123 4567', 'address_line1': '12 Industrial Road',
+        'address_line2': None, 'city': 'Johannesburg', 'province': 'Gauteng',
+        'postcode': '2001',
+    }
+
+
+def _many_items(count=8):
+    return [
+        {'product_name': f'Visible line item {index}', 'product_sku': f'SKU-{index:02d}',
+         'custom_name': '', 'quantity': 1, 'unit_price': 600.0, 'line_subtotal': 600.0,
+         'line_tax': 90.0, 'line_total': 690.0}
+        for index in range(1, count + 1)
+    ]
+
+
 def test_an_invoice_prints_the_fraction_slash_item_name(app):
     pdf_bytes, texts = build_invoice_texts(app)
-    assert '2.6m Utility Trailer - 1/2 ton' in texts
+    assert '2.6m Utility Trailer - 1/2' in texts
+    assert 'ton' in texts
     assert 'Ratchet + Strap Rental' in texts
     # The old failure mode: "1⁄2 ton" printed as "1?2 ton".
     assert not any('?' in text for text in texts)
-    assert b'(2.6m Utility Trailer - 1/2 ton) Tj' in pdf_bytes
+    assert b'(2.6m Utility Trailer - 1/2) Tj' in pdf_bytes
+    assert b'(ton) Tj' in pdf_bytes
+
+
+def test_long_product_names_wrap_inside_the_product_column(app):
+    long_name = 'Supply and install flatbar gap closure on trailer sides and front'
+    assert _wrap_pdf_cell_text(long_name, max_chars=27, max_lines=2) == [
+        'Supply and install flatbar',
+        'gap closure on trailer…',
+    ]
+    document = _sample_document('quote')
+    document.update({'subtotal': 478.26, 'tax_total': 71.74, 'total': 550.0, 'due_total': 550.0})
+    item = {'product_name': long_name, 'product_sku': '', 'custom_name': '', 'quantity': 1,
+            'unit_price': 478.26, 'line_subtotal': 478.26, 'line_tax': 71.74, 'line_total': 550.0}
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(document, [item], _sample_settings())
+    positions = _drawn_text_positions(pdf_bytes)
+
+    assert any(entry['text'] == 'Supply and install flatbar' and entry['x'] == 36 for entry in positions)
+    assert any(entry['text'] == 'gap closure on trailer...' and entry['x'] == 36 for entry in positions)
+    assert not any('trailer sides and front' in entry['text'] for entry in positions)
+
+
+@pytest.mark.parametrize('document_type', ['invoice', 'quote'])
+def test_quote_and_invoice_summary_moves_down_with_visible_line_items(app, document_type):
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(8), _sample_settings())
+    positions = _drawn_text_positions(pdf_bytes)
+    last_sku_y = next(entry['y'] for entry in positions if entry['text'] == 'SKU-08')
+    summary_y = next(entry['y'] for entry in positions if entry['text'] == 'Total without VAT')
+    amount_due_y = next(entry['y'] for entry in positions if entry['text'] == 'Amount due')
+
+    assert next(entry for entry in positions if entry['text'] == 'SKU-06')['page'] == 1
+    assert next(entry for entry in positions if entry['text'] == 'SKU-07')['page'] == 2
+    assert next(entry for entry in positions if entry['text'] == 'Total without VAT')['page'] == 2
+    # The summary must follow the final visible item row on quotes and invoices;
+    # the old fixed floor put it back above/inside the last row.
+    assert summary_y <= last_sku_y - 12
+    assert amount_due_y >= 58
+
+
+@pytest.mark.parametrize('document_type', ['invoice', 'quote'])
+def test_long_quote_and_invoice_repeat_headings_on_page_two(app, document_type):
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(8), _sample_settings())
+    positions = _drawn_text_positions(pdf_bytes)
+    product_headings = [entry for entry in positions if entry['text'] == 'PRODUCT']
+    total_headings = [entry for entry in positions if entry['text'] == 'TOTAL INCL. VAT']
+
+    assert [entry['page'] for entry in product_headings] == [1, 2]
+    assert [entry['page'] for entry in total_headings] == [1, 2]
+
+
+@pytest.mark.parametrize('document_type', ['invoice', 'quote'])
+def test_long_quote_and_invoice_keep_banking_details_on_page_two(app, document_type):
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(8), _sample_settings())
+    decoded = pdf_bytes.decode('latin-1')
+    positions = _drawn_text_positions(pdf_bytes)
+    banking = next(entry for entry in positions if entry['text'] == 'Banking details')
+    account_type = next(entry for entry in positions if entry['text'] == 'Account type: Business Cheque')
+
+    assert '/Count 2' in decoded
+    assert banking['page'] == 2
+    assert account_type['page'] == 2
+    assert account_type['y'] >= 58
 
 
 def test_the_document_fonts_declare_winansi_encoding(app):
