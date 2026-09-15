@@ -4180,6 +4180,68 @@ def test_ticket_341952905_customer_discount_balance_service_and_refund(client, a
         assert refund['method'] == 'cash'
 
 
+def test_re_saving_a_discounted_order_never_deducts_the_discount_twice(client, app):
+    """ORD-10169: a customer's standing discount was deducted again on every save.
+
+    ``_build_order_payload`` already subtracts the CUSTOMER's standard discount,
+    and the update path also subtracted the stored discount from that result, so
+    every re-save of the order dropped the total by the discount a second time.
+    The live order (Mduduzi Ntshangase, 9%) ended up R49.70 below its own lines,
+    so the proforma printed "Total with VAT R635.00" beside "Amount due -R49.70"
+    and the order showed as Overpaid although no discount was listed.
+    """
+    login(client)
+    seed_customer_and_product(client)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE tax_profiles SET rate=15 WHERE id=1')
+        db.execute('UPDATE customers SET standard_discount_percent=9 WHERE id=1')
+        db.commit()
+
+    order_form = {
+        'customer_id': '1', 'product_id': ['1'], 'quantity': ['1'],
+        'start_date': '2026-09-15', 'start_time': '15:00',
+        'end_date': '2026-09-16', 'end_time': '15:00',
+        'deposit_option': 'no_deposit',
+    }
+    created = client.post('/orders/new', data=order_form, follow_redirects=False)
+    assert created.status_code == 302
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+
+    def money():
+        with app.app_context():
+            row = get_db().execute(
+                'SELECT subtotal, tax_total, discount_total, total, due_total, payment_status FROM orders WHERE id = ?',
+                (order_id,),
+            ).fetchone()
+            return {key: row[key] for key in row.keys()}
+
+    opening = money()
+    assert opening['discount_total'] > 0
+    assert round(opening['total'], 2) == round(
+        opening['subtotal'] + opening['tax_total'] - opening['discount_total'], 2
+    )
+
+    # Re-save the way the edit form does: it submits no discount fields at all.
+    resaved_response = client.post(f'/orders/{order_id}/edit', data=order_form, follow_redirects=False)
+    assert resaved_response.status_code == 302
+    resaved = money()
+    assert round(resaved['discount_total'], 2) == round(opening['discount_total'], 2)
+    assert round(resaved['total'], 2) == round(opening['total'], 2)
+
+    # Clearing the discount must land exactly on the undiscounted total.
+    client.post(
+        f'/orders/{order_id}/discount',
+        data={'discount_mode': 'percent', 'discount_value': '0'},
+        follow_redirects=True,
+    )
+    cleared = money()
+    assert cleared['discount_total'] == 0
+    assert round(cleared['total'], 2) == round(cleared['subtotal'] + cleared['tax_total'], 2)
+    assert round(cleared['due_total'], 2) == round(cleared['total'], 2)
+    assert cleared['payment_status'] == 'payment_due'
+
+
 def test_ticket_341952905_return_validation_taxed_extra_and_invoice_revision(client, app):
     login(client)
     seed_customer_and_product(client)

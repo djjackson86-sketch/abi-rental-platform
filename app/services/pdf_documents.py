@@ -656,9 +656,13 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
 
     # A settled invoice is stamped PAID. Drawn first so every real figure sits
-    # on top of it, and pinned in the empty band above the totals.
+    # on top of it, and centred in the empty band at the TOP of the page -
+    # between the issuer block on the left and the document stack on the right.
+    # It used to sit at (395, 498), which is the first item rows: the table text
+    # and the light blue header band printed over it and buried it (client
+    # report, ORD-10169 proforma).
     if document_paid_stamp(document):
-        draw_commands.extend(_pdf_paid_stamp(395, 498))
+        draw_commands.extend(_pdf_paid_stamp(233, 782))
 
     text_commands = ['BT']
     # Top-left brand/address, matching the supplied template.

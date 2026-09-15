@@ -267,6 +267,40 @@ def test_long_quote_and_invoice_keep_banking_details_on_page_two(app, document_t
     assert account_type['y'] >= 58
 
 
+def _paid_stamp_geometry(pdf_bytes):
+    """(centre_x, centre_y) of the rotated PAID stamp box, from the content stream."""
+    stream = pdf_bytes.decode('latin-1')
+    match = re.search(
+        r'([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) ([\d.]+) ([\d.]+) cm\s*\n1\.8 w 0 0 ([\d.]+) ([\d.]+) re S',
+        stream,
+    )
+    assert match, 'the PAID stamp box is not in the content stream'
+    cos, sin, _c, _d, x, y, width, height = (float(value) for value in match.groups())
+    return (x + (cos * width / 2) - (sin * height / 2), y + (sin * width / 2) + (cos * height / 2))
+
+
+def test_paid_stamp_sits_centred_at_the_top_and_nothing_prints_over_it(app):
+    """The stamp used to sit on the first item rows and was buried by the table.
+
+    Client report (ORD-10169 proforma): the PAID stamp was invisible because it
+    was drawn under the item rows and the light blue table header band. It is now
+    centred in the empty band at the top of the page, so this pins both the
+    position and the fact that no drawn text sits over it.
+    """
+    document = _sample_document()
+    document['payment_status'] = 'paid'
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(document, _many_items(2), _sample_settings())
+    centre_x, centre_y = _paid_stamp_geometry(pdf_bytes)
+    assert 200 <= centre_x <= 400, f'PAID stamp is not centred (x={centre_x})'
+    assert centre_y >= 700, f'PAID stamp is not near the top of the page (y={centre_y})'
+    over_it = [
+        entry for entry in _drawn_text_positions(pdf_bytes)
+        if entry['text'].strip() and 210 <= entry['x'] <= 390 and entry['y'] >= 715
+    ]
+    assert over_it == [], f'text is printed over the PAID stamp: {over_it}'
+
+
 def test_the_document_fonts_declare_winansi_encoding(app):
     pdf_bytes, _texts = build_invoice_texts(app)
     decoded = pdf_bytes.decode('latin-1')

@@ -445,6 +445,27 @@ def computed_discount(mode, value, subtotal, tax_total):
     return min(discount, limit)
 
 
+def order_total_from_payload(payload):
+    """The order total as the SUM OF ITS PARTS, never as a running delta.
+
+    ``subtotal + tax - discount + refundable deposit + damage waiver`` is exactly
+    how :func:`_build_order_payload` composes the total, so re-deriving it is safe
+    at any point in a save. The update path used to subtract a carried-forward
+    discount from the builder's total instead, which deducted it a SECOND time
+    whenever the customer carries a standing standard discount - every re-save of
+    such an order lost the discount again (ORD-10169: R49.70 off a R635.00 order,
+    printed as a phantom "Amount due -R49.70" and an Overpaid status).
+    """
+    return round(
+        float(payload.get("subtotal") or 0)
+        + float(payload.get("tax_total") or 0)
+        - float(payload.get("discount_total") or 0)
+        + float(payload.get("deposit_total") or 0)
+        + float(payload.get("damage_waiver_amount") or 0),
+        2,
+    )
+
+
 def _build_order_payload(form):
     db = get_db()
     customer_id = int(form.get("customer_id") or 0) or None
@@ -639,7 +660,11 @@ def update_draft_order(order_id, form):
             payload["discount_total"] = computed_discount(
                 stored_discount_mode, stored_discount_value, payload["subtotal"], payload["tax_total"]
             )
-            payload["total"] = round(float(payload["total"] or 0) - float(payload["discount_total"] or 0), 2)
+            # Re-derive the total from its parts. The payload builder already
+            # deducted the CUSTOMER's standing standard discount, so subtracting
+            # the stored discount from payload["total"] deducted it twice for
+            # every customer carrying a standard discount (ORD-10169).
+            payload["total"] = order_total_from_payload(payload)
     from app.services.payments import payment_total
     paid_total = payment_total(order_id)
     due_total = round(max(float(payload["total"] or 0) - paid_total, 0), 2)
