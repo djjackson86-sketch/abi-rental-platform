@@ -5,6 +5,7 @@ import pytest
 
 from app import create_app
 from app.db import get_db
+from app.services.orders import order_counts
 from app.services.reports import (
     customer_summary,
     dashboard_period_metrics,
@@ -62,9 +63,9 @@ def _seed_revenue_orders(app):
             db.execute(
                 """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id,
                 return_branch_id, status, payment_status, subtotal, tax_total, deposit_total, total,
-                due_total, notes, created_at)
-                VALUES (?, ?, 'return', 1, 1, ?, ?, ?, 0, 0, ?, ?, '', ?)""",
-                (number, customer_id, status, payment_status, total, total, 0 if payment_status == "paid" else total, f"{DAY}T09:00:00"),
+                due_total, notes, start_at, end_at, created_at)
+                VALUES (?, ?, 'return', 1, 1, ?, ?, ?, 0, 0, ?, ?, '', ?, ?, ?)""",
+                (number, customer_id, status, payment_status, total, total, 0 if payment_status == "paid" else total, f"{DAY}T09:00:00", f"{DAY}T17:00:00", f"{DAY}T09:00:00"),
             )
             order_id = db.execute("SELECT id FROM orders WHERE order_number = ?", (number,)).fetchone()["id"]
             db.execute(
@@ -102,3 +103,47 @@ def test_reports_only_recognize_paid_real_order_stages_as_revenue(app):
         customer_rows = customer_summary(DAY, DAY)
         assert customer_rows[0]["customer_name"] == "Revenue Customer"
         assert customer_rows[0]["total"] == expected_revenue
+
+
+def test_orders_page_metrics_use_the_same_recognized_revenue_rule(app):
+    _seed_revenue_orders(app)
+
+    expected_revenue = 200 + 500 + 600 + 700
+    with app.app_context():
+        counts = order_counts()
+        assert counts["total"] == 12
+        assert counts["revenue"] == expected_revenue
+        # The due card keeps its existing behavior: outstanding balances from the
+        # filtered rows are still shown even when those rows are not revenue yet.
+        assert counts["due"] == 100 + 300 + 800 + 900 + 1000
+
+        sales_repairs = order_counts(status="sales_repairs")
+        assert sales_repairs["total"] == 2
+        assert sales_repairs["revenue"] == 200
+
+        drafts = order_counts(status="draft")
+        assert drafts["total"] == 2
+        assert drafts["revenue"] == 0
+
+        unpaid = order_counts(payment_status="payment_due")
+        assert unpaid["total"] == 5
+        assert unpaid["revenue"] == 0
+
+        paid = order_counts(payment_status="paid")
+        assert paid["total"] == 7
+        assert paid["revenue"] == expected_revenue
+
+
+def test_orders_page_revenue_keeps_existing_branch_and_date_filters(app):
+    _seed_revenue_orders(app)
+
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE orders SET collect_branch_id = 2, return_branch_id = 2 WHERE order_number = 'RETURNED-PAID'")
+        db.execute("UPDATE orders SET start_at = '2026-09-16T09:00:00' WHERE order_number = 'STARTED-PAID'")
+        db.commit()
+
+        assert order_counts(branch_id=1)["revenue"] == 200 + 500 + 600
+        assert order_counts(branch_id=2)["revenue"] == 700
+        assert order_counts(start_date=DAY, end_date=DAY)["revenue"] == 200 + 500 + 700
+        assert order_counts(branch_id=1, start_date=DAY, end_date=DAY)["revenue"] == 200 + 500

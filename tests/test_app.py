@@ -938,7 +938,8 @@ def test_orders_date_range_filters_metrics_and_shows_deposit_to_process(client, 
     assert b'value="2026-07-31"' in filtered.data
     assert b'ORD-10145' in filtered.data
     assert b'ORD-10146' not in filtered.data
-    assert b'<small>Revenue</small><b>R1150.00</b>' in filtered.data
+    assert b'<small>Revenue</small><b>R0.00</b>' in filtered.data
+    assert b'<small>Due</small><b>R1150.00</b>' in filtered.data
     assert b'Deposit to process' in filtered.data
     assert b'R750.00' in filtered.data
 
