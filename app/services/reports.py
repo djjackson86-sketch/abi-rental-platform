@@ -78,6 +78,31 @@ def _window(column, start_date, end_date):
     return sql, params
 
 
+_REVENUE_STATUSES = ("sales_repairs", "reserved", "started", "returned")
+
+
+def revenue_recognized_condition(alias="o"):
+    """SQL condition for orders that are allowed to count as revenue.
+
+    Drafts, unpaid Sales/Repairs work, and unpaid rental orders can carry totals
+    while staff are still quoting or preparing them. Reporting must not treat
+    those totals as earned revenue until the order is fully paid and has moved
+    into a real order stage.
+    """
+    prefix = f"{alias}." if alias else ""
+    marks = ", ".join("?" for _ in _REVENUE_STATUSES)
+    return (
+        f"COALESCE({prefix}payment_status, '') = ? "
+        f"AND COALESCE({prefix}status, '') IN ({marks})"
+    ), ["paid", *_REVENUE_STATUSES]
+
+
+def recognized_revenue_expr(alias="o", column="total"):
+    condition, params = revenue_recognized_condition(alias)
+    prefix = f"{alias}." if alias else ""
+    return f"CASE WHEN {condition} THEN COALESCE({prefix}{column}, 0) ELSE 0 END", params
+
+
 def summary_metrics(start_date=None, end_date=None, branch_id=None):
     """Headline figures. The branch restriction applies to orders and payments.
 
@@ -85,12 +110,14 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
     activity, so scoping them to one branch would understate the business.
     """
     db = get_db()
-    sql = """
-        SELECT COUNT(*) AS count, COALESCE(SUM(o.total), 0) AS revenue, COALESCE(SUM(o.due_total), 0) AS due
+    revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
+    sql = f"""
+        SELECT COUNT(*) AS count, COALESCE(SUM({revenue_expr}), 0) AS revenue, COALESCE(SUM(o.due_total), 0) AS due
         FROM orders o
         WHERE 1=1
     """
     params = []
+    params.extend(revenue_params)
     window_sql, window_params = _window("o.created_at", start_date, end_date)
     sql += window_sql
     params.extend(window_params)
@@ -148,8 +175,10 @@ def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
     """
     db = get_db()
 
-    order_sql = "SELECT COUNT(*) AS count, COALESCE(SUM(o.total), 0) AS revenue FROM orders o WHERE 1=1"
+    revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
+    order_sql = f"SELECT COUNT(*) AS count, COALESCE(SUM({revenue_expr}), 0) AS revenue FROM orders o WHERE 1=1"
     order_params = []
+    order_params.extend(revenue_params)
     window_sql, window_params = _window("o.created_at", start_date, end_date)
     order_sql += window_sql
     order_params.extend(window_params)
@@ -340,11 +369,13 @@ def dashboard_day_metrics(day=None, branch_id=None):
 
 def orders_by_status(start_date=None, end_date=None, branch_id=None):
     db = get_db()
-    sql = """
-        SELECT o.status, COUNT(*) AS count, COALESCE(SUM(o.total), 0) AS total FROM orders o
+    revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
+    sql = f"""
+        SELECT o.status, COUNT(*) AS count, COALESCE(SUM({revenue_expr}), 0) AS total FROM orders o
         WHERE 1=1
     """
     params = []
+    params.extend(revenue_params)
     window_sql, window_params = _window("o.created_at", start_date, end_date)
     sql += window_sql
     params.extend(window_params)
@@ -375,16 +406,19 @@ def payments_by_method(start_date=None, end_date=None, branch_id=None):
 
 def product_performance(start_date=None, end_date=None, limit=10, branch_id=None):
     db = get_db()
-    sql = """
+    condition, revenue_params = revenue_recognized_condition("o")
+    line_revenue_expr = f"CASE WHEN {condition} THEN COALESCE(oi.line_total, 0) ELSE 0 END"
+    sql = f"""
         SELECT COALESCE(p.name, oi.custom_name, 'Custom line') AS product_name,
             COALESCE(SUM(oi.quantity), 0) AS quantity,
-            COALESCE(SUM(oi.line_total), 0) AS total
+            COALESCE(SUM({line_revenue_expr}), 0) AS total
         FROM order_items oi
         JOIN orders o ON o.id = oi.order_id
         LEFT JOIN products p ON p.id = oi.product_id
         WHERE 1=1
     """
     params = []
+    params.extend(revenue_params)
     # order_items has no created_at: the order's own date is the reporting date,
     # which also matches every other query in this module (and fixes a 500 that
     # any report date filter used to raise).
@@ -405,13 +439,15 @@ def product_performance(start_date=None, end_date=None, limit=10, branch_id=None
 
 def customer_summary(start_date=None, end_date=None, limit=10, branch_id=None):
     db = get_db()
-    sql = """
-        SELECT c.name AS customer_name, COUNT(o.id) AS orders, COALESCE(SUM(o.total), 0) AS total
+    revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
+    sql = f"""
+        SELECT c.name AS customer_name, COUNT(o.id) AS orders, COALESCE(SUM({revenue_expr}), 0) AS total
         FROM customers c
         LEFT JOIN orders o ON o.customer_id = c.id
         WHERE 1=1
     """
     params = []
+    params.extend(revenue_params)
     window_sql, window_params = _window("o.created_at", start_date, end_date)
     sql += window_sql
     params.extend(window_params)

@@ -3426,6 +3426,15 @@ def test_reports_dashboard_summarizes_orders_payments_products_and_customers(cli
     first_id = create_order_for_status(client, quantity='2')
     second_id = create_order_for_status(client, quantity='1', start_date='2026-07-10', end_date='2026-07-11')
     client.post(f'/orders/{first_id}/reserve', follow_redirects=True)
+    with client.application.app_context():
+        recognized_total = get_db().execute(
+            'SELECT total FROM orders WHERE id = ?', (first_id,)
+        ).fetchone()['total']
+    client.post(
+        f'/orders/{first_id}/payments',
+        data={'amount': str(recognized_total), 'method': 'eft', 'reference': 'REPORT-PAID'},
+        follow_redirects=True,
+    )
     client.post(f'/orders/{second_id}/payments', data={'amount': '200', 'method': 'cash', 'reference': 'REPORT-CASH'}, follow_redirects=True)
 
     report = client.get('/reports')
@@ -3436,7 +3445,7 @@ def test_reports_dashboard_summarizes_orders_payments_products_and_customers(cli
     assert b'Product performance' in report.data
     assert b'Customer summary' in report.data
     assert b'Payment summary' in report.data
-    assert b'R1600.00' in report.data
+    assert f'R{recognized_total:.2f}'.encode() in report.data
     assert b'R200.00' in report.data
     assert b'Reserved' in report.data
     assert b'Draft' in report.data
