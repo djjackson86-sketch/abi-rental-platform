@@ -1839,6 +1839,67 @@ def test_edit_damage_waiver_order_without_amount_field_preserves_stored_waiver_a
         assert order['damage_waiver_amount'] == 125
 
 
+def test_service_day_products_bill_rental_days_and_preview_rule(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/inventory/new', data={
+        'name': 'Setup Service',
+        'sku': 'SERV-DAY',
+        'product_type': 'service',
+        'quantity': '12',
+        'price_amount': '40',
+        'price_unit': 'day',
+        'security_deposit': '500',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    new_page = client.get('/orders/new')
+    assert new_page.status_code == 200
+    assert b'data-type="service"' in new_page.data
+    assert b'data-unit="day"' in new_page.data
+    assert b"const productType=(match.dataset.type||'rental')" in new_page.data
+    assert b"const isDurationPriced=['day','week','month','hour'].includes(match.dataset.unit)" in new_page.data
+    assert b"multiplier=(productType==='rental'||isService)&&isDurationPriced?days:1" in new_page.data
+    assert b"deposit=isService?0" in new_page.data
+
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': ['2'],
+        'quantity': ['5'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'deposit_option': 'security_deposit',
+    }, follow_redirects=False)
+    assert created.status_code == 302
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+    with app.app_context():
+        db = get_db()
+        item = db.execute('SELECT quantity, line_subtotal, line_tax, line_total FROM order_items WHERE order_id=?', (order_id,)).fetchone()
+        order = db.execute('SELECT subtotal, tax_total, deposit_total, total, due_total FROM orders WHERE id=?', (order_id,)).fetchone()
+        assert item['quantity'] == 1
+        assert item['line_subtotal'] == 120
+        assert item['line_tax'] == 0
+        assert item['line_total'] == 120
+        assert order['subtotal'] == 120
+        assert order['tax_total'] == 0
+        assert order['deposit_total'] == 0
+        assert order['total'] == 120
+        assert order['due_total'] == 120
+
+    from app.services.orders import calculate_line
+    fixed_service = calculate_line({
+        'product_type': 'service', 'price_amount': 40, 'price_unit': 'fixed',
+        'tax_rate': 0, 'security_deposit': 500,
+    }, 5, 3, 'exclusive')
+    assert fixed_service['quantity'] == 1
+    assert fixed_service['line_total'] == 40
+    assert fixed_service['deposit'] == 0
+
+
 def test_order_estimate_hides_discount_and_damage_waiver_rows(client):
     login(client)
     seed_customer_and_product(client)

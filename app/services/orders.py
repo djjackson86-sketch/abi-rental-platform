@@ -376,12 +376,16 @@ def billed_rental_days(start_at, end_at, extra_hours=0, revised=False):
     return rental_days(start_at, end_at)
 
 
+DURATION_PRICE_UNITS = {"day", "week", "month", "hour"}
+
+
 def calculate_line(product, quantity, days, tax_mode="exclusive"):
     product_type = product["product_type"] or "rental"
     qty = 1 if product_type == "service" else max(1, int(quantity or 1))
     base = float(product["price_amount"] or 0) * qty
-    if product_type == "rental" and product["price_unit"] in {"day", "week", "month", "hour"}:
-        # v1 pricing is day-equivalent for all duration units; advanced structures come later.
+    if product_type in {"rental", "service"} and product["price_unit"] in DURATION_PRICE_UNITS:
+        # v1 pricing is day-equivalent for duration-priced rental/service items;
+        # service quantity stays 1 and service deposits stay zero.
         base *= days
     tax_rate = float(product["tax_rate"] or 0) / 100
     if tax_mode == "inclusive" and tax_rate:
