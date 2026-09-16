@@ -100,7 +100,43 @@ def revenue_recognized_condition(alias="o"):
 def recognized_revenue_expr(alias="o", column="total"):
     condition, params = revenue_recognized_condition(alias)
     prefix = f"{alias}." if alias else ""
-    return f"CASE WHEN {condition} THEN COALESCE({prefix}{column}, 0) ELSE 0 END", params
+    if column == "total":
+        # Refundable security deposits are held money, not earned revenue. Count
+        # only the part deliberately applied/retained for extra time, damages or
+        # other settlement costs. Damage-waiver/no-deposit orders are unaffected.
+        value = (
+            f"MAX(COALESCE({prefix}total, 0) - "
+            f"CASE WHEN COALESCE({prefix}deposit_option, 'security_deposit') = 'security_deposit' "
+            f"THEN COALESCE({prefix}deposit_total, 0) ELSE 0 END + "
+            f"COALESCE({prefix}deposit_applied_amount, 0), 0)"
+        )
+    else:
+        value = f"COALESCE({prefix}{column}, 0)"
+    return f"CASE WHEN {condition} THEN {value} ELSE 0 END", params
+
+
+def accepted_quote_exists_condition(alias="o"):
+    prefix = f"{alias}." if alias else ""
+    return (
+        "EXISTS (SELECT 1 FROM documents dq "
+        f"WHERE dq.order_id = {prefix}id AND dq.document_type = 'quote' "
+        "AND dq.status IN ('accepted', 'finalized'))"
+    )
+
+
+def collectible_due_expr(alias="o"):
+    prefix = f"{alias}." if alias else ""
+    accepted_quote = accepted_quote_exists_condition(alias)
+    condition = (
+        f"COALESCE({prefix}due_total, 0) > 0 "
+        f"AND COALESCE({prefix}status, '') NOT IN ('canceled', 'cancelled', 'archived') "
+        "AND ("
+        f"{accepted_quote} "
+        f"OR COALESCE({prefix}payment_status, '') = 'partially_paid' "
+        f"OR COALESCE({prefix}status, '') IN ('reserved', 'started', 'returned')"
+        ")"
+    )
+    return f"CASE WHEN {condition} THEN COALESCE({prefix}due_total, 0) ELSE 0 END"
 
 
 def summary_metrics(start_date=None, end_date=None, branch_id=None):
@@ -112,7 +148,7 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
     db = get_db()
     revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
     sql = f"""
-        SELECT COUNT(*) AS count, COALESCE(SUM({revenue_expr}), 0) AS revenue, COALESCE(SUM(o.due_total), 0) AS due
+        SELECT COUNT(*) AS count, COALESCE(SUM({revenue_expr}), 0) AS revenue, COALESCE(SUM({collectible_due_expr("o")}), 0) AS due
         FROM orders o
         WHERE 1=1
     """

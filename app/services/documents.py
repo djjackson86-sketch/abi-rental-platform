@@ -69,6 +69,20 @@ def display_document_number(document):
     return (document['number'] or '').strip() or 'Unnumbered'
 
 
+def accept_quote(document_id):
+    db = get_db()
+    document = get_document(document_id)
+    if not document:
+        raise ValueError('Document not found')
+    if document['document_type'] != 'quote':
+        raise ValueError('Only quotes can be accepted')
+    if document['status'] == 'accepted':
+        return document_id
+    db.execute("UPDATE documents SET status = 'accepted' WHERE id = ?", (document_id,))
+    db.commit()
+    return document_id
+
+
 def finalize_document(document_id):
     db = get_db()
     document = get_document(document_id)

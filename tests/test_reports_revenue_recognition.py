@@ -113,9 +113,9 @@ def test_orders_page_metrics_use_the_same_recognized_revenue_rule(app):
         counts = order_counts()
         assert counts["total"] == 12
         assert counts["revenue"] == expected_revenue
-        # The due card keeps its existing behavior: outstanding balances from the
-        # filtered rows are still shown even when those rows are not revenue yet.
-        assert counts["due"] == 100 + 300 + 800 + 900 + 1000
+        # The due card now excludes draft/Sales-Repairs quotes that have not been
+        # accepted, while keeping active reserved/started/returned balances.
+        assert counts["due"] == 800 + 900 + 1000
 
         sales_repairs = order_counts(status="sales_repairs")
         assert sales_repairs["total"] == 2

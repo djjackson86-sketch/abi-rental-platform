@@ -89,7 +89,7 @@ def _value(row, key, default=None):
         return default
     try:
         return row[key]
-    except (KeyError, IndexError, TypeError):
+    except (KeyError, IndexError, TypeError, ValueError):
         return default
 
 
@@ -218,6 +218,25 @@ def cash_received(day, branch_id):
     return money(_value(row, 's'))
 
 
+
+def cash_deposit_refunds(day, branch_id):
+    """Cash security-deposit refunds paid out on this business day.
+
+    A cash refund physically leaves the drawer, so the expected closing cash must
+    subtract it just like cash used and bank drops. The date follows the recorded
+    deposit_processed_at timestamp because that is when the payout happened.
+    """
+    scope_sql, scope_params = order_branch_clause('o', branch_id=branch_id)
+    row = get_db().execute(
+        f"""SELECT COALESCE(SUM(o.deposit_refund_amount), 0) AS s
+        FROM orders o
+        WHERE LOWER(COALESCE(o.deposit_process_method, '')) = 'cash'
+          AND COALESCE(o.deposit_refund_amount, 0) > 0
+          AND substr(o.deposit_processed_at, 1, 10) = ?{scope_sql}""",
+        [day, *scope_params],
+    ).fetchone()
+    return money(_value(row, 's'))
+
 def _day_row(day, branch_id):
     if not branch_id:
         return None
@@ -310,9 +329,10 @@ def day_summary(day=None, branch_id=None):
     drop_total = money(sum(line['amount'] for line in drop_lines))
     opening_from, opening = _closing_before(day, branch_id)
     received = cash_received(day, branch_id) if branch_id else 0.0
-    # Cash banked during the day is no longer in the drawer, exactly like cash
-    # spent: it comes off the expected figure (ABI-341952952).
-    expected = money(opening + received - used_total - drop_total)
+    deposit_refund_total = cash_deposit_refunds(day, branch_id) if branch_id else 0.0
+    # Cash banked, spent, or paid back as a deposit refund is no longer in the
+    # drawer, so all three come off the expected figure.
+    expected = money(opening + received - used_total - drop_total - deposit_refund_total)
     variance = None
     if cashed_up:
         variance = money(float(counted_value or 0) - expected)
@@ -329,6 +349,7 @@ def day_summary(day=None, branch_id=None):
         'drop_lines': drop_lines,
         'drop_count': len(drop_lines),
         'drop_total': drop_total,
+        'deposit_refund_total': deposit_refund_total,
         'counted': counted_value,
         'cashed_up': cashed_up,
         'expected': expected,
@@ -543,6 +564,7 @@ def day_report_rows(report):
         ('Cash up', 'Cash received for the day', f"R{cash['cash_received']:.2f}"),
         ('Cash up', 'Cash used for the day', f"R{cash['used_total']:.2f}"),
         ('Cash up', 'Total dropped at the bank', f"R{cash['drop_total']:.2f}"),
+        ('Cash up', 'Cash deposit refunds paid out', f"R{cash.get('deposit_refund_total', 0):.2f}"),
         ('Cash up', 'Expected cash in the drawer', f"R{cash['expected']:.2f}"),
         (
             'Cash up',

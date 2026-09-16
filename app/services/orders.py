@@ -10,7 +10,7 @@ from app.services.access import current_session_user_id, order_branch_clause, pr
 from app.services.branches import pickup_hours_error
 from app.services.settings import global_vat_rate
 from app.services.products import product_branch_stock
-from app.services.reports import recognized_revenue_expr
+from app.services.reports import collectible_due_expr, recognized_revenue_expr
 from app.services.timezone import local_now, local_now_iso
 
 # "Sales/Repairs" is a REAL stored order status (ticket ABI-341952962): a draft
@@ -145,7 +145,8 @@ def order_counts(query="", status="", payment_status="", return_status="", start
     where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date, branch_id=branch_id)
     revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
     db = get_db()
-    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({revenue_expr}),0) revenue, COALESCE(SUM(o.due_total),0) due
+    due_expr = collectible_due_expr("o")
+    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({revenue_expr}),0) revenue, COALESCE(SUM({due_expr}),0) due
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", [*revenue_params, *params]).fetchone()
     item_row = db.execute(f"""SELECT COALESCE(SUM(oi.quantity),0) items FROM order_items oi
         JOIN orders o ON o.id = oi.order_id LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()

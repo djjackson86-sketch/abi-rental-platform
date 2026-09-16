@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.routes.auth import login_required
 from app.services.documents import (
+    accept_quote,
     create_document,
     display_document_label,
     display_document_number,
@@ -201,6 +202,17 @@ def create_for_order(order_id):
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("orders.detail", order_id=order_id))
+
+
+@bp.post("/<int:document_id>/accept-quote")
+@login_required
+def accept_quote_route(document_id):
+    try:
+        accept_quote(document_id)
+        flash("Quote accepted", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("documents.detail", document_id=document_id))
 
 
 @bp.post("/<int:document_id>/finalize")
