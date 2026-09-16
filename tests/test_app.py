@@ -1900,6 +1900,85 @@ def test_service_day_products_bill_rental_days_and_preview_rule(client, app):
     assert fixed_service['deposit'] == 0
 
 
+def test_service_day_products_show_days_on_order_and_documents(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/inventory/new', data={
+        'name': 'Setup Service',
+        'sku': 'SERV-DAY',
+        'product_type': 'service',
+        'quantity': '1',
+        'price_amount': '40',
+        'price_unit': 'day',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Fixed Labour',
+        'sku': 'SERV-FIX',
+        'product_type': 'service',
+        'quantity': '1',
+        'price_amount': '90',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': ['2', '3'],
+        'quantity': ['1', '1'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-03',
+        'end_time': '15:00',
+        'deposit_option': 'security_deposit',
+    }, follow_redirects=False)
+    assert created.status_code == 302
+    order_id = created.headers['Location'].rstrip('/').split('/')[-1]
+
+    detail = client.get(f'/orders/{order_id}')
+    assert detail.status_code == 200
+    assert re.search(br'<strong>Setup Service</strong>.*?</td><td>3</td>', detail.data, re.DOTALL)
+    assert re.search('<strong>Fixed Labour</strong>.*?</td><td>[^<]*—[^<]*</td>'.encode(), detail.data, re.DOTALL)
+
+    document = client.post(f'/documents/orders/{order_id}', data={'document_type': 'invoice'}, follow_redirects=True)
+    assert document.status_code == 200
+    assert re.search(br'<strong>Setup Service</strong>.*?</td><td>3</td>', document.data, re.DOTALL)
+    assert re.search('<strong>Fixed Labour</strong>.*?</td><td>[^<]*—[^<]*</td>'.encode(), document.data, re.DOTALL)
+
+    with app.app_context():
+        db = get_db()
+        document_id = db.execute('SELECT id FROM documents WHERE order_id=? ORDER BY id DESC LIMIT 1', (order_id,)).fetchone()['id']
+        from app.services.pdf_documents import document_pdf_bytes
+        pdf_bytes = document_pdf_bytes(document_id)
+    decoded = pdf_bytes.decode('latin-1')
+    assert '(Setup Service) Tj' in decoded
+    assert '(3) Tj' in decoded
+    assert '(Fixed Labour) Tj' in decoded
+
+
+def test_return_revision_recalc_multiplies_service_day_lines():
+    from app.services.orders import _line_recalc
+
+    service_day = {
+        'quantity': 1,
+        'unit_price': 40,
+        'billing_mode': 'catalog',
+        'product_type': 'service',
+        'price_unit': 'day',
+        'tax_rate': 0,
+    }
+    fixed_service = {**service_day, 'price_unit': 'fixed'}
+
+    assert _line_recalc(service_day, 3, 'exclusive') == (120, 0, 120)
+    assert _line_recalc(fixed_service, 3, 'exclusive') == (40, 0, 40)
+
+
 def test_order_estimate_hides_discount_and_damage_waiver_rows(client):
     login(client)
     seed_customer_and_product(client)

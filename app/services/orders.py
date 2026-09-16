@@ -206,10 +206,33 @@ def get_order(order_id):
 
 def order_items(order_id):
     return get_db().execute(
-        """SELECT oi.*, p.name AS product_name, p.sku AS product_sku, p.product_type, p.security_deposit, p.hourly_extra_rate
+        """SELECT oi.*, p.name AS product_name, p.sku AS product_sku, p.product_type, p.price_unit, p.security_deposit, p.hourly_extra_rate
         FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ? ORDER BY oi.id""",
         (order_id,),
     ).fetchall()
+
+
+def line_uses_order_days(item):
+    """True when a line's price/display should use the order day count."""
+    def item_value(key):
+        if isinstance(item, dict):
+            return item.get(key, "")
+        try:
+            return item[key]
+        except (KeyError, IndexError, TypeError):
+            return ""
+
+    billing_mode = item_value("billing_mode") or ""
+    product_type = item_value("product_type") or ""
+    price_unit = item_value("price_unit") or ""
+    return (
+        billing_mode == "rental_day"
+        or (
+            billing_mode == "catalog"
+            and product_type in {"rental", "service"}
+            and price_unit in DURATION_PRICE_UNITS
+        )
+    )
 
 
 def order_has_rental_items(items):
@@ -1032,7 +1055,7 @@ def _line_recalc(item, days, tax_mode):
     billing_mode = item["billing_mode"] or "catalog"
     product_type = item["product_type"] or ""
     price_unit = item["price_unit"] or ""
-    multiplier = days if (billing_mode == "rental_day" or (billing_mode == "catalog" and product_type == "rental" and price_unit in {"day", "week", "month", "hour"})) else 1
+    multiplier = days if line_uses_order_days(item) else 1
     base = unit_price * qty * multiplier
     tax_rate = float(item["tax_rate"] or 0) / 100
     if tax_mode == "inclusive" and tax_rate:
