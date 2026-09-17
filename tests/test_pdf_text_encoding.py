@@ -301,6 +301,30 @@ def test_paid_stamp_sits_centred_at_the_top_and_nothing_prints_over_it(app):
     assert over_it == [], f'text is printed over the PAID stamp: {over_it}'
 
 
+def test_an_accepted_quote_prints_an_accepted_stamp(app):
+    document = _sample_document('quote')
+    document['status'] = 'accepted'
+    document['number'] = 'QUO-10145'
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(document, _many_items(2), _sample_settings())
+    decoded = pdf_bytes.decode('latin-1')
+    assert '(ACCEPTED) Tj' in decoded
+    assert '(PAID) Tj' not in decoded
+    centre_x, centre_y = _paid_stamp_geometry(pdf_bytes)
+    assert 200 <= centre_x <= 400, f'ACCEPTED stamp is not centred (x={centre_x})'
+    assert centre_y >= 700, f'ACCEPTED stamp is not near the top of the page (y={centre_y})'
+
+
+def test_a_paid_invoice_still_prints_the_paid_stamp(app):
+    document = _sample_document('invoice')
+    document['payment_status'] = 'paid'
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(document, _many_items(2), _sample_settings())
+    decoded = pdf_bytes.decode('latin-1')
+    assert '(PAID) Tj' in decoded
+    assert '(ACCEPTED) Tj' not in decoded
+
+
 def test_the_document_fonts_declare_winansi_encoding(app):
     pdf_bytes, _texts = build_invoice_texts(app)
     decoded = pdf_bytes.decode('latin-1')

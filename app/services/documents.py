@@ -290,6 +290,15 @@ def document_paid_stamp(document):
     return _row_get(document, 'payment_status', '') in ('paid', 'overpaid')
 
 
+def document_accepted_stamp(document):
+    """True when an accepted quote should print with an ACCEPTED stamp."""
+    return bool(
+        document
+        and _row_get(document, 'document_type', '') == 'quote'
+        and _row_get(document, 'status', '') == 'accepted'
+    )
+
+
 def printable_document(document_id):
     document = get_document(document_id)
     if not document:

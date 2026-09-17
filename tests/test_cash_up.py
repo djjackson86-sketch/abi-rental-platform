@@ -711,6 +711,26 @@ def test_a_chosen_depot_is_the_one_cashed_up(client, app):
     assert 'Cash received for the day,R700.00' in csv_body
 
 
+def test_dashboard_branch_filter_defaults_the_cash_panel_to_the_same_depot(client, app):
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1, number='ORD-90001')
+    _seed_payment(app, 700.0, method='cash', day=TODAY, branch_id=2, number='ORD-90002')
+    login(client)
+    body = client.get('/dashboard?branch=2').get_data(as_text=True)
+    assert 'Cash up · Branch 2' in body
+    assert re.search(r'Cash received</small>\s*<b>R700\.00</b>', body), 'top branch 2 drives cash panel'
+    assert 'name="branch" value="2"' in body, 'cash write forms carry the same depot'
+
+
+def test_explicit_cash_branch_still_overrides_the_top_dashboard_branch(client, app):
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1, number='ORD-90001')
+    _seed_payment(app, 700.0, method='cash', day=TODAY, branch_id=2, number='ORD-90002')
+    login(client)
+    body = client.get('/dashboard?branch=2&cash_branch=1').get_data(as_text=True)
+    assert 'Cash up · Branch 1' in body
+    assert re.search(r'Cash received</small>\s*<b>R500\.00</b>', body), 'explicit cash_branch wins'
+    assert 'name="branch" value="1"' in body, 'cash write forms carry the explicit depot'
+
+
 def test_a_crafted_depot_can_never_widen_a_cash_up(client, app):
     login(client)
     client.post('/cash-up', data={'day': '', 'branch': '2', 'counted_cash': '300.00'},

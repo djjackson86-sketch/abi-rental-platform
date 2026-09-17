@@ -52,10 +52,14 @@ def dashboard():
     metrics = dashboard_period_metrics(
         start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
     )
-    # Cash up is per depot per day. The depot is chosen from the depots this
-    # session may already reach (?cash_branch= can only narrow), and for a
-    # depot-restricted account the session pins it.
-    cash_panel = cash_panel_state(request.args.get('cash_branch', ''))
+    # Cash up is per depot per day. An explicit ?cash_branch= still wins, but
+    # when the top dashboard branch filter is narrowed, the cash panel follows
+    # that same depot by default. The cash service validates the id against the
+    # session scope, so this can never widen access.
+    cash_requested = request.args.get('cash_branch', '')
+    if not cash_requested and branch_id:
+        cash_requested = str(branch_id)
+    cash_panel = cash_panel_state(cash_requested)
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),

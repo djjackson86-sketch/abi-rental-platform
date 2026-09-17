@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import display_document_label, display_document_number, document_date, document_datetime, document_has_rental_items, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
+from app.services.documents import display_document_label, display_document_number, document_accepted_stamp, document_date, document_datetime, document_has_rental_items, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 from app.services.timezone import display_local_datetime
@@ -655,14 +655,16 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
         ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
 
-    # A settled invoice is stamped PAID. Drawn first so every real figure sits
-    # on top of it, and centred in the empty band at the TOP of the page -
+    # Settled invoices are stamped PAID, and accepted quotes are stamped
+    # ACCEPTED. Drawn first so every real figure sits on top of it, and centred in the empty band at the TOP of the page -
     # between the issuer block on the left and the document stack on the right.
     # It used to sit at (395, 498), which is the first item rows: the table text
     # and the light blue header band printed over it and buried it (client
     # report, ORD-10169 proforma).
     if document_paid_stamp(document):
         draw_commands.extend(_pdf_paid_stamp(233, 782))
+    elif document_accepted_stamp(document):
+        draw_commands.extend(_pdf_paid_stamp(201, 782, text='ACCEPTED', size=26, colour=(0.09, 0.38, 0.70)))
 
     text_commands = ['BT']
     # Top-left brand/address, matching the supplied template.
