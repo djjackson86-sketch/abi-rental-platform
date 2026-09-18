@@ -3683,12 +3683,72 @@ def test_telegram_customer_formatter_escapes_html(client):
     message = format_customer_message({
         'name': '<ACME & Co>',
         'customer_type': 'company',
+        'branch_name': 'North & <Depot>',
         'email': 'boss@example.com',
         'phone': '<123>',
         'marketing_opt_in': 1,
     })
     assert '&lt;ACME &amp; Co&gt;' in message
+    assert 'Created at branch: North &amp; &lt;Depot&gt;' in message
     assert '<ACME' not in message
+
+
+def test_telegram_order_formatter_includes_collect_branch(client):
+    from app.services.telegram import format_order_message
+
+    with client.application.app_context():
+        message = format_order_message({
+            'id': 42,
+            'order_number': 'ORD-42',
+            'customer_name': 'Branch Customer',
+            'collect_branch_name': 'Depot Two',
+            'customer_email': '',
+            'customer_phone': '',
+            'start_at': '2026-07-02T09:00',
+            'end_at': '2026-07-03T09:00',
+            'subtotal': 100,
+            'discount_total': 0,
+            'tax_total': 15,
+            'deposit_total': 0,
+            'due_total': 115,
+            'status': 'draft',
+            'payment_status': 'payment_due',
+            'coupon_code': '',
+            'notes': '',
+        }, [{
+            'product_name': 'Trailer',
+            'custom_name': '',
+            'quantity': 1,
+            'line_total': 115,
+        }])
+    assert 'Created at branch: Depot Two' in message
+
+
+def test_telegram_daily_summary_includes_branches(client):
+    from app.services.telegram import format_daily_summary
+
+    with client.application.app_context():
+        message = format_daily_summary({
+            'date': '2026-07-02',
+            'going_out': [{
+                'order_number': 'ORD-1',
+                'customer_name': 'Outgoing Customer',
+                'start_at': '2026-07-02T09:00',
+                'collect_branch_name': 'Head Office',
+            }],
+            'coming_back': [{
+                'order_number': 'ORD-2',
+                'customer_name': 'Return Customer',
+                'end_at': '2026-07-02T16:00',
+                'return_branch_name': 'Depot Two',
+                'collect_branch_name': 'Head Office',
+            }],
+            'payment_due_count': 0,
+            'payment_due_total': 0,
+        })
+    assert 'ORD-1 — Outgoing Customer at 2026-07-02T09:00 — Head Office' in message
+    assert 'ORD-2 — Return Customer at 2026-07-02T16:00 — Depot Two' in message
+
 
 def test_customer_address_add_customer_from_order_and_custom_rental_line(client):
     login(client)

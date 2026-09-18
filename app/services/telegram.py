@@ -87,11 +87,29 @@ def _safe_send(builder):
         return {"ok": False, "sent": False, "error": str(exc)}
 
 
+def _row_value(row, key, default=""):
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        if isinstance(row, dict):
+            return row.get(key, default)
+        return default
+
+
+def _branch_label(row, *keys):
+    for key in keys:
+        value = _row_value(row, key)
+        if value:
+            return value
+    return "Unassigned / head office"
+
+
 def format_customer_message(customer):
     return "\n".join([
         "👤 <b>New customer created</b>",
         f"Name: {_escape(customer['name'])}",
         f"Type: {_escape(customer['customer_type'])}",
+        f"Created at branch: {_escape(_branch_label(customer, 'branch_name'))}",
         f"Email: {_escape(customer['email'] or 'Not supplied')}",
         f"Phone: {_escape(customer['phone'] or 'Not supplied')}",
         f"Marketing: {'Yes' if customer['marketing_opt_in'] else 'No'}",
@@ -100,7 +118,12 @@ def format_customer_message(customer):
 
 def send_new_customer_notification(customer_id):
     def build():
-        customer = get_db().execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        customer = get_db().execute(
+            """SELECT c.*, b.name AS branch_name
+            FROM customers c LEFT JOIN branches b ON b.id = c.branch_id
+            WHERE c.id = ?""",
+            (customer_id,),
+        ).fetchone()
         if not customer:
             return f"👤 <b>New customer created</b>\nCustomer ID: {_escape(customer_id)}"
         return format_customer_message(customer)
@@ -112,6 +135,7 @@ def format_order_message(order, items):
         "📦 <b>New order / booking request</b>",
         f"Order: {_escape(order['order_number'])}",
         f"Customer: {_escape(order['customer_name'] or 'Not supplied')}",
+        f"Created at branch: {_escape(_branch_label(order, 'collect_branch_name'))}",
         f"Email: {_escape(order['customer_email'] or 'Not supplied')}",
         f"Phone: {_escape(order['customer_phone'] or 'Not supplied')}",
         f"Pickup: {_escape(order['start_at'] or 'Not set')}",
@@ -164,13 +188,18 @@ def _parse_date(value):
 def daily_summary_counts(target_date):
     db = get_db()
     date_text = target_date.isoformat()
+    order_branch_select = """o.*, c.name AS customer_name,
+        cb.name AS collect_branch_name, rb.name AS return_branch_name"""
+    order_branch_join = """LEFT JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id"""
     going_out = db.execute(
-        """SELECT o.*, c.name AS customer_name FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+        f"""SELECT {order_branch_select} FROM orders o {order_branch_join}
         WHERE DATE(o.start_at) = ? AND o.status != 'canceled' ORDER BY o.start_at, o.id""",
         (date_text,),
     ).fetchall()
     coming_back = db.execute(
-        """SELECT o.*, c.name AS customer_name FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+        f"""SELECT {order_branch_select} FROM orders o {order_branch_join}
         WHERE DATE(o.end_at) = ? AND o.status != 'canceled' ORDER BY o.end_at, o.id""",
         (date_text,),
     ).fetchall()
@@ -185,14 +214,16 @@ def format_daily_summary(summary):
     lines.append(f"<b>Going out ({len(summary['going_out'])})</b>")
     if summary["going_out"]:
         for order in summary["going_out"][:20]:
-            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(order['start_at'] or '')}")
+            branch = _branch_label(order, 'collect_branch_name')
+            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(order['start_at'] or '')} — {_escape(branch)}")
     else:
         lines.append("• None")
     lines.append("")
     lines.append(f"<b>Coming back ({len(summary['coming_back'])})</b>")
     if summary["coming_back"]:
         for order in summary["coming_back"][:20]:
-            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(order['end_at'] or '')}")
+            branch = _branch_label(order, 'return_branch_name', 'collect_branch_name')
+            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(order['end_at'] or '')} — {_escape(branch)}")
     else:
         lines.append("• None")
     lines.append("")
