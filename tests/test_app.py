@@ -979,6 +979,85 @@ def test_new_order_form_starts_with_two_lines_and_add_line_control(client):
     assert 'range(1, 5)' not in body
 
 
+def test_service_lines_keep_quantity_inputs_submittable(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.get('/orders/new')
+    assert res.status_code == 200
+    body = res.data.decode()
+    assert "qty.disabled=true" not in body
+    assert "qty.disabled=false" not in body
+    assert "qty.readOnly=true" in body
+    assert "qty.readOnly=false" in body
+    assert "qty.setAttribute('aria-readonly','true')" in body
+    # Read-only fields are still submitted by browsers; disabled fields are not.
+    # Keeping service quantity inputs submittable prevents later line quantities
+    # from shifting when a service line appears before a sales item.
+
+
+def test_service_line_before_sale_line_preserves_following_sale_quantity(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/inventory/new', data={
+        'name': 'Brake Adjustment',
+        'sku': 'BRAKE-ADJ',
+        'quantity': '0',
+        'description': 'Workshop labour.',
+        'product_type': 'service',
+        'price_amount': '195',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Brake Cable (1440)',
+        'sku': '1440',
+        'quantity': '10',
+        'description': 'Brake cable.',
+        'product_type': 'sale',
+        'price_amount': '300',
+        'price_unit': 'fixed',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    created = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': ['2', '3'],
+        'custom_name': ['', ''],
+        'custom_unit_price': ['', ''],
+        'custom_billing_mode': ['fixed', 'fixed'],
+        'quantity': ['1', '2'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }, follow_redirects=False)
+    assert created.status_code == 302
+    order_id = int(created.headers['Location'].rstrip('/').split('/')[-1])
+
+    with app.app_context():
+        items = get_db().execute(
+            'SELECT p.name, oi.quantity, oi.line_total FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id WHERE oi.order_id = ? ORDER BY oi.id',
+            (order_id,),
+        ).fetchall()
+        assert [(row['name'], row['quantity'], row['line_total']) for row in items] == [
+            ('Brake Adjustment', 1, 195),
+            ('Brake Cable (1440)', 2, 600),
+        ]
+
+    detail = client.get(f'/orders/{order_id}')
+    assert detail.status_code == 200
+    assert b'Brake Cable (1440)' in detail.data
+    assert b'<td>2</td><td>R300.00</td><td>R600.00</td>' in detail.data
+
+
 def test_order_with_more_than_four_lines_saves_every_line(client, app):
     login(client)
     seed_customer_and_product(client)
