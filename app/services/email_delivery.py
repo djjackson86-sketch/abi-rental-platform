@@ -99,13 +99,23 @@ def build_outlook_draft_eml(to_email, subject, body, attachment_bytes, filename,
     msg['Date'] = formatdate(localtime=True)
     msg.set_content(combine_email_body(body, signature))
     if signature or logo_bytes:
-        logo_cid = 'invoice-signature-logo@abi-rental-platform' if logo_bytes else None
+        # Keep the signature logo as a true inline related image, not a named
+        # attachment. Outlook/Gmail-style clients display related parts with a
+        # filename as separate attachments and can leave a broken image marker in
+        # the signature body instead of resolving the cid.
+        logo_cid = 'sano-trailers-email-logo' if logo_bytes else None
         msg.add_alternative(build_email_html(body, signature, logo_cid=logo_cid), subtype='html')
         if logo_bytes:
             payload = msg.get_payload()
             if isinstance(payload, list):
                 html_part = payload[1]
                 add_related = getattr(html_part, 'add_related')
-                add_related(logo_bytes, maintype='image', subtype='jpeg', cid=f'<{logo_cid}>', filename=logo_filename)
+                add_related(
+                    logo_bytes,
+                    maintype='image',
+                    subtype='jpeg',
+                    cid=f'<{logo_cid}>',
+                    disposition='inline',
+                )
     msg.add_attachment(attachment_bytes, maintype='application', subtype='pdf', filename=filename)
     return msg.as_bytes()

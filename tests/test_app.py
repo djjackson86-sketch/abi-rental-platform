@@ -2857,9 +2857,12 @@ def test_invoice_email_default_message_can_be_configured(client, app):
     assert 'please contact us at midrand@sanotrailers.test or +27 11 555 0199.' in html
     assert 'Kind regards,' in html
     assert 'Accounts team' in html
-    assert 'cid:invoice-signature-logo@abi-rental-platform' in html
-    logo_parts = [part for part in parsed.walk() if part.get_content_type() == 'image/jpeg' and part.get_filename() == 'sano-trailers-logo.jpg']
+    assert 'cid:sano-trailers-email-logo' in html
+    logo_parts = [part for part in parsed.walk() if part.get_content_type() == 'image/jpeg' and part.get('Content-ID') == '<sano-trailers-email-logo>']
     assert len(logo_parts) == 1
+    assert logo_parts[0].get_filename() is None
+    assert logo_parts[0].get_content_disposition() == 'inline'
+    assert all(part.get_filename() != 'sano-trailers-logo.jpg' for part in parsed.walk())
     logo_payload = logo_parts[0].get_payload(decode=True)
     assert isinstance(logo_payload, bytes)
     assert logo_payload.startswith(b'\xff\xd8')
