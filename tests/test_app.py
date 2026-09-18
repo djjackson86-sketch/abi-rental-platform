@@ -2937,6 +2937,16 @@ def test_invoice_email_default_message_can_be_configured(client, app):
     assert 'Kind regards,' in html
     assert 'Accounts team' in html
     assert 'cid:sano-trailers-email-logo' in html
+    # Sizing must be stamped as attributes as well as CSS: Outlook's Word engine
+    # ignores max-width and renders the logo at its natural size without them.
+    assert 'width="180"' in html
+    assert 'max-width:180px' in html
+    assert 'height:auto' in html
+    assert 'display:block' in html
+    import re as _re
+    height_match = _re.search(r'height="(\d+)"', html)
+    assert height_match, html
+    assert 70 <= int(height_match.group(1)) <= 80
     logo_parts = [part for part in parsed.walk() if part.get_content_type() == 'image/jpeg' and part.get('Content-ID') == '<sano-trailers-email-logo>']
     assert len(logo_parts) == 1
     assert logo_parts[0].get_filename() is None
@@ -2945,6 +2955,32 @@ def test_invoice_email_default_message_can_be_configured(client, app):
     logo_payload = logo_parts[0].get_payload(decode=True)
     assert isinstance(logo_payload, bytes)
     assert logo_payload.startswith(b'\xff\xd8')
+    # The signature ships the email-sized logo, not the 1200px document artwork.
+    assert len(logo_payload) < 40000
+
+
+def test_signature_logo_size_is_derived_from_the_image(app):
+    import re as _re
+    from pathlib import Path as _Path
+    from app.services.email_delivery import _image_dimensions, build_email_html, signature_logo_html
+
+    logo = (_Path(app.static_folder) / 'img' / 'sano-trailers-logo.jpg').read_bytes()
+    email_logo = (_Path(app.static_folder) / 'img' / 'sano-trailers-email-logo.jpg').read_bytes()
+    assert _image_dimensions(logo) == (1200, 510)
+    email_size = _image_dimensions(email_logo)
+    assert email_size is not None and email_size[0] == 360
+    assert _image_dimensions(b'not an image') is None
+
+    markup = signature_logo_html('sano-trailers-email-logo', data=logo)
+    assert 'width="180"' in markup
+    height = int(_re.search(r'height="(\d+)"', markup).group(1))
+    assert 75 <= height <= 77  # 180 * 510 / 1200 = 76.5, so the logo is never stretched
+    assert 'style="width:180px;max-width:180px;height:auto;display:block;' in markup
+    assert markup.startswith('<p class="email-signature-logo">')
+    # A signature without a logo emits no image tag at all.
+    assert '<img' not in build_email_html('Body', 'Signature', logo_cid=None)
+    # An unreadable image still renders, just without the derived height.
+    assert 'width="180"' in signature_logo_html('x', data=None)
 
 
 def test_generated_email_cc_falls_back_to_sano_office_when_settings_email_blank(client, app):

@@ -28,6 +28,10 @@ from app.services.email_delivery import build_invoice_email_subject, build_outlo
 from app.services.pdf_documents import DOCUMENT_LOGO_STATIC_PATH, document_pdf_bytes, document_pdf_filename
 from app.services.customers import custom_fields_for
 
+# Email-sized signature logo (360px wide) so clients that ignore CSS sizing
+# still show a sane logo instead of the full 1200px document artwork.
+EMAIL_LOGO_STATIC_PATH = 'img/sano-trailers-email-logo.jpg'
+
 bp = Blueprint("documents", __name__, url_prefix="/documents")
 
 EMAIL_DRAFT_DOCUMENT_TYPES = {'invoice', 'quote'}
@@ -52,10 +56,16 @@ def _email_context(document, settings, label=None, number=None):
 def _invoice_email_logo_bytes(settings):
     if not settings['invoice_email_signature_include_logo']:
         return None
-    logo_path = Path(current_app.static_folder) / DOCUMENT_LOGO_STATIC_PATH
-    if not logo_path.exists():
-        return None
-    return logo_path.read_bytes()
+    static_folder = Path(current_app.static_folder)
+    # Use the email-sized logo (360px wide, ~15 KB) for the signature. The full
+    # 1200px document logo stays for the PDF; sending it inline made the
+    # signature huge in clients that ignore CSS (Outlook's Word engine) and
+    # bloated every draft by ~110 KB.
+    for relative_path in (EMAIL_LOGO_STATIC_PATH, DOCUMENT_LOGO_STATIC_PATH):
+        logo_path = static_folder / relative_path
+        if logo_path.exists():
+            return logo_path.read_bytes()
+    return None
 
 
 def _prepare_email_draft(document_id, to_email, message=None):

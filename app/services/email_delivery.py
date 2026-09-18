@@ -1,5 +1,6 @@
 import os
 import smtplib
+import struct
 from html import escape
 from email.message import EmailMessage
 from email.utils import formatdate
@@ -62,17 +63,75 @@ def _html_paragraphs(text):
     return ''.join(paragraphs)
 
 
-def build_email_html(body, signature='', logo_cid=None):
+def _image_dimensions(data):
+    """Return (width, height) for a JPEG or PNG payload, else None.
+
+    Mail clients differ wildly in how they treat CSS: Outlook's Word rendering
+    engine ignores ``max-width`` entirely and falls back to the image's natural
+    size (a 1200px logo then fills the whole message). Stamping explicit
+    ``width``/``height`` attributes - derived from the real image - is the only
+    sizing hint every client honours, so we read the dimensions from the bytes
+    instead of hard-coding them for one particular logo file.
+    """
+    if not data:
+        return None
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        if len(data) >= 24:
+            return struct.unpack('>II', data[16:24])
+        return None
+    if data[:2] == b'\xff\xd8':
+        index = 2
+        length = len(data)
+        while index + 9 < length:
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            marker = data[index + 1]
+            if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+                index += 2
+                continue
+            segment_length = struct.unpack('>H', data[index + 2:index + 4])[0]
+            if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                height, width = struct.unpack('>HH', data[index + 5:index + 9])
+                return width, height
+            index += 2 + segment_length
+    return None
+
+
+def signature_logo_html(logo_cid, display_width=180, data=None):
+    """Build the signature <img> with sizing every mail client understands.
+
+    ``width``/``height`` attributes carry the size for Outlook's Word engine,
+    the inline style keeps the aspect ratio for WebKit/Blink clients and caps
+    the logo on narrow phone screens, and ``display:block`` removes the extra
+    baseline gap the signature paragraph would otherwise show.
+    """
+    dimensions = _image_dimensions(data)
+    width = display_width
+    height = round(display_width * dimensions[1] / dimensions[0]) if dimensions and dimensions[0] else None
+    attributes = f'width="{width}"' + (f' height="{height}"' if height else '')
+    style = (
+        f'width:{width}px;max-width:{width}px;height:auto;display:block;border:0;'
+        'outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;'
+    )
+    return (
+        f'<p class="email-signature-logo"><img src="cid:{escape(logo_cid)}" alt="SANO Trailers logo" '
+        f'{attributes} style="{style}"></p>'
+    )
+
+
+def build_email_html(body, signature='', logo_cid=None, logo_data=None):
     html = ["<html><body>", _html_paragraphs(body)]
     if signature or logo_cid:
         html.append('<div class="email-signature">')
         if signature:
             html.append(_html_paragraphs(signature))
         if logo_cid:
-            html.append(f'<p><img src="cid:{escape(logo_cid)}" alt="SANO Trailers logo" style="max-width:180px;height:auto;"></p>')
+            html.append(signature_logo_html(logo_cid, data=logo_data))
         html.append('</div>')
     html.append("</body></html>")
     return ''.join(html)
+
 
 
 def build_outlook_draft_eml(to_email, subject, body, attachment_bytes, filename, from_email='', cc_email='', signature='', logo_bytes=None, logo_filename='sano-trailers-logo.jpg'):
@@ -104,7 +163,7 @@ def build_outlook_draft_eml(to_email, subject, body, attachment_bytes, filename,
         # filename as separate attachments and can leave a broken image marker in
         # the signature body instead of resolving the cid.
         logo_cid = 'sano-trailers-email-logo' if logo_bytes else None
-        msg.add_alternative(build_email_html(body, signature, logo_cid=logo_cid), subtype='html')
+        msg.add_alternative(build_email_html(body, signature, logo_cid=logo_cid, logo_data=logo_bytes), subtype='html')
         if logo_bytes:
             payload = msg.get_payload()
             if isinstance(payload, list):
