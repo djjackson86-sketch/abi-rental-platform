@@ -650,12 +650,110 @@ def create_order(form):
     return order_id
 
 
+class _OrderFormWithLineLists:
+    """Read-only view of a submitted form whose line lists can be patched.
+
+    ``update_draft_order`` feeds the submitted form to ``_build_order_payload``.
+    A data-safety net sometimes has to adjust one line value before that happens,
+    and submitted lines arrive as parallel lists (product_id / custom_name /
+    custom_unit_price / custom_billing_mode / quantity), so this wrapper hands
+    out mutable copies of those lists while every other field (customer, dates,
+    notes, deposit option) is read straight from the original form.
+    """
+
+    def __init__(self, form):
+        self._form = form
+        self._lists = {}
+
+    def getlist(self, name):
+        if name not in self._lists:
+            if hasattr(self._form, "getlist"):
+                self._lists[name] = [value for value in self._form.getlist(name)]
+            else:
+                self._lists[name] = list(_form_list(self._form, name))
+        return list(self._lists[name])
+
+    def setlist(self, name, values):
+        self._lists[name] = list(values)
+
+    def get(self, name, default=None):
+        return self._form.get(name, default)
+
+
+def _line_list(form, name):
+    """Submitted line values, blanks included (unlike ``_form_list``)."""
+    if hasattr(form, "getlist"):
+        return [value for value in form.getlist(name)]
+    return list(_form_list(form, name))
+
+
+def _restore_custom_line_prices(form, order_id):
+    """Refill a blank custom-line price from the order's stored line (ABI-341952987).
+
+    The order form's line JS used to blank the unit price of any custom line
+    whose product-search box was empty — and every saved custom line reopens with
+    an empty product-search box — so a save-then-edit round trip silently zeroed
+    the custom price and shrank the order total. The template is fixed, but the
+    server no longer trusts a blank price on a line whose price it already knows:
+    a blank entry on a custom line is refilled from that order's own order_items
+    row (matched on the custom name, preferring the same billing mode). An
+    explicit price — including an explicit 0 — is left exactly as submitted.
+    """
+    stored = {}
+    for item in get_db().execute(
+        """SELECT custom_name, billing_mode, unit_price FROM order_items
+        WHERE order_id = ? AND COALESCE(product_id, 0) = 0 ORDER BY id""",
+        (order_id,),
+    ).fetchall():
+        name = (item["custom_name"] or "").strip().lower()
+        if not name:
+            continue
+        stored.setdefault(name, []).append(((item["billing_mode"] or "fixed"), float(item["unit_price"] or 0)))
+    if not stored:
+        return form
+
+    product_ids = _line_list(form, "product_id")
+    names = _line_list(form, "custom_name")
+    prices = _line_list(form, "custom_unit_price")
+    modes = _line_list(form, "custom_billing_mode")
+    width = max(len(product_ids), len(names), len(prices), len(modes), 1)
+
+    def value_at(values, index):
+        return values[index] if index < len(values) else ""
+
+    patched = [value_at(prices, index) for index in range(width)]
+    changed = False
+    for index in range(width):
+        if str(value_at(product_ids, index) or "").strip():
+            continue  # catalogue line: the price comes from the product
+        name = str(value_at(names, index) or "").strip()
+        if not name:
+            continue  # blank row, nothing to keep
+        if str(patched[index] or "").strip():
+            continue  # a submitted price (including an explicit 0) is respected
+        candidates = stored.get(name.lower()) or []
+        if not candidates:
+            continue
+        mode = str(value_at(modes, index) or "fixed")
+        stored_price = next((price for stored_mode, price in candidates if stored_mode == mode), candidates[0][1])
+        patched[index] = f"{stored_price:g}"
+        changed = True
+    if not changed:
+        return form
+    patched_form = _OrderFormWithLineLists(form)
+    patched_form.setlist("custom_unit_price", patched)
+    return patched_form
+
+
 def update_draft_order(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
     if not can_edit_order_status(order["status"]):
         raise ValueError(BLOCKED_EDIT_MESSAGE)
+    # Data-safety net (update path only): never let a blank custom-line price
+    # wipe the stored price and shrink the order total.
+    form = _restore_custom_line_prices(form, order_id)
     payload = _build_order_payload(form)
     db = get_db()
     # Data-safety net (update path only): the order form no longer exposes an
@@ -882,17 +980,67 @@ def availability_errors(order_id):
               AND o.end_at > ?""",
             params,
         ).fetchone()["booked"] or 0
+        # Ticket ABI-341952987(2): a unit that is picked up and never returned
+        # cannot be picked up again on another order. A started order whose
+        # return time has passed is still physically out ("overrunning"), so it
+        # holds one unit even for a later, non-overlapping hire — which is the
+        # case the date-overlap check above cannot see. Started units that DO
+        # overlap this order's period are already counted in `booked`, so they
+        # are not counted twice here. Quantities, not orders, are counted, so
+        # spare units on the same product stay hireable.
+        out_params = [item["product_id"], order_id]
+        if branch_scoped:
+            out_params.append(order["collect_branch_id"])
+        overdue_units = 0
+        overdue_overlap_units = 0
+        overdue_order_number = ""
+        for out_row in db.execute(
+            f"""SELECT o.id AS id, o.order_number AS order_number, o.start_at AS start_at,
+                   o.end_at AS end_at, COALESCE(SUM(oi.quantity), 0) AS quantity
+            FROM order_items oi JOIN orders o ON o.id = oi.order_id
+            WHERE oi.product_id = ?
+              AND o.id != ?
+              AND o.status = 'started'
+              {branch_clause}
+            GROUP BY o.id, o.order_number, o.start_at, o.end_at
+            ORDER BY o.id""",
+            out_params,
+        ).fetchall():
+            out_quantity = int(out_row["quantity"] or 0)
+            out_end = out_row["end_at"] or ""
+            if out_end and out_end >= now():
+                continue  # still inside its hire period: the overlap check above covers it
+            if out_row["start_at"] and out_end and out_row["start_at"] < order["end_at"] and out_end > order["start_at"]:
+                overdue_overlap_units += out_quantity
+            elif not overdue_order_number:
+                overdue_order_number = out_row["order_number"] or ""
+            overdue_units += out_quantity
+        still_out_units = max(0, overdue_units - overdue_overlap_units)
+        busy = int(booked) + still_out_units
+
+        def shortage_message(name):
+            if branch_stock:
+                message = f"Only {available} available for {name} at this collection branch during this rental period"
+            else:
+                message = f"Only {available} available for {name} during this rental period"
+            if still_out_units > 0 and overdue_order_number:
+                out_note = f"{name} is still out on {overdue_order_number} — return it before picking it up again."
+                if available + still_out_units >= item["quantity"]:
+                    # The unit that never came back is the whole reason this
+                    # pickup is short — say that instead of a stock count.
+                    return out_note
+                message += f" {out_note}"
+            return message
+
         if branch_stock:
             stock_total = int(branch_stock.get(int(order["collect_branch_id"] or 0), 0))
-            available = stock_total - int(booked)
+            available = stock_total - busy
             if item["quantity"] > available:
-                errors.append(
-                    f"Only {available} available for {product['name']} at this collection branch during this rental period"
-                )
+                errors.append(shortage_message(product["name"]))
         else:
-            available = int(product["quantity"] or 0) - int(booked)
+            available = int(product["quantity"] or 0) - busy
             if item["quantity"] > available:
-                errors.append(f"Only {available} available for {product['name']} during this rental period")
+                errors.append(shortage_message(product["name"]))
     return errors
 
 
@@ -903,6 +1051,13 @@ def transition_order(order_id, action):
     if not order:
         raise ValueError("Order not found")
     transition = TRANSITIONS[action]
+    if action == "start" and order["status"] == "started":
+        # Ticket ABI-341952987(2): the same order is never picked up twice.
+        # Name the collection moment so staff know which order must come back
+        # first instead of reading a bare "status Started" refusal.
+        picked_up_at = (order["picked_up_at"] or "").replace("T", " ").strip()
+        detail = f" already picked up on {picked_up_at}" if picked_up_at else " already picked up"
+        raise ValueError(f"This order is{detail} — return it before picking it up again.")
     if order["status"] not in transition["from"]:
         raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
     if action == "return":

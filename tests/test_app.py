@@ -6147,3 +6147,197 @@ def test_customer_csv_export_includes_client_verified(client, app):
     rows = csv_text.splitlines()
     assert any(line.startswith('Csv Yes Client') and ',Yes,' in line for line in rows)
     assert any(line.startswith('Csv Unset Client') and ',—,' in line for line in rows)
+
+
+# ---------------------------------------------------------------------------
+# Ticket ABI-341952987
+#   (1) a custom line's price must survive a save -> edit round trip
+#   (2) an item that has been picked up cannot be picked up again before it
+#       is returned (same order, or another order)
+# ---------------------------------------------------------------------------
+
+
+def create_custom_line_order(client, custom_price='250', custom_name='Custom delivery'):
+    """Save an order whose only line is a custom (non-catalogue) line."""
+    res = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': [''],
+        'quantity': ['1'],
+        'custom_name': [custom_name],
+        'custom_unit_price': [custom_price],
+        'custom_billing_mode': ['fixed'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }, follow_redirects=False)
+    assert res.status_code == 302
+    return int(res.headers['Location'].rstrip('/').split('/')[-1])
+
+
+def edit_custom_line_payload(custom_price='', custom_name='Custom delivery'):
+    return {
+        'customer_id': '1',
+        'product_id': [''],
+        'quantity': ['1'],
+        'custom_name': [custom_name],
+        'custom_unit_price': [custom_price],
+        'custom_billing_mode': ['fixed'],
+        'start_date': '2026-07-01',
+        'start_time': '09:00',
+        'end_date': '2026-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }
+
+
+def custom_line_row(app, order_id):
+    with app.app_context():
+        return get_db().execute(
+            'SELECT unit_price, line_subtotal, line_total FROM order_items WHERE order_id = ? AND custom_name = ?',
+            (order_id, 'Custom delivery'),
+        ).fetchone()
+
+
+def test_edit_order_page_keeps_the_saved_custom_line_price(client, app):
+    """The edit form must re-open a custom line with its stored price filled in.
+
+    The unit price used to be visible in the input but blanked on load by the
+    line JS, so the next save posted an empty price and shrank the order total.
+    """
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_custom_line_order(client, custom_price='250')
+    assert round(custom_line_row(app, order_id)['unit_price'], 2) == 250.0
+
+    edit = client.get(f'/orders/{order_id}/edit')
+    assert edit.status_code == 200
+    html = edit.data.decode('utf-8')
+    match = re.search(r'name="custom_unit_price"[^>]*value="([^"]*)"', html)
+    assert match, 'custom unit price input missing from the edit form'
+    assert float(match.group(1)) == 250.0
+    assert 'Custom delivery' in html
+    # The page-load guard that caused the wipe is gone: only a price the form
+    # itself auto-filled from an inventory pick may be cleared.
+    assert "price.dataset.autoPrice==='1'" in html
+
+
+def test_blank_custom_price_on_edit_keeps_the_stored_price(client, app):
+    """A blank custom price on the edit POST keeps the stored price (safety net)."""
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_custom_line_order(client, custom_price='250')
+    before = custom_line_row(app, order_id)
+    with app.app_context():
+        order_before = get_db().execute('SELECT subtotal, total FROM orders WHERE id = ?', (order_id,)).fetchone()
+
+    saved = client.post(f'/orders/{order_id}/edit', data=edit_custom_line_payload(custom_price=''), follow_redirects=True)
+    assert b'Order saved' in saved.data
+
+    after = custom_line_row(app, order_id)
+    assert round(after['unit_price'], 2) == 250.0
+    assert round(after['line_total'], 2) == round(before['line_total'], 2)
+    with app.app_context():
+        order_after = get_db().execute('SELECT subtotal, total FROM orders WHERE id = ?', (order_id,)).fetchone()
+    assert round(order_after['total'], 2) == round(order_before['total'], 2)
+    assert round(order_after['subtotal'], 2) == round(order_before['subtotal'], 2)
+
+
+def test_explicit_zero_custom_price_on_edit_is_respected(client, app):
+    """A deliberately submitted 0 is a real price and is never refilled."""
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_custom_line_order(client, custom_price='250')
+    with app.app_context():
+        total_before = get_db().execute('SELECT total FROM orders WHERE id = ?', (order_id,)).fetchone()['total']
+
+    saved = client.post(f'/orders/{order_id}/edit', data=edit_custom_line_payload(custom_price='0'), follow_redirects=True)
+    assert b'Order saved' in saved.data
+
+    assert round(custom_line_row(app, order_id)['unit_price'], 2) == 0.0
+    with app.app_context():
+        total_after = get_db().execute('SELECT total FROM orders WHERE id = ?', (order_id,)).fetchone()['total']
+    assert round(total_after, 2) < round(total_before, 2)
+
+
+def test_started_order_cannot_be_picked_up_again(client, app):
+    """Re-starting a picked-up order is refused by name of the pickup moment."""
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-02')
+    assert b'Order started' in client.post(f'/orders/{order_id}/start', follow_redirects=True).data
+    with app.app_context():
+        picked_up_at = get_db().execute('SELECT picked_up_at FROM orders WHERE id = ?', (order_id,)).fetchone()['picked_up_at']
+        assert picked_up_at
+        status = get_db().execute('SELECT status FROM orders WHERE id = ?', (order_id,)).fetchone()['status']
+    assert status == 'started'
+
+    again = client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    text = again.data.decode('utf-8')
+    assert 'already picked up' in text
+    assert 'return it before picking it up again' in text
+    with app.app_context():
+        assert get_db().execute('SELECT status FROM orders WHERE id = ?', (order_id,)).fetchone()['status'] == 'started'
+
+
+def test_item_still_out_on_another_order_cannot_be_picked_up_again(client, app):
+    """A unit that was never returned blocks a second pickup, then frees the unit."""
+    login(client)
+    seed_customer_and_product(client)  # Order Trailer: rental, 4 in stock
+    out_id = create_order_for_status(client, quantity='4', start_date='2026-07-01', end_date='2026-07-02')
+    assert b'Order started' in client.post(f'/orders/{out_id}/start', follow_redirects=True).data
+    with app.app_context():
+        out_number = get_db().execute('SELECT order_number FROM orders WHERE id = ?', (out_id,)).fetchone()['order_number']
+
+    second_id = create_order_for_status(client, quantity='1', start_date='2099-07-01', end_date='2099-07-02')
+    blocked = client.post(f'/orders/{second_id}/start', follow_redirects=True)
+    text = blocked.data.decode('utf-8')
+    assert f'Order Trailer is still out on {out_number}' in text
+    assert 'return it before picking it up again' in text
+    with app.app_context():
+        assert get_db().execute('SELECT status FROM orders WHERE id = ?', (second_id,)).fetchone()['status'] == 'draft'
+
+    # Returning the trailer frees the unit for the next pickup.
+    assert b'Order returned' in return_order_ready(client, out_id).data
+    assert b'Order started' in client.post(f'/orders/{second_id}/start', follow_redirects=True).data
+
+
+def test_spare_units_and_untracked_lines_stay_hireable_while_one_is_out(client, app):
+    """The still-out rule counts units, and never blocks services or untracked stock."""
+    login(client)
+    seed_customer_and_product(client)  # Order Trailer: rental, 4 in stock
+    out_id = create_order_for_status(client, quantity='1', start_date='2026-07-01', end_date='2026-07-02')
+    assert b'Order started' in client.post(f'/orders/{out_id}/start', follow_redirects=True).data
+
+    # 3 of the 4 units are still hireable while one is out.
+    spare_id = create_order_for_status(client, quantity='3', start_date='2099-07-01', end_date='2099-07-02')
+    assert b'Order started' in client.post(f'/orders/{spare_id}/start', follow_redirects=True).data
+
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            """INSERT INTO products (name, product_type, description, sku, active, public_visible, price_amount, price_unit,
+               security_deposit, tax_profile_id, quantity, tracking_method, branch_id, created_at)
+            VALUES ('Loose Labour Unit', 'rental', 'Untracked labour.', 'LOOSE-LAB', 1, 1, 120, 'day', 0, 1, 0, 'none', NULL, '2026-06-01T00:00:00')"""
+        )
+        db.commit()
+        untracked_id = db.execute("SELECT id FROM products WHERE sku = 'LOOSE-LAB'").fetchone()['id']
+
+    # Untracked stock is never gated by an out unit.
+    untracked_order = client.post('/orders/new', data={
+        'customer_id': '1',
+        'product_id': [str(untracked_id)],
+        'quantity': ['5'],
+        'custom_name': [''],
+        'custom_unit_price': [''],
+        'custom_billing_mode': ['fixed'],
+        'start_date': '2099-07-01',
+        'start_time': '09:00',
+        'end_date': '2099-07-02',
+        'end_time': '09:00',
+        'deposit_option': 'no_deposit',
+    }, follow_redirects=False)
+    assert untracked_order.status_code == 302
+    untracked_order_id = int(untracked_order.headers['Location'].rstrip('/').split('/')[-1])
+    assert b'Order started' in client.post(f'/orders/{untracked_order_id}/start', follow_redirects=True).data
