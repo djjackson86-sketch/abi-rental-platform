@@ -630,7 +630,22 @@ def _insert_order_items(order_id, lines):
         )
 
 
-def create_order(form):
+def _notify_new_order(order_id):
+    """Best-effort Telegram "new order / booking request" message.
+
+    A Telegram failure (or a disabled / unconfigured bot) must never break the
+    order write, so the swallow is kept in one place. Ticket ABI-341952988 also
+    routes BOTH notification moments — creation for public bookings, first status
+    change for admin drafts — through here.
+    """
+    try:
+        from app.services.telegram import send_new_order_notification
+        send_new_order_notification(order_id)
+    except Exception:
+        pass
+
+
+def create_order(form, notify=True):
     payload = _build_order_payload(form)
     order_number = next_order_number()
     db = get_db()
@@ -642,11 +657,13 @@ def create_order(form):
     order_id = cur.lastrowid
     _insert_order_items(order_id, payload["lines"])
     db.commit()
-    try:
-        from app.services.telegram import send_new_order_notification
-        send_new_order_notification(order_id)
-    except Exception:
-        pass
+    if notify:
+        # Ticket ABI-341952988: an order created in the admin app is always
+        # stored as a draft first, so it is NOT announced here — its "New order"
+        # message goes out from transition_order() the moment its status leaves
+        # draft. Public store booking requests keep notifying immediately, which
+        # is why the default stays True and app/routes/public.py is untouched.
+        _notify_new_order(order_id)
     return order_id
 
 
@@ -1073,6 +1090,7 @@ def transition_order(order_id, action):
         if errors:
             raise ValueError(errors[0])
     db = get_db()
+    previous_status = order["status"]
     if action == "start":
         # Record the real collection moment: "reservation pick ups for the day"
         # is a day figure, and the scheduled pickup is only a proxy for it.
@@ -1085,6 +1103,16 @@ def transition_order(order_id, action):
             if item["product_id"]:
                 db.execute("UPDATE products SET branch_id = ? WHERE id = ?", (order["return_branch_id"], item["product_id"]))
     db.commit()
+    if previous_status == "draft" and transition["to"] not in {"draft", "canceled"} and order["created_by_user_id"]:
+        # Ticket ABI-341952988: a draft raised in the admin app skipped its
+        # creation notification, so this first move out of draft (Reserved,
+        # Started or Sales/Repairs) is the moment the "New order" message goes
+        # out — exactly once. A public/background order has
+        # created_by_user_id = NULL and already notified at creation, so the id
+        # check stops it ever being announced twice. Un-marking a Sales/Repairs
+        # order back to draft and cancelling a draft stay silent; the send is
+        # swallowed so messaging can never block a status change.
+        _notify_new_order(order_id)
     return transition["message"]
 
 

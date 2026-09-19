@@ -237,7 +237,11 @@ def new():
                 # a stray customer record with no order behind it.
                 _build_order_payload(form)
                 form = _form_with_inline_customer(form)
-                order_id = create_order(form)
+                # Ticket ABI-341952988: admin-app drafts stay silent on creation
+                # (notify=False). The "New order" message is sent by the status
+                # change below (Save as Sales/Repairs) or later from
+                # transition_order() when the order is reserved / picked up.
+                order_id = create_order(form, notify=False)
                 if _wants_sales_repairs(form, order_id):
                     # "Save as Sales/Repairs" on the form: the order is stored as
                     # a draft first, then the real Sales/Repairs status is applied
