@@ -817,6 +817,13 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             totals.append(('Security deposit', f'R{deposit_total:.2f}'))
     elif float(_doc_value(document, 'damage_waiver_amount') or 0):
         totals.append(('Damage waiver', f'R{float(_doc_value(document, "damage_waiver_amount") or 0):.2f}'))
+    # Security deposit consumed by the return settlement (extra time, damages or
+    # outstanding balance). It is already inside Paid as a deposit_applied
+    # payment; this is the visible deduction the client asked for. Invoices only:
+    # a quote never has a settled deposit.
+    deposit_used = float(_doc_value(document, 'deposit_applied_amount') or 0)
+    if _doc_value(document, 'document_type', '') == 'invoice' and deposit_used:
+        totals.append(('Less: deposit used', f'-R{deposit_used:.2f}'))
     totals.extend([
         ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
         ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
@@ -944,6 +951,9 @@ def document_pdf_bytes(document_id):
         lines.append(f'Security deposit: R{float(document["deposit_total"] or 0):.2f}')
     lines.append(f'Total: R{float(document["total"] or 0):.2f}')
     if document['document_type'] == 'invoice':
+        deposit_used = float(_doc_value(document, 'deposit_applied_amount') or 0)
+        if deposit_used:
+            lines.append(f'Less: deposit used: -R{deposit_used:.2f}')
         lines.extend([f'Paid: R{float(document["paid_total"] or 0):.2f}', f'Amount due: R{float(document["due_total"] or 0):.2f}'])
     logo_bytes = _document_logo_bytes()
     if document['document_type'] in {'invoice', 'quote'}:

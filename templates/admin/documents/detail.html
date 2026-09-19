@@ -68,6 +68,7 @@
       <div class="list-row"><span>VAT{% if tax_view.rate %} ({{ '%g'|format(tax_view.rate) }}%){% endif %}</span><b>R{{ '%.2f'|format(tax_view.vat) }}</b></div>
       <div class="list-row total-row"><span>Total with VAT</span><b>R{{ '%.2f'|format(tax_view.gross) }}</b></div>
       {% if (document.deposit_option or 'security_deposit') == 'security_deposit' and document.deposit_total %}<div class="list-row"><span>Security deposit (refundable)</span><b>R{{ '%.2f'|format(document.deposit_total) }}</b></div>{% elif document.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(document.damage_waiver_amount) }}</b></div>{% endif %}
+      {% if document.document_type == 'invoice' and document.deposit_applied_amount %}<div class="list-row"><span>Less: deposit used</span><b>-R{{ '%.2f'|format(document.deposit_applied_amount) }}</b></div>{% endif %}
       <div class="list-row"><span>Paid</span><b>R{{ '%.2f'|format(document.paid_total or 0) }}</b></div>
       <div class="list-row"><span>Amount due</span><b>R{{ '%.2f'|format(document.due_total or 0) }}</b></div>
     </div>
