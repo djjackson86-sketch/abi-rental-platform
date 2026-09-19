@@ -10,7 +10,7 @@ from app.services.access import current_session_user_id, order_branch_clause, pr
 from app.services.branches import pickup_hours_error
 from app.services.settings import global_vat_rate
 from app.services.products import product_branch_stock
-from app.services.reports import collectible_due_expr, recognized_revenue_expr
+from app.services.reports import collectible_due_expr
 from app.services.timezone import local_now, local_now_iso
 
 # "Sales/Repairs" is a REAL stored order status (ticket ABI-341952962): a draft
@@ -142,15 +142,49 @@ def _order_filter_where(query="", status="", payment_status="", return_status=""
 
 
 def order_counts(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
+    """Totals for the Orders page metric cards.
+
+    Revenue is money RECEIVED (ticket ABI-341952993) — paid, non-archived payments
+    dated inside the same window as the order list, taken on orders that survive
+    the page's own filters — so the card agrees with the dashboard's "Revenue for
+    the day" when the page is filtered to Today. The recognised (booked) value of
+    the same orders is a deliberately different number and lives on Reports, which
+    is relabelled "recognised (booked)".
+    """
     where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date, branch_id=branch_id)
-    revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
     db = get_db()
     due_expr = collectible_due_expr("o")
-    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({revenue_expr}),0) revenue, COALESCE(SUM({due_expr}),0) due
-        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", [*revenue_params, *params]).fetchone()
+    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({due_expr}),0) due
+        FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
     item_row = db.execute(f"""SELECT COALESCE(SUM(oi.quantity),0) items FROM order_items oi
         JOIN orders o ON o.id = oi.order_id LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
-    return {"total": row["total"] or 0, "revenue": row["revenue"] or 0, "due": row["due"] or 0, "items": item_row["items"] or 0}
+    # Money received for those orders. ``where`` already carries the branch,
+    # status, payment-status and pickup-date filters, so the payment window below
+    # is the only extra restriction: with no dates picked the card is everything
+    # ever received against the orders on screen.
+    payment_window_sql = ""
+    payment_window_params = []
+    if start_date:
+        payment_window_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) >= ?"
+        payment_window_params.append(start_date)
+    if end_date:
+        payment_window_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) <= ?"
+        payment_window_params.append(end_date)
+    received_row = db.execute(
+        f"""SELECT COALESCE(SUM(pay.amount),0) revenue
+        FROM payments pay
+        JOIN orders o ON o.id = pay.order_id
+        LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE {where} AND pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+        {payment_window_sql}""",
+        [*params, *payment_window_params],
+    ).fetchone()
+    return {
+        "total": row["total"] or 0,
+        "revenue": received_row["revenue"] or 0,
+        "due": row["due"] or 0,
+        "items": item_row["items"] or 0,
+    }
 
 
 def deposit_to_process_amount(order):
@@ -637,11 +671,27 @@ def _notify_new_order(order_id):
     order write, so the swallow is kept in one place. Ticket ABI-341952988 also
     routes BOTH notification moments — creation for public bookings, first status
     change for admin drafts — through here.
+
+    Ticket ABI-341952993: a delivered message stamps ``new_order_notified_at``, so
+    an order that is reverted to draft and then reserved again is never announced
+    to the client group a second time. A failed send leaves the stamp empty, which
+    only ever means the next departure from draft may try once more — never a
+    duplicate of a message that did go out.
     """
     try:
         from app.services.telegram import send_new_order_notification
         send_new_order_notification(order_id)
     except Exception:
+        return
+    try:
+        db = get_db()
+        db.execute(
+            "UPDATE orders SET new_order_notified_at = ? WHERE id = ? AND COALESCE(new_order_notified_at, '') = ''",
+            (now(), order_id),
+        )
+        db.commit()
+    except Exception:
+        # Never let bookkeeping of the flag break the caller either.
         pass
 
 
@@ -955,6 +1005,17 @@ TRANSITIONS = {
     "return": {"from": {"started"}, "to": "returned", "message": "Order returned"},
     "archive": {"from": {"returned", SALES_REPAIRS_STATUS}, "to": "archived", "message": "Order archived"},
     "cancel": {"from": {"draft", "reserved"}, "to": "canceled", "message": "Order canceled"},
+    # Ticket ABI-341952993: the main profile can pull a live order back to draft.
+    # Only orders that hold stock or are active are offered (reserved, picked up,
+    # returned, Sales/Repairs) — a cancelled or archived order is never
+    # resurrected. Reservations only count `reserved`/`started` orders, so the
+    # stock a reserved or picked-up order held is released by the status change
+    # itself; payments, quotes and invoices are deliberately left intact.
+    "revert_draft": {
+        "from": {"reserved", "started", "returned", SALES_REPAIRS_STATUS},
+        "to": "draft",
+        "message": "Order reverted to draft",
+    },
 }
 
 
@@ -1076,6 +1137,14 @@ def transition_order(order_id, action):
         detail = f" already picked up on {picked_up_at}" if picked_up_at else " already picked up"
         raise ValueError(f"This order is{detail} — return it before picking it up again.")
     if order["status"] not in transition["from"]:
+        if action == "revert_draft":
+            # Name the button and the eligible statuses: "Cannot revert_draft"
+            # leaks the internal action key at the client.
+            current = STATUS_LABELS.get(order["status"], order["status"])
+            raise ValueError(
+                f"Cannot revert an order with status {current} — Revert to Draft is available "
+                "for reserved, picked up, returned and Sales/Repairs orders"
+            )
         raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
     if action == "return":
         validate_return_ready(order_id)
@@ -1102,8 +1171,28 @@ def transition_order(order_id, action):
         for item in order_items(order_id):
             if item["product_id"]:
                 db.execute("UPDATE products SET branch_id = ? WHERE id = ?", (order["return_branch_id"], item["product_id"]))
+    if (
+        action == "revert_draft"
+        and previous_status == "returned"
+        and order["booking_type"] == "oneway"
+        and order["return_branch_id"]
+    ):
+        # Ticket ABI-341952993: the mirror of the return-leg move above. A
+        # completed one-way hire left its units at the return branch; pulling the
+        # order back to draft releases that stock, so the units have to sit in
+        # the yard the booking was collected from — otherwise the released units
+        # would be bookable at the wrong depot. Nothing else about the order (its
+        # payments, its quotes and invoices, its picked_up_at history) moves.
+        for item in order_items(order_id):
+            if item["product_id"] and order["collect_branch_id"]:
+                db.execute("UPDATE products SET branch_id = ? WHERE id = ?", (order["collect_branch_id"], item["product_id"]))
     db.commit()
-    if previous_status == "draft" and transition["to"] not in {"draft", "canceled"} and order["created_by_user_id"]:
+    if (
+        previous_status == "draft"
+        and transition["to"] not in {"draft", "canceled"}
+        and order["created_by_user_id"]
+        and not order["new_order_notified_at"]
+    ):
         # Ticket ABI-341952988: a draft raised in the admin app skipped its
         # creation notification, so this first move out of draft (Reserved,
         # Started or Sales/Repairs) is the moment the "New order" message goes
@@ -1112,6 +1201,11 @@ def transition_order(order_id, action):
         # check stops it ever being announced twice. Un-marking a Sales/Repairs
         # order back to draft and cancelling a draft stay silent; the send is
         # swallowed so messaging can never block a status change.
+        #
+        # Ticket ABI-341952993: "once" is per ORDER, not per departure from draft.
+        # Reverting a live order to draft and reserving it again is now a normal
+        # workflow, and it must not re-announce the same order to the client
+        # group — hence the new_order_notified_at guard (stamped by the send).
         _notify_new_order(order_id)
     return transition["message"]
 
@@ -1123,6 +1217,13 @@ def status_actions(status, has_rental_items=False):
     Sales/Repairs status (ticket ABI-341952962). Draft stays a valid status, so an
     unmarked sale order is still a draft — and a Sales/Repairs order keeps
     "Save as draft" (plus archive once the sale is done).
+
+    Ticket ABI-341952993 adds ``revert_draft`` ("Revert to Draft") to every status
+    that holds stock or is active. The button is only RENDERED for the main
+    profile (``current_user_is_main`` in templates/admin/orders/detail.html) and
+    the endpoint itself is main-gated, so a staff account is never offered it and
+    cannot post it either. Cancelled and archived orders get nothing: a cancelled
+    or archived order is not resurrected.
     """
     actions = []
     if status == "draft":
@@ -1133,14 +1234,18 @@ def status_actions(status, has_rental_items=False):
         actions.append(("cancel", "Cancel order", "danger"))
     elif status == SALES_REPAIRS_STATUS:
         actions.append(("draft", "Save as draft", "ghost"))
+        actions.append(("revert_draft", "Revert to Draft", "ghost"))
         actions.append(("archive", "Archive order", "ghost"))
     elif status == "reserved":
         actions.append(("start", "Start order", "primary"))
+        actions.append(("revert_draft", "Revert to Draft", "ghost"))
         actions.append(("cancel", "Cancel order", "danger"))
     elif status == "started":
         actions.append(("return", "Return order", "primary"))
+        actions.append(("revert_draft", "Revert to Draft", "ghost"))
     elif status == "returned":
         actions.append(("archive", "Archive order", "ghost"))
+        actions.append(("revert_draft", "Revert to Draft", "ghost"))
     return actions
 
 

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
@@ -12,7 +12,7 @@ from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
-from app.services.access import main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
+from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 
@@ -576,10 +576,39 @@ def delete(order_id):
     return redirect(url_for("orders.index"))
 
 
+@bp.post("/<int:order_id>/revert-draft")
+@login_required
+@main_required
+def revert_draft(order_id):
+    """Pull a live order back to draft (ticket ABI-341952993).
+
+    Main profile only — the gate is on the endpoint, never on the button. The
+    stock the order held is released by the status change itself (availability
+    only counts reserved and started orders) while payments, quotes and invoices
+    are deliberately left intact, so nothing financial is rewritten or removed.
+    Cancelled and archived orders are refused by the transition table.
+    """
+    order = _ensure_order_access(order_id)
+    if not order:
+        flash("Order not found", "error")
+        return redirect(url_for("orders.index"))
+    try:
+        message = transition_order(order_id, "revert_draft")
+        flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))
+
+
 @bp.post("/<int:order_id>/<action>")
 @login_required
 def change_status(order_id, action):
     _ensure_order_access(order_id)
+    if action == "revert_draft" and not is_main_session(session):
+        # Belt and braces: the dedicated /revert-draft route above carries the
+        # gate, and this refuses the same action through the generic catch-all
+        # (a crafted URL must not be able to sidestep the main-profile rule).
+        abort(403)
     try:
         message = transition_order(order_id, action)
         flash(message, "success")

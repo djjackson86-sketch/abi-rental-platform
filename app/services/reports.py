@@ -194,27 +194,35 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
 def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
     """The four headline dashboard cards, restricted to a period (and branch).
 
-    Definitions are the ones the dashboard has always used, only windowed:
+    Definitions, only windowed:
 
     * ``orders``   — orders **created** in the period (``orders.created_at``)
-    * ``revenue``  — the sum of those orders' totals
+    * ``revenue``  — money **received** in the period (see below)
     * ``products`` — catalogue rows **added** in the period (``products.created_at``);
       like the pre-ticket card this counts every row, archived included
     * ``customers``— customer records **added** in the period (``customers.created_at``)
 
+    Gross revenue is money RECEIVED, not booked (ticket ABI-341952993): the sum of
+    paid, non-archived payments whose date falls inside the window, branch-scoped
+    by the order they were taken on. That is exactly the query behind the
+    dashboard's "Revenue for the day" card run over a single day, so choosing the
+    ``Today`` range reproduces that card instead of showing the booked value of the
+    orders raised today — the three revenue figures the client compared can no
+    longer disagree. The booked/recognised basis still lives on Reports, which is
+    relabelled "recognised (booked)" so the two are visibly different numbers on
+    purpose.
+
     With ``start_date``/``end_date`` of ``None`` the window is off and the four
-    numbers are byte-for-byte the all-time figures the page showed before the
-    quick ranges existed, so the "All time" pill is a true baseline.
+    numbers are the all-time figures the page showed before the quick ranges
+    existed, so the "All time" pill is a true baseline.
 
     Rows come back as plain ints/float — production returns libsql tuple rows,
     which is why nothing here builds a dict from a raw row without ``row_dict``.
     """
     db = get_db()
 
-    revenue_expr, revenue_params = recognized_revenue_expr("o", "total")
-    order_sql = f"SELECT COUNT(*) AS count, COALESCE(SUM({revenue_expr}), 0) AS revenue FROM orders o WHERE 1=1"
+    order_sql = "SELECT COUNT(*) AS count FROM orders o WHERE 1=1"
     order_params = []
-    order_params.extend(revenue_params)
     window_sql, window_params = _window("o.created_at", start_date, end_date)
     order_sql += window_sql
     order_params.extend(window_params)
@@ -222,6 +230,24 @@ def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
     order_sql += scope_sql
     order_params.extend(scope_params)
     orders = row_dict(db.execute(order_sql, order_params).fetchone())
+
+    # Money received in the window. The payment date is the stored
+    # ``payment_date``, falling back to when the payment was captured — the same
+    # COALESCE/NULLIF the day card uses, compared as a YYYY-MM-DD prefix so a
+    # single-day range matches "Revenue for the day" by construction.
+    received_sql = f"""SELECT COALESCE(SUM(pay.amount), 0) AS revenue
+        FROM payments pay JOIN orders o ON o.id = pay.order_id
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''"""
+    received_params = []
+    if start_date:
+        received_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) >= ?"
+        received_params.append(start_date)
+    if end_date:
+        received_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) <= ?"
+        received_params.append(end_date)
+    received_sql += scope_sql
+    received_params.extend(scope_params)
+    received = row_dict(db.execute(received_sql, received_params).fetchone())
 
     product_sql = "SELECT COUNT(*) AS count FROM products p WHERE 1=1"
     product_params = []
@@ -242,7 +268,7 @@ def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
 
     return {
         "orders": int(orders.get("count") or 0),
-        "revenue": money(orders.get("revenue")),
+        "revenue": money(received.get("revenue")),
         "products": int(products.get("count") or 0),
         "customers": int(customers.get("count") or 0),
     }

@@ -12,7 +12,16 @@
     <a class="btn ghost" href="{{ url_for('orders.index') }}">Back</a>
     {% if order.status not in ['canceled', 'cancelled', 'archived'] %}<a class="btn primary" href="{{ url_for('orders.edit', order_id=order.id) }}">Edit order</a>{% endif %}
     {% for action, label, style in actions %}
-      {% if action == 'return' and not finalized_invoice_exists %}
+      {% if action == 'revert_draft' %}
+        {# Ticket ABI-341952993: the button is main-profile only and posts to its
+           own main-gated endpoint. It releases the stock the order held and
+           keeps every payment, quote and invoice on the order. #}
+        {% if current_user_is_main %}
+          <form method="post" action="{{ url_for('orders.revert_draft', order_id=order.id) }}" class="inline-form">
+            <button class="btn {{ style }}" type="submit" title="Main profile only — releases the stock, keeps payments and invoices">Revert to Draft</button>
+          </form>
+        {% endif %}
+      {% elif action == 'return' and not finalized_invoice_exists %}
         <button class="btn {{ style }}" type="button" disabled title="Finalize the invoice before returning this order">{{ label }}</button>
       {% else %}
         <form method="post" action="{{ url_for('orders.change_status', order_id=order.id, action=action) }}" class="inline-form">

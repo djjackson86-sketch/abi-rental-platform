@@ -252,6 +252,7 @@ CREATE TABLE IF NOT EXISTS orders (
     notes TEXT NOT NULL DEFAULT '',
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     picked_up_at TEXT,
+    new_order_notified_at TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -454,6 +455,22 @@ def run_migrations(db):
     # column fall back to their scheduled pickup where a "picked up today"
     # figure needs a date (see reports.dashboard_day_metrics).
     ensure_column(db, "orders", "picked_up_at", "TEXT")
+    # --- "New order" announced once per order (additive, 2026-09-19) ----------
+    # Ticket ABI-341952993 makes "revert a live order to draft" a normal step, so
+    # an order can leave draft more than once. Without a marker that would
+    # re-announce the same order to the client Telegram group every time it is
+    # reserved again. NULL = never announced (an admin draft untouched since
+    # ABI-341952988 keeps its single announcement when it finally moves on).
+    ensure_column(db, "orders", "new_order_notified_at", "TEXT")
+    # One-off backfill: an order that has already left draft has already been
+    # announced (admin drafts announce on that move, public bookings announce at
+    # creation), so it must never announce again. Drafts stay NULL so the live
+    # drafts that are still waiting announce exactly once, as documented.
+    db.execute(
+        "UPDATE orders SET new_order_notified_at = COALESCE(NULLIF(created_at, ''), ?) "
+        "WHERE new_order_notified_at IS NULL AND status <> 'draft'",
+        (now(),),
+    )
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")

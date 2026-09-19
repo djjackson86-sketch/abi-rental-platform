@@ -69,7 +69,11 @@ def test_revenue_excludes_refundable_deposit_but_includes_applied_deposit(app):
         # First order recognizes only the rental/extras (200). Second recognizes
         # rental/extras plus the R300 of deposit retained for settlement costs.
         assert summary_metrics(DAY, DAY)['revenue'] == 700
-        assert order_counts()['revenue'] == 700
+        # Ticket ABI-341952993: the Orders page Revenue card no longer uses the
+        # recognized/recognised basis — it reports money RECEIVED, so with no
+        # payments captured against either order the card is genuinely R0.00.
+        # The deposit rule itself is covered by summary_metrics above.
+        assert order_counts()['revenue'] == 0
 
 
 def test_cash_deposit_refunds_reduce_expected_drawer_cash(app):

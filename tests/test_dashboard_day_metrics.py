@@ -643,6 +643,14 @@ def _ranged_fixtures(app):
                 status, payment_status, subtotal, tax_total, deposit_total, total, due_total, notes,
                 created_at) VALUES (?, 'return', ?, ?, 'started', 'paid', 0, 0, 0, ?, 0, '', ?)""",
                 (number, branch, branch, total, created))
+            # Ticket ABI-341952993: the Gross revenue card is money RECEIVED, so
+            # each order needs a real payment to carry its value — a total alone
+            # is a booked figure and would leave every window reading R0.00.
+            order_id = db.execute("SELECT id FROM orders WHERE order_number = ?", (number,)).fetchone()['id']
+            db.execute(
+                """INSERT INTO payments (order_id, amount, method, reference, status, payment_date,
+                deleted_at, created_at) VALUES (?, ?, 'cash', '', 'paid', ?, '', ?)""",
+                (order_id, total, created[:10], created))
         for name, created in (('Range Today A', f'{today}T08:00:00'),
                               ('Range Today B', f'{today}T08:30:00'),
                               ('Range Old', f'{old}T08:00:00')):
@@ -658,8 +666,10 @@ def _ranged_fixtures(app):
 def _window_counts(app, start, end, branch_id=None):
     """The four card numbers read straight from the fixtures.
 
-    These are the *legacy* queries (the ones the dashboard ran before the
-    ranges existed); ``start``/``end`` of ``''`` is the all-time baseline.
+    Orders / products / customers are the *legacy* queries (the ones the
+    dashboard ran before the ranges existed); ``start``/``end`` of ``''`` is the
+    all-time baseline. Revenue is money RECEIVED in the window (ticket
+    ABI-341952993) — the same query as the "Revenue for the day" card, windowed.
     """
     order_where, order_params = '', []
     for column, value, operator in (('o.created_at', start, '>='), ('o.created_at', end, '<=')):
@@ -669,6 +679,16 @@ def _window_counts(app, start, end, branch_id=None):
     if branch_id is not None:
         order_where += ' AND (o.collect_branch_id = ? OR o.return_branch_id = ?)'
         order_params += [branch_id, branch_id]
+
+    payment_where, payment_params = '', []
+    for _prefix, value, operator in (('', start, '>='), ('', end, '<=')):
+        if value:
+            payment_where += (" AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) "
+                              f"{operator} ?")
+            payment_params.append(value)
+    if branch_id is not None:
+        payment_where += ' AND (o.collect_branch_id = ? OR o.return_branch_id = ?)'
+        payment_params += [branch_id, branch_id]
 
     product_where, product_params = '', []
     if start:
@@ -692,9 +712,14 @@ def _window_counts(app, start, end, branch_id=None):
     with app.app_context():
         db = get_db()
         row = db.execute(
-            f"SELECT COUNT(*) AS c, COALESCE(SUM(o.total), 0) AS s FROM orders o WHERE 1=1{order_where}",
+            f"SELECT COUNT(*) AS c FROM orders o WHERE 1=1{order_where}",
             order_params).fetchone()
-        counts = {'orders': row['c'], 'revenue': round(float(row['s'] or 0), 2)}
+        counts = {'orders': row['c']}
+        counts['revenue'] = round(float(db.execute(
+            f"""SELECT COALESCE(SUM(pay.amount), 0) AS s FROM payments pay
+            JOIN orders o ON o.id = pay.order_id
+            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+            {payment_where}""", payment_params).fetchone()['s'] or 0), 2)
         counts['products'] = db.execute(
             f"SELECT COUNT(*) AS c FROM products p WHERE 1=1{product_where}",
             product_params).fetchone()['c']
@@ -750,10 +775,13 @@ def test_the_four_cards_open_on_this_month(client, app):
     # mistaken for the whole catalogue.
     assert 'Created · This month' in page
     assert 'Added · This month' in page
-    assert 'Booked · This month' in page
+    # Ticket ABI-341952993: the Gross revenue card now says what it measures.
+    assert 'Received · This month' in page
 
 
 def test_all_time_is_the_pre_ticket_baseline(client, app):
+    """The three count cards are unchanged all-time; only revenue moved basis
+    (ticket ABI-341952993 — money received instead of booked value)."""
     today, first, _old = _ranged_fixtures(app)
     login(client)
 

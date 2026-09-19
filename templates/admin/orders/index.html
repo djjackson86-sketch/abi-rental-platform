@@ -110,7 +110,7 @@
     <section class="metrics orders-metrics" id="orders-metrics">
       <div class="metric-card"><small>Orders</small><b>{{ counts.total }}</b></div>
       <div class="metric-card"><small>Items ordered</small><b>{{ counts['items'] }}</b></div>
-      <div class="metric-card"><small>Revenue</small><b>R{{ '%.2f'|format(counts.revenue) }}</b></div>
+      <div class="metric-card"><small>Revenue received</small><b>R{{ '%.2f'|format(counts.revenue) }}</b></div>
       <div class="metric-card"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
     </section>
     {% else %}
