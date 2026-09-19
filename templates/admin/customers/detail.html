@@ -16,6 +16,18 @@
   </div>
 </header>
 
+<section class="panel">
+  <div class="panel-title"><h2>Customer actions</h2></div>
+  {% if customer_has_history %}
+    <p class="form-help">This customer has existing orders/history, so deletion is blocked.</p>
+  {% else %}
+    <form method="post" action="{{ url_for('customers.delete', customer_id=customer.id) }}" onsubmit="return confirm('Delete this customer? This cannot be undone.');">
+      <button class="btn danger" type="submit">Delete customer</button>
+    </form>
+    <p class="form-help">Only customers with no orders/history can be deleted.</p>
+  {% endif %}
+</section>
+
 <section class="customer-profile-grid">
   <article class="panel customer-summary-card">
     <div class="profile-card-head">

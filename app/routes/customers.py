@@ -4,7 +4,7 @@ from io import StringIO
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
-from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_orders, get_customer, list_customers, update_customer
+from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_has_history, customer_orders, delete_customer, get_customer, list_customers, update_customer
 from app.services.settings import get_company_settings
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
@@ -73,7 +73,27 @@ def detail(customer_id):
     if not customer:
         flash("Customer not found", "error")
         return redirect(url_for("customers.index"))
-    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=customer_orders(customer_id), custom_field_label=custom_field_label, client_verified_label=client_verified_label)
+    orders = customer_orders(customer_id)
+    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=orders, customer_has_history=bool(orders) or customer_has_history(customer_id), custom_field_label=custom_field_label, client_verified_label=client_verified_label)
+
+
+@bp.route("/<int:customer_id>/delete", methods=["POST"])
+@login_required
+def delete(customer_id):
+    customer = get_customer(customer_id)
+    if not customer:
+        flash("Customer not found", "error")
+        return redirect(url_for("customers.index"))
+    try:
+        deleted = delete_customer(customer_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("customers.detail", customer_id=customer_id))
+    if deleted:
+        flash("Customer deleted", "success")
+    else:
+        flash("Customer not found", "error")
+    return redirect(url_for("customers.index"))
 
 
 @bp.route("/<int:customer_id>/edit", methods=["GET", "POST"])

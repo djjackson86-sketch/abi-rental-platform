@@ -93,6 +93,23 @@ def customer_orders(customer_id):
     return get_db().execute("SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC", (customer_id,)).fetchall()
 
 
+def customer_has_history(customer_id):
+    row = get_db().execute(
+        "SELECT COUNT(*) AS count FROM orders WHERE customer_id = ?",
+        (customer_id,),
+    ).fetchone()
+    return bool(row and row["count"])
+
+
+def delete_customer(customer_id):
+    if customer_has_history(customer_id):
+        raise ValueError("Customer has existing orders/history and cannot be deleted")
+    db = get_db()
+    cur = db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+    db.commit()
+    return cur.rowcount > 0
+
+
 def _client_verified_value(form):
     """Yes/No client verification: 1, 0, or None when nobody has answered yet.
 

@@ -1126,6 +1126,115 @@ def test_add_company_customer_from_order_captures_vat_fields(client, app):
         assert custom_fields['vehicle_make'] == 'Fleet bakkie'
 
 
+def test_add_customer_continue_button_is_primary_and_ajax_returns_summary(client, app):
+    login(client)
+    seed_customer_and_product(client)
+
+    page = client.get('/orders/new')
+    assert page.status_code == 200
+    assert b'id="inline-customer-submit"' in page.data
+    assert b'class="btn primary" type="submit" id="inline-customer-submit"' in page.data
+
+    res = client.post('/orders/new', data={
+        'order_action': 'create_customer_continue',
+        'customer_type': 'company',
+        'name': 'Ajax Inline Customer Pty Ltd',
+        'email': 'ajax-inline@example.test',
+        'phone': '+271****3333',
+        'address_line1': '1 Ajax Road',
+        'address_line2': 'Unit 4',
+        'postal_code': '7441',
+        'vat_number': '4777777777',
+    }, headers={'X-Requested-With': 'fetch', 'Accept': 'application/json'})
+
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert payload['ok'] is True
+    assert payload['customer']['name'] == 'Ajax Inline Customer Pty Ltd'
+    assert payload['customer']['email'] == 'ajax-inline@example.test'
+    assert payload['customer']['address'] == '1 Ajax Road, Unit 4, 7441, South Africa'
+    assert payload['customer']['custom_fields']['vat_number'] == '4777777777'
+    assert payload['customer']['display'] == 'Ajax Inline Customer Pty Ltd — ajax-inline@example.test'
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT address_line2, postal_code, custom_fields_json FROM customers WHERE name = ?",
+            ('Ajax Inline Customer Pty Ltd',),
+        ).fetchone()
+        assert row is not None
+        assert row['address_line2'] == 'Unit 4'
+        assert row['postal_code'] == '7441'
+        assert json.loads(row['custom_fields_json'])['vat_number'] == '4777777777'
+
+
+def test_inline_customer_ajax_validation_does_not_redirect(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    res = client.post('/orders/new', data={
+        'order_action': 'create_customer_continue',
+        'customer_type': 'individual',
+        'name': '',
+    }, headers={'X-Requested-With': 'fetch', 'Accept': 'application/json'})
+
+    assert res.status_code == 400
+    assert res.get_json() == {'ok': False, 'message': 'Customer name is required'}
+
+
+def test_customer_without_orders_can_be_deleted(client, app):
+    login(client)
+    client.post('/customers/new', data={
+        'customer_type': 'individual',
+        'name': 'Delete Me Customer',
+        'email': 'delete-me@example.test',
+        'phone': '+271****4444',
+    }, follow_redirects=True)
+    with app.app_context():
+        customer_id = get_db().execute("SELECT id FROM customers WHERE name = ?", ('Delete Me Customer',)).fetchone()['id']
+
+    detail = client.get(f'/customers/{customer_id}')
+    assert detail.status_code == 200
+    assert b'Delete customer' in detail.data
+    assert f'/customers/{customer_id}/delete'.encode() in detail.data
+
+    deleted = client.post(f'/customers/{customer_id}/delete', follow_redirects=True)
+    assert deleted.status_code == 200
+    assert b'Customer deleted' in deleted.data
+    assert b'Delete Me Customer' not in deleted.data
+    with app.app_context():
+        remaining = get_db().execute("SELECT COUNT(*) AS count FROM customers WHERE id = ?", (customer_id,)).fetchone()['count']
+        assert remaining == 0
+
+
+def test_customer_with_orders_cannot_be_deleted(client, app):
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+
+    detail = client.get('/customers/1')
+    assert detail.status_code == 200
+    assert b'Deletion is blocked' in detail.data or b'deletion is blocked' in detail.data
+    assert b'Delete customer' not in detail.data
+
+    blocked = client.post('/customers/1/delete', follow_redirects=True)
+    assert blocked.status_code == 200
+    assert b'Customer has existing orders/history and cannot be deleted' in blocked.data
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) AS count FROM customers WHERE id = 1").fetchone()['count'] == 1
+        assert db.execute("SELECT customer_id FROM orders WHERE id = ?", (order_id,)).fetchone()['customer_id'] == 1
+
+
+def test_customer_delete_requires_post_and_login(client):
+    login(client)
+    client.post('/customers/new', data={'customer_type': 'individual', 'name': 'Post Only Customer'}, follow_redirects=True)
+    assert client.get('/customers/1/delete').status_code == 405
+
+    logged_out = client.application.test_client()
+    response = logged_out.post('/customers/1/delete')
+    assert response.status_code == 302
+    assert '/login' in response.headers['Location']
+
+
 def test_save_draft_with_inline_company_customer_creates_and_attaches_customer(client, app):
     login(client)
     seed_customer_and_product(client)

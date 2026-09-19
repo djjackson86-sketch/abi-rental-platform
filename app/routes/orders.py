@@ -53,6 +53,30 @@ def _selected_customer_summary(customers, selected_customer_id):
     return next((customer for customer in customers if customer["id"] == wanted), None)
 
 
+def _customer_summary_by_id(customer_id):
+    row = get_db().execute("""
+        SELECT id, customer_type, name, email, phone, marketing_opt_in,
+               address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
+               client_verified,
+               (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
+                FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance
+        FROM customers
+        WHERE id = ?
+    """, (customer_id,)).fetchone()
+    return customer_summary_for(row) if row else None
+
+
+def _wants_json():
+    return request.is_json or request.headers.get("X-Requested-With") == "fetch" or "application/json" in request.headers.get("Accept", "")
+
+
+def _create_inline_customer_response(customer_id, message):
+    summary = _customer_summary_by_id(customer_id)
+    if _wants_json():
+        return jsonify({"ok": True, "message": message, "customer": summary})
+    return None
+
+
 def _products():
     scope_ids = session_branch_scope_ids()
     if scope_ids is None:
@@ -204,9 +228,14 @@ def new():
         if request.form.get("order_action") == "create_customer_continue":
             try:
                 customer_id = create_customer(request.form)
+                json_response = _create_inline_customer_response(customer_id, "Customer created — continue the order")
+                if json_response:
+                    return json_response
                 flash("Customer created — continue the order", "success")
                 return redirect(url_for("orders.new", customer_id=customer_id))
             except ValueError as exc:
+                if _wants_json():
+                    return jsonify({"ok": False, "message": str(exc)}), 400
                 flash(str(exc), "error")
                 submitted_customer_values = _submitted_customer_values(request.form)
         else:
@@ -301,9 +330,14 @@ def edit(order_id):
                 customer_id = create_customer(request.form)
                 get_db().execute("UPDATE orders SET customer_id = ? WHERE id = ?", (customer_id, order_id))
                 get_db().commit()
+                json_response = _create_inline_customer_response(customer_id, "Customer created and attached — continue editing the order")
+                if json_response:
+                    return json_response
                 flash("Customer created and attached — continue editing the order", "success")
                 return redirect(url_for("orders.edit", order_id=order_id))
             except ValueError as exc:
+                if _wants_json():
+                    return jsonify({"ok": False, "message": str(exc)}), 400
                 flash(str(exc), "error")
                 form_data = None
         else:
