@@ -1,5 +1,5 @@
 from app.db import get_db, now
-from app.services.access import product_branch_clause, session_branch_scope_ids
+from app.services.access import order_branch_clause, product_branch_clause, session_branch_scope_ids
 from app.services.settings import global_tax_profile_id
 
 VALID_TYPES = {"rental", "sale", "service"}
@@ -261,6 +261,61 @@ def stock_breakdown_rows(product_ids=None):
 def format_stock_breakdown(rows):
     """One-line 'Midrand 5 · Wonderboom 2' summary of a product's branch stock."""
     return " \u00b7 ".join(f"{row['branch_name']} {row['quantity']}" for row in (rows or []))
+
+
+#: Order statuses that mean a unit is physically out or promised. "Picked up"
+#: is the live collection stage (``started``); "reserved" is a booking that has
+#: not been collected yet. Everything else (draft, sales/repairs, returned,
+#: canceled, archived) holds no live unit.
+LIVE_RENTAL_STATUSES = ("started", "reserved")
+
+
+def live_rental_status(product_ids, branch_id=None):
+    """{product_id: {'picked_up': n, 'reserved': n}} live rented units.
+
+    Counts the ordered quantity still held by an open booking — orders in
+    ``started`` (picked up) or ``reserved`` — for every product in one query.
+    Branch scoping reuses the shared ``order_branch_clause``, so a
+    branch-limited session (or the inventory branch filter) can only ever
+    narrow the figures, never widen them. One query for the whole page.
+    """
+    ids = [int(pid) for pid in (product_ids or [])]
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    status_marks = ",".join("?" for _ in LIVE_RENTAL_STATUSES)
+    sql = f"""
+        SELECT oi.product_id AS product_id, o.status AS status,
+            COALESCE(SUM(oi.quantity), 0) AS quantity
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE oi.product_id IN ({marks}) AND o.status IN ({status_marks})
+    """
+    params = [*ids, *LIVE_RENTAL_STATUSES]
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
+    sql += " GROUP BY oi.product_id, o.status"
+    live = {}
+    for row in get_db().execute(sql, params).fetchall():
+        entry = live.setdefault(int(row["product_id"]), {"picked_up": 0, "reserved": 0})
+        if row["status"] == "started":
+            entry["picked_up"] += int(row["quantity"] or 0)
+        else:
+            entry["reserved"] += int(row["quantity"] or 0)
+    return live
+
+
+def live_rental_status_label(entry):
+    """'Picked up 2 · Reserved 1' for the inventory status column, or '—'."""
+    if not entry:
+        return "\u2014"
+    parts = []
+    if entry.get("picked_up"):
+        parts.append(f"Picked up {entry['picked_up']}")
+    if entry.get("reserved"):
+        parts.append(f"Reserved {entry['reserved']}")
+    return " \u00b7 ".join(parts) if parts else "\u2014"
 
 
 def set_product_branch_stock(product_id, counts, restrict_branch_id=None):

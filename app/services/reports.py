@@ -440,6 +440,50 @@ def payments_by_method(start_date=None, end_date=None, branch_id=None):
     return rows_with_bars(db.execute(sql, params).fetchall())
 
 
+def product_revenue(product_ids, start_date=None, end_date=None, branch_id=None):
+    """{product_id: recognized revenue} for the inventory revenue column.
+
+    Deliberately the SAME rule as Reports -> Product performance: only paid
+    orders in a real order stage count (``revenue_recognized_condition``), the
+    line total is used (so refundable security deposits are never revenue), and
+    the reporting date is the order's own ``created_at``. The two screens can
+    therefore never show conflicting figures for the same product.
+
+    One query for every product on the page. ``start_date``/``end_date`` window
+    the figure only — the product list itself is unchanged by the choice.
+    """
+    ids = [int(pid) for pid in (product_ids or [])]
+    if not ids:
+        return {}
+    db = get_db()
+    condition, revenue_params = revenue_recognized_condition("o")
+    line_revenue_expr = f"CASE WHEN {condition} THEN COALESCE(oi.line_total, 0) ELSE 0 END"
+    marks = ",".join("?" for _ in ids)
+    sql = f"""
+        SELECT oi.product_id AS product_id, COALESCE(SUM({line_revenue_expr}), 0) AS total
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE oi.product_id IN ({marks})
+    """
+    # Placeholder order follows the statement text: the SELECT-list CASE comes
+    # first, then the id list, then the date window, then the branch scope.
+    params = [*revenue_params, *ids]
+    window_sql, window_params = _window("o.created_at", start_date, end_date)
+    sql += window_sql
+    params.extend(window_params)
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    sql += scope_sql
+    params.extend(scope_params)
+    sql += " GROUP BY oi.product_id"
+    revenue = {}
+    for row in db.execute(sql, params).fetchall():
+        data = row_dict(row)
+        if data.get("product_id") is None:
+            continue
+        revenue[int(data["product_id"])] = money(data["total"])
+    return revenue
+
+
 def product_performance(start_date=None, end_date=None, limit=10, branch_id=None):
     db = get_db()
     condition, revenue_params = revenue_recognized_condition("o")

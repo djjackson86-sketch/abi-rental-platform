@@ -16,6 +16,7 @@
     {% if filters.visibility %}<input type="hidden" name="visibility" value="{{ filters.visibility }}">{% endif %}
     {% if filters.product_group_id %}<input type="hidden" name="product_group_id" value="{{ filters.product_group_id }}">{% endif %}
     {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
+    {% if filters.revenue_range %}<input type="hidden" name="revenue_range" value="{{ filters.revenue_range }}">{% endif %}
   </form>
   <div class="inventory-actions">
     <a class="btn ghost" href="{{ url_for('inventory.new_group') }}">Add group</a>
@@ -25,7 +26,7 @@
 
 <section class="inventory-page-shell">
   <nav class="inventory-filter-bar panel">
-    <form method="get" class="inventory-filter-form">
+    <form method="get" class="inventory-filter-form" id="inventory-filter-form">
       {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
       <div class="filter-group">
         <div class="filter-group-head"><strong>Branch</strong></div>
@@ -37,11 +38,11 @@
           {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
         </select>
         {% endif %}
-        {% if filters.branch %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, product_group_id=filters.product_group_id) }}">Clear branch</a>{% endif %}
+        {% if filters.branch %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, product_group_id=filters.product_group_id, revenue_range=filters.revenue_range) }}">Clear branch</a>{% endif %}
       </div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>Product group</strong></div>
-        <a class="select-like {% if not filters.product_group_id %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, branch=filters.branch or None) }}">All groups</a>
+        <a class="select-like {% if not filters.product_group_id %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, product_type=filters.product_type, visibility=filters.visibility, branch=filters.branch or None, revenue_range=filters.revenue_range) }}">All groups</a>
         {% for group in product_groups %}
           <label class="filter-check">
             <input type="radio" name="product_group_id" value="{{ group.id }}" {% if filters.product_group_id|string==group.id|string %}checked{% endif %} onchange="this.form.submit()">
@@ -56,14 +57,14 @@
       </div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>Product type</strong></div>
-        <a class="select-like {% if not filters.product_type %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id, branch=filters.branch or None) }}">All</a>
+        <a class="select-like {% if not filters.product_type %}active{% endif %}" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id, branch=filters.branch or None, revenue_range=filters.revenue_range) }}">All</a>
         {% for type_value,label in [('rental','Rental products'),('sale','Sales items'),('service','Services')] %}
           <label class="filter-check">
             <input type="radio" name="product_type" value="{{ type_value }}" {% if filters.product_type==type_value %}checked{% endif %} onchange="this.form.submit()">
             <span>{{ label }}</span>
           </label>
         {% endfor %}
-        {% if filters.product_type %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id, branch=filters.branch or None) }}">Clear</a>{% endif %}
+        {% if filters.product_type %}<a class="filter-clear" href="{{ url_for('inventory.index', query=filters.query, visibility=filters.visibility, product_group_id=filters.product_group_id, branch=filters.branch or None, revenue_range=filters.revenue_range) }}">Clear</a>{% endif %}
       </div>
 
       <button class="btn ghost import-btn" type="button" disabled title="CSV import is planned for a later pass">Import</button>
@@ -90,6 +91,13 @@
                 <th>Tracking</th>
                 <th>Price</th>
                 <th>Stock</th>
+                <th>Live status</th>
+                <th class="inventory-revenue-head">
+                  <span>Revenue</span>
+                  <select name="revenue_range" form="inventory-filter-form" aria-label="Revenue period" title="Revenue — {{ revenue_label }}{% if revenue_window %} ({{ revenue_window }}){% endif %}" onchange="this.form.submit()">
+                    {% for value, label in revenue_ranges.items() %}<option value="{{ value }}" {% if filters.revenue_range == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                  </select>
+                </th>
                 <th>Days</th>
                 <th>Branch</th>
                 <th>Deposit</th>
@@ -101,7 +109,7 @@
             <tbody>
               {% for group in grouped_products %}
                 <tr class="inventory-group-row">
-                  <td colspan="11">
+                  <td colspan="13">
                     <strong>▾ {{ group.name }}</strong>
                     <small>{{ group.products|length }} item{{ '' if group.products|length == 1 else 's' }}{% if group.description %} · {{ group.description }}{% endif %}</small>
                   </td>
@@ -116,6 +124,8 @@
                     <td>{{ tracking_label(p.tracking_method) }}</td>
                     <td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td>
                     <td>{% if p.product_type == 'service' or p.tracking_method == 'none' %}Not tracked{% else %}{{ p.quantity }}{% if p.product_type == 'sale' and stock_breakdown.get(p.id) %}<small>{{ stock_breakdown.get(p.id) }}</small>{% endif %}{% endif %}</td>
+                    <td><small>{{ live_rental_status_label(live_status.get(p.id)) }}</small></td>
+                    <td>{% if p.product_type == 'service' %}—{% else %}<b>R{{ '%.2f'|format(revenue.get(p.id) or 0) }}</b>{% endif %}</td>
                     <td>{% if p.product_type == 'rental' %}Per order{% else %}—{% endif %}</td>
                     <td>{% if p.product_type == 'sale' and p.id in branch_split %}Multiple branches{% else %}{{ p.branch_name or 'Unassigned' }}{% endif %}</td>
                     <td>R{{ '%.2f'|format(p.security_deposit) }}</td>

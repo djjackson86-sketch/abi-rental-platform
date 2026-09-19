@@ -73,7 +73,7 @@ def dashboard():
         branch_scope=branch_scope,
         range_presets=range_presets,
         range_label=range_label,
-        filters={"branch": selected_branch, "range": range_key},
+        filters={"branch": selected_branch, "range": range_key, "start_date": range_start, "end_date": range_end},
     )
 
 @bp.route("/coupons", methods=["GET", "POST"])

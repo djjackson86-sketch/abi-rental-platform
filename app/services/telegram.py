@@ -9,6 +9,7 @@ from flask import current_app
 
 from app.db import get_db
 from app.services.orders import get_order, order_items
+from app.services.timezone import display_local_datetime
 
 
 def _truthy(value):
@@ -138,8 +139,8 @@ def format_order_message(order, items):
         f"Created at branch: {_escape(_branch_label(order, 'collect_branch_name'))}",
         f"Email: {_escape(order['customer_email'] or 'Not supplied')}",
         f"Phone: {_escape(order['customer_phone'] or 'Not supplied')}",
-        f"Pickup: {_escape(order['start_at'] or 'Not set')}",
-        f"Return: {_escape(order['end_at'] or 'Not set')}",
+        f"Pickup: {_escape(display_local_datetime(order['start_at']) if order['start_at'] else 'Not set')}",
+        f"Return: {_escape(display_local_datetime(order['end_at']) if order['end_at'] else 'Not set')}",
         "",
         "<b>Items</b>",
     ]
@@ -215,7 +216,7 @@ def format_daily_summary(summary):
     if summary["going_out"]:
         for order in summary["going_out"][:20]:
             branch = _branch_label(order, 'collect_branch_name')
-            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(order['start_at'] or '')} — {_escape(branch)}")
+            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(display_local_datetime(order['start_at']) if order['start_at'] else '')} — {_escape(branch)}")
     else:
         lines.append("• None")
     lines.append("")
@@ -223,7 +224,7 @@ def format_daily_summary(summary):
     if summary["coming_back"]:
         for order in summary["coming_back"][:20]:
             branch = _branch_label(order, 'return_branch_name', 'collect_branch_name')
-            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(order['end_at'] or '')} — {_escape(branch)}")
+            lines.append(f"• {_escape(order['order_number'])} — {_escape(order['customer_name'] or 'No customer')} at {_escape(display_local_datetime(order['end_at']) if order['end_at'] else '')} — {_escape(branch)}")
     else:
         lines.append("• None")
     lines.append("")

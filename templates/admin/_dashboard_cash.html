@@ -60,7 +60,7 @@
     <div class="cash-used-lines">
       {% for line in cash_day.used_lines %}
       <div class="cash-used-line">
-        <span>{{ line.description }}<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ line.created_at[:16] }}{% endif %}</small></span>
+        <span>{{ line.description }}<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ display_local_datetime(line.created_at) }}{% endif %}</small></span>
         <form method="post" action="{{ url_for('cash.delete_used', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
@@ -91,7 +91,7 @@
     <div class="cash-used-lines">
       {% for line in cash_day.drop_lines %}
       <div class="cash-used-line">
-        <span>Dropped off at the bank<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ line.created_at[:16] }}{% endif %}</small></span>
+        <span>Dropped off at the bank<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ display_local_datetime(line.created_at) }}{% endif %}</small></span>
         <form method="post" action="{{ url_for('cash.delete_bank_drop', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">

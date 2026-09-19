@@ -8,7 +8,7 @@
 {% if document.document_type in ['invoice', 'quote'] %}
 <section class="panel settings-form">
   <h2>Email {{ display_label }}</h2>
-  {% if document.email_status != 'not_sent' %}<p class="form-help">Last email status: {{ document.email_status|replace('_', ' ')|title }}{% if document.sent_to %} for {{ document.sent_to }}{% endif %}{% if document.sent_at %} at {{ document.sent_at }}{% endif %}{% if document.email_error %}. Error: {{ document.email_error }}{% endif %}</p>{% endif %}
+  {% if document.email_status != 'not_sent' %}<p class="form-help">Last email status: {{ document.email_status|replace('_', ' ')|title }}{% if document.sent_to %} for {{ document.sent_to }}{% endif %}{% if document.sent_at %} at {{ display_local_datetime(document.sent_at) }}{% endif %}{% if document.email_error %}. Error: {{ document.email_error }}{% endif %}</p>{% endif %}
   <p class="form-help">Click <strong>Generate Email</strong> to download an Outlook-compatible email draft. The PDF {{ display_label|lower }} is attached automatically, and {{ settings.email or 'info@sanotrailers.co.za' }} is always copied on the draft.</p>
   <form method="post" action="{{ url_for('documents.send_document_email', document_id=document.id) }}" class="form-grid">
     <label>Send to<input type="email" name="to_email" value="{{ document.customer_email or '' }}" placeholder="customer@example.com"></label>

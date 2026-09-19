@@ -1,4 +1,5 @@
 import csv
+from datetime import date, timedelta
 from io import StringIO
 
 from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
@@ -17,6 +18,8 @@ from app.services.products import (
     group_products_for_display,
     list_product_groups,
     list_products,
+    live_rental_status,
+    live_rental_status_label,
     product_branch_stock,
     product_counts,
     product_filter_counts,
@@ -28,6 +31,7 @@ from app.services.products import (
 )
 from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
+from app.services.reports import product_revenue as _product_revenue
 from app.services.access import main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
@@ -55,6 +59,41 @@ def _force_staff_product_branch(form):
     chosen = submitted if submitted in scope_ids else (primary if primary in scope_ids else scope_ids[0])
     mutable["branch_id"] = str(chosen)
     return mutable
+
+
+#: Revenue window choices for the inventory revenue column. The client asked for
+#: the column to open on the current month; the wording matches the app's own
+#: Reports/Dashboard quick ranges ("This month" / "Last month" / "All time") so
+#: the same period is never named two different ways.
+REVENUE_RANGES = {
+    "current_month": "This month",
+    "last_month": "Last month",
+    "all_time": "All time",
+}
+REVENUE_RANGE_DEFAULT = "current_month"
+
+
+def _revenue_window(choice):
+    """(key, start_date, end_date, label, window) for a revenue-range choice.
+
+    ``label`` is the wording shown in the column's period select and ``window``
+    the exact dates behind it (for the tooltip). An unrecognised value falls back
+    to the default (current month) rather than silently widening the column to
+    all time. All-time returns empty bounds, which ``_window`` turns into no
+    restriction at all.
+    """
+    key = choice if choice in REVENUE_RANGES else REVENUE_RANGE_DEFAULT
+    today = date.today()
+    if key == "all_time":
+        return key, "", "", "All time", ""
+    if key == "last_month":
+        first_of_this_month = today.replace(day=1)
+        start = (first_of_this_month - timedelta(days=1)).replace(day=1)
+        end = first_of_this_month - timedelta(days=1)
+    else:
+        start, end = today.replace(day=1), today
+    window = f"{start.strftime('%d %b %Y').lstrip('0')} \u2013 {end.strftime('%d %b %Y').lstrip('0')}"
+    return key, start.isoformat(), end.isoformat(), REVENUE_RANGES[key], window
 
 
 def _ensure_product_access(product):
@@ -86,6 +125,15 @@ def index():
     products = list_products(query=query, product_type=product_type, visibility=visibility,
                              product_group_id=product_group_id, branch_id=branch_id)
     breakdown = stock_breakdown_rows([product["id"] for product in products])
+    product_ids = [product["id"] for product in products]
+    # Live rented units (picked up / reserved) per product, and the revenue
+    # column's window. Both are scoped exactly like the product list itself.
+    live_status = live_rental_status(product_ids, branch_id=branch_id)
+    revenue_key, revenue_start, revenue_end, revenue_label, revenue_window = _revenue_window(
+        (request.args.get("revenue_range") or "").strip()
+    )
+    revenue = _product_revenue(product_ids, start_date=revenue_start or None,
+                               end_date=revenue_end or None, branch_id=branch_id)
     return render_template(
         "admin/inventory/index.html",
         settings=get_company_settings(),
@@ -97,7 +145,13 @@ def index():
         branches=branches,
         branch_scope=branch_scope,
         branch_label=branch_label,
-        filters={"query": query, "product_type": product_type, "visibility": visibility, "product_group_id": product_group_id, "branch": selected_branch},
+        filters={"query": query, "product_type": product_type, "visibility": visibility, "product_group_id": product_group_id, "branch": selected_branch, "revenue_range": revenue_key},
+        revenue_ranges=REVENUE_RANGES,
+        revenue_label=revenue_label,
+        revenue_window=revenue_window,
+        revenue=revenue,
+        live_status=live_status,
+        live_rental_status_label=live_rental_status_label,
         tracking_label=tracking_label,
         stock_breakdown={pid: format_stock_breakdown(rows) for pid, rows in breakdown.items()},
         branch_split={pid for pid, rows in breakdown.items() if len(rows) > 1},

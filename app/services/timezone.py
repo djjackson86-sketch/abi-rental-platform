@@ -29,13 +29,20 @@ def parse_iso_datetime(value):
 
 
 def display_local_datetime(value):
+    """Human-readable SA local date-time: ``YYYY-MM-DD HH:MM``.
+
+    Ticket ABI-341952990: the ISO "T" between the date and the time must never
+    reach a human-visible surface, so every template/message renders through
+    this helper. Stored values, ``datetime-local`` inputs and JS data attributes
+    keep their raw ISO form.
+    """
     parsed = parse_iso_datetime(value)
     if parsed:
-        return parsed.strftime("%Y-%m-%d  %H:%M")
+        return parsed.strftime("%Y-%m-%d %H:%M")
     text = str(value or "").strip()
     if not text:
         return "—"
-    return text.replace("T", "  ")
+    return text.replace("T", " ")
 
 
 def display_local_date(value):

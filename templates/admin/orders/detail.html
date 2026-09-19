@@ -47,15 +47,15 @@
     <div class="list-row"><span>Return branch</span><b>{{ order.return_branch_name or order.collect_branch_name or '—' }}</b></div>
     {% if has_rental_items %}
     <h2>Rental period</h2>
-    <div class="list-row"><span>Pickup</span><b>{{ order.start_at[:16].replace('T', '  ') if order.start_at else '—' }}</b></div>
-    <div class="list-row"><span>Return</span><b>{{ order.end_at[:16].replace('T', '  ') if order.end_at else '—' }}</b></div>
+    <div class="list-row"><span>Pickup</span><b>{{ display_local_datetime(order.start_at) }}</b></div>
+    <div class="list-row"><span>Return</span><b>{{ display_local_datetime(order.end_at) }}</b></div>
     {% endif %}
   </article>
   <article class="panel">
     <h2>Status and payment</h2>
     <div class="list-row"><span>Status</span><b>{{ status_label(order.status) }}</b></div>
     <div class="list-row"><span>Created by</span><b>{{ order.created_by_name or '—' }}</b></div>
-    <div class="list-row"><span>Created</span><b>{{ order.created_at[:16].replace('T', '  ') }}</b></div>
+    <div class="list-row"><span>Created</span><b>{{ display_local_datetime(order.created_at) }}</b></div>
     <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>
     <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
     <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
@@ -146,7 +146,7 @@
     {% if order.extra_hours %}<div class="list-row"><span>Extra hours</span><b>{{ order.extra_hours }} hrs</b></div>{% endif %}
     {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
     {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not processed</b></div>{% endif %}
-    {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ order.deposit_processed_at[:16].replace('T', ' ') }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
+    {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ display_local_datetime(order.deposit_processed_at) }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
     <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b data-total-field="total">R{{ '%.2f'|format(order.total) }}</b></div>
     <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
     <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>

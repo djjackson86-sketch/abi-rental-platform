@@ -15,6 +15,7 @@ from .routes.branches import bp as branches_bp
 from .routes.cash import bp as cash_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
 from .services.access import is_main_session, module_for_endpoint, session_active_branch, user_can_module
+from .services.timezone import display_local_date, display_local_datetime
 
 
 def _truthy_env(name):
@@ -81,6 +82,14 @@ def create_app(test_config=None):
     app.register_blueprint(cash_bp)
     app.register_blueprint(internal_telegram_bp)
     app.register_blueprint(public_bp)
+
+    # Human-visible date-times always render through this helper so the ISO "T"
+    # between the date and the time can never leak into a template (ticket
+    # ABI-341952990). Stored values and datetime-local inputs stay raw.
+    app.jinja_env.globals.update(
+        display_local_datetime=display_local_datetime,
+        display_local_date=display_local_date,
+    )
 
     @app.before_request
     def enforce_module_access():

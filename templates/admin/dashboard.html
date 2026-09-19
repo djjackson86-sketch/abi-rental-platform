@@ -38,6 +38,16 @@
   <div class="report-presets">
     {% for preset in range_presets %}<a class="report-preset{{ ' is-active' if filters.range == preset.key }}" href="{{ url_for('admin.dashboard', branch=filters.branch or None, range=preset.key) }}">{{ preset.label }}</a>{% endfor %}
   </div>
+  <form class="dashboard-custom-range" method="get" action="{{ url_for('admin.dashboard') }}">
+    {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
+    <div class="filter-group">
+      <div class="filter-group-head"><strong>Custom dates</strong><span class="dashboard-ranges-note">pick your own range</span></div>
+      <label class="dashboard-range-field">Start<input type="date" name="start_date" value="{{ filters.start_date or '' }}" aria-label="Custom range start date"></label>
+      <label class="dashboard-range-field">End<input type="date" name="end_date" value="{{ filters.end_date or '' }}" aria-label="Custom range end date"></label>
+      <button class="btn ghost" type="submit">Apply</button>
+      {% if filters.start_date or filters.end_date %}<a class="filter-clear" href="{{ url_for('admin.dashboard', branch=filters.branch or None, range='this_month') }}">Clear custom range</a>{% endif %}
+    </div>
+  </form>
 </div>
 <section class="metrics dashboard-metrics">
   <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Created · {{ range_label }}</span></div>
@@ -75,7 +85,7 @@
         {% for order in schedule.going_out %}
           <a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
             <span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span>
-            <span><small>Pickup</small><b>{{ order.start_at }}</b></span>
+            <span><small>Pickup</small><b>{{ display_local_datetime(order.start_at) }}</b></span>
           </a>
         {% endfor %}
         </div>
@@ -99,7 +109,7 @@
         {% for order in schedule.coming_back %}
           <a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
             <span><b>{{ order.customer_name or 'No customer' }}</b><small>{{ order.order_number }} · {{ order.product_names or 'No items' }}</small></span>
-            <span><small>Return</small><b>{{ order.end_at }}</b></span>
+            <span><small>Return</small><b>{{ display_local_datetime(order.end_at) }}</b></span>
           </a>
         {% endfor %}
         </div>

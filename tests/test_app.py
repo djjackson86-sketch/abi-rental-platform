@@ -3864,8 +3864,8 @@ def test_telegram_daily_summary_includes_branches(client):
             'payment_due_count': 0,
             'payment_due_total': 0,
         })
-    assert 'ORD-1 — Outgoing Customer at 2026-07-02T09:00 — Head Office' in message
-    assert 'ORD-2 — Return Customer at 2026-07-02T16:00 — Depot Two' in message
+    assert 'ORD-1 — Outgoing Customer at 2026-07-02 09:00 — Head Office' in message
+    assert 'ORD-2 — Return Customer at 2026-07-02 16:00 — Depot Two' in message
 
 
 def test_customer_address_add_customer_from_order_and_custom_rental_line(client):
@@ -4175,13 +4175,13 @@ def test_damage_waiver_documents_hide_security_deposit_and_show_times(client, ap
     client.post('/orders/1/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     detail = client.get('/documents/1')
     assert b'Security deposit</span>' not in detail.data
-    assert b'Pickup: 2026-07-01  09:30' in detail.data
-    assert b'Return: 2026-07-02  15:45' in detail.data
+    assert b'Pickup: 2026-07-01 09:30' in detail.data
+    assert b'Return: 2026-07-02 15:45' in detail.data
     pdf = client.get('/documents/1/download.pdf')
     assert pdf.status_code == 200
     assert b'Security deposit' not in pdf.data
-    assert b'Pickup: 2026-07-01  09:30' in pdf.data
-    assert b'Return: 2026-07-02  15:45' in pdf.data
+    assert b'Pickup: 2026-07-01 09:30' in pdf.data
+    assert b'Return: 2026-07-02 15:45' in pdf.data
 
 def test_document_email_prepares_outlook_draft_without_smtp_provider(client, app):
     login(client)

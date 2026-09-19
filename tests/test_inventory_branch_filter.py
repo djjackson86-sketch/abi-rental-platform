@@ -13,6 +13,7 @@ search form, the "All groups" / "All" links, the "Clear" links, the CSV export
 and the active-filter line.
 """
 import os
+import re
 import tempfile
 
 import pytest
@@ -97,6 +98,18 @@ def filter_form(page):
     return page[start:page.index('</form>', start)]
 
 
+def _href_for(page, label):
+    """The href of the first <a> whose whole text is exactly ``label``.
+
+    Read from the anchor rather than asserted as a literal query string: the
+    link's argument order and its extra carried filters (revenue_range since
+    ticket ABI-341952990) are not part of the contract under test.
+    """
+    match = re.search(r'<a [^>]*href="([^"]*)"[^>]*>' + re.escape(label) + r'</a>', page)
+    assert match, f'link {label!r} not found'
+    return match.group(1)
+
+
 # --- the filter narrows the list --------------------------------------------
 
 def test_the_branch_filter_narrows_the_inventory_list(client):
@@ -144,8 +157,10 @@ def test_the_branch_survives_the_search_form_and_the_links(client):
     assert filter_form(page).count('name="branch"') == 1
 
     # Every link that keeps (or clears) a filter keeps the branch too.
-    assert 'visibility=&amp;branch=2">All groups' in page
-    assert 'product_group_id=&amp;branch=2">All<' in page
+    groups = _href_for(page, 'All groups')
+    assert 'branch=2' in groups and 'visibility=' in groups
+    all_types = _href_for(page, 'All')
+    assert 'branch=2' in all_types and 'product_group_id=' in all_types
     assert '/inventory/export.csv?' in page and 'branch=2' in page
     # No date-filter twin was reintroduced by this change.
     assert 'name="start_date"' not in page and 'name="end_date"' not in page
