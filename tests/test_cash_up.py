@@ -776,8 +776,8 @@ def test_branch_for_request_resolves_inside_the_session_scope(app):
 def test_dashboard_has_submit_day_report_button(client):
     login(client)
     body = client.get('/dashboard').get_data(as_text=True)
-    assert 'SUBMIT DAY REPORT' in body
-    assert 'class="btn warning" type="submit" form="submit-day-report-form">SUBMIT DAY REPORT' in body
+    assert 'Submit day report' in body
+    assert 'class="btn warning" type="submit" form="submit-day-report-form">Submit day report' in body
     assert 'action="/cash-up/report/telegram"' in body
     assert 'id="submit-day-report-form"' in body
 
@@ -787,15 +787,15 @@ def test_dashboard_download_report_buttons_are_main_profile_only(client, app):
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'Download day report (PDF)' in body
     assert 'Download CSV' in body
-    assert 'SUBMIT DAY REPORT' in body
-    assert 'class="btn warning" type="submit" form="submit-day-report-form">SUBMIT DAY REPORT' in body
+    assert 'Submit day report' in body
+    assert 'class="btn warning" type="submit" form="submit-day-report-form">Submit day report' in body
 
     with app.app_context():
         create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
     login(client, name='Depot Two Clerk', password='staff123')
     body = client.get('/dashboard').get_data(as_text=True)
-    assert 'SUBMIT DAY REPORT' in body
-    assert 'class="btn warning" type="submit" form="submit-day-report-form">SUBMIT DAY REPORT' in body
+    assert 'Submit day report' in body
+    assert 'class="btn warning" type="submit" form="submit-day-report-form">Submit day report' in body
     assert 'Download day report (PDF)' not in body
     assert 'Download CSV' not in body
 

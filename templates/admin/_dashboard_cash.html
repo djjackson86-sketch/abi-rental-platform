@@ -45,7 +45,7 @@
         {% if current_user_is_main %}
         <a class="btn ghost" href="{{ url_for('cash.report_pdf', day=cash_day.day, branch=cash_day.branch_id) }}">Download day report (PDF)</a>
         {% endif %}
-        <button class="btn warning" type="submit" form="submit-day-report-form">SUBMIT DAY REPORT</button>
+        <button class="btn warning" type="submit" form="submit-day-report-form">Submit day report</button>
         {% if current_user_is_main %}
         <a class="btn ghost" href="{{ url_for('cash.export_csv', day=cash_day.day, branch=cash_day.branch_id) }}">Download CSV</a>
         {% endif %}
