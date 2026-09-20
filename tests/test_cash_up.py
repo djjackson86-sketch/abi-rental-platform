@@ -282,11 +282,15 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
     login(client)
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'New client interactions' in body
+    cash_panel_start = body.index('Cash up · Branch 1')
+    interactions_panel_start = body.index('<h2>New client interactions</h2>')
+    assert interactions_panel_start > cash_panel_start
+    assert body.count('<h2>New client interactions</h2>') == 1
     for expected in [
-        'name="interaction_calls" value="0"',
-        'name="interaction_whatsapp" value="0"',
-        'name="interaction_emails" value="0"',
-        'name="interaction_walk_in" value="0"',
+        'name="interaction_calls" value="" placeholder="0"',
+        'name="interaction_whatsapp" value="" placeholder="0"',
+        'name="interaction_emails" value="" placeholder="0"',
+        'name="interaction_walk_in" value="" placeholder="0"',
         'Notes for new client interactions',
     ]:
         assert expected in body
@@ -301,10 +305,10 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
         'interaction_notes': 'Two quote follow-ups needed.',
     }, follow_redirects=True).get_data(as_text=True)
     assert 'New client interactions saved' in body
-    assert 'name="interaction_calls" value="4"' in body
-    assert 'name="interaction_whatsapp" value="3"' in body
-    assert 'name="interaction_emails" value="2"' in body
-    assert 'name="interaction_walk_in" value="1"' in body
+    assert 'name="interaction_calls" value="" placeholder="0"' in body
+    assert 'name="interaction_whatsapp" value="" placeholder="0"' in body
+    assert 'name="interaction_emails" value="" placeholder="0"' in body
+    assert 'name="interaction_walk_in" value="" placeholder="0"' in body
     assert 'Two quote follow-ups needed.' in body
 
     summary = _summary(app)
@@ -868,9 +872,9 @@ def test_dashboard_has_submit_day_report_button(client):
     login(client)
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'Submit day report' in body
-    assert 'class="btn warning" type="submit" form="submit-day-report-form">Submit day report' in body
-    assert 'action="/cash-up/report/telegram"' in body
-    assert 'id="submit-day-report-form"' in body
+    assert 'id="submit-day-report-form" method="post" action="/cash-up/report/telegram"' in body
+    assert '<button class="btn warning" type="submit">Submit day report</button>' in body
+    assert body.index('Day report actions') > body.index('Cash drop off (to bank)')
 
 
 def test_dashboard_download_report_buttons_are_main_profile_only(client, app):
@@ -879,16 +883,31 @@ def test_dashboard_download_report_buttons_are_main_profile_only(client, app):
     assert 'Download day report (PDF)' in body
     assert 'Download CSV' in body
     assert 'Submit day report' in body
-    assert 'class="btn warning" type="submit" form="submit-day-report-form">Submit day report' in body
+    assert '<button class="btn warning" type="submit">Submit day report</button>' in body
 
     with app.app_context():
         create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
     login(client, name='Depot Two Clerk', password='staff123')
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'Submit day report' in body
-    assert 'class="btn warning" type="submit" form="submit-day-report-form">Submit day report' in body
+    assert '<button class="btn warning" type="submit">Submit day report</button>' in body
     assert 'Download day report (PDF)' not in body
     assert 'Download CSV' not in body
+
+
+def test_submit_day_report_requires_cash_up_amount_before_sending(client, app, monkeypatch):
+    sent = {'called': False}
+
+    def fake_send(*_args, **_kwargs):
+        sent['called'] = True
+        return {'ok': True, 'sent': True, 'status': 200}
+
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', fake_send)
+    login(client)
+    body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
+    assert 'Cash up amount must be filled before submitting the day report' in body
+    assert sent['called'] is False
 
 
 def test_submit_day_report_sends_the_existing_pdf_to_telegram(client, app, monkeypatch):
@@ -903,6 +922,7 @@ def test_submit_day_report_sends_the_existing_pdf_to_telegram(client, app, monke
     from app.routes import cash as cash_routes
     monkeypatch.setattr(cash_routes, '_send_document', fake_send)
     login(client)
+    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '0'}, follow_redirects=True)
     res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True)
     body = res.get_data(as_text=True)
     assert res.status_code == 200
@@ -925,6 +945,7 @@ def test_submit_day_report_cannot_widen_a_branch_limited_account(client, app, mo
     with app.app_context():
         create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
     login(client, name='Depot Two Clerk', password='staff123')
+    client.post('/cash-up', data={'day': TODAY, 'branch': '2', 'counted_cash': '0'}, follow_redirects=True)
     res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=False)
     assert res.status_code == 302
     assert 'cash_branch=2' in res.headers['Location']
@@ -933,6 +954,7 @@ def test_submit_day_report_cannot_widen_a_branch_limited_account(client, app, mo
 
 def test_submit_day_report_flashes_when_telegram_is_disabled_or_not_configured(client, app):
     login(client)
+    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '0'}, follow_redirects=True)
     app.config.update(TELEGRAM_NOTIFICATIONS_ENABLED='')
     body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
     assert 'Telegram notifications are disabled; day report was not sent' in body
@@ -946,6 +968,7 @@ def test_submit_day_report_failure_does_not_crash_dashboard(client, app, monkeyp
     from app.routes import cash as cash_routes
     monkeypatch.setattr(cash_routes, '_send_document', lambda *_args, **_kwargs: {'ok': False, 'sent': False, 'error': 'boom'})
     login(client)
+    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '0'}, follow_redirects=True)
     res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True)
     body = res.get_data(as_text=True)
     assert res.status_code == 200
