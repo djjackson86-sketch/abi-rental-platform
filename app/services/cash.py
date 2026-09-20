@@ -241,7 +241,9 @@ def _day_row(day, branch_id):
     if not branch_id:
         return None
     return get_db().execute(
-        'SELECT id, opening_cash, counted_cash, notes FROM cash_ups WHERE branch_id = ? AND business_day = ?',
+        """SELECT id, opening_cash, counted_cash, notes, interaction_calls,
+        interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes
+        FROM cash_ups WHERE branch_id = ? AND business_day = ?""",
         (branch_id, day),
     ).fetchone()
 
@@ -357,6 +359,13 @@ def day_summary(day=None, branch_id=None):
         'variance_display': _variance_text(variance, cashed_up),
         'variance_label': _variance_label(variance, cashed_up),
         'notes': str(_value(day_row, 'notes') or '') if day_row is not None else '',
+        'interactions': {
+            'calls': int(_value(day_row, 'interaction_calls', 0) or 0) if day_row is not None else 0,
+            'whatsapp': int(_value(day_row, 'interaction_whatsapp', 0) or 0) if day_row is not None else 0,
+            'emails': int(_value(day_row, 'interaction_emails', 0) or 0) if day_row is not None else 0,
+            'walk_in': int(_value(day_row, 'interaction_walk_in', 0) or 0) if day_row is not None else 0,
+            'notes': str(_value(day_row, 'interaction_notes') or '') if day_row is not None else '',
+        },
         'has_day_row': day_row is not None,
     }
 
@@ -374,8 +383,10 @@ def _ensure_day(day, branch_id, user_id=None):
     opening = opening_cash(day, branch_id)
     ts = now()
     db.execute(
-        """INSERT INTO cash_ups (branch_id, business_day, opening_cash, counted_cash, notes, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, NULL, '', ?, ?, ?)""",
+        """INSERT INTO cash_ups (branch_id, business_day, opening_cash, counted_cash, notes,
+        interaction_calls, interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes,
+        created_by, created_at, updated_at)
+        VALUES (?, ?, ?, NULL, '', 0, 0, 0, 0, '', ?, ?, ?)""",
         (branch_id, day, opening, user_id, ts, ts),
     )
     db.commit()
@@ -429,6 +440,45 @@ def save_notes(day, notes, branch_id=None, user_id=None):
     db.execute(
         'UPDATE cash_ups SET notes = ?, opening_cash = ?, updated_at = ? WHERE id = ?',
         (str(notes or '').strip(), opening_cash(day, branch_id), now(), cash_up_id),
+    )
+    db.commit()
+    return cash_up_id
+
+
+def _parse_interaction_count(value, label):
+    text = str(value or '0').strip()
+    if text == '':
+        return 0
+    try:
+        number = int(text)
+    except (TypeError, ValueError):
+        raise ValueError(f'{label} must be a whole number')
+    if number < 0:
+        raise ValueError(f'{label} cannot be negative')
+    return number
+
+
+def save_interactions(day, calls, whatsapp, emails, walk_in, notes='', branch_id=None, user_id=None):
+    """Save the new-client interaction counts for one depot business day."""
+    if branch_id is None:
+        branch_id = acting_branch_id()
+    if not branch_id:
+        raise ValueError('No depot is available for client interactions')
+    day = parse_business_day(day)
+    values = {
+        'calls': _parse_interaction_count(calls, 'Calls'),
+        'whatsapp': _parse_interaction_count(whatsapp, 'WhatsApp'),
+        'emails': _parse_interaction_count(emails, 'Emails'),
+        'walk_in': _parse_interaction_count(walk_in, 'Walk-in'),
+    }
+    db = get_db()
+    cash_up_id = _ensure_day(day, branch_id, user_id)
+    db.execute(
+        """UPDATE cash_ups SET interaction_calls = ?, interaction_whatsapp = ?,
+        interaction_emails = ?, interaction_walk_in = ?, interaction_notes = ?,
+        opening_cash = ?, updated_at = ? WHERE id = ?""",
+        (values['calls'], values['whatsapp'], values['emails'], values['walk_in'],
+         str(notes or '').strip(), opening_cash(day, branch_id), now(), cash_up_id),
     )
     db.commit()
     return cash_up_id
@@ -577,7 +627,15 @@ def day_report_rows(report):
             f"{cash['variance_display']} ({cash['variance_label']})" if cash['cashed_up'] else 'Not cashed up yet',
         ),
     ]
-    rows = money_rows + cash_rows
+    interactions = cash.get('interactions') or {}
+    interaction_rows = [
+        ('New client interactions', 'Calls', str(interactions.get('calls', 0) or 0)),
+        ('New client interactions', 'WhatsApp', str(interactions.get('whatsapp', 0) or 0)),
+        ('New client interactions', 'Emails', str(interactions.get('emails', 0) or 0)),
+        ('New client interactions', 'Walk-in', str(interactions.get('walk_in', 0) or 0)),
+        ('New client interactions', 'Notes', interactions.get('notes') or 'No interaction notes recorded'),
+    ]
+    rows = money_rows + cash_rows + interaction_rows
     for line in cash['used_lines']:
         rows.append(('Cash used', line['description'] or 'No description', f"R{line['amount']:.2f}"))
     if not cash['used_lines']:
@@ -641,6 +699,34 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
     if prepared_by and role_label:
         prepared_by = f'{prepared_by} ({role_label})'
 
+    sections = [
+        {'kind': 'cards', 'title': 'Dashboard', 'cards': dashboard_cards},
+        {'kind': 'cards', 'title': 'Cash up', 'cards': cash_cards},
+    ]
+    interaction_values = cash.get('interactions') or {}
+    if any(int(interaction_values.get(key, 0) or 0) for key in ('calls', 'whatsapp', 'emails', 'walk_in')) or str(interaction_values.get('notes') or '').strip():
+        sections.append({'kind': 'cards', 'title': 'New client interactions', 'cards': cards_for('New client interactions')})
+    sections.extend([
+        {
+            'kind': 'list',
+            'title': 'Cash used',
+            'rows': _pdf_list_rows(grouped.get('Cash used', []), 'No cash used recorded'),
+            'overflow': '... and {remaining} more cash used line(s) - see the CSV export',
+        },
+        {
+            'kind': 'list',
+            'title': 'Cash drop off (to bank)',
+            'rows': _pdf_list_rows(grouped.get('Cash drop off (to bank)', []), 'No cash dropped at the bank'),
+            'overflow': '... and {remaining} more bank drop off line(s) - see the CSV export',
+        },
+        {
+            'kind': 'list',
+            'title': 'End of day notes',
+            'rows': note_rows,
+            'cap': MAX_NOTE_LINES_IN_PDF,
+            'overflow': '... more notes in the CSV export',
+        },
+    ])
     return {
         'meta': {
             'company': report['company'],
@@ -651,29 +737,7 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
         },
         # Section titles match the CSV export's own section names on purpose: the
         # two downloads are the same report, so they should read the same.
-        'sections': [
-            {'kind': 'cards', 'title': 'Dashboard', 'cards': dashboard_cards},
-            {'kind': 'cards', 'title': 'Cash up', 'cards': cash_cards},
-            {
-                'kind': 'list',
-                'title': 'Cash used',
-                'rows': _pdf_list_rows(grouped.get('Cash used', []), 'No cash used recorded'),
-                'overflow': '... and {remaining} more cash used line(s) - see the CSV export',
-            },
-            {
-                'kind': 'list',
-                'title': 'Cash drop off (to bank)',
-                'rows': _pdf_list_rows(grouped.get('Cash drop off (to bank)', []), 'No cash dropped at the bank'),
-                'overflow': '... and {remaining} more bank drop off line(s) - see the CSV export',
-            },
-            {
-                'kind': 'list',
-                'title': 'End of day notes',
-                'rows': note_rows,
-                'cap': MAX_NOTE_LINES_IN_PDF,
-                'overflow': '... more notes in the CSV export',
-            },
-        ],
+        'sections': sections,
     }
 
 

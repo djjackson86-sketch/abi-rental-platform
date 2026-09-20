@@ -61,6 +61,19 @@
       <label>End of day notes<textarea name="notes" rows="3" placeholder="Anything the next shift should know about {{ cash_day.day }}">{{ cash_day.notes }}</textarea></label>
       <div class="form-actions"><button class="btn" type="submit">Save notes</button></div>
     </form>
+    <form method="post" action="{{ url_for('cash.save_interactions') }}" class="settings-form">
+      <input type="hidden" name="day" value="{{ cash_day.day }}">
+      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <div class="panel-title"><h2>New client interactions</h2></div>
+      <div class="form-grid compact">
+        <label>Calls<input type="number" min="0" step="1" name="interaction_calls" value="{{ cash_day.interactions.calls }}"></label>
+        <label>WhatsApp<input type="number" min="0" step="1" name="interaction_whatsapp" value="{{ cash_day.interactions.whatsapp }}"></label>
+        <label>Emails<input type="number" min="0" step="1" name="interaction_emails" value="{{ cash_day.interactions.emails }}"></label>
+        <label>Walk-in<input type="number" min="0" step="1" name="interaction_walk_in" value="{{ cash_day.interactions.walk_in }}"></label>
+      </div>
+      <label>Notes for new client interactions<textarea name="interaction_notes" rows="3" placeholder="Notes for calls, WhatsApp, emails or walk-ins">{{ cash_day.interactions.notes }}</textarea></label>
+      <div class="form-actions"><button class="btn primary" type="submit">Save client interactions</button></div>
+    </form>
   </section>
 
   <section class="panel">

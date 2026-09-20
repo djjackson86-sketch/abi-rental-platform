@@ -97,6 +97,30 @@ def save_notes():
     return _done(f"End of day notes saved for {day}", branch_id)
 
 
+@bp.post("/interactions")
+@login_required
+def save_interactions():
+    """Save the new-client interaction counts and notes for the day."""
+    day = _day_from_request()
+    branch_id = _target_branch()
+    try:
+        cash.guard_writable_day(day)
+        cash.save_interactions(
+            day,
+            request.form.get("interaction_calls", "0"),
+            request.form.get("interaction_whatsapp", "0"),
+            request.form.get("interaction_emails", "0"),
+            request.form.get("interaction_walk_in", "0"),
+            request.form.get("interaction_notes", ""),
+            branch_id=branch_id,
+            user_id=_user_id(),
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(_dashboard_url(branch_id))
+    return _done(f"New client interactions saved for {day}", branch_id)
+
+
 @bp.post("/used")
 @login_required
 def add_used():

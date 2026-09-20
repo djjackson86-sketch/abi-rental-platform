@@ -278,6 +278,97 @@ def test_cash_used_lines_can_be_added_and_removed(client, app):
     assert '>Diesel<' not in body, 'the removed line is gone from the panel'
 
 
+def test_new_client_interactions_render_defaults_save_and_reach_reports(client, app):
+    login(client)
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert 'New client interactions' in body
+    for expected in [
+        'name="interaction_calls" value="0"',
+        'name="interaction_whatsapp" value="0"',
+        'name="interaction_emails" value="0"',
+        'name="interaction_walk_in" value="0"',
+        'Notes for new client interactions',
+    ]:
+        assert expected in body
+
+    body = client.post('/cash-up/interactions', data={
+        'day': '',
+        'branch': '1',
+        'interaction_calls': '4',
+        'interaction_whatsapp': '3',
+        'interaction_emails': '2',
+        'interaction_walk_in': '1',
+        'interaction_notes': 'Two quote follow-ups needed.',
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'New client interactions saved' in body
+    assert 'name="interaction_calls" value="4"' in body
+    assert 'name="interaction_whatsapp" value="3"' in body
+    assert 'name="interaction_emails" value="2"' in body
+    assert 'name="interaction_walk_in" value="1"' in body
+    assert 'Two quote follow-ups needed.' in body
+
+    summary = _summary(app)
+    assert summary['interactions'] == {
+        'calls': 4,
+        'whatsapp': 3,
+        'emails': 2,
+        'walk_in': 1,
+        'notes': 'Two quote follow-ups needed.',
+    }
+    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    for expected in [
+        'New client interactions,Calls,4',
+        'New client interactions,WhatsApp,3',
+        'New client interactions,Emails,2',
+        'New client interactions,Walk-in,1',
+        'New client interactions,Notes,Two quote follow-ups needed.',
+    ]:
+        assert expected in csv_body
+    drawn = _drawn_text(client.get('/cash-up/report.pdf').data)
+    for expected in ['NEW CLIENT INTERACTIONS', 'Calls', '4', 'WhatsApp', '3',
+                     'Emails', '2', 'Walk-in', '1', 'Notes', 'Two quote follow-ups needed.']:
+        assert expected in drawn
+
+
+def test_new_client_interactions_reject_junk_and_negative_counts(client, app):
+    login(client)
+    body = client.post('/cash-up/interactions', data={
+        'day': '', 'interaction_calls': '-1', 'interaction_whatsapp': '0',
+        'interaction_emails': '0', 'interaction_walk_in': '0',
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'Calls cannot be negative' in body
+    body = client.post('/cash-up/interactions', data={
+        'day': '', 'interaction_calls': '1', 'interaction_whatsapp': 'many',
+        'interaction_emails': '0', 'interaction_walk_in': '0',
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'WhatsApp must be a whole number' in body
+    assert _cash_rows(app) == [], 'a refused interaction form must not open the day row'
+
+
+def test_new_client_interactions_are_scoped_to_the_acting_depot(client, app):
+    login(client)
+    client.post('/cash-up/interactions', data={
+        'day': '', 'branch': '1', 'interaction_calls': '9',
+        'interaction_whatsapp': '0', 'interaction_emails': '0', 'interaction_walk_in': '0',
+    }, follow_redirects=True)
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    body = client.post('/cash-up/interactions', data={
+        'day': '', 'branch': '1', 'interaction_calls': '2',
+        'interaction_whatsapp': '1', 'interaction_emails': '1', 'interaction_walk_in': '1',
+        'interaction_notes': 'Depot two own walk-in.',
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'cash_branch=2' in body or 'Cash up · Branch 2' in body
+    rows = {row['branch_id']: row for row in _cash_rows(app)}
+    assert rows[1]['interaction_calls'] == 9
+    assert rows[2]['interaction_calls'] == 2
+    assert rows[2]['interaction_whatsapp'] == 1
+    assert rows[2]['interaction_emails'] == 1
+    assert rows[2]['interaction_walk_in'] == 1
+    assert rows[2]['interaction_notes'] == 'Depot two own walk-in.'
+
+
 def test_end_of_day_notes_save_without_a_cash_up_and_reach_the_report(client, app):
     login(client)
     client.post('/cash-up/notes', data={'day': '', 'notes': 'Two tyres booked for Monday.'},
