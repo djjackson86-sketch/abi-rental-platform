@@ -43,6 +43,8 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
 .btn:hover,button:hover{transform:translateY(-1px)}
 .btn.primary,button.primary{background:var(--brand);color:#fff;box-shadow:0 8px 18px rgba(20,99,255,.22)}
 .btn.primary:hover,button.primary:hover{background:var(--brand-2)}
+.btn.warning,button.warning{background:var(--warning);color:#fff;box-shadow:0 8px 18px rgba(245,158,11,.26)}
+.btn.warning:hover,button.warning:hover{background:#d97706}
 .btn.ghost,.logout button{background:#fff;border:1px solid var(--line);color:var(--ink-2);box-shadow:var(--shadow-sm)}
 .btn.ghost:hover,.logout button:hover{border-color:#b9c5d6;background:var(--surface-soft)}
 .btn.danger,button.danger{background:var(--danger-soft);color:var(--danger);border:1px solid #ffd2cc}
