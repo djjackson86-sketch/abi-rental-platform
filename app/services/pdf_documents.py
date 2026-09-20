@@ -27,10 +27,11 @@ A4_PORTRAIT_HEIGHT = 842
 A4_PORTRAIT_MEDIABOX = f'[0 0 {A4_PORTRAIT_WIDTH} {A4_PORTRAIT_HEIGHT}]'
 # Invoice table money columns. The table runs from x=36 to x=559; TAX and
 # TOTAL INCL. VAT were 35pt apart, so a TAX figure (R675.00 is ~30pt at 8pt)
-# ran into the column beside it. 396 and 462 give a 66pt gutter while the
-# widest amount the format can print still ends inside the table edge.
+# ran into the column beside it. 396 and 470 give a 74pt gutter while the
+# widest amount the format can print still ends inside the table edge and the
+# line-item total column aligns with the summary amount column.
 TAX_COLUMN_X = 396
-TOTAL_INCL_COLUMN_X = 462
+TOTAL_INCL_COLUMN_X = 470
 INVOICE_TABLE_RIGHT_EDGE = 559
 
 
@@ -662,7 +663,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # and the light blue header band printed over it and buried it (client
     # report, ORD-10169 proforma).
     if document_paid_stamp(document):
-        draw_commands.extend(_pdf_paid_stamp(233, 782))
+        draw_commands.extend(_pdf_paid_stamp(233, 782, colour=(0.07, 0.54, 0.30)))
     elif document_accepted_stamp(document):
         draw_commands.extend(_pdf_paid_stamp(201, 782, text='ACCEPTED', size=26, colour=(0.09, 0.38, 0.70)))
 
@@ -734,14 +735,16 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     tax_view = document_tax_view(document, items)
 
     def add_table_header(draw, text, header_y):
-        draw.append(_pdf_light_blue_rect(36, header_y - 5, 523, 18))
+        draw.append(_pdf_rect(36, header_y - 5, 523, 18, fill='0 0 0'))
+        text.append('1 1 1 rg')
         _add_pdf_lines(text, 36, header_y, ['PRODUCT'], size=7.5)
-        _add_pdf_lines(text, 165, header_y, ['QTY'], size=7.5)
-        _add_pdf_lines(text, 200, header_y, ['DAYS'], size=7.5)
-        _add_pdf_lines(text, 235, header_y, ['UNIT EXCL. VAT'], size=7.5)
-        _add_pdf_lines(text, 310, header_y, ['SUBTOTAL EXCL. VAT'], size=7.5)
+        _add_pdf_lines(text, 185, header_y, ['QTY'], size=7.5)
+        _add_pdf_lines(text, 220, header_y, ['DAYS'], size=7.5)
+        _add_pdf_lines(text, 255, header_y, ['RATE'], size=7.5)
+        _add_pdf_lines(text, 335, header_y, ['SUBTOTAL'], size=7.5)
         _add_pdf_lines(text, TAX_COLUMN_X, header_y, ['TAX'], size=7.5)
         _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, header_y, ['TOTAL INCL. VAT'], size=7.5)
+        text.append('0 0 0 rg')
 
     def add_item_rows(text, page_items, start_index, first_row_y):
         y_pos = first_row_y
@@ -752,17 +755,17 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             line_view = tax_view['lines'][line_index] if line_index < len(tax_view['lines']) else {
                 'unit_excl': 0.0, 'subtotal_excl': 0.0, 'tax': 0.0, 'total_incl': 0.0, 'rental_days': None}
             days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
-            product_lines = _wrap_pdf_cell_text(name, max_chars=27, max_lines=2)
-            if sku and len(product_lines) < 2:
-                product_lines.append(str(sku)[:30])
-            _add_pdf_lines(text, 36, y_pos, product_lines, size=8, leading=11, max_lines=2)
-            _add_pdf_lines(text, 165, y_pos, [str(item['quantity'])], size=8)
-            _add_pdf_lines(text, 200, y_pos, [days_text], size=8)
-            _add_pdf_lines(text, 235, y_pos, [f"R{line_view['unit_excl']:.2f}"], size=8)
-            _add_pdf_lines(text, 310, y_pos, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
+            product_lines = _wrap_pdf_cell_text(name, max_chars=34, max_lines=3)
+            if sku and len(product_lines) < 3:
+                product_lines.append(str(sku)[:34])
+            _add_pdf_lines(text, 36, y_pos, product_lines, size=8, leading=10, max_lines=3)
+            _add_pdf_lines(text, 185, y_pos, [str(item['quantity'])], size=8)
+            _add_pdf_lines(text, 220, y_pos, [days_text], size=8)
+            _add_pdf_lines(text, 255, y_pos, [f"R{line_view['unit_excl']:.2f}"], size=8)
+            _add_pdf_lines(text, 335, y_pos, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
             _add_pdf_lines(text, TAX_COLUMN_X, y_pos, [f"R{line_view['tax']:.2f}"], size=8)
             _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, y_pos, [f"R{line_view['total_incl']:.2f}"], size=8)
-            y_pos -= 36
+            y_pos -= 43
         return y_pos
 
     visible_items = items[:8]
@@ -830,18 +833,15 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ])
     summary_min_y = 58 + ((len(totals) - 1) * 14)
     totals_y = max(summary_min_y, totals_y)
-    draw_commands.append(_pdf_light_blue_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4))
+    draw_commands.append(_pdf_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4, stroke='0.82 0.86 0.91', line_width=0.6))
     for index, (label, amount) in enumerate(totals):
         line_y = totals_y - (index * 14)
         if label == 'Total with VAT':
-            draw_commands.append(_pdf_light_blue_rect(386, line_y - 5, 169, 16))
-            text_commands.append('0.08 0.39 1 rg')
             text_commands.append(_pdf_text_command(390, line_y, label, size=8.8, font='F2'))
-            text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8, font='F2'))
-            text_commands.append('0 0 0 rg')
+            text_commands.append(_pdf_text_command(TOTAL_INCL_COLUMN_X, line_y, amount, size=8.8, font='F2'))
         else:
             text_commands.append(_pdf_text_command(390, line_y, label, size=8.8))
-            text_commands.append(_pdf_text_command(505, line_y, amount, size=8.8))
+            text_commands.append(_pdf_text_command(TOTAL_INCL_COLUMN_X, line_y, amount, size=8.8))
     bank_y = totals_y - (len(totals) * 14) - 26
     bank_detail_lines = bank_lines[1:]
     bank_last_y = bank_y - 13 - ((len(bank_detail_lines) - 1) * 13 if bank_detail_lines else 0)

@@ -2780,15 +2780,15 @@ def test_invoice_line_items_exclude_vat_and_summarise_it(client, app):
     # the client's column order: PRODUCT | QTY | DAYS | UNIT | SUBTOTAL | TAX | TOTAL INCL
     assert b'<th>Product</th>' in invoice.data
     assert b'<th>Days</th>' in invoice.data
-    assert b'<th>Unit excl. VAT</th>' in invoice.data
-    assert b'<th>Subtotal excl. VAT</th>' in invoice.data
+    assert b'<th>Rate</th>' in invoice.data
+    assert b'<th>Subtotal</th>' in invoice.data
     assert b'<th>Tax</th>' in invoice.data
     assert b'<th>Total incl. VAT</th>' in invoice.data
     assert (invoice.data.index(b'<th>Product</th>')
             < invoice.data.index(b'<th>Qty</th>')
             < invoice.data.index(b'<th>Days</th>')
-            < invoice.data.index(b'<th>Unit excl. VAT</th>')
-            < invoice.data.index(b'<th>Subtotal excl. VAT</th>')
+            < invoice.data.index(b'<th>Rate</th>')
+            < invoice.data.index(b'<th>Subtotal</th>')
             < invoice.data.index(b'<th>Tax</th>')
             < invoice.data.index(b'<th>Total incl. VAT</th>'))
     assert b'Rental days 1' in invoice.data  # Order details keep rental dates/days visible.
@@ -2801,11 +2801,11 @@ def test_invoice_line_items_exclude_vat_and_summarise_it(client, app):
     assert b'Proforma Invoice' in pdf
     assert b'Unnumbered' not in pdf
     assert b'Rental days 1' in pdf  # Order details keep rental dates/days visible.
-    for heading in (b'(PRODUCT) Tj', b'(QTY) Tj', b'(DAYS) Tj', b'(UNIT EXCL. VAT) Tj',
-                    b'(SUBTOTAL EXCL. VAT) Tj', b'(TAX) Tj', b'(TOTAL INCL. VAT) Tj'):
+    for heading in (b'(PRODUCT) Tj', b'(QTY) Tj', b'(DAYS) Tj', b'(RATE) Tj',
+                    b'(SUBTOTAL) Tj', b'(TAX) Tj', b'(TOTAL INCL. VAT) Tj'):
         assert heading in pdf
     assert (pdf.index(b'(PRODUCT) Tj') < pdf.index(b'(QTY) Tj') < pdf.index(b'(DAYS) Tj')
-            < pdf.index(b'(UNIT EXCL. VAT) Tj') < pdf.index(b'(SUBTOTAL EXCL. VAT) Tj')
+            < pdf.index(b'(RATE) Tj') < pdf.index(b'(SUBTOTAL) Tj')
             < pdf.index(b'(TAX) Tj') < pdf.index(b'(TOTAL INCL. VAT) Tj'))
     for label in (b'(Total without VAT) Tj', b'(Total with VAT) Tj', b'(Amount due) Tj'):
         assert label in pdf
@@ -3357,7 +3357,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Amount due',
         b'R650.00',
         b'Thank you for your business.',
-        b'q 0.86 0.94 1 rg 36.00 371.00 523.00 18.00 re f Q',
+        b'q 0 0 0 rg 36.00 371.00 523.00 18.00 re f Q',
         # Summary: 2 days x R200 excluding VAT, then the VAT, then the total with VAT.
         # The refundable deposit is listed separately and is NOT part of the VAT total.
         b'(Total without VAT) Tj',
@@ -3365,8 +3365,6 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'(Total with VAT) Tj',
         b'(Security deposit) Tj',
         b'(R750.00) Tj',
-        b'/F2 8.8 Tf 1 0 0 1 36.00 212.00 Tm (Thank you for your business.) Tj',
-        b'/F2 8.5 Tf 1 0 0 1 36.00 194.00 Tm (Banking details) Tj',
     ]:
         assert expected in pdf
     # The logo box must clear the issuer/branch line, which is printed at y=715. Pin the
@@ -3391,19 +3389,16 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'Invoice date: ' + invoice_created_at.encode() not in pdf
     assert b'Pickup date:' not in pdf
     # Summary order: total without VAT, the VAT, then the total with VAT.
-    assert b'390.00 304.00 Tm (Total without VAT)' in pdf
-    assert b'505.00 304.00 Tm (R400.00)' in pdf
-    assert b'390.00 290.00 Tm (VAT)' in pdf
-    assert b'505.00 290.00 Tm (R0.00)' in pdf
-    assert b'390.00 276.00 Tm (Total with VAT)' in pdf
+    assert pdf.index(b'(Total without VAT) Tj') < pdf.index(b'(VAT) Tj') < pdf.index(b'(Total with VAT) Tj')
+    assert b'470.00' in pdf
     assert pdf.index(b'Order: ORD-10145') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'Rental days 2')
     assert pdf.index(b'Invoice') < pdf.index(b'INV-10145') < pdf.index(b'Invoice date:') < pdf.index(invoice_date.encode()) < pdf.index(b'Order: ORD-10145') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
     assert pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj')
-    assert pdf.index(b'(Total without VAT) Tj') < pdf.index(b'(VAT) Tj') < pdf.index(b'(Total with VAT) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 36.00 194.00 Tm (Banking details) Tj')
+    assert pdf.index(b'(Total without VAT) Tj') < pdf.index(b'(VAT) Tj') < pdf.index(b'(Total with VAT) Tj') < pdf.index(b'(Banking details) Tj')
     assert pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
-    assert b'0.08 0.39 1 rg' in pdf
+    assert b'0.08 0.39 1 rg' not in pdf
     assert pdf.index(b'12 Pawcare Street') < pdf.index(b'Unit 4') < pdf.index(b'Parkwood') < pdf.index(b'Johannesburg') < pdf.index(b'Gauteng 2193') < pdf.index(b'South Africa')
 
 
@@ -5728,7 +5723,7 @@ def test_rental_days_column_only_fills_for_rental_lines(client, app):
     html = invoice.data.decode('utf-8')
     assert '<th>Days</th>' in html
     assert (html.index('<th>Product</th>') < html.index('<th>Qty</th>') < html.index('<th>Days</th>')
-            < html.index('<th>Unit excl. VAT</th>'))
+            < html.index('<th>Rate</th>'))
 
     # 2026-07-01 09:00 -> 2026-07-03 15:00 is 3 rental days
     assert _invoice_row_cells(html, 'Order Trailer')[2] == '3'

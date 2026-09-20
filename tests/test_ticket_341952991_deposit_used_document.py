@@ -177,7 +177,7 @@ def test_invoice_document_and_pdf_show_the_deposit_used_line(client, app):
 
     # the deduction carries the minus sign and sits between the deposit and Paid
     deduction_amount = next(run for run in runs if run['y'] == deduction['y'] and run['text'] == '-R300.00')
-    assert deduction_amount['x'] == 505
+    assert deduction_amount['x'] == 470
     deposit_run = labels['Security deposit']
     paid_run = labels['Paid']
     assert deposit_run['y'] == deduction['y'] + 14

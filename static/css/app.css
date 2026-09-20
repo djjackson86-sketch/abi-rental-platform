@@ -284,9 +284,17 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
    on-screen table mirrors it with padding rather than squeezing the numbers.
    Specificity beats the print block's `.data-table th/td` padding rule, so the
    gutter survives printing too. */
+.document-line-items{table-layout:fixed}
+.document-line-items th{background:#000;color:#fff}
+.document-line-items th:first-child,.document-line-items td:first-child{width:30%;white-space:normal;overflow-wrap:anywhere}
+.document-line-items td:first-child strong{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
+.document-line-items td:first-child small{overflow-wrap:anywhere}
 .document-line-items th:nth-last-child(2),.document-line-items td:nth-last-child(2){padding-right:18px}
 .document-line-items th:last-child,.document-line-items td:last-child{padding-left:18px}
-.paid-stamp{position:absolute;top:32%;right:7%;transform:rotate(-18deg);border:4px solid #c81e1e;color:#c81e1e;font:800 34px/1 Arial,Helvetica,sans-serif;letter-spacing:.14em;padding:8px 18px;border-radius:6px;opacity:.85;pointer-events:none;z-index:2}
+.document-type-invoice .totals{background:#fff;border:1px solid var(--line);border-radius:12px}
+.document-type-invoice .totals .total-row{background:#fff;color:var(--ink);border-radius:0}
+.document-type-invoice .totals .total-row span,.document-type-invoice .totals .total-row b{color:var(--ink)}
+.paid-stamp{position:absolute;top:32%;right:7%;transform:rotate(-18deg);border:4px solid #128a4d;color:#128a4d;font:800 34px/1 Arial,Helvetica,sans-serif;letter-spacing:.14em;padding:8px 18px;border-radius:6px;opacity:.85;pointer-events:none;z-index:2}
 @media print{.paid-stamp{opacity:.95}}
 @media (max-width:640px){.paid-stamp{font-size:22px;top:26%;right:4%}}
 

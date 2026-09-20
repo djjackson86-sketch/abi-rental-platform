@@ -194,20 +194,18 @@ def _many_items(count=8):
 
 def test_an_invoice_prints_the_fraction_slash_item_name(app):
     pdf_bytes, texts = build_invoice_texts(app)
-    assert '2.6m Utility Trailer - 1/2' in texts
-    assert 'ton' in texts
+    assert '2.6m Utility Trailer - 1/2 ton' in texts
     assert 'Ratchet + Strap Rental' in texts
     # The old failure mode: "1⁄2 ton" printed as "1?2 ton".
     assert not any('?' in text for text in texts)
-    assert b'(2.6m Utility Trailer - 1/2) Tj' in pdf_bytes
-    assert b'(ton) Tj' in pdf_bytes
+    assert b'(2.6m Utility Trailer - 1/2 ton) Tj' in pdf_bytes
 
 
 def test_long_product_names_wrap_inside_the_product_column(app):
     long_name = 'Supply and install flatbar gap closure on trailer sides and front'
-    assert _wrap_pdf_cell_text(long_name, max_chars=27, max_lines=2) == [
-        'Supply and install flatbar',
-        'gap closure on trailer…',
+    assert _wrap_pdf_cell_text(long_name, max_chars=34, max_lines=3) == [
+        'Supply and install flatbar gap',
+        'closure on trailer sides and front',
     ]
     document = _sample_document('quote')
     document.update({'subtotal': 478.26, 'tax_total': 71.74, 'total': 550.0, 'due_total': 550.0})
@@ -217,9 +215,9 @@ def test_long_product_names_wrap_inside_the_product_column(app):
         pdf_bytes = _invoice_template_pdf(document, [item], _sample_settings())
     positions = _drawn_text_positions(pdf_bytes)
 
-    assert any(entry['text'] == 'Supply and install flatbar' and entry['x'] == 36 for entry in positions)
-    assert any(entry['text'] == 'gap closure on trailer...' and entry['x'] == 36 for entry in positions)
-    assert not any('trailer sides and front' in entry['text'] for entry in positions)
+    assert any(entry['text'] == 'Supply and install flatbar gap' and entry['x'] == 36 for entry in positions)
+    assert any(entry['text'] == 'closure on trailer sides and front' and entry['x'] == 36 for entry in positions)
+    assert not any('...' in entry['text'] or '…' in entry['text'] for entry in positions if entry['x'] == 36)
 
 
 @pytest.mark.parametrize('document_type', ['invoice', 'quote'])
@@ -250,6 +248,27 @@ def test_long_quote_and_invoice_repeat_headings_on_page_two(app, document_type):
 
     assert [entry['page'] for entry in product_headings] == [1, 2]
     assert [entry['page'] for entry in total_headings] == [1, 2]
+
+
+def test_document_table_visual_ticket_changes_are_pinned(app):
+    document = _sample_document('invoice')
+    document['payment_status'] = 'paid'
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(document, _many_items(1), _sample_settings())
+    decoded = pdf_bytes.decode('latin-1')
+    positions = _drawn_text_positions(pdf_bytes)
+
+    assert '(RATE) Tj' in decoded
+    assert '(SUBTOTAL) Tj' in decoded
+    assert '(UNIT EXCL. VAT) Tj' not in decoded
+    assert '(SUBTOTAL EXCL. VAT) Tj' not in decoded
+    assert 'q 0 0 0 rg 36.00' in decoded
+    assert '1 1 1 rg' in decoded
+    assert '0.860 0.940 1' not in decoded
+    assert '0.070 0.540 0.300 rg' in decoded
+    line_total = next(entry for entry in positions if entry['text'] == 'R690.00' and entry['y'] > 300)
+    bottom_total = next(entry for entry in positions if entry['text'] == 'R5520.00' and entry['font'] == 'F2')
+    assert line_total['x'] == bottom_total['x'] == 470
 
 
 @pytest.mark.parametrize('document_type', ['invoice', 'quote'])
