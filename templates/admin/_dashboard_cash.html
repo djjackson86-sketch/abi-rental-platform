@@ -15,44 +15,6 @@
 
 <div class="two-col">
   <section class="panel">
-    <div class="panel-title">
-      <h2>Cash up · {{ cash_day.branch_name }}</h2>
-      <span class="pill">{% if cash_day.cashed_up %}Cashed up{% else %}Not cashed up{% endif %}</span>
-    </div>
-    {% if cash_panel.branches|length > 1 %}
-    <form class="cash-branch-picker" method="get" action="{{ url_for('admin.dashboard') }}">
-      {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
-      <label>Depot
-        <select name="cash_branch" onchange="this.form.submit()">
-          {% for branch in cash_panel.branches %}
-          <option value="{{ branch.id }}" {% if branch.id == cash_panel.branch_id %}selected{% endif %}>{{ branch.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    </form>
-    {% else %}
-    <p class="cash-note">Depot: {{ cash_day.branch_name }}</p>
-    {% endif %}
-    <form method="post" action="{{ url_for('cash.save') }}" class="settings-form">
-      <input type="hidden" name="day" value="{{ cash_day.day }}">
-      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
-      <div class="form-grid compact">
-        <label>Cash counted (closing)<input type="number" step="0.01" min="0" name="counted_cash" value="{% if cash_day.cashed_up %}{{ '%.2f'|format(cash_day.counted) }}{% endif %}" placeholder="0.00" required></label>
-        <label>Expected in the drawer<input value="R{{ '%.2f'|format(cash_day.expected) }}" disabled></label>
-      </div>
-      <div class="form-actions">
-        <button class="btn primary" type="submit">Save cash up</button>
-      </div>
-    </form>
-    <form method="post" action="{{ url_for('cash.save_notes') }}" class="settings-form">
-      <input type="hidden" name="day" value="{{ cash_day.day }}">
-      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
-      <label>End of day notes<textarea name="notes" rows="3" placeholder="Anything the next shift should know about {{ cash_day.day }}">{{ cash_day.notes }}</textarea></label>
-      <div class="form-actions"><button class="btn" type="submit">Save notes</button></div>
-    </form>
-  </section>
-
-  <section class="panel">
     <div class="panel-title"><h2>New client interactions</h2></div>
     <form method="post" action="{{ url_for('cash.save_interactions') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
@@ -125,6 +87,44 @@
         <label>Amount<input type="number" step="0.01" min="0.01" name="amount" placeholder="0.00" required></label>
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Add bank drop off</button></div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title">
+      <h2>Cash up · {{ cash_day.branch_name }}</h2>
+      <span class="pill">{% if cash_day.cashed_up %}Cashed up{% else %}Not cashed up{% endif %}</span>
+    </div>
+    {% if cash_panel.branches|length > 1 %}
+    <form class="cash-branch-picker" method="get" action="{{ url_for('admin.dashboard') }}">
+      {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
+      <label>Depot
+        <select name="cash_branch" onchange="this.form.submit()">
+          {% for branch in cash_panel.branches %}
+          <option value="{{ branch.id }}" {% if branch.id == cash_panel.branch_id %}selected{% endif %}>{{ branch.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+    {% else %}
+    <p class="cash-note">Depot: {{ cash_day.branch_name }}</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('cash.save') }}" class="settings-form">
+      <input type="hidden" name="day" value="{{ cash_day.day }}">
+      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <div class="form-grid compact">
+        <label>Cash counted (closing)<input type="number" step="0.01" min="0" name="counted_cash" value="{% if cash_day.cashed_up %}{{ '%.2f'|format(cash_day.counted) }}{% endif %}" placeholder="0.00" required></label>
+        <label>Expected in the drawer<input value="R{{ '%.2f'|format(cash_day.expected) }}" disabled></label>
+      </div>
+      <div class="form-actions">
+        <button class="btn primary" type="submit">Save cash up</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('cash.save_notes') }}" class="settings-form">
+      <input type="hidden" name="day" value="{{ cash_day.day }}">
+      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <label>End of day notes<textarea name="notes" rows="3" placeholder="Anything the next shift should know about {{ cash_day.day }}">{{ cash_day.notes }}</textarea></label>
+      <div class="form-actions"><button class="btn" type="submit">Save notes</button></div>
     </form>
   </section>
 </div>

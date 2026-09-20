@@ -155,6 +155,15 @@ def test_dashboard_shows_the_opening_cash_card_and_the_day_end_panel(client):
     assert 'Not cashed up yet' in body
 
 
+def test_dashboard_places_cash_up_below_cash_drop_off(client):
+    login(client)
+    body = client.get('/dashboard').get_data(as_text=True)
+    drop_panel_start = body.index('<h2>Cash drop off (to bank)</h2>')
+    cash_up_panel_start = body.index('<h2>Cash up · Branch 1</h2>')
+    assert drop_panel_start < cash_up_panel_start
+    assert body.count('<h2>Cash up · Branch 1</h2>') == 1
+
+
 def test_opening_cash_is_the_previous_days_closing_cash(client, app):
     login(client)
     client.post('/cash-up', data={'day': YESTERDAY, 'counted_cash': '1000.00'}, follow_redirects=True)
@@ -282,9 +291,6 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
     login(client)
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'New client interactions' in body
-    cash_panel_start = body.index('Cash up · Branch 1')
-    interactions_panel_start = body.index('<h2>New client interactions</h2>')
-    assert interactions_panel_start > cash_panel_start
     assert body.count('<h2>New client interactions</h2>') == 1
     for expected in [
         'name="interaction_calls" value="" placeholder="0"',
