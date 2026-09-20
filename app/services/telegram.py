@@ -2,6 +2,7 @@ import html
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -77,6 +78,61 @@ def _send_message(text):
         return {"ok": False, "sent": False, "status": exc.code, "body": body}
     except Exception as exc:
         current_app.logger.warning("Telegram send failed: %s: %s", type(exc).__name__, exc)
+        return {"ok": False, "sent": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _send_document(document_bytes, filename, caption=''):
+    """Send a PDF/document to the configured Telegram chat.
+
+    Uses the same enable/config checks as text notifications. Kept small and
+    stdlib-only so the cash dashboard can submit its existing day report PDF
+    without adding dependencies or new secrets.
+    """
+    if not notifications_enabled():
+        return {"ok": True, "sent": False, "skipped": "disabled"}
+    if not telegram_configured():
+        return {"ok": True, "sent": False, "skipped": "not_configured"}
+
+    boundary = f"----abi-telegram-{uuid.uuid4().hex}"
+
+    def field(name, value):
+        return (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+            f"{value}\r\n"
+        ).encode("utf-8")
+
+    body = bytearray()
+    body.extend(field("chat_id", current_app.config["TELEGRAM_CHAT_ID"]))
+    if caption:
+        body.extend(field("caption", caption))
+    safe_filename = str(filename or "document.pdf").replace('"', '')
+    body.extend((
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"document\"; filename=\"{safe_filename}\"\r\n"
+        f"Content-Type: application/pdf\r\n\r\n"
+    ).encode("utf-8"))
+    body.extend(document_bytes or b"")
+    body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+
+    token = current_app.config["TELEGRAM_BOT_TOKEN"]
+    request = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendDocument",
+        data=bytes(body),
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response_body = response.read().decode("utf-8", "replace")
+            sent = 200 <= response.status < 300
+            return {"ok": sent, "sent": sent, "status": response.status, "body": response_body[:500]}
+    except urllib.error.HTTPError as exc:
+        response_body = exc.read().decode("utf-8", "replace")[:500]
+        current_app.logger.warning("Telegram document send failed: HTTP %s %s", exc.code, response_body)
+        return {"ok": False, "sent": False, "status": exc.code, "body": response_body}
+    except Exception as exc:
+        current_app.logger.warning("Telegram document send failed: %s: %s", type(exc).__name__, exc)
         return {"ok": False, "sent": False, "error": f"{type(exc).__name__}: {exc}"}
 
 

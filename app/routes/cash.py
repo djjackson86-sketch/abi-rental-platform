@@ -27,6 +27,7 @@ from flask import Blueprint, Response, flash, redirect, request, session, url_fo
 from app.routes.auth import login_required
 from app.services import cash
 from app.services.pdf_documents import report_pdf_bytes
+from app.services.telegram import _send_document
 
 bp = Blueprint("cash", __name__, url_prefix="/cash-up")
 
@@ -178,6 +179,18 @@ def _report():
     )
 
 
+def _report_for_branch(branch_id):
+    return cash.day_report(day=_day_from_request(), branch_id=branch_id)
+
+
+def _report_pdf_bytes(report):
+    return report_pdf_bytes(cash.day_report_pdf_cards(
+        report,
+        user_name=session.get("user_name") or "",
+        user_role=session.get("user_role") or "",
+    ))
+
+
 @bp.get("/report.pdf")
 @login_required
 def report_pdf():
@@ -189,14 +202,33 @@ def report_pdf():
     report = _report()
     day = report["cash"]["day"]
     return Response(
-        report_pdf_bytes(cash.day_report_pdf_cards(
-            report,
-            user_name=session.get("user_name") or "",
-            user_role=session.get("user_role") or "",
-        )),
+        _report_pdf_bytes(report),
         mimetype="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=dashboard-report-{day}.pdf"},
     )
+
+
+@bp.post("/report/telegram")
+@login_required
+def submit_report_telegram():
+    """Send the same dashboard day-report PDF to the configured Telegram chat."""
+    branch_id = _target_branch()
+    report = _report_for_branch(branch_id)
+    cash_summary = report["cash"]
+    day = cash_summary["day"]
+    branch_name = cash_summary["branch_name"] or "this depot"
+    filename = f"dashboard-report-{day}.pdf"
+    caption = f"Day report — {branch_name} — {day}"
+    result = _send_document(_report_pdf_bytes(report), filename, caption=caption)
+    if result.get("sent"):
+        flash(f"Day report sent on Telegram for {branch_name} ({day})", "success")
+    elif result.get("skipped") == "disabled":
+        flash("Telegram notifications are disabled; day report was not sent", "error")
+    elif result.get("skipped") == "not_configured":
+        flash("Telegram is not configured; day report was not sent", "error")
+    else:
+        flash("Day report could not be sent on Telegram", "error")
+    return redirect(_dashboard_url(branch_id))
 
 
 @bp.get("/export.csv")

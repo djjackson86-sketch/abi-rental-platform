@@ -771,3 +771,73 @@ def test_branch_for_request_resolves_inside_the_session_scope(app):
         assert len(cash.cash_branches()) == 3
         assert cash.branch_for_request('3') == 3
         assert cash.branch_for_request('999') == 1, 'junk falls back to the acting depot'
+
+
+def test_dashboard_has_submit_day_report_button(client):
+    login(client)
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert 'SUBMIT DAY REPORT' in body
+    assert 'action="/cash-up/report/telegram"' in body
+    assert 'id="submit-day-report-form"' in body
+
+
+def test_submit_day_report_sends_the_existing_pdf_to_telegram(client, app, monkeypatch):
+    sent = {}
+
+    def fake_send(document_bytes, filename, caption=''):
+        sent['document_bytes'] = document_bytes
+        sent['filename'] = filename
+        sent['caption'] = caption
+        return {'ok': True, 'sent': True, 'status': 200}
+
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', fake_send)
+    login(client)
+    res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True)
+    body = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert 'Day report sent on Telegram for Branch 1' in body
+    assert sent['filename'] == f'dashboard-report-{TODAY}.pdf'
+    assert sent['document_bytes'].startswith(b'%PDF-')
+    assert sent['document_bytes'].rstrip().endswith(b'%%EOF')
+    assert sent['caption'] == f'Day report — Branch 1 — {TODAY}'
+
+
+def test_submit_day_report_cannot_widen_a_branch_limited_account(client, app, monkeypatch):
+    sent = {}
+
+    def fake_send(_document_bytes, _filename, caption=''):
+        sent['caption'] = caption
+        return {'ok': True, 'sent': True, 'status': 200}
+
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', fake_send)
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=False)
+    assert res.status_code == 302
+    assert 'cash_branch=2' in res.headers['Location']
+    assert sent['caption'] == f'Day report — Branch 2 — {TODAY}'
+
+
+def test_submit_day_report_flashes_when_telegram_is_disabled_or_not_configured(client, app):
+    login(client)
+    app.config.update(TELEGRAM_NOTIFICATIONS_ENABLED='')
+    body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
+    assert 'Telegram notifications are disabled; day report was not sent' in body
+
+    app.config.update(TELEGRAM_NOTIFICATIONS_ENABLED='true', TELEGRAM_BOT_TOKEN='', TELEGRAM_CHAT_ID='')
+    body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
+    assert 'Telegram is not configured; day report was not sent' in body
+
+
+def test_submit_day_report_failure_does_not_crash_dashboard(client, app, monkeypatch):
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', lambda *_args, **_kwargs: {'ok': False, 'sent': False, 'error': 'boom'})
+    login(client)
+    res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True)
+    body = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert 'Day report could not be sent on Telegram' in body
+    assert 'Cash up · Branch 1' in body

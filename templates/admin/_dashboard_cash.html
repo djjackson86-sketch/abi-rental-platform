@@ -43,8 +43,13 @@
       <div class="form-actions">
         <button class="btn primary" type="submit">Save cash up</button>
         <a class="btn ghost" href="{{ url_for('cash.report_pdf', day=cash_day.day, branch=cash_day.branch_id) }}">Download day report (PDF)</a>
+        <button class="btn ghost" type="submit" form="submit-day-report-form">SUBMIT DAY REPORT</button>
         <a class="btn ghost" href="{{ url_for('cash.export_csv', day=cash_day.day, branch=cash_day.branch_id) }}">Download CSV</a>
       </div>
+    </form>
+    <form id="submit-day-report-form" method="post" action="{{ url_for('cash.submit_report_telegram') }}">
+      <input type="hidden" name="day" value="{{ cash_day.day }}">
+      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
     </form>
     <form method="post" action="{{ url_for('cash.save_notes') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
