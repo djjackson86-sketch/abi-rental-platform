@@ -19,6 +19,7 @@ something else".
 import os
 import re
 import tempfile
+import json
 from decimal import Decimal
 
 import pytest
@@ -26,11 +27,18 @@ from werkzeug.datastructures import MultiDict
 
 from app import create_app
 from app.db import get_db
-from app.services.pdf_documents import TAX_COLUMN_X, TOTAL_INCL_COLUMN_X
+from app.services.pdf_documents import (
+    DAYS_COLUMN_X,
+    INVOICE_TABLE_X,
+    QTY_COLUMN_X,
+    RATE_COLUMN_X,
+    SUBTOTAL_COLUMN_X,
+    TAX_COLUMN_X,
+    TOTAL_INCL_COLUMN_X,
+)
 
 BASE_PRICE = 100.0
 PRICE_STEP = 5.0
-PAGE_ONE_LIMIT = 6
 ROW_PITCH = 43
 CONTINUATION_TABLE_Y = 675
 TAX_RATE = 15
@@ -197,7 +205,7 @@ def row_runs(page):
         by_y.setdefault(run['y'], []).append(run)
     rows = []
     for y in sorted(by_y, reverse=True):
-        runs = [run for run in by_y[y] if abs(run['x'] - 36) < 0.01]
+        runs = [run for run in by_y[y] if abs(run['x'] - INVOICE_TABLE_X) < 0.01]
         names = [run for run in runs if run['text'].startswith('Extra Item')]
         if not names:
             continue
@@ -205,9 +213,9 @@ def row_runs(page):
         rows.append({
             'y': y,
             'name': names[0]['text'],
-            'qty': columns.get(185),
-            'rate': columns.get(255),
-            'subtotal': columns.get(335),
+            'qty': columns.get(round(QTY_COLUMN_X)),
+            'rate': columns.get(round(RATE_COLUMN_X)),
+            'subtotal': columns.get(round(SUBTOTAL_COLUMN_X)),
             'tax': columns.get(round(TAX_COLUMN_X)),
             'total': columns.get(round(TOTAL_INCL_COLUMN_X)),
         })
@@ -303,8 +311,8 @@ def test_every_edited_line_prints_its_own_qty_rate_and_totals(client, app):
         assert summary_amount(pages, 'Amount due') == summary_amount(pages, 'Total with VAT')
 
 
-def test_page_one_keeps_the_six_row_rule_and_continuation_pages_repeat_the_headings(client, app):
-    """The client's own rule: six rows on page 1, headings + page number after."""
+def test_page_one_fills_available_space_and_continuation_pages_repeat_the_headings(client, app):
+    """Page 1 should not leave two blank rows before jumping to page 2."""
     login(client)
     seed_customer_and_products(client, 25)
     order_id = create_order(client, [(1, 1)])
@@ -314,7 +322,7 @@ def test_page_one_keeps_the_six_row_rule_and_continuation_pages_repeat_the_headi
     pages = pdf_pages(download_pdf(client, documents['invoice']))
     assert len(pages) > 2
     per_page = [len(row_runs(page)) for page in pages]
-    assert per_page[0] == PAGE_ONE_LIMIT, f'page 1 must keep six rows, got {per_page[0]}'
+    assert per_page[0] > 6, f'page 1 should use its available space, got {per_page[0]}'
     assert sum(per_page) == 25
     assert all(count > 0 for count in per_page[:3]), per_page
 
@@ -381,13 +389,13 @@ def test_short_orders_keep_their_exact_pre_fix_layout(client, app):
     order_id = create_order(client, [(1, 1)])
     documents = create_documents(client, app, order_id, ('invoice',))
 
-    for count, expected_pages in ((2, 1), (6, 1), (8, 2)):
+    for count, expected_pages in ((2, 1), (6, 1), (8, 1)):
         edit_order(client, order_id, [(index, 1) for index in range(1, count + 1)])
         pages = pdf_pages(download_pdf(client, documents['invoice']))
         assert len(pages) == expected_pages, f'{count} items: {len(pages)} pages'
         rows = all_rows(pages)
         assert [row['name'] for row in rows] == [item_name(index) for index in range(1, count + 1)]
-        if count > PAGE_ONE_LIMIT:
+        if expected_pages > 1:
             # unchanged continuation geometry: first row at 675-24, second 43pt lower
             page_two = row_runs(pages[1])
             assert [row['y'] for row in page_two[:2]] == [CONTINUATION_TABLE_Y - 24, CONTINUATION_TABLE_Y - 24 - ROW_PITCH]
@@ -397,6 +405,43 @@ def test_short_orders_keep_their_exact_pre_fix_layout(client, app):
             assert page_two[-1]['y'] - ROW_PITCH - 12 == summary_y
         else:
             assert 'Page 2' not in [run['text'] for run in pages[0]['runs']]
+
+
+def test_invoice_with_vehicle_details_and_eight_items_prints_cleanly(client, app):
+    """Client regression: vehicle/customer detail blocks must not break an 8-item invoice."""
+    login(client)
+    seed_customer_and_products(client, 8)
+    with app.app_context():
+        get_db().execute(
+            'UPDATE customers SET custom_fields_json = ? WHERE id = 1',
+            (json.dumps({
+                'vehicle_make': 'Toyota Quantum',
+                'vehicle_color': 'White',
+                'vehicle_reg_no': 'LKL 455 NW',
+                'alternative_contact_name': 'Sbu',
+                'alternative_contact_number': '0761492049',
+            }),),
+        )
+        get_db().commit()
+    order_id = create_order(client, [(index, 1) for index in range(1, 9)])
+    documents = create_documents(client, app, order_id, ('invoice',))
+
+    pages = pdf_pages(download_pdf(client, documents['invoice']))
+    drawn_text = [run['text'] for page in pages for run in page['runs']]
+    assert 'Vehicle Make: Toyota Quantum' in drawn_text
+    assert 'Vehicle Color: White' in drawn_text
+    assert 'Veh Reg No: LKL 455 NW' in drawn_text
+    assert 'Alternative Contact Name: Sbu' in drawn_text
+    assert [row['name'] for row in all_rows(pages)] == [item_name(index) for index in range(1, 9)]
+    assert summary_amount(pages, 'Amount due') is not None
+    assert 'Banking details' in drawn_text
+
+    for page in pages:
+        rows = row_runs(page)
+        summary = [run for run in page['runs'] if run['text'] in ('Total without VAT', 'Amount due')]
+        if rows and summary:
+            assert min(row['y'] for row in rows) - 2 > max(run['y'] for run in summary)
+        assert all(run['y'] > 40 for run in page['runs'])
 
 
 def test_contract_prints_every_line_of_a_long_order(client, app):

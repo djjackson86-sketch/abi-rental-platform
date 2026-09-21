@@ -3429,7 +3429,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'Amount due',
         b'R650.00',
         b'Thank you for your business.',
-        b'q 0 0 0 rg 36.00 371.00 523.00 18.00 re f Q',
+        b'q 0 0 0 rg 26.69 371.00 532.31 18.00 re f Q',
         # Summary: 2 days x R200 excluding VAT, then the VAT, then the total with VAT.
         # The refundable deposit is listed separately and is NOT part of the VAT total.
         b'(Total without VAT) Tj',
@@ -4556,16 +4556,18 @@ def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
     assert heading_right <= INVOICE_TABLE_RIGHT_EDGE
 
 
-def test_document_screen_table_mirrors_the_pdf_money_column_gutter():
-    """The on-screen invoice must show the same gutter as the PDF (screen parity)."""
+def test_document_screen_table_mirrors_the_pdf_compact_money_columns():
+    """The on-screen invoice must compact numeric columns like the PDF (screen parity)."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     template = (root / 'templates/admin/documents/detail.html').read_text()
     css = (root / 'static/css/app.css').read_text()
     assert 'class="data-table document-line-items"' in template
-    assert '.document-line-items td:nth-last-child(2){padding-right:18px}' in css
-    assert '.document-line-items td:last-child{padding-left:18px}' in css
+    assert '.document-line-items th:nth-child(1),.document-line-items td:nth-child(1){width:38%' in css
+    assert '.document-line-items th:nth-child(6),.document-line-items td:nth-child(6){width:10%' in css
+    assert '.document-line-items th:nth-child(7),.document-line-items td:nth-child(7){width:17%' in css
+    assert '-webkit-line-clamp' not in css[css.index('.document-line-items'):css.index('.document-type-invoice .totals')]
 
 
 def test_settle_deposit_uses_balance_before_refund_and_shows_money_payout(client, app):

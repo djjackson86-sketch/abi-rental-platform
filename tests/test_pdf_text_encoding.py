@@ -18,7 +18,13 @@ import tempfile
 import pytest
 
 from app import create_app
-from app.services.pdf_documents import _escape_pdf_text, _invoice_template_pdf, _pdf_text, _wrap_pdf_cell_text
+from app.services.pdf_documents import (
+    INVOICE_TABLE_X,
+    _escape_pdf_text,
+    _invoice_template_pdf,
+    _pdf_text,
+    _wrap_pdf_cell_text,
+)
 
 FRACTION_SLASH_NAME = '2.6m Utility Trailer - 1\u20442 ton'
 
@@ -215,9 +221,10 @@ def test_long_product_names_wrap_inside_the_product_column(app):
         pdf_bytes = _invoice_template_pdf(document, [item], _sample_settings())
     positions = _drawn_text_positions(pdf_bytes)
 
-    assert any(entry['text'] == 'Supply and install flatbar gap' and entry['x'] == 36 for entry in positions)
-    assert any(entry['text'] == 'closure on trailer sides and front' and entry['x'] == 36 for entry in positions)
-    assert not any('...' in entry['text'] or '…' in entry['text'] for entry in positions if entry['x'] == 36)
+    product_lines = [entry['text'] for entry in positions if entry['x'] == INVOICE_TABLE_X]
+    assert any('Supply and install flatbar gap' in text for text in product_lines)
+    assert any('trailer sides and front' in text for text in product_lines)
+    assert not any('...' in text or '…' in text for text in product_lines)
 
 
 @pytest.mark.parametrize('document_type', ['invoice', 'quote'])
@@ -230,8 +237,11 @@ def test_quote_and_invoice_summary_moves_down_with_visible_line_items(app, docum
     amount_due_y = next(entry['y'] for entry in positions if entry['text'] == 'Amount due')
 
     assert next(entry for entry in positions if entry['text'] == 'SKU-06')['page'] == 1
-    assert next(entry for entry in positions if entry['text'] == 'SKU-07')['page'] == 2
-    assert next(entry for entry in positions if entry['text'] == 'Total without VAT')['page'] == 2
+    assert next(entry for entry in positions if entry['text'] == 'SKU-07')['page'] == 1
+    assert next(entry for entry in positions if entry['text'] == 'SKU-08')['page'] <= 2
+    assert next(entry for entry in positions if entry['text'] == 'Total without VAT')['page'] == next(
+        entry for entry in positions if entry['text'] == 'SKU-08'
+    )['page']
     # The summary must follow the final visible item row on quotes and invoices;
     # the old fixed floor put it back above/inside the last row.
     assert summary_y <= last_sku_y - 12
@@ -241,7 +251,7 @@ def test_quote_and_invoice_summary_moves_down_with_visible_line_items(app, docum
 @pytest.mark.parametrize('document_type', ['invoice', 'quote'])
 def test_long_quote_and_invoice_repeat_headings_on_page_two(app, document_type):
     with app.app_context():
-        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(8), _sample_settings())
+        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(12), _sample_settings())
     positions = _drawn_text_positions(pdf_bytes)
     product_headings = [entry for entry in positions if entry['text'] == 'PRODUCT']
     total_headings = [entry for entry in positions if entry['text'] == 'TOTAL INCL. VAT']
@@ -262,7 +272,7 @@ def test_document_table_visual_ticket_changes_are_pinned(app):
     assert '(SUBTOTAL) Tj' in decoded
     assert '(UNIT EXCL. VAT) Tj' not in decoded
     assert '(SUBTOTAL EXCL. VAT) Tj' not in decoded
-    assert 'q 0 0 0 rg 36.00' in decoded
+    assert f'q 0 0 0 rg {INVOICE_TABLE_X:.2f}' in decoded
     assert '1 1 1 rg' in decoded
     assert '0.860 0.940 1' not in decoded
     assert '0.070 0.540 0.300 rg' in decoded
@@ -274,7 +284,7 @@ def test_document_table_visual_ticket_changes_are_pinned(app):
 @pytest.mark.parametrize('document_type', ['invoice', 'quote'])
 def test_long_quote_and_invoice_keep_banking_details_on_page_two(app, document_type):
     with app.app_context():
-        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(8), _sample_settings())
+        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(12), _sample_settings())
     decoded = pdf_bytes.decode('latin-1')
     positions = _drawn_text_positions(pdf_bytes)
     banking = next(entry for entry in positions if entry['text'] == 'Banking details')

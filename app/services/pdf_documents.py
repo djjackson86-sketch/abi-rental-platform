@@ -25,12 +25,15 @@ LEFT_BLOCK_X = round(LOGO_IMAGE_X + LOGO_INK_LEFT_RATIO * LOGO_IMAGE_WIDTH, 2)
 A4_PORTRAIT_WIDTH = 595
 A4_PORTRAIT_HEIGHT = 842
 A4_PORTRAIT_MEDIABOX = f'[0 0 {A4_PORTRAIT_WIDTH} {A4_PORTRAIT_HEIGHT}]'
-# Invoice table money columns. The table runs from x=36 to x=559; TAX and
-# TOTAL INCL. VAT were 35pt apart, so a TAX figure (R675.00 is ~30pt at 8pt)
-# ran into the column beside it. 396 and 470 give a 74pt gutter while the
-# widest amount the format can print still ends inside the table edge and the
-# line-item total column aligns with the summary amount column.
-TAX_COLUMN_X = 396
+# Invoice table columns. The table aligns to the logo/text artwork on the left,
+# while the compact money columns free space for long product names. Keep the
+# final amount aligned with the summary amount column.
+INVOICE_TABLE_X = LEFT_BLOCK_X
+QTY_COLUMN_X = 238
+DAYS_COLUMN_X = 268
+RATE_COLUMN_X = 300
+SUBTOTAL_COLUMN_X = 356
+TAX_COLUMN_X = 410
 TOTAL_INCL_COLUMN_X = 470
 INVOICE_TABLE_RIGHT_EDGE = 559
 
@@ -750,10 +753,12 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     customer_bottom_y = 625 - ((len(visible_customer_lines) - 1) * 13 if visible_customer_lines else 0)
 
     # Invoice table and totals.
-    # Move the table up under the address blocks; if there are more than six
-    # line items, page 1 stays readable and the remaining rows continue on the
-    # following pages - each with the same column headings and a page number -
-    # before the summary/banking block. Every item is always printed
+    # Move the table up under the address blocks. Page 1 takes as many rows as
+    # genuinely fit above the summary/banking floor (instead of the earlier
+    # hard six-row cap that left a large blank area and jumped to page 2). Any
+    # remaining rows continue on following pages - each with the same column
+    # headings and a page number - before the summary/banking block. Every item
+    # is always printed
     # (ticket ABI-341953022: the table used to stop after eight rows, so items
     # added by an order edit never reached the invoice/quote PDF).
     table_y = min(545, customer_bottom_y - 28)
@@ -792,13 +797,13 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ])
 
     def add_table_header(draw, text, header_y):
-        draw.append(_pdf_rect(36, header_y - 5, 523, 18, fill='0 0 0'))
+        draw.append(_pdf_rect(INVOICE_TABLE_X, header_y - 5, INVOICE_TABLE_RIGHT_EDGE - INVOICE_TABLE_X, 18, fill='0 0 0'))
         text.append('1 1 1 rg')
-        _add_pdf_lines(text, 36, header_y, ['PRODUCT'], size=7.5)
-        _add_pdf_lines(text, 185, header_y, ['QTY'], size=7.5)
-        _add_pdf_lines(text, 220, header_y, ['DAYS'], size=7.5)
-        _add_pdf_lines(text, 255, header_y, ['RATE'], size=7.5)
-        _add_pdf_lines(text, 335, header_y, ['SUBTOTAL'], size=7.5)
+        _add_pdf_lines(text, INVOICE_TABLE_X, header_y, ['PRODUCT'], size=7.5)
+        _add_pdf_lines(text, QTY_COLUMN_X, header_y, ['QTY'], size=7.5)
+        _add_pdf_lines(text, DAYS_COLUMN_X, header_y, ['DAYS'], size=7.5)
+        _add_pdf_lines(text, RATE_COLUMN_X, header_y, ['RATE'], size=7.5)
+        _add_pdf_lines(text, SUBTOTAL_COLUMN_X, header_y, ['SUBTOTAL'], size=7.5)
         _add_pdf_lines(text, TAX_COLUMN_X, header_y, ['TAX'], size=7.5)
         _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, header_y, ['TOTAL INCL. VAT'], size=7.5)
         text.append('0 0 0 rg')
@@ -812,26 +817,22 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             line_view = tax_view['lines'][line_index] if line_index < len(tax_view['lines']) else {
                 'unit_excl': 0.0, 'subtotal_excl': 0.0, 'tax': 0.0, 'total_incl': 0.0, 'rental_days': None}
             days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
-            product_lines = _wrap_pdf_cell_text(name, max_chars=34, max_lines=3)
+            product_lines = _wrap_pdf_cell_text(name, max_chars=42, max_lines=3)
             if sku and len(product_lines) < 3:
-                product_lines.append(str(sku)[:34])
-            _add_pdf_lines(text, 36, y_pos, product_lines, size=8, leading=10, max_lines=3)
-            _add_pdf_lines(text, 185, y_pos, [str(item['quantity'])], size=8)
-            _add_pdf_lines(text, 220, y_pos, [days_text], size=8)
-            _add_pdf_lines(text, 255, y_pos, [f"R{line_view['unit_excl']:.2f}"], size=8)
-            _add_pdf_lines(text, 335, y_pos, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
+                product_lines.append(str(sku)[:42])
+            _add_pdf_lines(text, INVOICE_TABLE_X, y_pos, product_lines, size=8, leading=10, max_lines=3)
+            _add_pdf_lines(text, QTY_COLUMN_X, y_pos, [str(item['quantity'])], size=8)
+            _add_pdf_lines(text, DAYS_COLUMN_X, y_pos, [days_text], size=8)
+            _add_pdf_lines(text, RATE_COLUMN_X, y_pos, [f"R{line_view['unit_excl']:.2f}"], size=8)
+            _add_pdf_lines(text, SUBTOTAL_COLUMN_X, y_pos, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
             _add_pdf_lines(text, TAX_COLUMN_X, y_pos, [f"R{line_view['tax']:.2f}"], size=8)
             _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, y_pos, [f"R{line_view['total_incl']:.2f}"], size=8)
             y_pos -= 43
         return y_pos
 
-    # Client rule: at most six line items on page 1. Everything after that is
-    # printed on continuation pages, each repeating the column headings and
-    # carrying `Page n`. A page takes as many rows as really fit between its
-    # header and the summary band (43pt per row), and rows are chunked until the
-    # list is exhausted - items are never truncated, however many an order edit
-    # adds.
-    first_page_limit = 6
+    # Fill page 1 by measured capacity instead of leaving two rows' worth of
+    # blank space after row 6. Continuation pages still use the same capacity
+    # calculation and repeated headings.
     continuation_table_y = 675
     summary_floor_y = 58 + ((len(totals) - 1) * 14)
     # Lowest y the LAST item row of a page may reach: below it the summary rows
@@ -841,6 +842,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     def rows_that_fit(first_row_y):
         return max(1, int((first_row_y - last_row_y_floor) // 43) + 1)
 
+    first_page_limit = rows_that_fit(table_y - 24)
     first_page_items = list(items[:first_page_limit])
     remaining_items = list(items[first_page_limit:])
     add_table_header(draw_commands, text_commands, table_y)
@@ -888,7 +890,11 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         else:
             text_commands.append(_pdf_text_command(390, line_y, label, size=8.8))
             text_commands.append(_pdf_text_command(TOTAL_INCL_COLUMN_X, line_y, amount, size=8.8))
-    bank_y = totals_y - (len(totals) * 14) - 26
+    # Banking details belong on the left, aligned with the document/table edge,
+    # while totals sit on the right. Keeping the two blocks side by side avoids
+    # the old behaviour where 5-8 line invoices used page 1 for rows/totals but
+    # pushed only the banking details onto page 2.
+    bank_y = totals_y
     bank_detail_lines = bank_lines[1:]
     bank_last_y = bank_y - 13 - ((len(bank_detail_lines) - 1) * 13 if bank_detail_lines else 0)
     if bank_last_y < 58:
@@ -898,15 +904,15 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         bank_text_commands = ['BT']
         bank_text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
         bank_text_commands.append(_pdf_text_command(455, 746, f'Page {len(streams) + 1}', size=8.5))
-        bank_text_commands.append(_pdf_text_command(36, 715, 'Thank you for your business.', size=8.8, font='F2'))
-        bank_text_commands.append(_pdf_text_command(36, 690, 'Banking details', size=8.5, font='F2'))
-        _add_pdf_lines(bank_text_commands, 36, 675, bank_detail_lines, size=8.5, leading=13, max_lines=7)
+        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 715, 'Thank you for your business.', size=8.8, font='F2'))
+        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 690, 'Banking details', size=8.5, font='F2'))
+        _add_pdf_lines(bank_text_commands, INVOICE_TABLE_X, 675, bank_detail_lines, size=8.5, leading=13, max_lines=7)
         bank_text_commands.append('ET')
         streams.append('\n'.join(bank_draw_commands + bank_text_commands).encode('latin-1', 'replace'))
         return _pdf_objects(streams, image_object=image_object)
-    text_commands.append(_pdf_text_command(36, bank_y + 18, 'Thank you for your business.', size=8.8, font='F2'))
-    text_commands.append(_pdf_text_command(36, bank_y, 'Banking details', size=8.5, font='F2'))
-    _add_pdf_lines(text_commands, 36, bank_y - 13, bank_detail_lines, size=8.5, leading=13, max_lines=7)
+    text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y + 18, 'Thank you for your business.', size=8.8, font='F2'))
+    text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y, 'Banking details', size=8.5, font='F2'))
+    _add_pdf_lines(text_commands, INVOICE_TABLE_X, bank_y - 13, bank_detail_lines, size=8.5, leading=13, max_lines=7)
     text_commands.append('ET')
     streams.append('\n'.join(draw_commands + text_commands).encode('latin-1', 'replace'))
     return _pdf_objects(streams, image_object=image_object)

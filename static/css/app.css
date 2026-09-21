@@ -279,18 +279,23 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 /* PAID stamp on a settled invoice. The screen version mirrors the diagonal stamp
    the PDF draws, so what the client prints is what they see on screen. */
 .document-page{position:relative}
-/* Client ticket: the TAX and TOTAL INCL. VAT figures sat almost touching. The
-   PDF gives the two money columns a 66pt gutter (see TAX_COLUMN_X), so the
-   on-screen table mirrors it with padding rather than squeezing the numbers.
-   Specificity beats the print block's `.data-table th/td` padding rule, so the
-   gutter survives printing too. */
-.document-line-items{table-layout:fixed}
+/* Document line-items mirror the PDF column intent: compact numeric columns and
+   a wider product column. This fixes mobile screenshots where TAX/RATE/SUBTOTAL
+   consumed the same width as long product names and forced horizontal scrolling. */
+.document-type-invoice .table-wrap{margin-left:-15px;width:calc(100% + 15px)}
+.document-line-items{table-layout:fixed;min-width:620px}
 .document-line-items th{background:#000;color:#fff}
-.document-line-items th:first-child,.document-line-items td:first-child{width:30%;white-space:normal;overflow-wrap:anywhere}
-.document-line-items td:first-child strong{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25}
+.document-line-items th,.document-line-items td{padding-left:8px;padding-right:8px}
+.document-line-items th:nth-child(1),.document-line-items td:nth-child(1){width:38%;white-space:normal;overflow-wrap:anywhere}
+.document-line-items th:nth-child(2),.document-line-items td:nth-child(2){width:6%}
+.document-line-items th:nth-child(3),.document-line-items td:nth-child(3){width:7%}
+.document-line-items th:nth-child(4),.document-line-items td:nth-child(4){width:10%}
+.document-line-items th:nth-child(5),.document-line-items td:nth-child(5){width:12%}
+.document-line-items th:nth-child(6),.document-line-items td:nth-child(6){width:10%}
+.document-line-items th:nth-child(7),.document-line-items td:nth-child(7){width:17%}
+.document-line-items td:first-child strong{display:block;line-height:1.25;white-space:normal;overflow:visible}
 .document-line-items td:first-child small{overflow-wrap:anywhere}
-.document-line-items th:nth-last-child(2),.document-line-items td:nth-last-child(2){padding-right:18px}
-.document-line-items th:last-child,.document-line-items td:last-child{padding-left:18px}
+@media(max-width:520px){.document-line-items{min-width:560px}.document-line-items th,.document-line-items td{padding-left:6px;padding-right:6px;font-size:11px}}
 .document-type-invoice .totals{background:#fff;border:1px solid var(--line);border-radius:12px}
 .document-type-invoice .totals .total-row{background:#fff;color:var(--ink);border-radius:0}
 .document-type-invoice .totals .total-row span,.document-type-invoice .totals .total-row b{color:var(--ink)}
