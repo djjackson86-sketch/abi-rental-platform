@@ -649,6 +649,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     issuer_name = document['branch_name'] or settings['company_name']
     issuer_email = document['branch_email'] or settings['email']
     issuer_phone = document['branch_phone'] or settings['phone']
+    issuer_vat_number = (_doc_value(settings, 'vat_number', '') or '').strip()
+    issuer_company_reg_no = (_doc_value(settings, 'company_reg_no', '') or '').strip()
     issuer_address = [
         document['branch_address_line1'] or settings['address_line1'],
         document['branch_address_line2'] or settings['address_line2'],
@@ -661,6 +663,9 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         document['customer_country'],
     ]
     custom_fields = custom_fields_for(document)
+    customer_is_company = _doc_value(document, 'customer_type', '') == 'company'
+    customer_vat_number = (custom_fields.get('vat_number') or '').strip() if customer_is_company else ''
+    customer_company_reg_no = (custom_fields.get('company_reg_no') or '').strip() if customer_is_company else ''
     rent_label = rental_days_label(document)
     image_object = None
     logo_draw_command = None
@@ -697,8 +702,12 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     _add_pdf_lines(text_commands, LEFT_BLOCK_X, 715, [
         issuer_name,
         *[line for line in [issuer_phone, issuer_email] if line],
+        *[line for line in [
+            f'VAT No: {issuer_vat_number}' if issuer_vat_number else '',
+            f'Company Reg No: {issuer_company_reg_no}' if issuer_company_reg_no else '',
+        ] if line],
         *[line for line in issuer_address if line],
-    ], size=8.2, leading=12, max_lines=7)
+    ], size=8.2, leading=10, max_lines=9)
 
     # Top-right invoice and order stack.
     detail_x = 455
@@ -726,6 +735,10 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ]
     if document['customer_phone']:
         customer_lines.append(document['customer_phone'])
+    if customer_vat_number:
+        customer_lines.append(f'VAT No: {customer_vat_number}')
+    if customer_company_reg_no:
+        customer_lines.append(f'Company Reg No: {customer_company_reg_no}')
     customer_lines.extend([line for line in customer_address if line])
     vehicle_lines = []
     if custom_fields.get('vehicle_make'):
@@ -929,6 +942,8 @@ def document_pdf_bytes(document_id):
     issuer_name = document['branch_name'] or settings['company_name']
     issuer_email = document['branch_email'] or settings['email']
     issuer_phone = document['branch_phone'] or settings['phone']
+    issuer_vat_number = (_doc_value(settings, 'vat_number', '') or '').strip()
+    issuer_company_reg_no = (_doc_value(settings, 'company_reg_no', '') or '').strip()
     issuer_address = [
         document['branch_address_line1'] or settings['address_line1'],
         document['branch_address_line2'] or settings['address_line2'],
@@ -943,6 +958,10 @@ def document_pdf_bytes(document_id):
         lines.append(f'Issuer email: {issuer_email}')
     if issuer_phone:
         lines.append(f'Issuer phone: {issuer_phone}')
+    if issuer_vat_number:
+        lines.append(f'Issuer VAT No: {issuer_vat_number}')
+    if issuer_company_reg_no:
+        lines.append(f'Issuer Company Reg No: {issuer_company_reg_no}')
     lines.extend([line for line in issuer_address if line])
     lines.append(f'Order: {document["order_number"]}')
     if document_has_rental_items(items):
@@ -965,6 +984,14 @@ def document_pdf_bytes(document_id):
                     added_heading = True
                 lines.append(f'{key}: {value}')
     lines.extend([f'Customer: {document["customer_name"] or "-"}', f'Email: {document["customer_email"] or "-"}'])
+    custom_fields = custom_fields_for(document)
+    customer_is_company = _doc_value(document, 'customer_type', '') == 'company'
+    customer_vat_number = (custom_fields.get('vat_number') or '').strip() if customer_is_company else ''
+    customer_company_reg_no = (custom_fields.get('company_reg_no') or '').strip() if customer_is_company else ''
+    if customer_vat_number:
+        lines.append(f'Customer VAT No: {customer_vat_number}')
+    if customer_company_reg_no:
+        lines.append(f'Customer Company Reg No: {customer_company_reg_no}')
     if document['document_type'] == 'invoice':
         if document['customer_phone']:
             lines.append(f'Phone: {document["customer_phone"]}')
@@ -979,7 +1006,6 @@ def document_pdf_bytes(document_id):
         compact_address = ', '.join(line for line in customer_address if line)
         if compact_address:
             lines.append(f'Customer address: {compact_address}')
-        custom_fields = custom_fields_for(document)
         if custom_fields.get('vehicle_make'):
             lines.append(f'Vehicle Make: {custom_fields["vehicle_make"]}')
         if custom_fields.get('vehicle_color'):

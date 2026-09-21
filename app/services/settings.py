@@ -23,7 +23,7 @@ def _row_value(row, key, default=''):
 
 def update_company_settings(form):
     fields = [
-        "company_name", "email", "phone", "website", "country", "address_line1", "address_line2",
+        "company_name", "email", "phone", "website", "vat_number", "company_reg_no", "country", "address_line1", "address_line2",
         "city", "province", "postcode", "additional_detail1", "additional_detail2", "units",
         "currency", "currency_symbol", "currency_position",
         "tax_mode", "default_pickup_time", "default_return_time", "time_increment_minutes", "deposit_mode", "deposit_value",

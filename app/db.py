@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS company_settings (
     email TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     website TEXT NOT NULL DEFAULT '',
+    vat_number TEXT NOT NULL DEFAULT '',
+    company_reg_no TEXT NOT NULL DEFAULT '',
     logo_path TEXT NOT NULL DEFAULT '',
     country TEXT NOT NULL DEFAULT 'South Africa',
     address_line1 TEXT NOT NULL DEFAULT '',
@@ -432,6 +434,8 @@ def run_migrations(db):
     ensure_column(db, "company_settings", "checkout_instructions", "TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.'")
     ensure_column(db, "company_settings", "store_contact_email", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "store_contact_phone", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "company_settings", "vat_number", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "company_settings", "company_reg_no", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "invoice_email_message", "TEXT NOT NULL DEFAULT 'Dear {customer_name}\n\nPlease find attached {document_label} {document_number} for order {order_number}.\n\nKind regards,\n{company_name}'")
     ensure_column(db, "company_settings", "invoice_email_signature", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "company_settings", "invoice_email_signature_include_logo", "INTEGER NOT NULL DEFAULT 0")

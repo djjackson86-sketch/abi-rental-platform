@@ -153,7 +153,7 @@ def get_document(document_id):
             o.subtotal, o.discount_total, o.discount_mode, o.discount_value, o.tax_total, o.deposit_total, o.deposit_option, o.total, o.due_total, o.notes,
             o.deposit_applied_amount,
             COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'paid' AND COALESCE(p.deleted_at, '') = ''), 0) AS paid_total,
-            c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
+            c.name AS customer_name, c.customer_type AS customer_type, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
             c.custom_fields_json AS custom_fields_json,
