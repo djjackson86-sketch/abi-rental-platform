@@ -806,7 +806,6 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
             'kind': 'list',
             'title': 'End of day notes',
             'rows': note_rows,
-            'cap': MAX_NOTE_LINES_IN_PDF,
             'overflow': '... more notes in the CSV export',
         },
     ])

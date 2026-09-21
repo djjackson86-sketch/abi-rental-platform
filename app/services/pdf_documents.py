@@ -210,12 +210,10 @@ def _simple_pdf(lines, logo_bytes=None):
 # one source of truth for both this PDF and the CSV export, so the two can
 # never disagree.
 #
-# One page, budgeted rather than hoped for. The header and the two card grids
-# have fixed geometry, so what is left for the three list sections is known
-# before a single row is drawn: ``_report_line_allocations`` shares those slots
-# round-robin (no section can starve another) and a section that does not get
-# its full share prints "... and N more ... - see the CSV export" as its last
-# row instead of dropping lines silently.
+# Multi-page, budgeted rather than hoped for. The header and the card grids
+# have fixed geometry, then the variable list sections flow onto continuation
+# pages. Rows are kept whole whenever possible and continuation pages repeat the
+# depot/day context plus page numbering, so busy days do not silently lose text.
 REPORT_LEFT = 36
 REPORT_RIGHT = 559
 REPORT_WIDTH = REPORT_RIGHT - REPORT_LEFT
@@ -312,9 +310,10 @@ def _pdf_fit(text, size: int | float, width, bold=False):
 def _pdf_wrap(text, size: int | float, width, bold=False, max_lines=2):
     """Word-wrap a free-text row (the page stream has no automatic wrapping).
 
-    The last line is ellipsised if the text still does not fit, which keeps a
-    long cash-used description or note inside its panel; the section's "see the
-    CSV export" row states anything that had to be left out entirely.
+    ``max_lines=None`` is used by the dashboard report's multi-page list panels:
+    once the report can continue to page 2, long notes/descriptions should wrap
+    instead of being ellipsised on page 1. Fixed-height cards still pass a small
+    limit and keep the visible ellipsis behaviour.
     """
     words = str(text or '').split()
     if not words:
@@ -322,7 +321,7 @@ def _pdf_wrap(text, size: int | float, width, bold=False, max_lines=2):
     lines = []
     remaining = list(words)
     while remaining:
-        if len(lines) >= max_lines - 1:
+        if max_lines is not None and len(lines) >= max_lines - 1:
             lines.append(_pdf_fit(' '.join(remaining), size, width, bold))
             break
         line = remaining.pop(0)
@@ -332,129 +331,40 @@ def _pdf_wrap(text, size: int | float, width, bold=False, max_lines=2):
     return lines
 
 
-def _report_card_section_height(card_count):
-    """Vertical space a card grid takes, including its heading and its gap."""
-    if card_count <= 0:
-        return 0
-    rows = math.ceil(card_count / REPORT_CARD_COLUMNS)
-    return REPORT_SECTION_GAP + REPORT_CARD_HEADING_DROP + (rows - 1) * REPORT_CARD_ROW_HEIGHT + REPORT_CARD_HEIGHT
-
-
-def _report_list_line_capacity(available_height, section_count):
-    """How many row lines the list sections may draw in ``available_height``.
-
-    Each list section costs a fixed 34pt (its heading, the panel's top padding
-    and its bottom padding) plus 13pt per drawn line, so the line budget is the
-    leftover height divided by the leading.
-    """
-    if section_count <= 0:
-        return 0
-    return max(0, int((available_height - 34 * section_count) // REPORT_LIST_LEADING))
-
-
-def _report_line_allocations(desires, capacity):
-    """Share ``capacity`` row lines out round-robin, so no section starves.
-
-    Round-robin keeps a day with a dozen bank drop offs from blanking the
-    cash-used section (or the end of day notes). A section that gets fewer lines
-    than it asked for is truncated, and its last allocated line becomes the
-    "... and N more" row — so every allocation is fully used and the total can
-    never exceed ``capacity``.
-    """
-    allocations = [0] * len(desires)
-    remaining = int(capacity)
-    while remaining > 0:
-        progressed = False
-        for index, desire in enumerate(desires):
-            if remaining <= 0:
-                break
-            if allocations[index] < desire:
-                allocations[index] += 1
-                remaining -= 1
-                progressed = True
-        if not progressed:
-            break
-    return allocations
-
-
-def _report_section_rows(entries, capacity, overflow_template):
-    """The rows a section may draw, plus its stated overflow row (if any).
-
-    Rows are never split across the boundary: a wrapped row that no longer fits
-    whole is left for the overflow row to account for.
-    """
-    if capacity <= 0:
-        return [], ''
-    total = sum(len(entry['lines']) for entry in entries)
-    if total <= capacity:
-        return list(entries), ''
-    available = capacity - 1
-    drawn = []
-    used = 0
-    for entry in entries:
-        if used + len(entry['lines']) > available:
-            break
-        drawn.append(entry)
-        used += len(entry['lines'])
-    hidden = len(entries) - len(drawn)
-    if hidden <= 0:
-        return drawn, ''
-    return drawn, overflow_template.format(remaining=hidden)
-
-
 def _report_row_entries(rows, label_width):
     """Wrap each row's label so the page budget can count the real drawn lines."""
     return [{
-        'lines': _pdf_wrap(row.get('label'), 9, label_width, max_lines=2),
+        'lines': _pdf_wrap(row.get('label'), 9, label_width, max_lines=None),
         'value_text': str(row.get('value') or ''),
     } for row in rows]
 
 
-def _report_template_pdf(view):
-    meta = view.get('meta') or {}
-    sections = [section for section in (view.get('sections') or []) if section]
-    card_sections = [section for section in sections if section.get('kind') != 'list']
-    list_sections = [section for section in sections if section.get('kind') == 'list']
-
-    # Work out the row layout of every list section BEFORE drawing anything, so
-    # the single page is budgeted exactly rather than discovered by truncation.
-    prepared = []
-    for section in list_sections:
-        has_value = any(row.get('value') for row in section.get('rows') or [])
-        label_width = REPORT_RIGHT - 9 - (REPORT_LIST_VALUE_WIDTH if has_value else 0) - (REPORT_LEFT + REPORT_LIST_ROW_PAD)
-        entries = _report_row_entries(section.get('rows') or [], label_width)
-        prepared.append(entries)
-
-    cards_height = sum(_report_card_section_height(len(section.get('cards') or [])) for section in card_sections)
-    capacity = _report_list_line_capacity(REPORT_HEADER_RULE_Y - cards_height - REPORT_BOTTOM, len(list_sections))
-    desires = []
-    for section, entries in zip(list_sections, prepared):
-        needed = sum(len(entry['lines']) for entry in entries)
-        cap = section.get('cap')
-        if cap:
-            needed = min(needed, int(cap))
-        desires.append(needed)
-    allocations = _report_line_allocations(desires, capacity)
-
-    text = ['BT']
-    draw = []
-    image_object = None
+def _report_logo_object():
     logo_bytes = _document_logo_bytes()
-    if logo_bytes:
-        logo_width, logo_height = _jpeg_dimensions(logo_bytes)
-        display_height = REPORT_LOGO_WIDTH * logo_height / logo_width
-        draw.append(
-            f'q {REPORT_LOGO_WIDTH:.2f} 0 0 {display_height:.2f} {REPORT_LEFT} '
-            f'{REPORT_LOGO_TOP - display_height:.2f} cm /Im1 Do Q')
-        image_object = (
-            f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
-            f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
-        ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
+    if not logo_bytes:
+        return None, []
+    logo_width, logo_height = _jpeg_dimensions(logo_bytes)
+    display_height = REPORT_LOGO_WIDTH * logo_height / logo_width
+    logo_draw = [
+        f'q {REPORT_LOGO_WIDTH:.2f} 0 0 {display_height:.2f} {REPORT_LEFT} '
+        f'{REPORT_LOGO_TOP - display_height:.2f} cm /Im1 Do Q'
+    ]
+    image_object = (
+        f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
+        f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
+    ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
+    return image_object, logo_draw
 
+
+def _report_header(meta, page_number=1, logo_draw=None):
+    """Return (draw, text, y) for a report page header with context."""
+    draw = list(logo_draw or [])
+    text = ['BT']
     company = str(meta.get('company') or '').strip()
     text.append(_pdf_text_command(150, REPORT_LOGO_TOP, company, size=15, font='F2'))
     text.append(f'{REPORT_MUTED} rg')
-    text.append(_pdf_text_command(150, REPORT_LOGO_TOP - 17, 'Daily dashboard report', size=10.5))
+    subtitle = 'Daily dashboard report' if page_number == 1 else 'Daily dashboard report (continued)'
+    text.append(_pdf_text_command(150, REPORT_LOGO_TOP - 17, subtitle, size=10.5))
     text.append(f'{REPORT_INK} rg')
     text.append(_pdf_text_command(REPORT_LEFT, 750, f"Depot: {meta.get('depot') or '-'}", size=9.5))
     text.append(_pdf_text_command(REPORT_LEFT, 736, f"Business day: {meta.get('day') or '-'}", size=9.5))
@@ -462,12 +372,25 @@ def _report_template_pdf(view):
     text.append(_pdf_text_command(380, 750, f"Generated: {generated_at}", size=9.5))
     text.append(_pdf_text_command(380, 736, f"Prepared by: {meta.get('prepared_by') or '-'}", size=9.5))
     draw.append(_pdf_rect(REPORT_LEFT, REPORT_HEADER_RULE_Y, REPORT_WIDTH, 1.2, fill=REPORT_RULE))
+    return draw, text, REPORT_HEADER_RULE_Y
 
-    y = REPORT_HEADER_RULE_Y
+
+def _report_new_page(pages, meta, logo_draw):
+    draw, text, y = _report_header(meta, len(pages) + 1, logo_draw)
+    page = {'draw': draw, 'text': text, 'y': y, 'empty': True}
+    pages.append(page)
+    return page
+
+
+def _report_draw_card_sections(page, card_sections):
+    text = page['text']
+    draw = page['draw']
+    y = page['y']
     for section in card_sections:
         cards = section.get('cards') or []
         if not cards:
             continue
+        page['empty'] = False
         heading_y = y - REPORT_SECTION_GAP
         text.append(f'{REPORT_ACCENT} rg')
         text.append(_pdf_text_command(REPORT_LEFT, heading_y, str(section.get('title') or '').upper(), size=8.6, font='F2'))
@@ -476,9 +399,6 @@ def _report_template_pdf(view):
         row_count = math.ceil(len(cards) / REPORT_CARD_COLUMNS)
         for row in range(row_count):
             row_cards = cards[row * REPORT_CARD_COLUMNS:(row + 1) * REPORT_CARD_COLUMNS]
-            # A part-filled last row is stretched across the full width so the
-            # grid never ends on an empty gap (the dashboard has ten cards and
-            # the cash up seven, so both end part-filled).
             card_width = (REPORT_WIDTH - (len(row_cards) - 1) * REPORT_CARD_GAP) / len(row_cards)
             for column, card in enumerate(row_cards):
                 card_x = REPORT_LEFT + column * (card_width + REPORT_CARD_GAP)
@@ -502,46 +422,139 @@ def _report_template_pdf(view):
                                               size=value_size, font='F2'))
         text.append(f'{REPORT_INK} rg')
         y = cards_top - (row_count - 1) * REPORT_CARD_ROW_HEIGHT - REPORT_CARD_HEIGHT
+    page['y'] = y
 
-    for section, entries, allocation in zip(list_sections, prepared, allocations):
-        cap = section.get('cap')
-        section_capacity = int(cap) if cap else allocation
-        section_capacity = min(allocation, section_capacity)
-        rows, overflow = _report_section_rows(entries, section_capacity, str(section.get('overflow') or ''))
-        if not rows and not overflow:
-            continue
-        heading_y = y - REPORT_SECTION_GAP
-        text.append(f'{REPORT_ACCENT} rg')
-        text.append(_pdf_text_command(REPORT_LEFT, heading_y, str(section.get('title') or '').upper(), size=8.6, font='F2'))
-        text.append(f'{REPORT_INK} rg')
-        panel_top = heading_y - REPORT_LIST_HEADING_DROP
-        baseline = heading_y - REPORT_LIST_FIRST_ROW_DROP
-        for row_index, entry in enumerate(rows):
-            row_baseline = baseline
-            for line in entry['lines']:
-                text.append(_pdf_text_command(REPORT_LEFT + REPORT_LIST_ROW_PAD, baseline, line, size=9))
-                baseline -= REPORT_LIST_LEADING
-            if entry['value_text']:
-                text.append(_pdf_right_text(REPORT_RIGHT - 9, row_baseline, entry['value_text'], size=9, font='F2'))
-            if row_index < len(rows) - 1 or overflow:
-                draw.append(_pdf_rect(REPORT_LEFT + REPORT_LIST_ROW_PAD, baseline + 4, REPORT_WIDTH - (2 * REPORT_LIST_ROW_PAD), 0.6, fill=REPORT_RULE))
-        if overflow:
-            text.append(f'{REPORT_MUTED} rg')
-            text.append(_pdf_text_command(REPORT_LEFT + REPORT_LIST_ROW_PAD, baseline, overflow, size=8.4))
-            text.append(f'{REPORT_INK} rg')
-            baseline -= REPORT_LIST_LEADING
-        panel_bottom = baseline + REPORT_LIST_LEADING - REPORT_LIST_BOTTOM_PAD
-        draw.append(_pdf_rect(REPORT_LEFT, panel_bottom, REPORT_WIDTH, panel_top - panel_bottom, fill=REPORT_LIST_FILL))
-        draw.append(_pdf_rect(REPORT_LEFT, panel_bottom, 3, panel_top - panel_bottom, fill=REPORT_ACCENT))
-        y = panel_bottom
 
-    text.append(f'{REPORT_MUTED} rg')
-    text.append(_pdf_right_text(REPORT_RIGHT, REPORT_FOOTER_Y, 'Page 1 of 1', size=7.5))
+def _report_list_capacity_lines(y):
+    """How many row lines still fit below ``y`` on this page.
+
+    The section gap is only worth its full 16pt when the section that needs it
+    gets more than one line: a single-line section (an "no cash used recorded"
+    row, say) would otherwise push a whole page break just to repeat itself, so
+    the gap shrinks to whatever is left over.
+    """
+    room = y - REPORT_BOTTOM
+    available = room - REPORT_SECTION_GAP
+    if _report_section_lines(available) < 2:
+        available = room - 2
+    return _report_section_lines(available)
+
+
+def _report_section_lines(available):
+    usable = available - REPORT_LIST_FIRST_ROW_DROP + REPORT_LIST_LEADING - REPORT_LIST_BOTTOM_PAD
+    return max(0, int(usable // REPORT_LIST_LEADING))
+
+
+def _report_draw_list_chunk(page, section, rows, continued=False):
+    text = page['text']
+    draw = page['draw']
+    page['empty'] = False
+    heading_y = page['y'] - REPORT_SECTION_GAP
+    title = str(section.get('title') or '').upper()
+    if continued:
+        title = f'{title} (CONTINUED)'
+    text.append(f'{REPORT_ACCENT} rg')
+    text.append(_pdf_text_command(REPORT_LEFT, heading_y, title, size=8.6, font='F2'))
     text.append(f'{REPORT_INK} rg')
-    text.append('ET')
-    stream = '\n'.join(draw + text).encode('latin-1', 'replace')
-    return _pdf_objects(stream, image_object=image_object)
+    panel_top = heading_y - REPORT_LIST_HEADING_DROP
+    baseline = heading_y - REPORT_LIST_FIRST_ROW_DROP
+    for row_index, entry in enumerate(rows):
+        lines = entry.get('lines') or ['']
+        row_baseline = baseline
+        for line in lines:
+            text.append(_pdf_text_command(REPORT_LEFT + REPORT_LIST_ROW_PAD, baseline, line, size=9))
+            baseline -= REPORT_LIST_LEADING
+        if entry['value_text']:
+            text.append(_pdf_right_text(REPORT_RIGHT - 9, row_baseline, entry['value_text'], size=9, font='F2'))
+        if row_index < len(rows) - 1:
+            draw.append(_pdf_rect(REPORT_LEFT + REPORT_LIST_ROW_PAD, baseline + 4, REPORT_WIDTH - (2 * REPORT_LIST_ROW_PAD), 0.6, fill=REPORT_RULE))
+    panel_bottom = baseline + REPORT_LIST_LEADING - REPORT_LIST_BOTTOM_PAD
+    draw.append(_pdf_rect(REPORT_LEFT, panel_bottom, REPORT_WIDTH, panel_top - panel_bottom, fill=REPORT_LIST_FILL))
+    draw.append(_pdf_rect(REPORT_LEFT, panel_bottom, 3, panel_top - panel_bottom, fill=REPORT_ACCENT))
+    page['y'] = panel_bottom
 
+
+def _report_draw_list_segment(page, section, entries, entries_done, skip_lines):
+    """Draw what fits on ``page`` starting at ``entries_done`` / ``skip_lines``.
+
+    A row that no longer fits whole is left for the next page. The one exception
+    is a single row taller than a whole page (a paragraph pasted into a note):
+    it is split at a line boundary so its text still reaches paper instead of
+    looping forever. Returns ``(index of the row being drawn, lines consumed of
+    that row)`` so the caller can resume exactly where the page ran out.
+    """
+    capacity = _report_list_capacity_lines(page['y'])
+    segment = []
+    used = 0
+    cursor = entries_done
+    skip = skip_lines
+    while cursor < len(entries):
+        lines = entries[cursor].get('lines') or ['']
+        pending = lines[skip:]
+        if used + len(pending) > capacity:
+            if segment:
+                break
+            if capacity <= 0:
+                break
+            take = max(1, min(len(pending), capacity))
+            drawn_lines = skip + take
+            segment.append({'lines': pending[:take], 'value_text': entries[cursor].get('value_text')})
+            _report_draw_list_chunk(page, section, segment, continued=bool(entries_done) or skip > 0)
+            if drawn_lines >= len(lines):
+                return cursor + 1, 0
+            return cursor, drawn_lines
+        segment.append({'lines': pending, 'value_text': entries[cursor].get('value_text')})
+        used += len(pending)
+        cursor += 1
+        skip = 0
+    if not segment:
+        return entries_done, skip_lines
+    _report_draw_list_chunk(page, section, segment, continued=bool(entries_done))
+    return cursor, 0
+
+def _report_template_pdf(view):
+    meta = view.get('meta') or {}
+    sections = [section for section in (view.get('sections') or []) if section]
+    card_sections = [section for section in sections if section.get('kind') != 'list']
+    list_sections = [section for section in sections if section.get('kind') == 'list']
+
+    prepared = []
+    for section in list_sections:
+        has_value = any(row.get('value') for row in section.get('rows') or [])
+        label_width = REPORT_RIGHT - 9 - (REPORT_LIST_VALUE_WIDTH if has_value else 0) - (REPORT_LEFT + REPORT_LIST_ROW_PAD)
+        prepared.append(_report_row_entries(section.get('rows') or [], label_width))
+
+    image_object, logo_draw = _report_logo_object()
+    pages = []
+    page = _report_new_page(pages, meta, logo_draw)
+    _report_draw_card_sections(page, card_sections)
+
+    for section, entries in zip(list_sections, prepared):
+        entries_done = 0
+        skip_lines = 0
+        while entries_done < len(entries):
+            next_row, next_skip = _report_draw_list_segment(page, section, entries,
+                                                            entries_done, skip_lines)
+            if (next_row, next_skip) == (entries_done, skip_lines):
+                # Nothing fitted and nothing progressed: start a fresh page.
+                page = _report_new_page(pages, meta, logo_draw)
+                continue
+            entries_done, skip_lines = next_row, next_skip
+            if entries_done < len(entries):
+                page = _report_new_page(pages, meta, logo_draw)
+
+    # A section that exactly filled the previous page leaves the page opened for
+    # it empty; drop those so the report never ends on a blank sheet.
+    pages = [page for page in pages if not page['empty']]
+    total_pages = len(pages)
+    streams = []
+    for index, page in enumerate(pages, start=1):
+        page['text'].append(f'{REPORT_MUTED} rg')
+        page['text'].append(_pdf_right_text(REPORT_RIGHT, REPORT_FOOTER_Y, f'Page {index} of {total_pages}', size=7.5))
+        page['text'].append(f'{REPORT_INK} rg')
+        page['text'].append('ET')
+        streams.append('\n'.join(page['draw'] + page['text']).encode('latin-1', 'replace'))
+    return _pdf_objects(streams, image_object=image_object)
 
 def _compact_address(parts):
     return ', '.join(str(part) for part in parts if part)

@@ -596,26 +596,39 @@ def test_the_pdf_stays_on_one_page_with_bank_drop_offs_too(client, app):
     assert csv_body.count('Cash drop off (to bank),Dropped at the bank') == 12
 
 
-def test_a_busy_day_keeps_both_capped_sections_on_the_page(client, app):
-    """A day full of banked cash must not blank the described cash-used lines."""
+def test_a_busy_day_flows_onto_page_two_without_losing_a_line(client, app):
+    """Ticket ABI-341953024: a day too big for one page continues on page 2.
+
+    24 list rows plus the notes no longer fit the card layout, so the report used
+    to truncate them. It must now flow onto a second page and keep every line.
+    """
     login(client)
     for index in range(12):
         client.post('/cash-up/used', data={'day': '', 'amount': '10', 'description': f'Line {index + 1}'},
                     follow_redirects=True)
         client.post('/cash-up/bank', data={'day': '', 'amount': '10'}, follow_redirects=True)
+    # Notes are submitted after the cash up: the cash-up save owns the same row.
+    client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
     client.post('/cash-up/notes', data={'day': '', 'notes': 'One.\nTwo.\nThree.'},
                 follow_redirects=True)
     blob = client.get('/cash-up/report.pdf').data
     text = blob.decode('latin-1')
     drawn = _drawn_text(blob)
-    # 24 lines cannot all fit: both capped sections share the page evenly and
-    # each states how many of its own lines went to the CSV instead.
-    assert 'Line 1' in drawn and 'Line 6' in drawn and 'Line 7' not in drawn
-    assert text.count('Dropped at the bank') == 6, text.count('Dropped at the bank')
-    assert 'more cash used line' in text and 'more bank drop off line' in text
-    # The end of day notes keep their slot in the same round-robin share.
-    assert 'One.' in drawn and 'Three.' in drawn
-    assert text.count('/Type /Page ') == 1
+    assert text.count('/Type /Page ') == 2, 'the report continues onto page 2'
+    assert 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn
+    # Every cash-used line and every bank drop off is drawn, not summarised away.
+    for index in range(1, 13):
+        assert f'Line {index}' in drawn, f'Line {index}'
+    assert text.count('Dropped at the bank') == 12, text.count('Dropped at the bank')
+    assert 'One.' in drawn and 'Two.' in drawn and 'Three.' in drawn
+    # Nothing is left out any more, so the report never has to say it was.
+    assert 'more cash used line' not in text
+    assert 'more bank drop off line' not in text
+    assert 'more notes in the CSV export' not in text
+    # Page 2 repeats the depot/day context so a filed page stands on its own.
+    assert 'Daily dashboard report (continued)' in drawn
+    assert f'Business day: {TODAY}' in drawn
+    # Nothing is drawn outside the printable band on either page.
     baselines = _baselines(blob)
     assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
     # The CSV export still carries every one of the 24 lines.
@@ -685,18 +698,22 @@ def test_the_pdf_report_renders_the_day_figures(client, app):
     assert '?' not in ''.join(drawn[notes_index:])
 
 
-def test_the_pdf_stays_on_one_page_and_says_what_it_left_out(client, app):
+def test_a_long_cash_used_list_continues_instead_of_being_cut_off(client, app):
+    """Ticket ABI-341953024: no list row is dropped just because page 1 filled up."""
     login(client)
     for index in range(16):
         client.post('/cash-up/used', data={'day': '', 'amount': '10', 'description': f'Line {index + 1}'},
                     follow_redirects=True)
     blob = client.get('/cash-up/report.pdf').data
+    text = blob.decode('latin-1')
     drawn = _drawn_text(blob)
-    assert 'Line 14' in drawn and 'Line 15' not in drawn
-    # Parentheses are escaped in the PDF stream, so match the plain wording.
-    assert '... and 2 more cash used line' in blob.decode('latin-1')
-    assert 'see the CSV export' in blob.decode('latin-1')
-    assert blob.decode('latin-1').count('/Type /Page ') == 1
+    for index in range(1, 17):
+        assert f'Line {index}' in drawn, f'Line {index}'
+    # The whole list still fits page 1, and it now uses that space instead of
+    # stopping at a fixed line cap. Nothing had to stand in for a dropped line.
+    assert text.count('/Type /Page ') == 1
+    assert 'Page 1 of 1' in drawn
+    assert 'more cash used line' not in text
     # The CSV export is uncapped, so nothing is actually lost.
     csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
     assert 'Line 16,R10.00' in csv_body
@@ -728,6 +745,34 @@ def test_the_pdf_report_is_branded_and_names_the_user_who_ran_it(client, app):
     login(client, name='Depot Two Clerk', password='staff123')
     text = client.get('/cash-up/report.pdf').data.decode('latin-1')
     assert 'Prepared by: Depot Two Clerk \\(Staff\\)' in text
+
+
+def test_a_long_end_of_day_note_flows_onto_page_two(client, app):
+    """Ticket ABI-341953024: a long note must print in full, not wrap-and-clip.
+
+    The old report capped the notes panel at three lines and ellipsised whatever
+    it could not fit, so the end of a long end-of-day note never reached paper.
+    """
+    login(client)
+    note_lines = [
+        f'Note line {index}: the depot reconciled the day takings with the bank slip and filed the receipt.'
+        for index in range(1, 29)
+    ]
+    client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
+    client.post('/cash-up/notes', data={'day': '', 'notes': '\n'.join(note_lines)}, follow_redirects=True)
+    blob = client.get('/cash-up/report.pdf').data
+    text = blob.decode('latin-1')
+    drawn = _drawn_text(blob)
+    # First and last line of the note both reach the page, whole.
+    assert 'Note line 1: the depot reconciled the day takings with the bank slip and filed the receipt.' in drawn
+    assert 'Note line 28: the depot reconciled the day takings with the bank slip and filed the receipt.' in drawn
+    assert text.count('/Type /Page ') >= 2
+    assert 'more notes in the CSV export' not in text
+    # A wrapped row is never ellipsised now that the report can continue.
+    notes_index = drawn.index('END OF DAY NOTES')
+    assert '...' not in ''.join(drawn[notes_index:])
+    baselines = _baselines(blob)
+    assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
 
 
 def test_the_cash_panel_renders_with_libsql_shaped_rows(client, app, monkeypatch):
