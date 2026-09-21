@@ -164,6 +164,29 @@ def test_dashboard_places_cash_up_below_cash_drop_off(client):
     assert body.count('<h2>Cash up · Branch 1</h2>') == 1
 
 
+def test_dashboard_explains_cash_up_plainly(client):
+    login(client)
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert 'Cash up is tracked separately for each depot.' in body
+    assert 'Opening cash is the previous recorded closing cash for Branch 1.' in body
+    assert 'Expected cash = opening cash + cash received − cash used − cash dropped off at the bank.' in body
+    assert 'Variance = counted cash − expected cash.' in body
+
+
+def test_end_of_day_notes_have_their_own_panel(client):
+    login(client)
+    body = client.get('/dashboard').get_data(as_text=True)
+    cash_up_start = body.index('<h2>Cash up · Branch 1</h2>')
+    notes_start = body.index('<h2>End of day notes</h2>')
+    next_section_after_cash_up = body.index('</section>', cash_up_start)
+    assert cash_up_start < notes_start
+    assert next_section_after_cash_up < notes_start
+    notes_panel = body[notes_start:body.index('</section>', notes_start)]
+    assert 'action="/cash-up/notes"' in notes_panel
+    assert 'name="notes"' in notes_panel
+    assert 'Anything the next shift should know' in notes_panel
+
+
 def test_opening_cash_is_the_previous_days_closing_cash(client, app):
     login(client)
     client.post('/cash-up', data={'day': YESTERDAY, 'counted_cash': '1000.00'}, follow_redirects=True)

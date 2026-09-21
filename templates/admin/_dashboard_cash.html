@@ -11,7 +11,7 @@
   <div class="metric-card"><small>Variance</small><b>{{ cash_day.variance_display }}</b><span>{{ cash_day.variance_label }}</span></div>
 </section>
 
-<p class="cash-note">Cash up is per depot: opening cash is {{ cash_day.branch_name }}'s previous recorded closing cash. Expected cash = opening + cash received − cash used − dropped off at the bank; variance = counted − expected.</p>
+<p class="cash-note">Cash up is tracked separately for each depot. Opening cash is the previous recorded closing cash for {{ cash_day.branch_name }}. Expected cash = opening cash + cash received − cash used − cash dropped off at the bank. Variance = counted cash − expected cash.</p>
 
 <div class="two-col">
   <section class="panel">
@@ -120,10 +120,14 @@
         <button class="btn primary" type="submit">Save cash up</button>
       </div>
     </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-title"><h2>End of day notes</h2></div>
     <form method="post" action="{{ url_for('cash.save_notes') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
-      <label>End of day notes<textarea name="notes" rows="3" placeholder="Anything the next shift should know about {{ cash_day.day }}">{{ cash_day.notes }}</textarea></label>
+      <label>Notes<textarea name="notes" rows="3" placeholder="Anything the next shift should know about {{ cash_day.day }}">{{ cash_day.notes }}</textarea></label>
       <div class="form-actions"><button class="btn" type="submit">Save notes</button></div>
     </form>
   </section>
