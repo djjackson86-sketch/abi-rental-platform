@@ -164,13 +164,20 @@ def test_dashboard_places_cash_up_below_cash_drop_off(client):
     assert body.count('<h2>Cash up · Branch 1</h2>') == 1
 
 
-def test_dashboard_explains_cash_up_plainly(client):
+def test_dashboard_removes_cash_up_explanation_for_all_users(client, app):
     login(client)
     body = client.get('/dashboard').get_data(as_text=True)
-    assert 'Cash up is tracked separately for each depot.' in body
-    assert 'Opening cash is the previous recorded closing cash for Branch 1.' in body
-    assert 'Expected cash = opening cash + cash received − cash used − cash dropped off at the bank.' in body
-    assert 'Variance = counted cash − expected cash.' in body
+    assert 'Cash up is tracked separately for each depot.' not in body
+    assert 'Opening cash is the previous recorded closing cash for Branch 1.' not in body
+    assert 'Expected cash = opening cash + cash received − cash used − cash dropped off at the bank.' not in body
+    assert 'Variance = counted cash − expected cash.' not in body
+
+    with app.app_context():
+        create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
+    login(client, name='Depot Two Clerk', password='staff123')
+    staff_body = client.get('/dashboard').get_data(as_text=True)
+    assert 'Cash up is tracked separately for each depot.' not in staff_body
+    assert 'Expected cash = opening cash + cash received − cash used − cash dropped off at the bank.' not in staff_body
 
 
 def test_end_of_day_notes_have_their_own_panel(client):
@@ -184,7 +191,9 @@ def test_end_of_day_notes_have_their_own_panel(client):
     notes_panel = body[notes_start:body.index('</section>', notes_start)]
     assert 'action="/cash-up/notes"' in notes_panel
     assert 'name="notes"' in notes_panel
-    assert 'Anything the next shift should know' in notes_panel
+    assert 'placeholder=' not in notes_panel
+    assert '<textarea name="notes" rows="3">' in notes_panel
+    assert '<button class="btn warning" type="submit">Save notes</button>' in notes_panel
 
 
 def test_opening_cash_is_the_previous_days_closing_cash(client, app):
