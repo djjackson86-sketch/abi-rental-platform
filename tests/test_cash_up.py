@@ -1003,3 +1003,113 @@ def test_submit_day_report_failure_does_not_crash_dashboard(client, app, monkeyp
     assert res.status_code == 200
     assert 'Day report could not be sent on Telegram' in body
     assert 'Cash up · Branch 1' in body
+
+
+
+def _seed_service_products(app):
+    with app.app_context():
+        db = get_db()
+        ts = '2026-09-21 08:00'
+        db.execute("INSERT INTO product_groups (name, active, sort_order, created_at, updated_at) VALUES ('Trailers', 1, 1, ?, ?)", (ts, ts))
+        db.execute("INSERT INTO product_groups (name, active, sort_order, created_at, updated_at) VALUES ('Other rental products', 1, 2, ?, ?)", (ts, ts))
+        trailers = db.execute("SELECT id FROM product_groups WHERE name = 'Trailers'").fetchone()['id']
+        other = db.execute("SELECT id FROM product_groups WHERE name = 'Other rental products'").fetchone()['id']
+        rows = [
+            ('Road trailer', 'rental', trailers, 1, 1),
+            ('Branch two trailer', 'rental', trailers, 1, 2),
+            ('Hidden old trailer', 'rental', trailers, 0, 1),
+            ('Generator rental', 'rental', other, 1, 1),
+            ('Brake service', 'service', None, 1, 1),
+            ('Ratchet sale', 'sale', None, 1, 1),
+        ]
+        ids = {}
+        for name, product_type, group_id, active, branch_id in rows:
+            db.execute(
+                """INSERT INTO products (name, product_type, tracking_method, description, sku, active, public_visible,
+                price_amount, price_unit, security_deposit, hourly_extra_rate, product_group_id, quantity, branch_id, created_at)
+                VALUES (?, ?, 'bulk', '', ?, ?, 1, 100, 'day', 0, 0, ?, 1, ?, ?)""",
+                (name, product_type, name.upper().replace(' ', '-'), active, group_id, branch_id, ts),
+            )
+            ids[name] = db.execute("SELECT id FROM products WHERE name = ?", (name,)).fetchone()['id']
+        db.commit()
+        return ids
+
+
+def test_trailer_service_history_table_exists(app):
+    with app.app_context():
+        cols = {row['name'] for row in get_db().execute('PRAGMA table_info(trailer_service_history)').fetchall()}
+    assert {'id', 'product_id', 'service_type', 'custom_description', 'service_date', 'branch_id', 'created_by_user_id', 'created_at'} <= cols
+
+
+def test_dashboard_trailer_service_panel_filters_eligible_products(client, app):
+    ids = _seed_service_products(app)
+    login(client)
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert body.index('<h2>New client interactions</h2>') < body.index('<h2>Trailer service and maintenance</h2>') < body.index('<h2>Cash used</h2>')
+    assert 'action="/cash-up/trailer-service"' in body
+    assert 'Add trailer' in body
+    assert 'Road trailer' in body
+    assert 'Bearing service' in body and 'Custom' in body
+    assert 'Generator rental' not in body
+    assert 'Brake service' not in body
+    assert 'Ratchet sale' not in body
+    assert 'Hidden old trailer' not in body
+
+
+def test_add_trailer_service_saves_and_shows_on_product(client, app):
+    ids = _seed_service_products(app)
+    login(client)
+    body = client.post('/cash-up/trailer-service', data={
+        'day': TODAY,
+        'branch': '1',
+        'product_id': str(ids['Road trailer']),
+        'service_type': 'Bearing service',
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'Trailer service and maintenance saved' in body
+    with app.app_context():
+        row = get_db().execute('SELECT * FROM trailer_service_history WHERE product_id = ?', (ids['Road trailer'],)).fetchone()
+        assert row['service_type'] == 'Bearing service'
+        assert row['service_date'] == TODAY
+        assert row['branch_id'] == 1
+    product_page = client.get(f"/inventory/{ids['Road trailer']}/edit").get_data(as_text=True)
+    assert 'Trailer service and maintenance history' in product_page
+    assert 'Bearing service' in product_page
+    assert TODAY in product_page
+
+
+def test_custom_trailer_service_requires_manual_description(client, app):
+    ids = _seed_service_products(app)
+    login(client)
+    body = client.post('/cash-up/trailer-service', data={
+        'day': TODAY, 'branch': '1', 'product_id': str(ids['Road trailer']), 'service_type': 'Custom', 'custom_description': '  '
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'Enter the custom service or maintenance done' in body
+    body = client.post('/cash-up/trailer-service', data={
+        'day': TODAY, 'branch': '1', 'product_id': str(ids['Road trailer']), 'service_type': 'Custom', 'custom_description': 'Welded jockey wheel bracket'
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'Trailer service and maintenance saved' in body
+    product_page = client.get(f"/inventory/{ids['Road trailer']}/edit").get_data(as_text=True)
+    assert 'Custom — Welded jockey wheel bracket' in product_page
+
+
+def test_trailer_service_rejects_other_groups_and_branch_widening(client, app):
+    ids = _seed_service_products(app)
+    login(client)
+    body = client.post('/cash-up/trailer-service', data={
+        'day': TODAY, 'branch': '1', 'product_id': str(ids['Generator rental']), 'service_type': 'Tyre change'
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'Choose an active rental trailer from inventory' in body
+    with app.app_context():
+        create_additional_user('Depot Two Service', 'staff123', branch_id=2)
+    login(client, name='Depot Two Service', password='staff123')
+    body = client.post('/cash-up/trailer-service', data={
+        'day': TODAY, 'branch': '1', 'product_id': str(ids['Road trailer']), 'service_type': 'Tyre change'
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'Choose an active rental trailer from inventory' in body
+    body = client.post('/cash-up/trailer-service', data={
+        'day': TODAY, 'branch': '1', 'product_id': str(ids['Branch two trailer']), 'service_type': 'Tyre change'
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'Trailer service and maintenance saved' in body
+    with app.app_context():
+        rows = get_db().execute('SELECT product_id, branch_id FROM trailer_service_history').fetchall()
+        assert [(row['product_id'], row['branch_id']) for row in rows] == [(ids['Branch two trailer'], 2)]

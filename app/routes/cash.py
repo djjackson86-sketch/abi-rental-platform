@@ -28,6 +28,7 @@ from app.routes.auth import login_required
 from app.services import cash
 from app.services.pdf_documents import report_pdf_bytes
 from app.services.telegram import _send_document
+from app.services import trailer_service
 
 bp = Blueprint("cash", __name__, url_prefix="/cash-up")
 
@@ -119,6 +120,28 @@ def save_interactions():
         flash(str(exc), "error")
         return redirect(_dashboard_url(branch_id))
     return _done(f"New client interactions saved for {day}", branch_id)
+
+
+@bp.post("/trailer-service")
+@login_required
+def add_trailer_service():
+    """Capture trailer service/maintenance against a rental inventory item."""
+    day = _day_from_request()
+    branch_id = _target_branch()
+    try:
+        cash.guard_writable_day(day)
+        trailer_service.create_service_history(
+            request.form.get("product_id", ""),
+            request.form.get("service_type", ""),
+            request.form.get("custom_description", ""),
+            branch_id=branch_id,
+            user_id=_user_id(),
+            service_date=day,
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(_dashboard_url(branch_id))
+    return _done(f"Trailer service and maintenance saved for {day}", branch_id)
 
 
 @bp.post("/used")

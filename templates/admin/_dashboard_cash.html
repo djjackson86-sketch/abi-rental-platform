@@ -31,6 +31,37 @@
   </section>
 
   <section class="panel">
+    <div class="panel-title"><h2>Trailer service and maintenance</h2></div>
+    <p class="cash-note">Record service or maintenance done on a rental trailer. The history also appears on the product itself.</p>
+    <form method="post" action="{{ url_for('cash.add_trailer_service') }}" class="settings-form trailer-service-form">
+      <input type="hidden" name="day" value="{{ cash_day.day }}">
+      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <div class="form-grid compact">
+        <label class="span-2">Search and select trailer
+          <input list="trailer-service-products" name="product_search" placeholder="Search trailers by name or SKU" autocomplete="off" data-trailer-product-search>
+          <datalist id="trailer-service-products">
+            {% for product in trailer_service_products %}<option value="{{ product.name }}{% if product.sku %} · {{ product.sku }}{% endif %}" data-product-id="{{ product.id }}">{% endfor %}
+          </datalist>
+          <select name="product_id" required data-trailer-product-select>
+            <option value="">Select trailer</option>
+            {% for product in trailer_service_products %}
+            <option value="{{ product.id }}">{{ product.name }}{% if product.sku %} · {{ product.sku }}{% endif %}{% if product.product_group_name %} ({{ product.product_group_name }}){% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Service / maintenance type
+          <select name="service_type" required data-trailer-service-type>
+            <option value="">Choose type</option>
+            {% for service_type in trailer_service_types %}<option value="{{ service_type }}">{{ service_type }}</option>{% endfor %}
+          </select>
+        </label>
+        <label data-trailer-custom-field hidden>Custom service done<input name="custom_description" maxlength="500" placeholder="Describe the service or maintenance"></label>
+      </div>
+      <div class="form-actions"><button class="btn primary" type="submit">Add trailer</button></div>
+    </form>
+  </section>
+
+  <section class="panel">
     <div class="panel-title"><h2>Cash used</h2><span class="pill">{{ cash_day.used_count }} line{% if cash_day.used_count != 1 %}s{% endif %}</span></div>
     {% if cash_day.used_lines %}
     <div class="cash-used-lines">
@@ -147,6 +178,28 @@
     {% endif %}
   </div>
 </section>
+<script>
+(function(){
+  const typeSelect=document.querySelector('[data-trailer-service-type]');
+  const customField=document.querySelector('[data-trailer-custom-field]');
+  const customInput=customField?customField.querySelector('input[name="custom_description"]'):null;
+  const productSearch=document.querySelector('[data-trailer-product-search]');
+  const productSelect=document.querySelector('[data-trailer-product-select]');
+  function syncCustom(){
+    const isCustom=typeSelect&&typeSelect.value==='Custom';
+    if(customField) customField.hidden=!isCustom;
+    if(customInput) customInput.required=!!isCustom;
+  }
+  if(typeSelect){typeSelect.addEventListener('change',syncCustom);syncCustom();}
+  if(productSearch&&productSelect){
+    const products=[...document.querySelectorAll('#trailer-service-products option')];
+    productSearch.addEventListener('change',()=>{
+      const match=products.find(option=>option.value===productSearch.value);
+      if(match&&match.dataset.productId){productSelect.value=match.dataset.productId;}
+    });
+  }
+})();
+</script>
 {% else %}
 <section class="panel"><p class="cash-note">No depot is available to cash up for this sign-in.</p></section>
 {% endif %}

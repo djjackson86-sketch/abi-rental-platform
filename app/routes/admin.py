@@ -11,6 +11,7 @@ from app.services.app_store import list_app_store_items, update_app_store_item, 
 from app.services.access import resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 from app.services.cash import day_summary as cash_day_summary, panel_state as cash_panel_state
+from app.services.trailer_service import TRAILER_SERVICE_TYPES, eligible_trailer_products
 
 bp = Blueprint("admin", __name__)
 
@@ -67,6 +68,8 @@ def dashboard():
         day_metrics=dashboard_day_metrics(branch_id=branch_id),
         cash_panel=cash_panel,
         cash_day=cash_day_summary(branch_id=cash_panel['branch_id']),
+        trailer_service_products=eligible_trailer_products(branch_id=cash_panel['branch_id']),
+        trailer_service_types=TRAILER_SERVICE_TYPES,
         schedule=dashboard_schedule(branch_id=branch_id),
         branches=branches,
         branch_label=branch_label,

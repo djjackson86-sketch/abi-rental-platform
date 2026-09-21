@@ -29,6 +29,7 @@ from app.services.products import (
     update_product,
     update_product_group,
 )
+from app.services.trailer_service import list_service_history, service_history_label
 from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
 from app.services.reports import product_revenue as _product_revenue
@@ -249,6 +250,8 @@ def new():
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
         branch_stock={},
+        service_history=[],
+        service_history_label=service_history_label,
     )
 
 
@@ -284,6 +287,8 @@ def edit(product_id):
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
         branch_stock=product_branch_stock(product_id),
+        service_history=list_service_history(product_id),
+        service_history_label=service_history_label,
     )
 
 

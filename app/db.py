@@ -320,6 +320,17 @@ CREATE TABLE IF NOT EXISTS cash_bank_drops (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS trailer_service_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    service_type TEXT NOT NULL,
+    custom_description TEXT NOT NULL DEFAULT '',
+    service_date TEXT NOT NULL,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
@@ -617,6 +628,22 @@ def run_migrations(db):
         created_at TEXT NOT NULL
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_cash_bank_drops_cash_up ON cash_bank_drops(cash_up_id)")
+
+    # --- Trailer service and maintenance history (additive, ABI-341953013) ----
+    # Dashboard capture for active rental trailers, with each entry visible on the
+    # product itself. Deletes cascade only when a product is permanently removed.
+    db.execute("""CREATE TABLE IF NOT EXISTS trailer_service_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        service_type TEXT NOT NULL,
+        custom_description TEXT NOT NULL DEFAULT '',
+        service_date TEXT NOT NULL,
+        branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_trailer_service_history_product ON trailer_service_history(product_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_trailer_service_history_date ON trailer_service_history(service_date)")
 
 
 def init_db():
