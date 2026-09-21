@@ -1,4 +1,4 @@
-from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, current_app, flash, make_response, redirect, render_template, request, url_for
 import csv
 from io import StringIO
 from pathlib import Path
@@ -35,6 +35,18 @@ EMAIL_LOGO_STATIC_PATH = 'img/sano-trailers-email-logo.jpg'
 bp = Blueprint("documents", __name__, url_prefix="/documents")
 
 EMAIL_DRAFT_DOCUMENT_TYPES = {'invoice', 'quote'}
+
+
+def _prevent_generated_document_cache(response):
+    """Documents are rendered from the current order every request.
+
+    Keep browsers/proxies from reusing an older invoice/quote/PDF after the
+    order's lines have been edited under the same document URL.
+    """
+    response.headers['Cache-Control'] = 'no-store, no-cache, max-age=0, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 def _email_context(document, settings, label=None, number=None):
@@ -166,7 +178,7 @@ def detail(document_id):
     )
     email_signature = render_email_template(settings['invoice_email_signature'], _email_context(document, settings))
     has_rental_items = document_has_rental_items(items)
-    return render_template(
+    return _prevent_generated_document_cache(make_response(render_template(
         "admin/documents/detail.html",
         settings=settings,
         document=document,
@@ -184,7 +196,7 @@ def detail(document_id):
         email_message=email_message,
         email_signature=email_signature,
         email_signature_include_logo=bool(settings['invoice_email_signature_include_logo']),
-    )
+    )))
 
 
 @bp.route("/<int:document_id>/download.pdf")
@@ -195,11 +207,11 @@ def download_pdf(document_id):
         flash("Document not found", "error")
         return redirect(url_for("documents.index"))
     pdf_bytes = document_pdf_bytes(document_id)
-    return Response(
+    return _prevent_generated_document_cache(Response(
         pdf_bytes,
         mimetype="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={document_pdf_filename(document)}"},
-    )
+    ))
 
 
 @bp.post("/orders/<int:order_id>")

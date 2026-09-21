@@ -2919,7 +2919,79 @@ def test_invoice_can_be_saved_as_pdf(client):
     assert download.status_code == 200
     assert download.mimetype == 'application/pdf'
     assert download.headers['Content-Disposition'] == 'attachment; filename=INVOICE-PROFORMA.pdf'
+    assert download.headers['Cache-Control'] == 'no-store, no-cache, max-age=0, must-revalidate'
+    assert download.headers['Pragma'] == 'no-cache'
     assert download.data.startswith(b'%PDF-')
+
+
+def test_draft_documents_show_new_order_items_after_order_edit(client, app):
+    """Existing generated draft docs must render the edited order, not a cached/stale copy."""
+    from werkzeug.datastructures import MultiDict
+
+    login(client)
+    seed_customer_and_product(client)
+    client.post('/inventory/new', data={
+        'name': 'Added Document Item',
+        'sku': 'DOC-ADD',
+        'quantity': '3',
+        'description': 'Item added after documents were created.',
+        'product_type': 'sale',
+        'price_amount': '150',
+        'price_unit': 'each',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+    order_id = create_order_for_status(client, quantity='1')
+
+    document_ids = {}
+    for document_type in ('invoice', 'quote', 'contract'):
+        created = client.post(f'/orders/{order_id}/documents', data={'document_type': document_type}, follow_redirects=True)
+        assert created.status_code == 200
+        with app.app_context():
+            row = get_db().execute(
+                'SELECT id FROM documents WHERE order_id = ? AND document_type = ? ORDER BY id DESC LIMIT 1',
+                (order_id, document_type),
+            ).fetchone()
+            document_ids[document_type] = row['id']
+        assert b'Order Trailer' in created.data
+        assert b'Added Document Item' not in created.data
+
+    edited = client.post(f'/orders/{order_id}/edit', data=MultiDict([
+        ('customer_id', '1'),
+        ('booking_type', 'return'),
+        ('collect_branch_id', '1'),
+        ('return_branch_id', '1'),
+        ('start_date', '2026-07-01'),
+        ('start_time', '09:00'),
+        ('end_date', '2026-07-03'),
+        ('end_time', '15:00'),
+        ('product_id', '1'),
+        ('quantity', '1'),
+        ('product_id', '2'),
+        ('quantity', '2'),
+        ('deposit_option', 'security_deposit'),
+        ('notes', 'Status workload order'),
+    ]), follow_redirects=True)
+    assert edited.status_code == 200
+    assert b'Order saved' in edited.data
+    assert b'Added Document Item' in edited.data
+
+    for document_type, document_id in document_ids.items():
+        detail = client.get(f'/documents/{document_id}')
+        assert detail.status_code == 200
+        assert detail.headers['Cache-Control'] == 'no-store, no-cache, max-age=0, must-revalidate'
+        assert b'Order Trailer' in detail.data
+        assert b'Added Document Item' in detail.data
+        assert b'<td>2</td>' in detail.data
+        assert b'R300.00' in detail.data
+
+        pdf = client.get(f'/documents/{document_id}/download.pdf')
+        assert pdf.status_code == 200
+        assert pdf.headers['Cache-Control'] == 'no-store, no-cache, max-age=0, must-revalidate'
+        assert b'Added Document Item' in pdf.data
+        assert b'R300.00' in pdf.data
 
 
 def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app):
