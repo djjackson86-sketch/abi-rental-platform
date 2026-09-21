@@ -683,7 +683,11 @@ def test_the_pdf_report_renders_the_day_figures(client, app):
     assert res.status_code == 200
     assert res.data.startswith(b'%PDF-')
     assert res.data.rstrip().endswith(b'%%EOF')
-    assert f'dashboard-report-{TODAY}.pdf' in res.headers['Content-Disposition']
+    expected_name = f'Branch 1_Dashboard Report_{TODAY}.pdf'
+    assert res.headers['Content-Disposition'] == (
+        f'attachment; filename="{expected_name}"; '
+        f"filename*=UTF-8''{expected_name.replace(' ', '%20')}"
+    )
     drawn = _drawn_text(res.data)
     for expected in ['Daily dashboard report', 'DASHBOARD', 'CASH UP', 'CASH USED',
                      'CASH DROP OFF (TO BANK)', 'END OF DAY NOTES', 'Diesel', 'R150.50',
@@ -1041,7 +1045,7 @@ def test_submit_day_report_sends_the_existing_pdf_to_telegram(client, app, monke
     body = res.get_data(as_text=True)
     assert res.status_code == 200
     assert 'Day report sent on Telegram for Branch 1' in body
-    assert sent['filename'] == f'dashboard-report-{TODAY}.pdf'
+    assert sent['filename'] == f'Branch 1_Dashboard Report_{TODAY}.pdf'
     assert sent['document_bytes'].startswith(b'%PDF-')
     assert sent['document_bytes'].rstrip().endswith(b'%%EOF')
     assert sent['caption'] == f'Day report — Branch 1 — {TODAY}'
@@ -1198,3 +1202,105 @@ def test_trailer_service_rejects_other_groups_and_branch_widening(client, app):
     with app.app_context():
         rows = get_db().execute('SELECT product_id, branch_id FROM trailer_service_history').fetchall()
         assert [(row['product_id'], row['branch_id']) for row in rows] == [(ids['Branch two trailer'], 2)]
+
+
+# --- Ticket ABI-341953026: day report PDF naming + Previous Orders Balance spacing ---
+
+def test_report_filename_uses_the_depot_name_and_the_business_day():
+    """'"<Branch Name>"_Dashboard Report_"<Date>"', with a filename-safe depot token."""
+    from app.routes import cash as cash_routes
+
+    assert cash_routes._report_filename('Midrand', '2026-09-21', 1) == (
+        'Midrand_Dashboard Report_2026-09-21.pdf')
+    # Characters that are illegal in a filename (or would break the header) are dropped.
+    assert cash_routes._report_filename('Midrand / Depot "A":*?<>|', '2026-09-21', 1) == (
+        'Midrand Depot A_Dashboard Report_2026-09-21.pdf')
+    # Repeated separators collapse instead of leaving a run of spaces.
+    assert cash_routes._report_filename('  Midrand  Depot  ', '2026-09-21', 1) == (
+        'Midrand Depot_Dashboard Report_2026-09-21.pdf')
+    # Nothing usable is left, so the depot id names the file rather than a blank.
+    assert cash_routes._report_filename('///', '2026-09-21', 7) == (
+        'Depot 7_Dashboard Report_2026-09-21.pdf')
+    assert cash_routes._report_filename('', '2026-09-21', None) == (
+        'this depot_Dashboard Report_2026-09-21.pdf')
+    # The day is the same ISO day the CSV export already uses.
+    assert cash_routes._report_filename('Midrand', TODAY, 1) == (
+        f'Midrand_Dashboard Report_{TODAY}.pdf')
+
+
+def test_report_header_quotes_the_filename_and_keeps_an_ascii_fallback():
+    """A space in the name must be inside a quoted value, plus an RFC 5987 fallback."""
+    from app.routes import cash as cash_routes
+
+    header = cash_routes._content_disposition('Branch 1_Dashboard Report_2026-09-21.pdf')
+    assert header == (
+        'attachment; filename="Branch 1_Dashboard Report_2026-09-21.pdf"; '
+        "filename*=UTF-8''Branch%201_Dashboard%20Report_2026-09-21.pdf")
+    # Non-ASCII depot names survive in filename*, with an ASCII-only filename value.
+    header = cash_routes._content_disposition('Depot Café_Dashboard Report_2026-09-21.pdf')
+    assert header == (
+        'attachment; filename="Depot Caf?_Dashboard Report_2026-09-21.pdf"; '
+        "filename*=UTF-8''Depot%20Caf%C3%A9_Dashboard%20Report_2026-09-21.pdf")
+    assert header.count('"') == 2
+
+
+def test_the_day_report_download_is_named_after_the_depot(client, app):
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE branches SET name = ? WHERE id = 1', ('Kwa-Zulu / Depot "A"',))
+        db.commit()
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1)
+    login(client)
+    res = client.get('/cash-up/report.pdf?branch=1')
+    assert res.status_code == 200
+    assert res.data.startswith(b'%PDF-')
+    name = f'Kwa-Zulu Depot A_Dashboard Report_{TODAY}.pdf'
+    assert res.headers['Content-Disposition'] == (
+        f'attachment; filename="{name}"; '
+        f"filename*=UTF-8''{name.replace(' ', '%20')}")
+    # The depot name still prints inside the report itself, unchanged.
+    assert 'Depot: Kwa-Zulu / Depot "A"' in ' '.join(_drawn_text(res.data))
+
+
+def test_the_telegram_copy_uses_the_same_filename_and_caption(client, app, monkeypatch):
+    sent = {}
+
+    def fake_send(document_bytes, filename, caption=''):
+        sent.update(document_bytes=document_bytes, filename=filename, caption=caption)
+        return {'ok': True, 'sent': True, 'status': 200}
+
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', fake_send)
+    with app.app_context():
+        db = get_db()
+        db.execute('UPDATE branches SET name = ? WHERE id = 1', ('Midrand / Depot',))
+        db.commit()
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1)
+    login(client)
+    download = client.get('/cash-up/report.pdf?branch=1')
+    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '500'},
+                follow_redirects=True)
+    body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'},
+                       follow_redirects=True).get_data(as_text=True)
+    assert 'Day report sent on Telegram for Midrand / Depot' in body
+    # The download and the Telegram copy carry the same depot/day name.
+    name = f'Midrand Depot_Dashboard Report_{TODAY}.pdf'
+    assert sent['filename'] == name
+    assert f'filename="{name}"' in download.headers['Content-Disposition']
+    assert sent['caption'] == f'Day report — Midrand / Depot — {TODAY}'
+    assert sent['document_bytes'].startswith(b'%PDF-')
+    assert sent['document_bytes'].rstrip().endswith(b'%%EOF')
+
+
+def test_previous_balance_label_and_value_are_not_jammed_together(client):
+    """The card renders as one flex row with a gap, so the text is never run together."""
+    login(client)
+    client.post('/customers/new', data={'customer_type': 'individual', 'name': 'Balance Test'},
+                follow_redirects=True)
+    body = client.get('/orders/new?customer_id=1').get_data(as_text=True)
+    assert 'Previous Orders Balance' in body
+    # A real space in the markup (so the text is separated even without CSS) ...
+    assert re.search(
+        r'<span>Previous Orders Balance</span>\s+<strong id="previous-balance-value"', body)
+    # ... plus the layout rule that keeps the label and the value apart on screen.
+    assert '.previous-balance-card{display:flex;align-items:baseline;gap:8px' in body

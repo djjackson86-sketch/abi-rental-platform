@@ -20,7 +20,9 @@ selector, and every write form carries the resolved depot in a hidden ``branch``
 field.
 """
 import csv
+import re
 from io import StringIO
+from urllib.parse import quote
 
 from flask import Blueprint, Response, flash, redirect, request, session, url_for
 
@@ -238,6 +240,39 @@ def _report_pdf_bytes(report):
     ))
 
 
+# Characters that are illegal in a Windows/macOS filename (or would break the
+# Content-Disposition header) plus control characters.
+_UNSAFE_FILENAME_CHARS = re.compile(r'["/\\:*?<>|\x00-\x1f]+')
+
+
+def _filename_token(value):
+    """Collapse a depot name into a header/upload-safe filename part."""
+    token = _UNSAFE_FILENAME_CHARS.sub(" ", str(value or ""))
+    return " ".join(token.split())
+
+
+def _report_filename(branch_name, day, branch_id=None):
+    """``"<Depot>_Dashboard Report_<date>.pdf"`` for the download and the Telegram copy.
+
+    ``branch_name`` already falls back to ``this depot`` in ``cash.day_summary``,
+    so an unnamed depot is named by its id instead of shipping a placeholder.
+    """
+    token = _filename_token(branch_name)
+    if not token or token.lower() == "this depot":
+        token = _filename_token(f"Depot {branch_id}") if branch_id else token or "this depot"
+    return f"{token}_Dashboard Report_{day}.pdf"
+
+
+def _content_disposition(filename, disposition="attachment"):
+    """Quote the filename (it contains spaces) with an RFC 5987 UTF-8 fallback.
+
+    An unquoted value with spaces would truncate the name at the first space in
+    some clients, and a non-ASCII depot name needs the ``filename*`` form.
+    """
+    ascii_name = filename.encode("ascii", "replace").decode("ascii")
+    return f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
 @bp.get("/report.pdf")
 @login_required
 def report_pdf():
@@ -247,11 +282,14 @@ def report_pdf():
     layout is a branded one-pager (logo, cards, "Prepared by: <user>").
     """
     report = _report()
-    day = report["cash"]["day"]
+    cash_summary = report["cash"]
+    filename = _report_filename(
+        cash_summary["branch_name"], cash_summary["day"], cash_summary["branch_id"]
+    )
     return Response(
         _report_pdf_bytes(report),
         mimetype="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=dashboard-report-{day}.pdf"},
+        headers={"Content-Disposition": _content_disposition(filename)},
     )
 
 
@@ -267,7 +305,7 @@ def submit_report_telegram():
     if not cash_summary.get("cashed_up"):
         flash("Cash up amount must be filled before submitting the day report", "error")
         return redirect(_dashboard_url(branch_id))
-    filename = f"dashboard-report-{day}.pdf"
+    filename = _report_filename(branch_name, day, cash_summary.get("branch_id"))
     caption = f"Day report — {branch_name} — {day}"
     result = _send_document(_report_pdf_bytes(report), filename, caption=caption)
     if result.get("sent"):

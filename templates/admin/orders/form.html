@@ -13,7 +13,8 @@
         <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') or (selected_customer_summary.display if selected_customer_summary else '') }}">
       </label>
       {% set balance = (customer_summary.previous_orders_balance if customer_summary else (selected_customer_summary.previous_orders_balance if selected_customer_summary else 0)) if (customer_summary is defined) else (selected_customer_summary.previous_orders_balance if selected_customer_summary else 0) %}
-      <div class="stat-card previous-balance-card" id="previous-balance-card" aria-live="polite"><span>Previous Orders Balance</span><strong id="previous-balance-value" class="{{ 'balance-credit' if balance < 0 else ('balance-owing' if balance > 0 else 'balance-zero') }}">R{{ '%.2f'|format(balance) }}</strong></div></div>
+      <div class="stat-card previous-balance-card" id="previous-balance-card" aria-live="polite"><span>Previous Orders Balance</span>
+        <strong id="previous-balance-value" class="{{ 'balance-credit' if balance < 0 else ('balance-owing' if balance > 0 else 'balance-zero') }}">R{{ '%.2f'|format(balance) }}</strong></div></div>
       {% set customer_summary = order_form.get('customer_summary') if editing else selected_customer_summary %}
       {% set customer_values = customer_values or (customer_summary.form if customer_summary else {}) %}
       {% set card_inactive = '' if customer_summary else 'disabled' %}
@@ -165,6 +166,7 @@
       .order-lines-wrap .enhanced-line.can-remove .line-remove-row{display:inline-flex}
       .order-lines-wrap .add-line-help{margin:10px 2px 0}
       .order-lines-wrap .add-line-help .btn{min-height:36px;height:36px;padding:6px 14px;box-shadow:none}
+      .previous-balance-card{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal}
       .previous-balance-card strong.balance-zero{color:#111827}.previous-balance-card strong.balance-credit{color:#047857}.previous-balance-card strong.balance-owing{color:#b42318}
       .order-lines-wrap #order-line-template{display:none}
     </style>
