@@ -10,7 +10,7 @@ from app.services.reports import customer_summary, dashboard_day_metrics, dashbo
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.access import resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
-from app.services.cash import day_summary as cash_day_summary, panel_state as cash_panel_state
+from app.services.cash import aggregate_day_summary as cash_aggregate_day_summary, cash_branches, day_summary as cash_day_summary, panel_state as cash_panel_state
 from app.services.trailer_service import TRAILER_SERVICE_TYPES, eligible_trailer_products
 
 bp = Blueprint("admin", __name__)
@@ -53,22 +53,27 @@ def dashboard():
     metrics = dashboard_period_metrics(
         start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
     )
-    # Cash up is per depot per day. An explicit ?cash_branch= still wins, but
-    # when the top dashboard branch filter is narrowed, the cash panel follows
-    # that same depot by default. The cash service validates the id against the
-    # session scope, so this can never widen access.
-    cash_requested = request.args.get('cash_branch', '')
-    if not cash_requested and branch_id:
-        cash_requested = str(branch_id)
-    cash_panel = cash_panel_state(cash_requested)
+    # The top dashboard Branch filter is the single source of truth for cash
+    # figures. A selected branch shows that branch's editable cash-up drawer;
+    # All branches shows an aggregated, read-only view so one save never
+    # pretends to update several depots at once.
+    cash_branch_id = branch_id or (branch_scope if isinstance(branch_scope, int) else None)
+    if cash_branch_id:
+        cash_panel = cash_panel_state(str(cash_branch_id))
+        cash_day = cash_day_summary(branch_id=cash_panel['branch_id'])
+        trailer_products = eligible_trailer_products(branch_id=cash_panel['branch_id'])
+    else:
+        cash_panel = {'branches': cash_branches(), 'branch_id': None, 'branch_name': 'All branches'}
+        cash_day = cash_aggregate_day_summary()
+        trailer_products = []
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
         metrics=metrics,
         day_metrics=dashboard_day_metrics(branch_id=branch_id),
         cash_panel=cash_panel,
-        cash_day=cash_day_summary(branch_id=cash_panel['branch_id']),
-        trailer_service_products=eligible_trailer_products(branch_id=cash_panel['branch_id']),
+        cash_day=cash_day,
+        trailer_service_products=trailer_products,
         trailer_service_types=TRAILER_SERVICE_TYPES,
         schedule=dashboard_schedule(branch_id=branch_id),
         branches=branches,

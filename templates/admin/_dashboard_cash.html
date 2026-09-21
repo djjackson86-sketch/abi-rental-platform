@@ -1,9 +1,9 @@
-{% if cash_day and cash_day.branch_id %}
+{% if cash_day and (cash_day.branch_id or cash_day.aggregate) %}
 <section class="metrics dashboard-metrics dashboard-day-metrics">
   <div class="metric-card">
     <small>Opening cash</small>
     <b>R{{ '%.2f'|format(cash_day.opening) }}</b>
-    <span>{% if cash_day.opening_from %}Prev. closing {{ cash_day.opening_from }}{% else %}No earlier closing{% endif %}</span>
+    <span>{% if cash_day.aggregate %}Summed across {{ cash_day.branch_count }} depots{% elif cash_day.opening_from %}Prev. closing {{ cash_day.opening_from }}{% else %}No earlier closing{% endif %}</span>
   </div>
   <div class="metric-card"><small>Cash received</small><b>R{{ '%.2f'|format(cash_day.cash_received) }}</b><span>{{ cash_day.branch_name }} · {{ cash_day.day }}</span></div>
   <div class="metric-card"><small>Cash used</small><b>R{{ '%.2f'|format(cash_day.used_total) }}</b><span>{{ cash_day.used_count }} line{% if cash_day.used_count != 1 %}s{% endif %}</span></div>
@@ -15,6 +15,16 @@
 <div class="two-col">
   <section class="panel">
     <div class="panel-title"><h2>New client interactions</h2></div>
+    {% if cash_day.aggregate %}
+    <div class="metrics dashboard-metrics dashboard-day-metrics">
+      <div class="metric-card"><small>Calls</small><b>{{ cash_day.interactions.calls }}</b><span>All selected depots</span></div>
+      <div class="metric-card"><small>WhatsApp</small><b>{{ cash_day.interactions.whatsapp }}</b><span>All selected depots</span></div>
+      <div class="metric-card"><small>Emails</small><b>{{ cash_day.interactions.emails }}</b><span>All selected depots</span></div>
+      <div class="metric-card"><small>Walk-in</small><b>{{ cash_day.interactions.walk_in }}</b><span>All selected depots</span></div>
+    </div>
+    {% if cash_day.interactions.notes %}<p class="cash-note">{{ cash_day.interactions.notes }}</p>{% endif %}
+    <p class="cash-note">Select a branch in the top Branch filter to edit client interactions.</p>
+    {% else %}
     <form method="post" action="{{ url_for('cash.save_interactions') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
@@ -27,11 +37,15 @@
       <label>Notes for new client interactions<textarea name="interaction_notes" rows="3" placeholder="Notes for calls, WhatsApp, emails or walk-ins">{{ cash_day.interactions.notes }}</textarea></label>
       <div class="form-actions"><button class="btn primary" type="submit">Save client interactions</button></div>
     </form>
+    {% endif %}
   </section>
 
   <section class="panel">
     <div class="panel-title"><h2>Trailer service and maintenance</h2></div>
     <p class="cash-note">Record service or maintenance done on a rental trailer. The history also appears on the product itself.</p>
+    {% if cash_day.aggregate %}
+    <p class="cash-note">Select a branch in the top Branch filter to add trailer service or maintenance.</p>
+    {% else %}
     <form method="post" action="{{ url_for('cash.add_trailer_service') }}" class="settings-form trailer-service-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
@@ -58,6 +72,7 @@
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Add trailer</button></div>
     </form>
+    {% endif %}
   </section>
 
   <section class="panel">
@@ -67,11 +82,11 @@
       {% for line in cash_day.used_lines %}
       <div class="cash-used-line">
         <span>{{ line.description }}<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ display_local_datetime(line.created_at) }}{% endif %}</small></span>
-        <form method="post" action="{{ url_for('cash.delete_used', entry_id=line.id) }}">
+        {% if not cash_day.aggregate %}<form method="post" action="{{ url_for('cash.delete_used', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
           <button class="btn ghost" type="submit">Delete</button>
-        </form>
+        </form>{% endif %}
       </div>
       {% endfor %}
     </div>
@@ -79,6 +94,9 @@
     {% else %}
     <div class="empty-results"><strong>No results</strong><span>No cash used recorded for {{ cash_day.day }}.</span></div>
     {% endif %}
+    {% if cash_day.aggregate %}
+    <p class="cash-note">Select a branch in the top Branch filter to add cash used.</p>
+    {% else %}
     <form method="post" action="{{ url_for('cash.add_used') }}" class="payment-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
@@ -88,6 +106,7 @@
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Add cash used</button></div>
     </form>
+    {% endif %}
   </section>
 
   <section class="panel">
@@ -97,12 +116,12 @@
     <div class="cash-used-lines">
       {% for line in cash_day.drop_lines %}
       <div class="cash-used-line">
-        <span>Dropped off at the bank<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ display_local_datetime(line.created_at) }}{% endif %}</small></span>
-        <form method="post" action="{{ url_for('cash.delete_bank_drop', entry_id=line.id) }}">
+        <span>{% if line.branch_name %}{{ line.branch_name }}: {% endif %}Dropped off at the bank<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ display_local_datetime(line.created_at) }}{% endif %}</small></span>
+        {% if not cash_day.aggregate %}<form method="post" action="{{ url_for('cash.delete_bank_drop', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
           <button class="btn ghost" type="submit">Delete</button>
-        </form>
+        </form>{% endif %}
       </div>
       {% endfor %}
     </div>
@@ -110,6 +129,9 @@
     {% else %}
     <div class="empty-results"><strong>No results</strong><span>No cash dropped off at the bank for {{ cash_day.day }}.</span></div>
     {% endif %}
+    {% if cash_day.aggregate %}
+    <p class="cash-note">Select a branch in the top Branch filter to add a bank drop off.</p>
+    {% else %}
     <form method="post" action="{{ url_for('cash.add_bank_drop') }}" class="payment-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
@@ -118,6 +140,7 @@
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Add bank drop off</button></div>
     </form>
+    {% endif %}
   </section>
 
   <section class="panel">
@@ -125,20 +148,10 @@
       <h2>Cash up · {{ cash_day.branch_name }}</h2>
       <span class="pill">{% if cash_day.cashed_up %}Cashed up{% else %}Not cashed up{% endif %}</span>
     </div>
-    {% if cash_panel.branches|length > 1 %}
-    <form class="cash-branch-picker" method="get" action="{{ url_for('admin.dashboard') }}">
-      {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
-      <label>Depot
-        <select name="cash_branch" onchange="this.form.submit()">
-          {% for branch in cash_panel.branches %}
-          <option value="{{ branch.id }}" {% if branch.id == cash_panel.branch_id %}selected{% endif %}>{{ branch.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    </form>
+    {% if cash_day.aggregate %}
+    <p class="cash-note">All branch cash-up figures are read-only totals. Select a branch in the top Branch filter to enter counted cash.</p>
     {% else %}
     <p class="cash-note">Depot: {{ cash_day.branch_name }}</p>
-    {% endif %}
     <form method="post" action="{{ url_for('cash.save') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
@@ -150,19 +163,26 @@
         <button class="btn primary" type="submit">Save cash up</button>
       </div>
     </form>
+    {% endif %}
   </section>
 
   <section class="panel">
     <div class="panel-title"><h2>End of day notes</h2></div>
+    {% if cash_day.aggregate %}
+    {% if cash_day.notes %}<p class="cash-note">{{ cash_day.notes }}</p>{% else %}<div class="empty-results"><strong>No results</strong><span>No end of day notes recorded for {{ cash_day.day }}.</span></div>{% endif %}
+    <p class="cash-note">Select a branch in the top Branch filter to edit end of day notes.</p>
+    {% else %}
     <form method="post" action="{{ url_for('cash.save_notes') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
       <label>Notes<textarea name="notes" rows="3">{{ cash_day.notes }}</textarea></label>
       <div class="form-actions"><button class="btn primary" type="submit">Save notes</button></div>
     </form>
+    {% endif %}
   </section>
 </div>
 
+{% if not cash_day.aggregate %}
 <section class="panel dashboard-report-actions">
   <div class="panel-title"><h2>Day report actions</h2></div>
   <div class="form-actions">
@@ -177,6 +197,12 @@
     {% endif %}
   </div>
 </section>
+{% else %}
+<section class="panel dashboard-report-actions">
+  <div class="panel-title"><h2>Day report actions</h2></div>
+  <p class="cash-note">Select a branch in the top Branch filter to submit or download a branch day report.</p>
+</section>
+{% endif %}
 <script>
 (function(){
   const typeSelect=document.querySelector('[data-trailer-service-type]');

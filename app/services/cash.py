@@ -149,8 +149,8 @@ def branch_for_request(requested=''):
     """The depot a cash-up action applies to.
 
     A requested id is honoured only when it is one of the depots this session may
-    already reach, so a crafted ``?cash_branch=`` or posted ``branch`` can narrow
-    a cash up but never widen one. Anything else falls back to the depot the
+    already reach, so a crafted posted ``branch`` can narrow a cash up but never
+    widen one. Anything else falls back to the depot the
     sign-in is acting as, then to the first depot that is allowed.
     """
     allowed = [branch['id'] for branch in cash_branches()]
@@ -367,6 +367,89 @@ def day_summary(day=None, branch_id=None):
             'notes': str(_value(day_row, 'interaction_notes') or '') if day_row is not None else '',
         },
         'has_day_row': day_row is not None,
+    }
+
+
+def aggregate_day_summary(day=None):
+    """Read-only cash dashboard totals for every depot the session may see.
+
+    Cash-up writes remain per depot. When the dashboard's top Branch filter is
+    "All branches", this helper adds the same per-depot figures together but
+    marks the result as non-writable so templates/routes do not offer a fake
+    multi-depot save.
+    """
+    day = parse_business_day(day)
+    branches = cash_branches()
+    summaries = [day_summary(day=day, branch_id=branch['id']) for branch in branches]
+    used_lines = []
+    drop_lines = []
+    interaction_notes = []
+    notes = []
+    counted_total = 0.0
+    counted_count = 0
+    for summary in summaries:
+        for line in summary['used_lines']:
+            item = dict(line)
+            item['description'] = f"{summary['branch_name']}: {item['description']}"
+            used_lines.append(item)
+        for line in summary['drop_lines']:
+            item = dict(line)
+            item['branch_name'] = summary['branch_name']
+            drop_lines.append(item)
+        if summary.get('cashed_up'):
+            counted_total += float(summary.get('counted') or 0)
+            counted_count += 1
+        if summary.get('notes'):
+            notes.append(f"{summary['branch_name']}: {summary['notes']}")
+        if summary.get('interactions', {}).get('notes'):
+            interaction_notes.append(f"{summary['branch_name']}: {summary['interactions']['notes']}")
+
+    opening = money(sum(summary['opening'] for summary in summaries))
+    received = money(sum(summary['cash_received'] for summary in summaries))
+    used_total = money(sum(summary['used_total'] for summary in summaries))
+    drop_total = money(sum(summary['drop_total'] for summary in summaries))
+    deposit_refund_total = money(sum(summary.get('deposit_refund_total', 0) for summary in summaries))
+    expected = money(opening + received - used_total - drop_total - deposit_refund_total)
+    cashed_up = counted_count > 0
+    counted_value = money(counted_total) if cashed_up else None
+    variance = money(counted_total - expected) if cashed_up else None
+    all_cashed_up = bool(summaries) and counted_count == len(summaries)
+    if cashed_up and not all_cashed_up:
+        variance_label = f"Partial: {counted_count} of {len(summaries)} depots cashed up"
+    else:
+        variance_label = _variance_label(variance, cashed_up)
+    return {
+        'day': day,
+        'branch_id': None,
+        'branch_name': 'All branches',
+        'branch_count': len(branches),
+        'aggregate': True,
+        'writable': False,
+        'opening': opening,
+        'opening_from': 'summed per depot' if branches else '',
+        'cash_received': received,
+        'used_lines': used_lines,
+        'used_count': sum(summary['used_count'] for summary in summaries),
+        'used_total': used_total,
+        'drop_lines': drop_lines,
+        'drop_count': sum(summary['drop_count'] for summary in summaries),
+        'drop_total': drop_total,
+        'deposit_refund_total': deposit_refund_total,
+        'counted': counted_value,
+        'cashed_up': cashed_up,
+        'expected': expected,
+        'variance': variance,
+        'variance_display': _variance_text(variance, cashed_up),
+        'variance_label': variance_label,
+        'notes': '\n'.join(notes),
+        'interactions': {
+            'calls': sum(summary['interactions']['calls'] for summary in summaries),
+            'whatsapp': sum(summary['interactions']['whatsapp'] for summary in summaries),
+            'emails': sum(summary['interactions']['emails'] for summary in summaries),
+            'walk_in': sum(summary['interactions']['walk_in'] for summary in summaries),
+            'notes': '\n'.join(interaction_notes),
+        },
+        'has_day_row': any(summary.get('has_day_row') for summary in summaries),
     }
 
 

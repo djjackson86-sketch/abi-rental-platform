@@ -145,19 +145,18 @@ def test_dashboard_shows_the_opening_cash_card_and_the_day_end_panel(client):
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'Opening cash' in body
     assert 'Cash up · end of day' in body
-    assert 'Cash up · Branch 1' in body
-    # Every part the ticket asked for is on the dashboard.
+    assert 'Cash up · All branches' in body
+    # All-branch cash is a read-only total until a branch is selected.
     assert 'End of day notes' in body
-    assert 'What the cash was used for' in body
-    assert 'Download day report (PDF)' in body
-    # First-ever day: nothing has been cashed up yet.
-    assert 'No earlier closing' in body
+    assert 'Select a branch in the top Branch filter to enter counted cash.' in body
+    assert 'name="cash_branch"' not in body
+    assert 'Download day report (PDF)' not in body
     assert 'Not cashed up yet' in body
 
 
 def test_dashboard_places_cash_up_below_cash_drop_off(client):
     login(client)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     drop_panel_start = body.index('<h2>Cash drop off (to bank)</h2>')
     cash_up_panel_start = body.index('<h2>Cash up · Branch 1</h2>')
     assert drop_panel_start < cash_up_panel_start
@@ -182,7 +181,7 @@ def test_dashboard_removes_cash_up_explanation_for_all_users(client, app):
 
 def test_end_of_day_notes_have_their_own_panel(client):
     login(client)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     cash_up_start = body.index('<h2>Cash up · Branch 1</h2>')
     notes_start = body.index('<h2>End of day notes</h2>')
     next_section_after_cash_up = body.index('</section>', cash_up_start)
@@ -209,7 +208,7 @@ def test_opening_cash_is_the_previous_days_closing_cash(client, app):
     assert _summary(app, day=YESTERDAY, branch_id=1)['counted'] == 1000.0
     assert _summary(app, day=TODAY, branch_id=1)['cashed_up'] is False
     # The card itself follows the previous closing.
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert 'Prev. closing 2026-09-12' in body
     assert 'R1000.00' in body
 
@@ -231,7 +230,7 @@ def test_expected_cash_and_variance_arithmetic(client, app):
     assert summary['variance'] == 50.50
     assert summary['variance_display'] == '+R50.50'
     assert summary['variance_label'] == 'Over by R50.50'
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert '+R50.50' in body and 'Over by R50.50' in body
     assert 'R349.50' in body and 'R500.00' in body and 'R150.50' in body
 
@@ -245,7 +244,7 @@ def test_a_short_drawer_is_reported_as_short(client, app):
     assert summary['variance'] == -10.0
     assert summary['variance_display'] == '-R10.00'
     assert summary['variance_label'] == 'Short by R10.00'
-    assert 'Short by R10.00' in client.get('/dashboard').get_data(as_text=True)
+    assert 'Short by R10.00' in client.get('/dashboard?branch=1').get_data(as_text=True)
 
 
 def test_cash_up_is_one_row_per_depot_per_day(client, app):
@@ -307,21 +306,21 @@ def test_cash_used_lines_can_be_added_and_removed(client, app):
                 follow_redirects=True)
     client.post('/cash-up/used', data={'day': '', 'amount': '49.50', 'description': 'Cleaning supplies'},
                 follow_redirects=True)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert 'Diesel' in body and 'Cleaning supplies' in body
     assert 'R200.00' in body, 'the two lines total R200.00'
     entry_id = _used_rows(app)[0]['id']
     client.post(f'/cash-up/used/{entry_id}/delete', data={'day': ''}, follow_redirects=True)
     remaining = _used_rows(app)
     assert [row['description'] for row in remaining] == ['Cleaning supplies']
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert '>Cleaning supplies<' in body
     assert '>Diesel<' not in body, 'the removed line is gone from the panel'
 
 
 def test_new_client_interactions_render_defaults_save_and_reach_reports(client, app):
     login(client)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert 'New client interactions' in body
     assert body.count('<h2>New client interactions</h2>') == 1
     for expected in [
@@ -401,7 +400,7 @@ def test_new_client_interactions_are_scoped_to_the_acting_depot(client, app):
         'interaction_whatsapp': '1', 'interaction_emails': '1', 'interaction_walk_in': '1',
         'interaction_notes': 'Depot two own walk-in.',
     }, follow_redirects=True).get_data(as_text=True)
-    assert 'cash_branch=2' in body or 'Cash up · Branch 2' in body
+    assert 'Cash up · Branch 2' in body
     rows = {row['branch_id']: row for row in _cash_rows(app)}
     assert rows[1]['interaction_calls'] == 9
     assert rows[2]['interaction_calls'] == 2
@@ -809,12 +808,19 @@ def test_the_cash_panel_renders_with_libsql_shaped_rows(client, app, monkeypatch
     assert 'built-in method' not in body
 
 
-def test_the_depot_chooser_appears_only_for_a_multi_depot_sign_in(client, app):
+def test_top_branch_filter_is_the_only_dashboard_cash_branch_selector(client, app):
     login(client)
     body = client.get('/dashboard').get_data(as_text=True)
-    assert 'name="cash_branch"' in body, 'an all-branch viewer picks which drawer to cash up'
-    assert body.count('name="cash_branch"') == 1, 'a hidden duplicate would win over the picker'
-    assert 'name="branch"' in body, 'each write form must carry the chosen depot'
+    assert 'name="cash_branch"' not in body
+    assert body.count('name="branch"') == 1, 'the top Branch filter is the only visible branch selector'
+    assert 'Cash up · All branches' in body
+    assert 'Select a branch in the top Branch filter to enter counted cash.' in body
+    assert 'action="/cash-up"' not in body, 'all-branch cash totals must stay read-only'
+
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
+    assert 'name="cash_branch"' not in body
+    assert 'Cash up · Branch 1' in body
+    assert 'name="branch" value="1"' in body, 'branch-specific write forms carry the selected branch'
 
     with app.app_context():
         create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
@@ -828,13 +834,13 @@ def test_a_chosen_depot_is_the_one_cashed_up(client, app):
     _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1, number='ORD-90001')
     _seed_payment(app, 700.0, method='cash', day=TODAY, branch_id=2, number='ORD-90002')
     login(client)
-    body = client.get('/dashboard?cash_branch=2').get_data(as_text=True)
+    body = client.get('/dashboard?branch=2').get_data(as_text=True)
     assert 'Cash up · Branch 2' in body
     assert re.search(r'Cash received</small>\s*<b>R700\.00</b>', body), 'depot 2 cash only'
     # The chosen depot is what the form writes to, and the reply keeps showing it.
     res = client.post('/cash-up', data={'day': '', 'branch': '2', 'counted_cash': '700.00'})
     assert res.status_code == 302
-    assert 'cash_branch=2' in res.headers['Location'], res.headers['Location']
+    assert 'branch=2' in res.headers['Location'], res.headers['Location']
     rows = {row['branch_id']: row for row in _cash_rows(app)}
     assert rows[2]['counted_cash'] == 700.0
     assert 1 not in rows, 'nothing was written for depot 1'
@@ -842,6 +848,31 @@ def test_a_chosen_depot_is_the_one_cashed_up(client, app):
     csv_body = client.get('/cash-up/export.csv?branch=2').get_data(as_text=True)
     assert 'Depot,Branch 2' in csv_body
     assert 'Cash received for the day,R700.00' in csv_body
+
+
+def test_all_branch_dashboard_cash_totals_are_aggregated_and_read_only(client, app):
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1, number='ORD-90001')
+    _seed_payment(app, 700.0, method='cash', day=TODAY, branch_id=2, number='ORD-90002')
+    login(client)
+    client.post('/cash-up/used', data={'day': TODAY, 'branch': '1', 'amount': '50', 'description': 'Depot one fuel'}, follow_redirects=True)
+    client.post('/cash-up/used', data={'day': TODAY, 'branch': '2', 'amount': '25', 'description': 'Depot two toll'}, follow_redirects=True)
+
+    body = client.get('/dashboard').get_data(as_text=True)
+    assert 'Cash up · All branches' in body
+    assert 'name="cash_branch"' not in body
+    assert 'action="/cash-up"' not in body
+    assert 'Submit day report' not in body
+    assert 'Download day report (PDF)' not in body
+    assert re.search(r'Cash received</small>\s*<b>R1200\.00</b>', body), 'all branch cash is summed'
+    assert re.search(r'Cash used</small>\s*<b>R75\.00</b>', body), 'all branch cash-used lines are summed'
+    assert 'Branch 1: Depot one fuel' in body
+    assert 'Branch 2: Depot two toll' in body
+    assert 'Select a branch in the top Branch filter to enter counted cash.' in body
+
+    branch_body = client.get('/dashboard?branch=2').get_data(as_text=True)
+    assert 'Cash up · Branch 2' in branch_body
+    assert re.search(r'Cash received</small>\s*<b>R700\.00</b>', branch_body)
+    assert 'action="/cash-up"' in branch_body
 
 
 def test_dashboard_branch_filter_defaults_the_cash_panel_to_the_same_depot(client, app):
@@ -854,14 +885,14 @@ def test_dashboard_branch_filter_defaults_the_cash_panel_to_the_same_depot(clien
     assert 'name="branch" value="2"' in body, 'cash write forms carry the same depot'
 
 
-def test_explicit_cash_branch_still_overrides_the_top_dashboard_branch(client, app):
+def test_legacy_cash_branch_query_no_longer_overrides_the_top_dashboard_branch(client, app):
     _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1, number='ORD-90001')
     _seed_payment(app, 700.0, method='cash', day=TODAY, branch_id=2, number='ORD-90002')
     login(client)
     body = client.get('/dashboard?branch=2&cash_branch=1').get_data(as_text=True)
-    assert 'Cash up · Branch 1' in body
-    assert re.search(r'Cash received</small>\s*<b>R500\.00</b>', body), 'explicit cash_branch wins'
-    assert 'name="branch" value="1"' in body, 'cash write forms carry the explicit depot'
+    assert 'Cash up · Branch 2' in body
+    assert re.search(r'Cash received</small>\s*<b>R700\.00</b>', body), 'top branch drives cash panel'
+    assert 'name="branch" value="2"' in body, 'cash write forms carry the top-filter depot'
 
 
 def test_a_crafted_depot_can_never_widen_a_cash_up(client, app):
@@ -873,7 +904,7 @@ def test_a_crafted_depot_can_never_widen_a_cash_up(client, app):
     login(client, name='Depot Two Clerk', password='staff123')
     # Their own depot renders even when the query string asks for another one,
     # and a forged depot 1 post is ignored rather than honoured.
-    body = client.get('/dashboard?cash_branch=1').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert 'Cash up · Branch 2' in body
     assert 'name="cash_branch"' not in body, 'no depot chooser for a pinned account'
     client.post('/cash-up', data={'day': '', 'branch': '1', 'counted_cash': '999.00'},
@@ -908,7 +939,7 @@ def test_branch_for_request_resolves_inside_the_session_scope(app):
 
 def test_dashboard_has_submit_day_report_button(client):
     login(client)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert 'Submit day report' in body
     assert 'id="submit-day-report-form" method="post" action="/cash-up/report/telegram"' in body
     assert '<button class="btn warning dashboard-report-action" type="submit">Submit day report</button>' in body
@@ -917,7 +948,7 @@ def test_dashboard_has_submit_day_report_button(client):
 
 def test_dashboard_download_report_buttons_are_main_profile_only(client, app):
     login(client)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert 'Download day report (PDF)' in body
     assert 'Download CSV' in body
     assert 'Submit day report' in body
@@ -986,7 +1017,7 @@ def test_submit_day_report_cannot_widen_a_branch_limited_account(client, app, mo
     client.post('/cash-up', data={'day': TODAY, 'branch': '2', 'counted_cash': '0'}, follow_redirects=True)
     res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=False)
     assert res.status_code == 302
-    assert 'cash_branch=2' in res.headers['Location']
+    assert 'branch=2' in res.headers['Location']
     assert sent['caption'] == f'Day report — Branch 2 — {TODAY}'
 
 
@@ -1053,7 +1084,7 @@ def test_trailer_service_history_table_exists(app):
 def test_dashboard_trailer_service_panel_filters_eligible_products(client, app):
     ids = _seed_service_products(app)
     login(client)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert body.index('<h2>New client interactions</h2>') < body.index('<h2>Trailer service and maintenance</h2>') < body.index('<h2>Cash used</h2>')
     assert 'action="/cash-up/trailer-service"' in body
     assert 'Add trailer' in body

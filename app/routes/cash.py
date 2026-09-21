@@ -15,9 +15,9 @@ The depot is **never trusted from the request**: it goes through
 reach and otherwise falls back to the depot the sign-in is acting as. A crafted
 ``?branch=`` or posted ``branch`` can therefore narrow a cash up, never widen
 one — the same rule the branch filters on /orders, /calendar, /reports and
-/inventory follow. The panel's own depot picker is a GET parameter named
-``cash_branch`` (it belongs to the dashboard, not to a cash-up action), and every
-write form carries the resolved depot in a hidden ``branch`` field.
+/inventory follow. The dashboard's top Branch filter is the only visible branch
+selector, and every write form carries the resolved depot in a hidden ``branch``
+field.
 """
 import csv
 from io import StringIO
@@ -53,7 +53,7 @@ def _target_branch():
 def _dashboard_url(branch_id=None):
     """Back to the dashboard, still showing the depot that was acted on."""
     if branch_id:
-        return url_for("admin.dashboard", cash_branch=branch_id)
+        return url_for("admin.dashboard", branch=branch_id)
     return url_for("admin.dashboard")
 
 
