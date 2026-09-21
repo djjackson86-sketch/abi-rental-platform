@@ -336,6 +336,9 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .cash-branch-picker{display:flex;align-items:center;gap:12px;margin:0 0 14px}
 .cash-branch-picker label{display:flex;align-items:center;gap:10px;margin:0;min-width:0;color:var(--muted);font-weight:750}
 .cash-branch-picker select{max-width:240px}
+.dashboard-report-actions form{display:inline-flex}
+.dashboard-report-actions .dashboard-report-action{width:240px;max-width:100%}
+@media(max-width:520px){.dashboard-report-actions form,.dashboard-report-actions .dashboard-report-action{width:100%}}
 
 /* --- Dashboard refresh (ticket ABI-341952954): a branded hero with the
    signed-in name, the branch filter for the main profile, and named card

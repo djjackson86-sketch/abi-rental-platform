@@ -193,7 +193,7 @@ def test_end_of_day_notes_have_their_own_panel(client):
     assert 'name="notes"' in notes_panel
     assert 'placeholder=' not in notes_panel
     assert '<textarea name="notes" rows="3">' in notes_panel
-    assert '<button class="btn warning" type="submit">Save notes</button>' in notes_panel
+    assert '<button class="btn primary" type="submit">Save notes</button>' in notes_panel
 
 
 def test_opening_cash_is_the_previous_days_closing_cash(client, app):
@@ -911,7 +911,7 @@ def test_dashboard_has_submit_day_report_button(client):
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'Submit day report' in body
     assert 'id="submit-day-report-form" method="post" action="/cash-up/report/telegram"' in body
-    assert '<button class="btn warning" type="submit">Submit day report</button>' in body
+    assert '<button class="btn warning dashboard-report-action" type="submit">Submit day report</button>' in body
     assert body.index('Day report actions') > body.index('Cash drop off (to bank)')
 
 
@@ -921,14 +921,14 @@ def test_dashboard_download_report_buttons_are_main_profile_only(client, app):
     assert 'Download day report (PDF)' in body
     assert 'Download CSV' in body
     assert 'Submit day report' in body
-    assert '<button class="btn warning" type="submit">Submit day report</button>' in body
+    assert '<button class="btn warning dashboard-report-action" type="submit">Submit day report</button>' in body
 
     with app.app_context():
         create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
     login(client, name='Depot Two Clerk', password='staff123')
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'Submit day report' in body
-    assert '<button class="btn warning" type="submit">Submit day report</button>' in body
+    assert '<button class="btn warning dashboard-report-action" type="submit">Submit day report</button>' in body
     assert 'Download day report (PDF)' not in body
     assert 'Download CSV' not in body
 

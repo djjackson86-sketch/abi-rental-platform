@@ -158,7 +158,7 @@
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
       <label>Notes<textarea name="notes" rows="3">{{ cash_day.notes }}</textarea></label>
-      <div class="form-actions"><button class="btn warning" type="submit">Save notes</button></div>
+      <div class="form-actions"><button class="btn primary" type="submit">Save notes</button></div>
     </form>
   </section>
 </div>
@@ -169,11 +169,11 @@
     <form id="submit-day-report-form" method="post" action="{{ url_for('cash.submit_report_telegram') }}">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
-      <button class="btn warning" type="submit">Submit day report</button>
+      <button class="btn warning dashboard-report-action" type="submit">Submit day report</button>
     </form>
     {% if current_user_is_main %}
-    <a class="btn ghost" href="{{ url_for('cash.report_pdf', day=cash_day.day, branch=cash_day.branch_id) }}">Download day report (PDF)</a>
-    <a class="btn ghost" href="{{ url_for('cash.export_csv', day=cash_day.day, branch=cash_day.branch_id) }}">Download CSV</a>
+    <a class="btn ghost dashboard-report-action" href="{{ url_for('cash.report_pdf', day=cash_day.day, branch=cash_day.branch_id) }}">Download day report (PDF)</a>
+    <a class="btn ghost dashboard-report-action" href="{{ url_for('cash.export_csv', day=cash_day.day, branch=cash_day.branch_id) }}">Download CSV</a>
     {% endif %}
   </div>
 </section>
