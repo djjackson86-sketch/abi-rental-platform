@@ -50,6 +50,16 @@ def _drawn_text(pdf_bytes):
     return [run[3] for run in _runs(pdf_bytes)]
 
 
+def _runs_with_font(pdf_bytes):
+    """(font, x, y, size, text) for every run.
+
+    The report title block is measured with the same advance factors the
+    renderer used, so the test needs the run's font as well as its x.
+    """
+    return [(font, float(x), float(y), float(size), _unescape(text))
+            for font, size, x, y, text in _TEXT_RUN.findall(pdf_bytes.decode('latin-1'))]
+
+
 def _card_values(pdf_bytes):
     """{label: value} as the cards draw them — a card's value sits 15pt below it.
 
@@ -749,6 +759,76 @@ def test_the_pdf_report_is_branded_and_names_the_user_who_ran_it(client, app):
     login(client, name='Depot Two Clerk', password='staff123')
     text = client.get('/cash-up/report.pdf').data.decode('latin-1')
     assert 'Prepared by: Depot Two Clerk \\(Staff\\)' in text
+
+
+def test_the_day_report_title_block_is_centred(client, app):
+    """Ticket ABI-341953027: the title block sits on the page's midline.
+
+    "Sano Trailers" and "Daily dashboard report" used to start at a fixed x of
+    150, which reads off-centre on A4 portrait (true centre 297.5). Only those
+    two lines move: the logo (36-128) and the Depot/Generated context rows keep
+    their own left/right positions.
+
+    The expected x values are pinned from the Helvetica AFM metrics, so a change
+    to either the width table or the centring helper fails here.
+    """
+    login(client)
+    client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
+    blob = client.get('/cash-up/report.pdf').data
+    page_centre = pdf_documents.A4_PORTRAIT_WIDTH / 2
+    logo_right = pdf_documents.REPORT_LEFT + pdf_documents.REPORT_LOGO_WIDTH
+    runs = _runs_with_font(blob)
+    expected_x = {'Sano Trailers': 249.98, 'Daily dashboard report': 244.40}
+    for title, pinned_x in expected_x.items():
+        font, x, _y, size, _text = next(run for run in runs if run[4] == title)
+        width = pdf_documents._pdf_exact_text_width(title, size, bold=font == 'F2')
+        centre = x + width / 2
+        assert abs(centre - page_centre) < 1.5, f'{title} centres at {centre}, not {page_centre}'
+        assert abs(x - pinned_x) < 0.05, f'{title} starts at {x}, expected {pinned_x}'
+        assert x >= logo_right, f'{title} runs into the logo band'
+        assert x + width <= pdf_documents.REPORT_RIGHT, f'{title} runs past the right margin'
+        # The old fixed left offset is gone.
+        assert abs(x - 150) > 0.01, f'{title} still starts at the old x=150'
+    # The context rows keep their own columns: context, not part of the title.
+    assert any(abs(run[1] - pdf_documents.REPORT_LEFT) < 0.01 and run[4].startswith('Depot:')
+               for run in runs)
+    assert any(abs(run[1] - 380) < 0.01 and run[4].startswith('Generated:') for run in runs)
+    # The logo itself never moved.
+    assert f'q {pdf_documents.REPORT_LOGO_WIDTH:.2f} 0 0 ' in blob.decode('latin-1')
+
+
+def test_the_helvetica_metric_table_matches_a_real_render():
+    """The width table is the ground truth the centring depends on.
+
+    These advance widths were measured off a Ghostscript render of the report:
+    "Sano Trailers" at 15pt bold inks 93.57pt wide and "Daily dashboard report"
+    at 10.5pt inks 105.08pt, each ~1pt narrower than its advance width because
+    of glyph side bearings.
+    """
+    assert pdf_documents._pdf_exact_text_width('Sano Trailers', 15, bold=True) == pytest.approx(95.04, abs=0.01)
+    assert pdf_documents._pdf_exact_text_width('Daily dashboard report', 10.5) == pytest.approx(106.21, abs=0.01)
+    # The flat factors are still what wrapping/right-alignment use, and are wider.
+    assert pdf_documents._pdf_text_width('Sano Trailers', 15, bold=True) == pytest.approx(109.20, abs=0.01)
+
+
+def test_a_continued_report_page_centres_its_subtitle_too(app):
+    """Ticket ABI-341953027: page 2 inherits the centred title block.
+
+    ``_report_new_page`` renders every continuation page through the same
+    ``_report_header``, so the "(continued)" subtitle must be centred as well.
+    """
+    header = pdf_documents._report_header({'company': 'Sano Trailers', 'depot': 'Midrand',
+                                           'day': TODAY, 'prepared_by': 'Head office admin'},
+                                          page_number=2)
+    subtitle = 'Daily dashboard report (continued)'
+    # Parentheses are escaped inside the PDF string literal, so match on the tail.
+    command = next(line for line in header[1] if 'continued' in line)
+    match = re.search(r'1 0 0 1 ([\d.]+) [\d.]+ Tm', command)
+    assert match, command
+    x = float(match.group(1))
+    assert x == pytest.approx(216.68, abs=0.05)
+    centre = x + pdf_documents._pdf_exact_text_width(subtitle, 10.5) / 2
+    assert abs(centre - pdf_documents.A4_PORTRAIT_WIDTH / 2) < 1.5
 
 
 def test_a_long_end_of_day_note_flows_onto_page_two(client, app):

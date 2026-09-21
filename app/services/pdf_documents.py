@@ -292,8 +292,70 @@ def _pdf_text_width(text, size: int | float, bold=False):
     return len(str(text or '')) * size * (0.56 if bold else 0.5)
 
 
+# Real Helvetica / Helvetica-Bold advance widths (AFM metrics, /1000 em) for the
+# printable ASCII range. The flat 0.5/0.56 factors above are good enough for
+# wrapping and right-alignment, but they are ~15% wide on a bold line: measuring
+# a centred title with them left it visibly off the midline, which is the whole
+# point of a centring fix. Only the centred helper uses these.
+_HELVETICA_WIDTHS = dict(zip(
+    ' ' + '!"#$%&\'()*+,-./' + '0123456789' + ':;<=>?@'
+    + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '[\\]^_`' + 'abcdefghijklmnopqrstuvwxyz' + '{|}~',
+    [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+     556, 556, 556, 556, 556, 556, 556, 556, 556, 556,
+     278, 278, 584, 584, 584, 556, 1015,
+     667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667,
+     778, 722, 667, 611, 722, 667, 944, 667, 667, 611,
+     278, 278, 278, 469, 556, 333,
+     556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556,
+     556, 333, 500, 278, 556, 500, 722, 500, 500, 500,
+     334, 260, 334, 584]))
+_HELVETICA_BOLD_WIDTHS = dict(zip(
+    ' ' + '!"#$%&\'()*+,-./' + '0123456789' + ':;<=>?@'
+    + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '[\\]^_`' + 'abcdefghijklmnopqrstuvwxyz' + '{|}~',
+    [278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278,
+     556, 556, 556, 556, 556, 556, 556, 556, 556, 556,
+     333, 333, 584, 584, 584, 611, 975,
+     722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667,
+     778, 722, 667, 611, 722, 667, 944, 667, 667, 611,
+     333, 278, 333, 584, 556, 333,
+     556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611, 611,
+     611, 389, 556, 333, 611, 556, 778, 556, 556, 500,
+     389, 280, 389, 584]))
+
+
+def _pdf_exact_text_width(text, size: int | float, bold=False):
+    """The width a PDF viewer will actually use for a run.
+
+    Measures the string the renderer will draw (``_pdf_text`` first, so
+    transliteration is accounted for) with the real glyph widths. Accented
+    Latin-1 characters fall back to the width of their base letter.
+    """
+    table = _HELVETICA_BOLD_WIDTHS if bold else _HELVETICA_WIDTHS
+    adobe = 0
+    for char in _pdf_text(text):
+        width = table.get(char)
+        if width is None:
+            decomposed = unicodedata.normalize('NFKD', char)
+            width = table.get(decomposed[0]) if decomposed else None
+        adobe += width if width is not None else 556
+    return adobe * float(size) / 1000.0
+
+
 def _pdf_right_text(x_right, y, text, size: int | float = 9, font='F1'):
     return _pdf_text_command(x_right - _pdf_text_width(text, size, bold=font == 'F2'), y, text, size=size, font=font)
+
+
+def _pdf_centre_text(y, text, size: int | float = 9, font='F1', centre=None):
+    """Centre a run on the page width.
+
+    Ticket ABI-341953027: the day report's title block used to start at a fixed
+    x of 150, which reads off-centre on A4 portrait. Centring derives x from the
+    text's own measured width, so the company name and the subtitle sit on the
+    page's midline no matter how long either string is.
+    """
+    page_centre = A4_PORTRAIT_WIDTH / 2 if centre is None else centre
+    x = page_centre - _pdf_exact_text_width(text, size, bold=font == 'F2') / 2
+    return _pdf_text_command(x, y, text, size=size, font=font)
 
 
 def _pdf_fit(text, size: int | float, width, bold=False):
@@ -361,10 +423,11 @@ def _report_header(meta, page_number=1, logo_draw=None):
     draw = list(logo_draw or [])
     text = ['BT']
     company = str(meta.get('company') or '').strip()
-    text.append(_pdf_text_command(150, REPORT_LOGO_TOP, company, size=15, font='F2'))
+    # Ticket ABI-341953027: the title block is centred on the page midline.
+    text.append(_pdf_centre_text(REPORT_LOGO_TOP, company, size=15, font='F2'))
     text.append(f'{REPORT_MUTED} rg')
     subtitle = 'Daily dashboard report' if page_number == 1 else 'Daily dashboard report (continued)'
-    text.append(_pdf_text_command(150, REPORT_LOGO_TOP - 17, subtitle, size=10.5))
+    text.append(_pdf_centre_text(REPORT_LOGO_TOP - 17, subtitle, size=10.5))
     text.append(f'{REPORT_INK} rg')
     text.append(_pdf_text_command(REPORT_LEFT, 750, f"Depot: {meta.get('depot') or '-'}", size=9.5))
     text.append(_pdf_text_command(REPORT_LEFT, 736, f"Business day: {meta.get('day') or '-'}", size=9.5))
