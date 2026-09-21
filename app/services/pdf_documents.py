@@ -125,7 +125,14 @@ def _doc_value(document, key, default=None):
 
 
 def _simple_pdf(lines, logo_bytes=None):
-    y = 680 if logo_bytes else 800
+    start_y = 680 if logo_bytes else 800
+    leading = 18
+    page_floor_y = 60
+    # The loop below stops when the next line would fall off the page, so a long
+    # document used to lose its tail silently. How many 18pt lines fit is fixed
+    # arithmetic; anything longer continues on further pages (ticket ABI-341953022).
+    lines_per_page = int((start_y - page_floor_y) // leading) + 1
+    y = start_y
     content_lines = []
     image_object = None
     if logo_bytes:
@@ -137,6 +144,21 @@ def _simple_pdf(lines, logo_bytes=None):
             f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
         ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
+    if len(lines) > lines_per_page:
+        streams = []
+        for page_index, start in enumerate(range(0, len(lines), lines_per_page), start=1):
+            page_lines = lines[start:start + lines_per_page]
+            commands = list(content_lines)
+            if page_index > 1:
+                commands.append(_pdf_text_command(500, 740, f'Page {page_index}', size=10))
+            commands.append('BT')
+            y = start_y
+            for line in page_lines:
+                commands.append(_pdf_text_command(50, y, line, size=12))
+                y -= leading
+            commands.append('ET')
+            streams.append('\n'.join(commands).encode('latin-1', 'replace'))
+        return _pdf_objects(streams, image_object=image_object)
     stream_lines = content_lines + ['BT']
     for line in lines:
         # Absolute positioning: ``Td`` is a RELATIVE translate, so the old
@@ -729,10 +751,45 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 
     # Invoice table and totals.
     # Move the table up under the address blocks; if there are more than six
-    # line items, page 1 stays readable and the remaining rows continue on page 2
-    # with the same column headings before the summary/banking block.
+    # line items, page 1 stays readable and the remaining rows continue on the
+    # following pages - each with the same column headings and a page number -
+    # before the summary/banking block. Every item is always printed
+    # (ticket ABI-341953022: the table used to stop after eight rows, so items
+    # added by an order edit never reached the invoice/quote PDF).
     table_y = min(545, customer_bottom_y - 28)
     tax_view = document_tax_view(document, items)
+
+    # Summary: total without VAT, the VAT itself, then the total with VAT.
+    # Built before the table is drawn because how many summary rows there are
+    # sets the floor the last item row of every page has to clear - that floor
+    # is what tells the pagination how many rows genuinely fit on a page.
+    totals = [('Total without VAT', f"R{tax_view['net']:.2f}")]
+    if tax_view['discount']:
+        discount_label = 'Discount'
+        if _doc_value(document, 'discount_mode', '') == 'percent' and float(_doc_value(document, 'discount_value') or 0):
+            discount_label = f'Discount ({float(_doc_value(document, "discount_value") or 0):g}%)'
+        elif _doc_value(document, 'discount_mode', '') == 'amount' and float(_doc_value(document, 'discount_value') or 0):
+            discount_label = f'Discount (R{float(_doc_value(document, "discount_value") or 0):.2f})'
+        totals.append((discount_label, f"-R{tax_view['discount']:.2f}"))
+    totals.append((f"VAT ({tax_view['rate']:g}%)" if tax_view['rate'] else 'VAT', f"R{tax_view['vat']:.2f}"))
+    totals.append(('Total with VAT', f"R{tax_view['gross']:.2f}"))
+    if (_doc_value(document, 'deposit_option', 'security_deposit') or 'security_deposit') == 'security_deposit':
+        deposit_total = float(document["deposit_total"] or 0)
+        if deposit_total:
+            totals.append(('Security deposit', f'R{deposit_total:.2f}'))
+    elif float(_doc_value(document, 'damage_waiver_amount') or 0):
+        totals.append(('Damage waiver', f'R{float(_doc_value(document, "damage_waiver_amount") or 0):.2f}'))
+    # Security deposit consumed by the return settlement (extra time, damages or
+    # outstanding balance). It is already inside Paid as a deposit_applied
+    # payment; this is the visible deduction the client asked for. Invoices only:
+    # a quote never has a settled deposit.
+    deposit_used = float(_doc_value(document, 'deposit_applied_amount') or 0)
+    if _doc_value(document, 'document_type', '') == 'invoice' and deposit_used:
+        totals.append(('Less: deposit used', f'-R{deposit_used:.2f}'))
+    totals.extend([
+        ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
+        ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
+    ])
 
     def add_table_header(draw, text, header_y):
         draw.append(_pdf_rect(36, header_y - 5, 523, 18, fill='0 0 0'))
@@ -768,26 +825,43 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             y_pos -= 43
         return y_pos
 
-    visible_items = items[:8]
+    # Client rule: at most six line items on page 1. Everything after that is
+    # printed on continuation pages, each repeating the column headings and
+    # carrying `Page n`. A page takes as many rows as really fit between its
+    # header and the summary band (43pt per row), and rows are chunked until the
+    # list is exhausted - items are never truncated, however many an order edit
+    # adds.
     first_page_limit = 6
-    first_page_items = visible_items[:first_page_limit] if len(visible_items) > first_page_limit else visible_items
-    continuation_items = visible_items[first_page_limit:] if len(visible_items) > first_page_limit else []
+    continuation_table_y = 675
+    summary_floor_y = 58 + ((len(totals) - 1) * 14)
+    # Lowest y the LAST item row of a page may reach: below it the summary rows
+    # (14pt apart), their 12pt gap and the row pitch itself would not fit.
+    last_row_y_floor = summary_floor_y + 12 + 43
+
+    def rows_that_fit(first_row_y):
+        return max(1, int((first_row_y - last_row_y_floor) // 43) + 1)
+
+    first_page_items = list(items[:first_page_limit])
+    remaining_items = list(items[first_page_limit:])
     add_table_header(draw_commands, text_commands, table_y)
     y = add_item_rows(text_commands, first_page_items, 0, table_y - 24)
 
     streams = []
-    if continuation_items:
+    page_number = 1
+    next_item_index = len(first_page_items)
+    while remaining_items:
+        page_number += 1
         text_commands.append('ET')
         streams.append('\n'.join(draw_commands + text_commands).encode('latin-1', 'replace'))
-        page_draw_commands = [logo_draw_command] if logo_draw_command else []
-        page_text_commands = ['BT']
-        page_text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
-        page_text_commands.append(_pdf_text_command(455, 746, 'Page 2', size=8.5))
-        page_table_y = 675
-        add_table_header(page_draw_commands, page_text_commands, page_table_y)
-        y = add_item_rows(page_text_commands, continuation_items, first_page_limit, page_table_y - 24)
-        draw_commands = page_draw_commands
-        text_commands = page_text_commands
+        page_items = remaining_items[:rows_that_fit(continuation_table_y - 24)]
+        remaining_items = remaining_items[len(page_items):]
+        draw_commands = [logo_draw_command] if logo_draw_command else []
+        text_commands = ['BT']
+        text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
+        text_commands.append(_pdf_text_command(455, 746, f'Page {page_number}', size=8.5))
+        add_table_header(draw_commands, text_commands, continuation_table_y)
+        y = add_item_rows(text_commands, page_items, next_item_index, continuation_table_y - 24)
+        next_item_index += len(page_items)
 
     # Keep the summary attached to the visible line items on the page that holds
     # the final item rows, clamped only far enough to keep Amount due on-page.
@@ -803,34 +877,6 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     ]:
         if value:
             bank_lines.append(f'{key}: {value}')
-    # Summary: total without VAT, the VAT itself, then the total with VAT.
-    totals = [('Total without VAT', f"R{tax_view['net']:.2f}")]
-    if tax_view['discount']:
-        discount_label = 'Discount'
-        if _doc_value(document, 'discount_mode', '') == 'percent' and float(_doc_value(document, 'discount_value') or 0):
-            discount_label = f'Discount ({float(_doc_value(document, "discount_value") or 0):g}%)'
-        elif _doc_value(document, 'discount_mode', '') == 'amount' and float(_doc_value(document, 'discount_value') or 0):
-            discount_label = f'Discount (R{float(_doc_value(document, "discount_value") or 0):.2f})'
-        totals.append((discount_label, f"-R{tax_view['discount']:.2f}"))
-    totals.append((f"VAT ({tax_view['rate']:g}%)" if tax_view['rate'] else 'VAT', f"R{tax_view['vat']:.2f}"))
-    totals.append(('Total with VAT', f"R{tax_view['gross']:.2f}"))
-    if (_doc_value(document, 'deposit_option', 'security_deposit') or 'security_deposit') == 'security_deposit':
-        deposit_total = float(document["deposit_total"] or 0)
-        if deposit_total:
-            totals.append(('Security deposit', f'R{deposit_total:.2f}'))
-    elif float(_doc_value(document, 'damage_waiver_amount') or 0):
-        totals.append(('Damage waiver', f'R{float(_doc_value(document, "damage_waiver_amount") or 0):.2f}'))
-    # Security deposit consumed by the return settlement (extra time, damages or
-    # outstanding balance). It is already inside Paid as a deposit_applied
-    # payment; this is the visible deduction the client asked for. Invoices only:
-    # a quote never has a settled deposit.
-    deposit_used = float(_doc_value(document, 'deposit_applied_amount') or 0)
-    if _doc_value(document, 'document_type', '') == 'invoice' and deposit_used:
-        totals.append(('Less: deposit used', f'-R{deposit_used:.2f}'))
-    totals.extend([
-        ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
-        ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
-    ])
     summary_min_y = 58 + ((len(totals) - 1) * 14)
     totals_y = max(summary_min_y, totals_y)
     draw_commands.append(_pdf_rect(382, totals_y - ((len(totals) - 1) * 14) - 5, 177, (len(totals) * 14) + 4, stroke='0.82 0.86 0.91', line_width=0.6))
