@@ -122,6 +122,7 @@
                       <span class="avatar">{{ (c.name[:2] or 'CU')|upper }}</span>
                       <span><strong>{{ c.name }}</strong><small>{{ c.customer_type|title }}{% if c.phone %} · {{ c.phone }}{% endif %}</small></span>
                     </a>
+                    {% if c.is_blocked %}<span class="badge blocked">Blocked</span>{% endif %}
                   </td>
                   <td>{{ c.email or '—' }}</td>
                   <td>{{ client_verified_label(c.client_verified) }}</td>

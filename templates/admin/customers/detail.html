@@ -6,7 +6,7 @@
     <span class="avatar large">{{ (customer.name[:2] or 'CU')|upper }}</span>
     <div>
       <p class="eyebrow">Customer</p>
-      <h1>{{ customer.name }}</h1>
+      <h1>{{ customer.name }}{% if customer.is_blocked %} <span class="badge blocked">Blocked</span>{% endif %}</h1>
       <p>{{ customer.email or 'No email' }}{% if customer.phone %} · {{ customer.phone }}{% endif %}</p>
     </div>
   </div>
@@ -55,6 +55,8 @@
       <div class="detail-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div>
       <div class="detail-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div>
       <div class="detail-row"><span>Client Verified</span><b>{{ client_verified_label(customer.client_verified) }}</b></div>
+      <div class="detail-row"><span>Blocked</span><b>{% if customer.is_blocked %}<span class="badge blocked">Blocked</span>{% else %}No{% endif %}</b></div>
+      {% if customer.is_blocked %}<div class="detail-row"><span>Blocked reason</span><b>{{ customer.blocked_reason or 'No reason recorded' }}</b></div>{% endif %}
       <div class="detail-row"><span>Created</span><b>{{ customer.created_at[:10] }}</b></div>
       <div class="detail-row"><span>Created by</span><b>{{ customer.created_by_name or '—' }}</b></div>
       <div class="detail-row"><span>Branch</span><b>{{ customer.branch_name or 'No branch recorded' }}</b></div>

@@ -34,6 +34,14 @@ VISIBLE_CUSTOM_FIELD_ORDER = [
 ]
 CUSTOM_FIELD_FORM_KEYS = list(VISIBLE_CUSTOM_FIELD_ORDER)
 
+# Ticket ABI-341953028: the "Block Customer" checkbox and its reason live on the
+# customer form only. _clean() is shared — the new/edit ORDER form's attached
+# customer card also posts through it — so the block fields are read ONLY when
+# the form actually carries this marker. Without the marker a customer edit that
+# knows nothing about blocking leaves the stored block state untouched instead of
+# silently unblocking the customer.
+BLOCKING_PANEL_MARKER = "blocking_panel"
+
 
 def list_customers(query="", customer_type="", marketing=""):
     sql = """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email,
@@ -127,6 +135,41 @@ def _client_verified_value(form):
     return None
 
 
+def _form_value(form, key):
+    try:
+        return form.get(key)
+    except AttributeError:
+        return None
+
+
+def blocking_panel_present(form):
+    """True when the submitted form is the customer form's own blocking panel."""
+    return str(_form_value(form, BLOCKING_PANEL_MARKER) or "").strip() == "1"
+
+
+def _row_flag(customer, key):
+    """1/0 for a nullable integer flag on a customer row, tolerant of absence."""
+    try:
+        value = customer[key]
+    except (KeyError, IndexError, TypeError):
+        return 0
+    if value is None or value == "":
+        return 0
+    try:
+        return 1 if int(value) else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def customer_is_blocked(customer):
+    """True when the customer is blocked (ticket ABI-341953028)."""
+    return bool(_row_flag(customer, "is_blocked"))
+
+
+def blocked_reason_for(customer):
+    return (_customer_row_value(customer, "blocked_reason", "") or "").strip()
+
+
 def _clean(form, existing_custom_fields=None):
     name = form.get("name", "").strip()
     if not name:
@@ -156,7 +199,7 @@ def _clean(form, existing_custom_fields=None):
         standard_discount_percent = max(0, min(100, float(form.get("standard_discount_percent") or 0)))
     except ValueError as exc:
         raise ValueError("Standard discount must be a percentage between 0 and 100") from exc
-    return {
+    data = {
         "customer_type": customer_type,
         "name": name,
         "email": form.get("email", "").strip().lower(),
@@ -173,6 +216,14 @@ def _clean(form, existing_custom_fields=None):
         "standard_discount_percent": standard_discount_percent,
         "client_verified": _client_verified_value(form),
     }
+    if blocking_panel_present(form):
+        # Ticket ABI-341953028: block/unblock only ever comes from the customer
+        # form's own panel. The typed reason is stored as-is when the customer is
+        # unblocked too, so the record keeps the audit trail; enforcement keys off
+        # is_blocked alone.
+        data["is_blocked"] = 1 if form.get("is_blocked") else 0
+        data["blocked_reason"] = (form.get("blocked_reason") or "").strip()
+    return data
 
 
 def customer_branch_id():
@@ -190,10 +241,21 @@ def customer_branch_id():
 def create_customer(form):
     data = _clean(form)
     db = get_db()
+    # Ticket ABI-341953028: a customer created from the customer form can be
+    # blocked on the spot. Any other caller (public storefront booking, inline
+    # order customer, inline AJAX create) carries no blocking panel, so its new
+    # customer starts unblocked.
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, created_by_user_id, branch_id, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :created_by_user_id, :branch_id, :created_at)""",
-        {**data, "created_by_user_id": current_session_user_id(), "branch_id": customer_branch_id(), "created_at": now()},
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, is_blocked, blocked_reason, created_by_user_id, branch_id, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :is_blocked, :blocked_reason, :created_by_user_id, :branch_id, :created_at)""",
+        {
+            **data,
+            "is_blocked": int(data.get("is_blocked") or 0),
+            "blocked_reason": data.get("blocked_reason") or "",
+            "created_by_user_id": current_session_user_id(),
+            "branch_id": customer_branch_id(),
+            "created_at": now(),
+        },
     )
     db.commit()
     customer_id = cur.lastrowid
@@ -208,10 +270,13 @@ def create_customer(form):
 def update_customer(customer_id, form):
     data = _clean(form, existing_custom_fields=raw_custom_fields_for(get_customer(customer_id)))
     data["id"] = customer_id
-    get_db().execute(
-        """UPDATE customers SET customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json, standard_discount_percent=:standard_discount_percent, client_verified=:client_verified WHERE id=:id""",
-        data,
-    )
+    # Ticket ABI-341953028: the block columns are only written when the customer
+    # form's own blocking panel was submitted, so the order form's attached
+    # customer card can never clear a block by saving other details.
+    sets = """customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json, standard_discount_percent=:standard_discount_percent, client_verified=:client_verified"""
+    if blocking_panel_present(form):
+        sets += ", is_blocked=:is_blocked, blocked_reason=:blocked_reason"
+    get_db().execute(f"UPDATE customers SET {sets} WHERE id=:id", data)
     get_db().commit()
 
 
@@ -265,6 +330,11 @@ def customer_summary_for(customer):
         "previous_orders_balance": round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2),
         "client_verified": _customer_row_value(customer, "client_verified", None),
         "client_verified_label": client_verified_label(_customer_row_value(customer, "client_verified", None)),
+        # Ticket ABI-341953028: the order form renders the blocked banner from
+        # this summary (the same payload the customer picker's datalist carries),
+        # so it needs no second request when a blocked customer is chosen.
+        "is_blocked": customer_is_blocked(customer),
+        "blocked_reason": blocked_reason_for(customer),
         "display": display,
     }
 

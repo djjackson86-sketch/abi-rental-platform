@@ -167,6 +167,8 @@ CREATE TABLE IF NOT EXISTS customers (
     balance_due REAL NOT NULL DEFAULT 0,
     standard_discount_percent REAL NOT NULL DEFAULT 0,
     client_verified INTEGER,
+    is_blocked INTEGER NOT NULL DEFAULT 0,
+    blocked_reason TEXT NOT NULL DEFAULT '',
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
@@ -500,6 +502,10 @@ def run_migrations(db):
     ensure_column(db, "customers", "country", "TEXT NOT NULL DEFAULT 'South Africa'")
     ensure_column(db, "customers", "custom_fields_json", "TEXT NOT NULL DEFAULT '{}'")
     ensure_column(db, "customers", "standard_discount_percent", "REAL NOT NULL DEFAULT 0")
+    # Ticket ABI-341953028: a blocked customer cannot be used to create an order.
+    # Purely additive with defaults, so every existing customer stays unblocked.
+    ensure_column(db, "customers", "is_blocked", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(db, "customers", "blocked_reason", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
     # The branch a customer was created at, so a depot's "New customers for the
     # day" figure is the customers added by THAT branch (ticket ABI-341952962).

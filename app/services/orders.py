@@ -528,13 +528,43 @@ def order_total_from_payload(payload):
     )
 
 
-def _build_order_payload(form):
+def blocked_customer_error(customer):
+    """Ticket ABI-341953028: the refusal message for a blocked customer."""
+    try:
+        reason = (customer["blocked_reason"] or "").strip()
+    except (KeyError, IndexError, TypeError):
+        reason = ""
+    return f"Customer blocked — {reason or 'no reason recorded'}"
+
+
+def _blocked_customer_allowance(value):
+    """Normalise an "this order already had that customer" allowance to an id."""
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_order_payload(form, allow_blocked_customer_id=None):
     db = get_db()
     customer_id = int(form.get("customer_id") or 0) or None
     if customer_id:
-        customer = db.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        customer = db.execute("SELECT id, is_blocked, blocked_reason FROM customers WHERE id = ?", (customer_id,)).fetchone()
         if not customer:
             raise ValueError("Selected customer was not found")
+        # Ticket ABI-341953028: the server-side gate for the whole feature. A
+        # blocked customer can never take a new order, whatever the browser did —
+        # the "Are you sure / Customer Blocked" dialogs are only the visible half.
+        # allow_blocked_customer_id lets an order that ALREADY had this customer
+        # attached (a draft saved before the block) still be saved/edited; only
+        # attaching a blocked customer to an order is refused.
+        blocked = 0
+        try:
+            blocked = int(customer["is_blocked"] or 0)
+        except (KeyError, IndexError, TypeError, ValueError):
+            blocked = 0
+        if blocked and customer_id != _blocked_customer_allowance(allow_blocked_customer_id):
+            raise ValueError(blocked_customer_error(customer))
     booking_type = form.get("booking_type") if form.get("booking_type") in {"return", "oneway"} else "return"
     collect_branch_id = int(form.get("collect_branch_id") or 0) or None
     return_branch_id = int(form.get("return_branch_id") or 0) or collect_branch_id
@@ -821,7 +851,10 @@ def update_draft_order(order_id, form):
     # Data-safety net (update path only): never let a blank custom-line price
     # wipe the stored price and shrink the order total.
     form = _restore_custom_line_prices(form, order_id)
-    payload = _build_order_payload(form)
+    # Ticket ABI-341953028: a customer blocked AFTER this order was created can
+    # still be kept on the order it is already attached to — only pointing the
+    # order at a different blocked customer is refused.
+    payload = _build_order_payload(form, allow_blocked_customer_id=order["customer_id"])
     db = get_db()
     # Data-safety net (update path only): the order form no longer exposes an
     # editable "Damage waiver amount" box, so a re-save of an existing
@@ -942,6 +975,12 @@ def draft_order_form(order_id):
     end_at = datetime.fromisoformat(order["end_at"]) if order["end_at"] else None
     customer_summary = None
     if order["customer_id"]:
+        # Ticket ABI-341953028: the edit form shows the same blocked banner the
+        # new-order form does, so the customer's block state rides along with the
+        # summary built from the order's joined customer columns.
+        block_row = get_db().execute(
+            "SELECT is_blocked, blocked_reason FROM customers WHERE id = ?", (order["customer_id"],)
+        ).fetchone()
         customer_summary = customer_summary_for({
             "id": order["customer_id"],
             "customer_type": "individual",
@@ -957,6 +996,8 @@ def draft_order_form(order_id):
             "country": order["customer_country"],
             "custom_fields_json": order["custom_fields_json"],
             "client_verified": order["customer_client_verified"],
+            "is_blocked": block_row["is_blocked"] if block_row else 0,
+            "blocked_reason": (block_row["blocked_reason"] if block_row else "") or "",
         })
     lines = []
     for item in order_items(order_id):

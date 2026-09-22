@@ -34,7 +34,7 @@ def _customers():
     rows = get_db().execute("""
         SELECT id, customer_type, name, email, phone, marketing_opt_in,
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
-               client_verified,
+               client_verified, is_blocked, blocked_reason,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance
         FROM customers
@@ -57,7 +57,7 @@ def _customer_summary_by_id(customer_id):
     row = get_db().execute("""
         SELECT id, customer_type, name, email, phone, marketing_opt_in,
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
-               client_verified,
+               client_verified, is_blocked, blocked_reason,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance
         FROM customers
@@ -171,6 +171,17 @@ def _form_with_inline_customer(form):
     customer_id = create_customer(mutable_form)
     mutable_form["customer_id"] = str(customer_id)
     return mutable_form
+
+
+def _order_customer_id(form_data):
+    """The customer_id already stored on the order being edited (may be None)."""
+    order = form_data.get("order") if isinstance(form_data, dict) else None
+    if order is None:
+        return None
+    try:
+        return order["customer_id"]
+    except (KeyError, IndexError, TypeError):
+        return None
 
 
 def _wants_sales_repairs(form, order_id):
@@ -345,8 +356,11 @@ def edit(order_id):
                 form = _force_staff_collection_branch(request.form)
                 # Same guard as /orders/new: validate the order fields before the
                 # inline customer row is created, so a refused save cannot leave a
-                # customer with no order behind it.
-                _build_order_payload(form)
+                # customer with no order behind it. Ticket ABI-341953028: the
+                # order's OWN customer may be blocked (a block applied after the
+                # order was raised) — only re-pointing it at a blocked customer is
+                # refused.
+                _build_order_payload(form, allow_blocked_customer_id=_order_customer_id(form_data))
                 form = _form_with_inline_customer(form)
                 update_draft_order(order_id, form)
                 if _wants_sales_repairs(form, order_id):

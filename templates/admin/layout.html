@@ -2,6 +2,13 @@
 {% block title %}{{ title or 'Admin' }} | Sano Trailers{% endblock %}
 {% block body %}
 <div class="app-shell">
+<style>
+  /* Blocked-customer badge and order-form banner (ticket 341953028). */
+  .badge.blocked{background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318)}
+  .badge.blocked:before{opacity:1}
+  .blocked-customer-banner{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin:0 0 14px;padding:12px 14px;border-radius:var(--radius,12px);border:1px solid #fecaca;background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318);font-weight:650}
+  .blocked-customer-banner strong{font-weight:800;text-transform:none}
+</style>
   <aside class="sidebar">
     <a class="logo" href="{{ url_for('admin.dashboard') }}"><img src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers"></a>
     {% if user_can('new_order') %}<a href="{{ url_for('orders.new') }}"><span>＋</span><span>New order</span></a>{% endif %}
