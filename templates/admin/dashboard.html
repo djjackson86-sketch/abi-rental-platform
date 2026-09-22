@@ -67,6 +67,11 @@
   {% include "admin/_dashboard_cash.html" %}
 </section>
 
+<section class="dashboard-card-section">
+  <div class="section-head"><h2 class="section-heading">Spare Wheel Count</h2></div>
+  {% include "admin/_dashboard_spare_wheels.html" %}
+</section>
+
 {% if current_user_is_main %}
 <section class="dashboard-card-section">
   <div class="section-head"><h2 class="section-heading">Movement</h2></div>

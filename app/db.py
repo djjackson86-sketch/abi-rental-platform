@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS products (
     product_group_id INTEGER REFERENCES product_groups(id) ON DELETE SET NULL,
     quantity INTEGER NOT NULL DEFAULT 1,
     tracking_method TEXT NOT NULL DEFAULT 'bulk',
+    wheel_size TEXT NOT NULL DEFAULT '',
     branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
@@ -335,6 +336,20 @@ CREATE TABLE IF NOT EXISTS trailer_service_history (
     created_at TEXT NOT NULL
 );
 
+-- Spare wheel counts typed in on the dashboard, one row per depot per business
+-- day per wheel size (ticket ABI-341953033). Additive only: a day with no rows
+-- simply has nothing counted yet.
+CREATE TABLE IF NOT EXISTS spare_wheel_counts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    business_day TEXT NOT NULL,
+    wheel_size TEXT NOT NULL,
+    actual_count INTEGER NOT NULL DEFAULT 0,
+    reported_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(branch_id, business_day, wheel_size)
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
@@ -455,6 +470,10 @@ def run_migrations(db):
     ensure_column(db, "products", "product_group_id", "INTEGER REFERENCES product_groups(id) ON DELETE SET NULL")
     ensure_column(db, "products", "hourly_extra_rate", "REAL NOT NULL DEFAULT 0")
     ensure_column(db, "products", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
+    # Which wheel size a rental trailer runs (ticket ABI-341953033). Additive with
+    # a blank default, so every existing product simply has no wheel size and is
+    # left out of the dashboard spare wheel Expected total.
+    ensure_column(db, "products", "wheel_size", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "booking_type", "TEXT NOT NULL DEFAULT 'return'")
     ensure_column(db, "orders", "collect_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "orders", "return_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
@@ -654,6 +673,22 @@ def run_migrations(db):
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_trailer_service_history_product ON trailer_service_history(product_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_trailer_service_history_date ON trailer_service_history(service_date)")
+
+    # --- Spare wheel counts (additive, ABI-341953033) -------------------------
+    # One count per depot per business day per wheel size, typed in from the
+    # dashboard panel. Nothing existing is read or written by this table: a day
+    # with no rows simply has nothing counted yet.
+    db.execute("""CREATE TABLE IF NOT EXISTS spare_wheel_counts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        business_day TEXT NOT NULL,
+        wheel_size TEXT NOT NULL,
+        actual_count INTEGER NOT NULL DEFAULT 0,
+        reported_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(branch_id, business_day, wheel_size)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_spare_wheel_counts_day ON spare_wheel_counts(business_day, branch_id)")
 
 
 def init_db():

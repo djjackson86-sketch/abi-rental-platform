@@ -1,0 +1,62 @@
+{# Spare wheel count (ticket ABI-341953033).
+
+   Expected is one wheel per trailer that has not been picked up, per wheel size.
+   Actual is what staff count in the yard. A selected depot is editable ("All
+   branches" is a read-only sum), so one save can never update several depots. #}
+<section class="panel spare-wheel-panel">
+  <div class="panel-title">
+    <h2>Spare wheels by wheel size</h2>
+    <span class="pill">{% if spare_wheel_editable %}{{ cash_day.branch_name }}{% else %}All branches{% endif %} · {{ spare_wheel_day }}</span>
+  </div>
+  <style>
+    .spare-wheel-panel .spare-wheel-table{width:100%;border-collapse:collapse}
+    .spare-wheel-panel .spare-wheel-table th{text-align:left;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
+    .spare-wheel-panel .spare-wheel-table td{padding:8px 10px;border-bottom:1px solid var(--line-soft);font-weight:650}
+    .spare-wheel-panel .spare-wheel-table tbody tr:last-child td{border-bottom:0}
+    .spare-wheel-panel .spare-wheel-table input[type=number]{max-width:120px}
+    .spare-wheel-panel .spare-wheel-count{font-weight:800}
+    .spare-wheel-panel .spare-wheel-variance{white-space:nowrap;font-weight:800}
+    .spare-wheel-panel .spare-wheel-variance.is-ok{color:var(--success)}
+    .spare-wheel-panel .spare-wheel-variance.is-over{color:var(--success)}
+    .spare-wheel-panel .spare-wheel-variance.is-short{color:var(--danger)}
+    .spare-wheel-panel .spare-wheel-variance .spare-wheel-tick{font-size:17px;line-height:1;font-weight:900}
+    .spare-wheel-panel .spare-wheel-variance .spare-wheel-muted{color:var(--muted);font-weight:650}
+  </style>
+  {% if spare_wheel_editable %}
+  <form method="post" action="{{ url_for('admin.dashboard_spare_wheels') }}" class="settings-form spare-wheel-form">
+    <input type="hidden" name="day" value="{{ spare_wheel_day }}">
+    <input type="hidden" name="branch" value="{{ spare_wheel_branch_id }}">
+  {% endif %}
+    <div class="table-wrap">
+      <table class="spare-wheel-table">
+        <thead>
+          <tr><th>Wheel size</th><th>Expected</th><th>Actual</th><th>Actual &minus; Expected</th></tr>
+        </thead>
+        <tbody>
+          {% for row in spare_wheel_rows %}
+          <tr>
+            <td>{{ row.wheel_size }}</td>
+            <td class="spare-wheel-count" data-expected="{{ row.expected }}">{{ row.expected }}</td>
+            <td>
+              {% if spare_wheel_editable %}
+              <input type="number" min="0" step="1" inputmode="numeric" name="actual_{{ loop.index0 }}" value="{% if row.counted %}{{ row.actual }}{% endif %}" placeholder="—" aria-label="Actual {{ row.wheel_size }} spare wheels counted">
+              {% else %}{% if row.counted %}{{ row.actual }}{% else %}<span class="spare-wheel-muted">&mdash;</span>{% endif %}{% endif %}
+            </td>
+            <td class="spare-wheel-variance is-{{ row.kind }}" data-variance="{{ row.variance if row.variance is not none else '' }}">
+              {% if row.kind == 'none' %}<span class="spare-wheel-muted">Not counted yet</span>
+              {% elif row.kind == 'ok' %}<span class="spare-wheel-tick" title="Counted matches expected">&#10004;</span> 0
+              {% else %}{{ row.variance_text }}{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% if spare_wheel_editable %}
+    <p class="cash-note">Expected counts one wheel for every trailer that has not been picked up. Type what you actually counted &mdash; leave a box empty to clear it.</p>
+    <div class="form-actions"><button class="btn primary" type="submit">Save spare wheel count</button></div>
+  </form>
+  {% else %}
+  <p class="cash-note">Expected counts one wheel for every trailer that has not been picked up. Select a branch in the top Branch filter to type in the actual counts.</p>
+  {% endif %}
+</section>

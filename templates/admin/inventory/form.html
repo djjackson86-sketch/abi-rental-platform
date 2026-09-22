@@ -33,6 +33,7 @@
       {% set stock_untracked = initial_type == 'service' or initial_tracking == 'none' %}
       {% set branch_stock_mode = (not stock_untracked) and initial_type == 'sale' %}
       {% set quantity_mode = (not stock_untracked) and initial_type != 'sale' %}
+      {% set wheel_size_mode = (not stock_untracked) and initial_type == 'rental' %}
       <div class="span-2 stock-branch-field" data-stock-field {% if not branch_stock_mode %}hidden{% endif %}>
         <div class="stock-branch-head" style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><strong>Stock per branch</strong><span class="form-help">Total in stock: <b data-stock-total>{{ product.quantity if product else 1 }}</b> <span data-stock-mode>&mdash; one shared pool for all branches</span></span></div>
         {% if branches %}
@@ -56,6 +57,19 @@
     </div>
     <p class="form-help"><a href="{{ url_for('inventory.new_group') }}">Create or edit product groups</a> to show category headings/folders in inventory.</p>
     <p class="form-help">Unassigned products are available from all branches. Services and products that don&rsquo;t track quantities do not need a stock count.</p>
+  </section>
+
+  <section class="form-section" data-wheel-size-field {% if not wheel_size_mode %}hidden{% endif %}>
+    <h2>Wheel size</h2>
+    <div class="form-grid">
+      <label>Wheel size
+        <select name="wheel_size" {% if not wheel_size_mode %}disabled{% endif %}>
+          <option value="">Not set</option>
+          {% for size in wheel_sizes %}<option value="{{ size }}" {% if product and product.wheel_size == size %}selected{% endif %}>{{ size }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <p class="form-help">Rental trailers only. The wheel size is what the dashboard&rsquo;s Spare Wheel Count adds up (one wheel per trailer that has not been picked up).</p>
   </section>
 
   <section class="form-section">
@@ -105,6 +119,8 @@
   const stockField=document.querySelector('[data-stock-field]');
   const quantityField=document.querySelector('[data-stock-quantity-field]');
   const quantityInput=quantityField?quantityField.querySelector('input[name="quantity"]'):null;
+  const wheelField=document.querySelector('[data-wheel-size-field]');
+  const wheelSelect=wheelField?wheelField.querySelector('select[name="wheel_size"]'):null;
   const branchInputs=[...document.querySelectorAll('[data-stock-field] input[name^="qty_branch_"]')];
   const totalOut=document.querySelector('[data-stock-total]');
   const modeOut=document.querySelector('[data-stock-mode]');
@@ -137,6 +153,10 @@
     });
     if(quantityField) quantityField.hidden=!quantityMode;
     if(quantityInput) quantityInput.disabled=!quantityMode;
+    // Wheel size belongs to rental trailers only (ticket ABI-341953033).
+    const wheelMode=(type==='rental')&&!untracked;
+    if(wheelField) wheelField.hidden=!wheelMode;
+    if(wheelSelect) wheelSelect.disabled=!wheelMode;
     syncTotal();
   }
   typeInputs.forEach(input=>input.addEventListener('change',syncStockField));

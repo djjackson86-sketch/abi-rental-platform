@@ -81,6 +81,10 @@ _ENDPOINT_MODULE_RULES = [
     # finalize, download, send email).
     ("documents.", "orders"),
     ("admin.dashboard", "dashboard"),
+    # The dashboard's spare wheel panel (ABI-341953033) lives on the dashboard.
+    # It is already covered by the prefix above; listed here so the gate is
+    # explicit rather than implied.
+    ("admin.dashboard_spare_wheels", "dashboard"),
     ("admin.calendar", "calendar"),
     ("admin.online_store", "online_store"),
     ("admin.app_store", "app_store"),

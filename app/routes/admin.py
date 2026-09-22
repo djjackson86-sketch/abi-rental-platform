@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, request, url_for, Response, flash, abort
+from flask import Blueprint, render_template, redirect, request, url_for, Response, flash, abort, session
 import csv
 from datetime import date, timedelta
 from io import StringIO
@@ -10,7 +10,16 @@ from app.services.reports import customer_summary, dashboard_day_metrics, dashbo
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.access import resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
-from app.services.cash import aggregate_day_summary as cash_aggregate_day_summary, cash_branches, day_summary as cash_day_summary, panel_state as cash_panel_state
+from app.services import spare_wheels
+from app.services.cash import (
+    aggregate_day_summary as cash_aggregate_day_summary,
+    branch_for_request as cash_branch_for_request,
+    cash_branches,
+    day_summary as cash_day_summary,
+    panel_state as cash_panel_state,
+    parse_business_day as cash_parse_business_day,
+    today_iso as cash_today_iso,
+)
 from app.services.trailer_service import TRAILER_SERVICE_TYPES, eligible_trailer_products
 
 bp = Blueprint("admin", __name__)
@@ -66,6 +75,12 @@ def dashboard():
         cash_panel = {'branches': cash_branches(), 'branch_id': None, 'branch_name': 'All branches'}
         cash_day = cash_aggregate_day_summary()
         trailer_products = []
+    # Spare wheel count (ticket ABI-341953033): one wheel per trailer still in
+    # the yard, per wheel size. It follows the same depot as the cash panel, so a
+    # selected branch is editable and "All branches" is a read-only sum across the
+    # depots this sign-in may already see.
+    spare_wheel_day = cash_today_iso()
+    spare_wheel_branch_id = cash_branch_id
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
@@ -75,6 +90,14 @@ def dashboard():
         cash_day=cash_day,
         trailer_service_products=trailer_products,
         trailer_service_types=TRAILER_SERVICE_TYPES,
+        spare_wheel_rows=spare_wheels.spare_wheel_rows(
+            spare_wheel_day,
+            branch_id=spare_wheel_branch_id,
+            editable=bool(spare_wheel_branch_id),
+        ),
+        spare_wheel_day=spare_wheel_day,
+        spare_wheel_branch_id=spare_wheel_branch_id,
+        spare_wheel_editable=bool(spare_wheel_branch_id),
         schedule=dashboard_schedule(branch_id=branch_id),
         branches=branches,
         branch_label=branch_label,
@@ -83,6 +106,39 @@ def dashboard():
         range_label=range_label,
         filters={"branch": selected_branch, "range": range_key, "start_date": range_start, "end_date": range_end},
     )
+
+
+def _user_id():
+    """The signed-in account id, for rows that record who reported something."""
+    try:
+        return int(session.get("user_id") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+@bp.post("/dashboard/spare-wheels")
+@login_required
+def dashboard_spare_wheels():
+    """Save the dashboard's counted spare wheels for one depot business day.
+
+    The depot is never trusted from the request: it goes through
+    ``cash.branch_for_request``, which only accepts a depot the session may
+    already reach and otherwise falls back to the depot the sign-in is acting
+    as, so a crafted form can narrow a count but never widen one.
+    """
+    day = cash_parse_business_day(request.form.get("day"))
+    branch_id = cash_branch_for_request(request.form.get("branch", ""))
+    try:
+        spare_wheels.guard_countable_day(day)
+        values = spare_wheels.actual_counts_from_form(request.form)
+        spare_wheels.save_actual_counts(day, branch_id, values, user_id=_user_id())
+    except ValueError as exc:
+        flash(str(exc), "error")
+    else:
+        flash(f"Spare wheel count saved for {day}", "success")
+    if branch_id:
+        return redirect(url_for("admin.dashboard", branch=branch_id))
+    return redirect(url_for("admin.dashboard"))
 
 @bp.route("/coupons", methods=["GET", "POST"])
 @bp.route("/coupons/<int:coupon_id>/edit", methods=["GET", "POST"])

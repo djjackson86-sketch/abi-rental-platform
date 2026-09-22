@@ -7,6 +7,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.services.products import (
+    WHEEL_SIZES,
     archive_product,
     create_product,
     create_product_group,
@@ -250,6 +251,7 @@ def new():
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
         branch_stock={},
+        wheel_sizes=WHEEL_SIZES,
         service_history=[],
         service_history_label=service_history_label,
     )
@@ -287,6 +289,7 @@ def edit(product_id):
         product_groups=list_product_groups(include_inactive=False),
         tracking_label=tracking_label,
         branch_stock=product_branch_stock(product_id),
+        wheel_sizes=WHEEL_SIZES,
         service_history=list_service_history(product_id),
         service_history_label=service_history_label,
     )

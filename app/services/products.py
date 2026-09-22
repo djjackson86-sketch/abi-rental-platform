@@ -12,6 +12,31 @@ TRACKING_LABELS = {
 }
 
 
+#: Wheel sizes a rental trailer can run (ticket ABI-341953033). The client gave
+#: the list as 10” - 4H … 14” - 6H (inch mark); it is stored with a plain ASCII
+#: quote so the value is identical everywhere it is written or compared — the
+#: product form, the dashboard spare wheel panel and the spare_wheel_counts rows.
+WHEEL_SIZES = (
+    '10" - 4H',
+    '13" - 4H',
+    '13" - 5H',
+    '14" - 5H',
+    '14" - 6H',
+)
+
+
+def wheel_size_label(value):
+    """The stored wheel size, or an em dash when a product has none."""
+    text = str(value or "").strip()
+    return text if text in WHEEL_SIZES else "\u2014"
+
+
+def clean_wheel_size(value):
+    """A submitted wheel size, or '' — anything outside the client's list is dropped."""
+    text = str(value or "").strip()
+    return text if text in WHEEL_SIZES else ""
+
+
 def tracking_label(value):
     """customer-facing name of a tracking method ('none' = never blocks a booking)."""
     return TRACKING_LABELS.get(value, "Track quantities")
@@ -376,7 +401,7 @@ def set_product_branch_stock(product_id, counts, restrict_branch_id=None):
     return dict(cleaned)
 
 
-def _clean(form, existing_quantity=None):
+def _clean(form, existing_quantity=None, existing_wheel_size=None):
     name = form.get("name", "").strip()
     if not name:
         raise ValueError("Product name is required")
@@ -391,6 +416,19 @@ def _clean(form, existing_quantity=None):
         tracking_method = "bulk"
     product_group_id = int(form.get("product_group_id") or 0) or None
     branch_id = int(form.get("branch_id") or 0) or None
+    # Wheel size (rental trailers only, ticket ABI-341953033). The form field is
+    # hidden and disabled for anything that is not a rental, so a post that does
+    # not carry the field at all keeps whatever is stored rather than wiping it —
+    # the same guard the product type/tracking method change uses.
+    try:
+        form_keys = {str(key) for key in form.keys()}
+    except AttributeError:
+        form_keys = set()
+    if "wheel_size" in form_keys:
+        wheel_size = clean_wheel_size(form.get("wheel_size"))
+    else:
+        wheel_size = clean_wheel_size(existing_wheel_size)
+
     # Services and untracked products keep no stock count at all.
     untracked = product_type == "service" or tracking_method == "none"
     branch_counts, branch_form_present = _branch_counts_from_form(form)
@@ -412,6 +450,7 @@ def _clean(form, existing_quantity=None):
         "name": name,
         "product_type": product_type,
         "tracking_method": tracking_method,
+        "wheel_size": wheel_size,
         "description": form.get("description", "").strip(),
         "sku": form.get("sku", "").strip(),
         "active": 1 if form.get("active") else 0,
@@ -439,8 +478,8 @@ def create_product(form):
     db = get_db()
     cur = db.execute(
         """INSERT INTO products
-        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
-        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
+        (name, product_type, tracking_method, wheel_size, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
+        VALUES (:name, :product_type, :tracking_method, :wheel_size, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -464,7 +503,11 @@ def update_product(product_id, form):
     inputs is presentation, not a permission boundary.
     """
     existing = get_product(product_id)
-    data = _clean(form, existing_quantity=(existing["quantity"] if existing else None))
+    data = _clean(
+        form,
+        existing_quantity=(existing["quantity"] if existing else None),
+        existing_wheel_size=(existing["wheel_size"] if existing else None),
+    )
     branch_counts = data.pop("branch_counts")
     branch_form_present = data.pop("branch_form_present")
     untracked = data.pop("untracked")
@@ -509,7 +552,7 @@ def update_product(product_id, form):
     data["id"] = product_id
     get_db().execute(
         """UPDATE products SET
-        name=:name, product_type=:product_type, tracking_method=:tracking_method, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
+        name=:name, product_type=:product_type, tracking_method=:tracking_method, wheel_size=:wheel_size, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
         price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, hourly_extra_rate=:hourly_extra_rate, tax_profile_id=:tax_profile_id, product_group_id=:product_group_id, quantity=:quantity, branch_id=:branch_id
         WHERE id=:id""",
         data,
@@ -575,6 +618,7 @@ def duplicate_product(product_id):
         "name": f"{source['name']} (copy)",
         "product_type": source["product_type"],
         "tracking_method": source["tracking_method"],
+        "wheel_size": source["wheel_size"],
         "description": source["description"],
         "sku": "",
         "active": source["active"],
@@ -592,8 +636,8 @@ def duplicate_product(product_id):
     }
     cur = db.execute(
         """INSERT INTO products
-        (name, product_type, tracking_method, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
-        VALUES (:name, :product_type, :tracking_method, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
+        (name, product_type, tracking_method, wheel_size, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
+        VALUES (:name, :product_type, :tracking_method, :wheel_size, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
         data,
     )
     db.commit()
