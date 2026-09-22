@@ -111,7 +111,9 @@
       <div class="metric-card"><small>Orders</small><b>{{ counts.total }}</b></div>
       <div class="metric-card"><small>Items ordered</small><b>{{ counts['items'] }}</b></div>
       <div class="metric-card"><small>Revenue received</small><b>R{{ '%.2f'|format(counts.revenue) }}</b></div>
-      <div class="metric-card"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
+      <div class="metric-card is-alert"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
+      <div class="metric-card"><small>Unprocessed deposits</small><b>{{ counts.deposits_unprocessed_total }}</b></div>
+      <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>R{{ '%.2f'|format(counts.deposits_unprocessed_amount) }}</b></div>
     </section>
     {% else %}
     <div class="orders-tabs-row">
@@ -123,6 +125,13 @@
         <a class="{% if filters.status=='sales_repairs' %}active{% endif %}" href="{{ url_for('orders.index', status='sales_repairs', branch=filters.branch or None) }}">{{ sales_repairs_label }}</a>
       </nav>
     </div>
+
+    {# Ticket ABI-341953032: staff accounts get the Outstanding "Due" figure too,
+       shown in red in a slim bar of its own. The totals row (Orders / Items /
+       Revenue / deposits) and its Hide-metrics toggle stay main-profile only. #}
+    <section class="metrics orders-metrics orders-metrics-staff" id="orders-staff-metrics">
+      <div class="metric-card is-alert"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
+    </section>
     {% endif %}
 
     <section class="panel orders-list-panel">

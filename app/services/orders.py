@@ -154,7 +154,22 @@ def order_counts(query="", status="", payment_status="", return_status="", start
     where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date, branch_id=branch_id)
     db = get_db()
     due_expr = collectible_due_expr("o")
-    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({due_expr}),0) due
+    # "Unprocessed deposits" is the SAME set the rail's "Process deposit" filter and
+    # badge already use (_process_deposit_clause), so the two cards here can never
+    # disagree with the folder sitting next to them. The value mirrors
+    # deposit_to_process_amount() per order: once any part of a deposit has been
+    # refunded or applied, only the refunded remainder is still outstanding,
+    # otherwise the whole deposit is.
+    deposit_clause = _process_deposit_clause("o")
+    deposit_amount_expr = (
+        f"CASE WHEN {deposit_clause} THEN CASE "
+        f"WHEN COALESCE(o.deposit_applied_amount, 0) > 0 OR COALESCE(o.deposit_refund_amount, 0) > 0 "
+        f"THEN COALESCE(o.deposit_refund_amount, 0) ELSE COALESCE(o.deposit_total, 0) END "
+        f"ELSE 0 END"
+    )
+    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({due_expr}),0) due,
+        COALESCE(SUM({deposit_amount_expr}),0) deposit_amount,
+        COALESCE(SUM(CASE WHEN {deposit_clause} THEN 1 ELSE 0 END),0) deposit_count
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
     item_row = db.execute(f"""SELECT COALESCE(SUM(oi.quantity),0) items FROM order_items oi
         JOIN orders o ON o.id = oi.order_id LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
@@ -184,6 +199,8 @@ def order_counts(query="", status="", payment_status="", return_status="", start
         "revenue": received_row["revenue"] or 0,
         "due": row["due"] or 0,
         "items": item_row["items"] or 0,
+        "deposits_unprocessed_total": row["deposit_count"] or 0,
+        "deposits_unprocessed_amount": round(float(row["deposit_amount"] or 0), 2),
     }
 
 

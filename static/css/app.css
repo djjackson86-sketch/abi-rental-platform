@@ -241,6 +241,11 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .report-empty{margin:14px 0;padding:14px 0;color:var(--muted);font-weight:650;text-align:center}
 .filter-fixed{display:block;padding:8px 10px;border:1px dashed var(--line);border-radius:8px;font-size:12.5px;font-weight:700;color:var(--muted);background:#f8fafc}
 .orders-metrics.is-hidden{display:none}
+/* Ticket ABI-341953032: money that is still owed / still unprocessed is called out
+   in the danger colour, and staff (non-main) accounts get a slim one-card bar
+   holding only the red Due total. */
+.metric-card.is-alert b{color:var(--danger)}
+.orders-metrics-staff{grid-template-columns:minmax(0,1fr)}
 .report-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 .report-preset{display:inline-flex;align-items:center;justify-content:center;text-align:center;padding:6px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;font-weight:700;color:var(--ink);background:#fff;text-decoration:none;line-height:1.4}
 .report-preset:hover{border-color:var(--brand);color:var(--brand);text-decoration:none}
