@@ -29,8 +29,10 @@
     <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button type="submit"><span>↩</span><span>Log out</span></button></form>
   </aside>
   <main class="main">
+    {# Phone navigation: one uniform chip shape per module; the depot chip is
+       placed last and spans the full row so a long depot name stays readable. #}
     <nav class="mobile-nav">
-      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('customers') %}<a href="{{ url_for('customers.index') }}">Customers</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}
+      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('customers') %}<a href="{{ url_for('customers.index') }}">Customers</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}
     </nav>
     {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}
