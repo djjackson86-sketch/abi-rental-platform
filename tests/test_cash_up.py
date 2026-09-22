@@ -13,6 +13,8 @@ money if they drifted.
 
 All fixtures use fixed dates so nothing depends on the wall clock.
 """
+import csv
+import io
 import os
 import re
 import tempfile
@@ -376,9 +378,135 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
     ]:
         assert expected in csv_body
     drawn = _drawn_text(client.get('/cash-up/report.pdf').data)
+    # Ticket ABI-341953030: the free-text note no longer sits in a fixed-height
+    # card, so the block now reads as the four count cards plus a wrapping panel.
     for expected in ['NEW CLIENT INTERACTIONS', 'Calls', '4', 'WhatsApp', '3',
-                     'Emails', '2', 'Walk-in', '1', 'Notes', 'Two quote follow-ups needed.']:
+                     'Emails', '2', 'Walk-in', '1', 'NEW CLIENT INTERACTION NOTES',
+                     'Two quote follow-ups needed.']:
         assert expected in drawn
+
+
+def _panel_lines(pdf_bytes, title):
+    """The row text drawn under a list panel heading, as the reader sees it.
+
+    Every 9pt run at the list row indent between ``title`` and the next heading,
+    joined back with single spaces. Reading the drawn runs (rather than the
+    section dict) is what makes a cut word detectable.
+    """
+    runs = _runs(pdf_bytes)
+    matches = [index for index, run in enumerate(runs) if run[3] == title]
+    assert matches, f'{title} is not drawn on the report'
+    start = matches[0]
+    row_x = pdf_documents.REPORT_LEFT + pdf_documents.REPORT_LIST_ROW_PAD
+    lines = []
+    for x, _y, size, text in runs[start + 1:]:
+        if size == 9.0 and abs(x - row_x) < 0.01:
+            lines.append(text)
+            continue
+        break
+    return lines
+
+
+# Ticket ABI-341953030: a real note, well past what a single card line can hold.
+LONG_INTERACTION_NOTE = (
+    'Spoke to the client about the 4x8 trailer availability for the long weekend and confirmed '
+    'the deposit will be paid by EFT on Thursday morning before collection at 08:00. '
+    'They also asked whether the spare wheel and the ratchet set can be included in the hire, '
+    'which the branch manager approved at no extra cost because they are repeat customers. '
+    'Follow-up needed: send the quote, confirm the tow bar size, and arrange delivery to their '
+    'premises in Roodepoort if the paperwork is signed before Friday noon.'
+)
+
+
+def test_a_long_interaction_note_is_drawn_in_full_and_never_cut(client, app):
+    """The notes card ellipsised the free text; the panel must print every word."""
+    assert len(LONG_INTERACTION_NOTE) > 400
+    login(client)
+    body = client.post('/cash-up/interactions', data={
+        'day': '', 'branch': '1',
+        'interaction_calls': '4', 'interaction_whatsapp': '3',
+        'interaction_emails': '2', 'interaction_walk_in': '1',
+        'interaction_notes': LONG_INTERACTION_NOTE,
+    }, follow_redirects=True).get_data(as_text=True)
+    assert 'New client interactions saved' in body
+
+    blob = client.get('/cash-up/report.pdf').data
+    text = blob.decode('latin-1')
+    drawn = _drawn_text(blob)
+    lines = _panel_lines(blob, 'NEW CLIENT INTERACTION NOTES')
+    assert len(lines) > 1, lines
+    assert ' '.join(lines) == LONG_INTERACTION_NOTE
+    assert '...' not in text, 'nothing on the report may be ellipsised'
+    # The panel belongs to the interaction block, above the cash panels.
+    assert (drawn.index('NEW CLIENT INTERACTIONS')
+            < drawn.index('NEW CLIENT INTERACTION NOTES')
+            < drawn.index('CASH USED'))
+    # Nothing is drawn outside the printable band, on either page.
+    baselines = _baselines(blob)
+    assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
+    # The CSV export was never the surface that cut the words, so it is unchanged
+    # (read as CSV — a long note with a comma in it is quoted, not mangled).
+    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    assert ['New client interactions', 'Notes', LONG_INTERACTION_NOTE] in list(csv.reader(io.StringIO(csv_body)))
+
+
+def test_a_notes_only_interaction_day_still_renders_its_panel(client, app):
+    """No calls, WhatsApp, emails or walk-ins recorded — the note alone must print."""
+    login(client)
+    client.post('/cash-up/interactions', data={
+        'day': '', 'branch': '1',
+        'interaction_calls': '0', 'interaction_whatsapp': '0',
+        'interaction_emails': '0', 'interaction_walk_in': '0',
+        'interaction_notes': LONG_INTERACTION_NOTE,
+    }, follow_redirects=True)
+    blob = client.get('/cash-up/report.pdf').data
+    drawn = _drawn_text(blob)
+    assert 'NEW CLIENT INTERACTIONS' in drawn
+    assert 'NEW CLIENT INTERACTION NOTES' in drawn
+    assert ' '.join(_panel_lines(blob, 'NEW CLIENT INTERACTION NOTES')) == LONG_INTERACTION_NOTE
+    assert '...' not in blob.decode('latin-1')
+    cards = _card_values(blob)
+    assert [cards.get(key) for key in ('Calls', 'WhatsApp', 'Emails', 'Walk-in')] == ['0', '0', '0', '0']
+
+
+def test_a_short_interaction_note_keeps_the_report_on_one_page(client, app):
+    """A short note gains a one-row panel and costs no extra page."""
+    login(client)
+    client.post('/cash-up/interactions', data={
+        'day': '', 'branch': '1',
+        'interaction_calls': '4', 'interaction_whatsapp': '3',
+        'interaction_emails': '2', 'interaction_walk_in': '1',
+        'interaction_notes': 'Two quote follow-ups needed.',
+    }, follow_redirects=True)
+    blob = client.get('/cash-up/report.pdf').data
+    drawn = _drawn_text(blob)
+    assert blob.decode('latin-1').count('/Type /Page ') == 1
+    assert _panel_lines(blob, 'NEW CLIENT INTERACTION NOTES') == ['Two quote follow-ups needed.']
+    # The panel sits inside the interaction block, above every later panel.
+    assert drawn.index('NEW CLIENT INTERACTIONS') < drawn.index('NEW CLIENT INTERACTION NOTES')
+    for expected in ['CASH USED', 'CASH DROP OFF (TO BANK)', 'END OF DAY NOTES']:
+        assert expected in drawn, expected
+        assert drawn.index('NEW CLIENT INTERACTION NOTES') < drawn.index(expected)
+
+
+def test_a_day_without_interaction_notes_keeps_the_counts_only_report(client, app):
+    """The old fifth "Notes" card is gone; the four counts and the page are not."""
+    login(client)
+    client.post('/cash-up/interactions', data={
+        'day': '', 'branch': '1',
+        'interaction_calls': '4', 'interaction_whatsapp': '3',
+        'interaction_emails': '2', 'interaction_walk_in': '1',
+        'interaction_notes': '',
+    }, follow_redirects=True)
+    blob = client.get('/cash-up/report.pdf').data
+    drawn = _drawn_text(blob)
+    assert 'NEW CLIENT INTERACTIONS' in drawn
+    assert 'NEW CLIENT INTERACTION NOTES' not in drawn
+    assert 'No interaction notes recorded' not in drawn
+    cards = _card_values(blob)
+    assert 'Notes' not in cards
+    assert [cards.get(key) for key in ('Calls', 'WhatsApp', 'Emails', 'Walk-in')] == ['4', '3', '2', '1']
+    assert blob.decode('latin-1').count('/Type /Page ') == 1
 
 
 def test_new_client_interactions_reject_junk_and_negative_counts(client, app):

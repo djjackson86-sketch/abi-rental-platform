@@ -787,8 +787,25 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
         {'kind': 'cards', 'title': 'Cash up', 'cards': cash_cards},
     ]
     interaction_values = cash.get('interactions') or {}
-    if any(int(interaction_values.get(key, 0) or 0) for key in ('calls', 'whatsapp', 'emails', 'walk_in')) or str(interaction_values.get('notes') or '').strip():
-        sections.append({'kind': 'cards', 'title': 'New client interactions', 'cards': cards_for('New client interactions')})
+    # Ticket ABI-341953030: the interaction notes are free text, so they cannot
+    # live in a fixed-height card — a card draws one ellipsised line (10.5pt
+    # down to 7.0pt, then "..."). They print as a wrapping panel instead, the
+    # same shape as End of day notes, and that panel sits with the interaction
+    # cards rather than at the end of the report because it belongs to the block
+    # the reader is looking at.
+    interaction_notes = str(interaction_values.get('notes') or '').strip()
+    interaction_cards = [card for card in cards_for('New client interactions')
+                         if card.get('label') != 'Notes']
+    if any(int(interaction_values.get(key, 0) or 0) for key in ('calls', 'whatsapp', 'emails', 'walk_in')) or interaction_notes:
+        sections.append({'kind': 'cards', 'title': 'New client interactions', 'cards': interaction_cards})
+    if interaction_notes:
+        sections.append({
+            'kind': 'list',
+            'title': 'New client interaction notes',
+            'rows': [{'label': line} for line in
+                     ([line.strip() for line in interaction_notes.splitlines()] or [''])],
+            'overflow': '... more notes in the CSV export',
+        })
     sections.extend([
         {
             'kind': 'list',
