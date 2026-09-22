@@ -30,7 +30,7 @@
   </aside>
   <main class="main">
     <nav class="mobile-nav">
-      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}
+      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('customers') %}<a href="{{ url_for('customers.index') }}">Customers</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}
     </nav>
     {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}

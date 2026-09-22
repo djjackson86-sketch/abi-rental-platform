@@ -4845,6 +4845,60 @@ def test_main_can_manage_users_and_staff_have_restricted_access(client, app):
     assert b'>Settings</span>' not in sidebar
 
 
+def _mobile_nav_markup(html):
+    """Return just the phone nav block, so a link cannot be confused with the sidebar."""
+    match = re.search(rb'<nav class="mobile-nav">(.*?)</nav>', html, re.S)
+    assert match, 'the phone navigation was not rendered'
+    return match.group(1)
+
+
+def test_customers_is_reachable_from_the_phone_nav(client, app):
+    """ABI-341953029: Customers must be offered on the phone layout when the account may open it.
+
+    The sidebar is hidden below 860px, so the mobile nav is the only way to reach
+    a module on a phone. The link reuses the existing customers permission gate —
+    the module list and the /customers 403 must behave exactly as before.
+    """
+    login(client)
+    saved = client.post('/settings/users/permissions', data={
+        'module': ['new_order', 'dashboard', 'calendar', 'orders', 'customers'],
+    }, follow_redirects=True)
+    assert b'Additional account permissions saved' in saved.data
+    added = client.post('/settings/users/add', data={
+        'name': 'Phone Staff',
+        'password': 'staff123',
+    }, follow_redirects=True)
+    assert b'Additional account created' in added.data
+    client.post('/logout')
+    login(client, 'Phone Staff', 'staff123')
+
+    dashboard = client.get('/dashboard')
+    assert dashboard.status_code == 200
+    nav = _mobile_nav_markup(dashboard.data)
+    assert b'href="/customers">Customers</a>' in nav
+    # Same gate as the sidebar, so the phone link can only appear where the
+    # desktop link does.
+    assert b'>Customers</span>' in dashboard.data
+    assert client.get('/customers').status_code == 200
+
+    # Dropping the module removes the phone link AND keeps the server-side gate.
+    client.post('/logout')
+    login(client)
+    dropped = client.post('/settings/users/permissions', data={
+        'module': ['new_order', 'dashboard', 'calendar', 'orders'],
+    }, follow_redirects=True)
+    assert b'Additional account permissions saved' in dropped.data
+    client.post('/logout')
+    login(client, 'Phone Staff', 'staff123')
+
+    dashboard = client.get('/dashboard')
+    assert dashboard.status_code == 200
+    nav = _mobile_nav_markup(dashboard.data)
+    assert b'/customers' not in nav
+    assert b'>Customers</span>' not in dashboard.data
+    assert client.get('/customers').status_code == 403
+
+
 def test_staff_order_workflow_stays_available_inside_orders(client, app):
     login(client)
     seed_customer_and_product(client)
