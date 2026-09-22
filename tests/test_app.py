@@ -4826,12 +4826,12 @@ def test_main_can_manage_users_and_staff_have_restricted_access(client, app):
 
     orders = client.get('/orders')
     assert orders.status_code == 200
-    # Ticket ABI-341953032 gives staff a slim red "Due" card on the Orders page, so
-    # the restricted-access check is the absence of the main-only totals row (its id,
-    # its toggle and its deposit cards) rather than the class name the bar shares.
+    # Tickets ABI-341953032/034 give staff their own metric bar (red Due card plus
+    # the unprocessed-deposit count and value), so the restricted-access check is the
+    # absence of the main-only totals row (its id and its toggle), not of the cards.
     assert b'id="orders-metrics"' not in orders.data
     assert b'orders-staff-metrics' in orders.data
-    assert b'Unprocessed deposits' not in orders.data
+    assert b'Unprocessed deposits' in orders.data
     assert b'Hide metrics' not in orders.data
     assert b'Export' not in orders.data
 

@@ -127,10 +127,15 @@
     </div>
 
     {# Ticket ABI-341953032: staff accounts get the Outstanding "Due" figure too,
-       shown in red in a slim bar of its own. The totals row (Orders / Items /
-       Revenue / deposits) and its Hide-metrics toggle stay main-profile only. #}
+       shown in red in a bar of its own. Ticket ABI-341953034 adds the same
+       "Unprocessed deposits" count and money value the main row shows; the
+       main-only totals row (Orders / Items / Revenue) and its Hide-metrics toggle
+       stay main-profile only. Counts come from the same order_counts() the main
+       row uses and honour the page filters and the branch scope. #}
     <section class="metrics orders-metrics orders-metrics-staff" id="orders-staff-metrics">
       <div class="metric-card is-alert"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
+      <div class="metric-card"><small>Unprocessed deposits</small><b>{{ counts.deposits_unprocessed_total }}</b></div>
+      <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>R{{ '%.2f'|format(counts.deposits_unprocessed_amount) }}</b></div>
     </section>
     {% endif %}
 

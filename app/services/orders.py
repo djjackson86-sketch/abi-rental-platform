@@ -51,10 +51,18 @@ def _process_deposit_clause(alias="o"):
     This is deliberately separate from payment due. A returned order can still
     have rental money outstanding, but if its deposit has already been marked as
     refunded/used it should not remain in the staff "Process deposit" folder.
+
+    Ticket ABI-341953034: only **returned** orders belong here. A deposit on an
+    order that is merely picked up (``started``) is not actionable yet — the
+    deposit is only refunded or used once the trailer is back — and a
+    ``canceled``/``cancelled`` record is a dead one that will never be refunded.
+    This stays the single definition shared by the rail's "Process deposit" folder
+    and badge, the Orders metric cards, the CSV export and ``order_counts`` money
+    total, so the card, the badge and the folder can never disagree.
     """
     prefix = f"{alias}." if alias else ""
     return (
-        f"{prefix}status IN ('started', 'returned', 'canceled', 'cancelled') "
+        f"{prefix}status = 'returned' "
         f"AND COALESCE({prefix}deposit_total, 0) > 0 "
         f"AND COALESCE({prefix}deposit_processed_at, '') = '' "
         f"AND COALESCE({prefix}deposit_process_method, '') = '' "
@@ -155,11 +163,11 @@ def order_counts(query="", status="", payment_status="", return_status="", start
     db = get_db()
     due_expr = collectible_due_expr("o")
     # "Unprocessed deposits" is the SAME set the rail's "Process deposit" filter and
-    # badge already use (_process_deposit_clause), so the two cards here can never
-    # disagree with the folder sitting next to them. The value mirrors
-    # deposit_to_process_amount() per order: once any part of a deposit has been
-    # refunded or applied, only the refunded remainder is still outstanding,
-    # otherwise the whole deposit is.
+    # badge already use (_process_deposit_clause: returned orders only, ticket
+    # ABI-341953034), so the two cards here can never disagree with the folder
+    # sitting next to them. The value mirrors deposit_to_process_amount() per order:
+    # once any part of a deposit has been refunded or applied, only the refunded
+    # remainder is still outstanding, otherwise the whole deposit is.
     deposit_clause = _process_deposit_clause("o")
     deposit_amount_expr = (
         f"CASE WHEN {deposit_clause} THEN CASE "

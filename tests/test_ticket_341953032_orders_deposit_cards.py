@@ -7,17 +7,24 @@ Requested edit:
 
 "Unprocessed deposits" is the set the Orders filter rail already calls
 **Process deposit** (``order_counts`` / ``order_filter_counts`` ->
-``_process_deposit_clause``): a live order whose refundable deposit has not been
+``_process_deposit_clause``): an order whose refundable deposit has not been
 refunded/used yet. The count already existed as a rail badge; only the money total
 was missing. The value mirrors ``deposit_to_process_amount()`` per order - once any
 part of a deposit has been refunded or applied, only the refunded remainder is
 still outstanding, otherwise the whole deposit is.
 
-These tests pin: the exact numbers on a seeded mix, that processed/settled
-deposits leave both cards, that the cards agree with the rail badge and the list's
-own Due column, that they follow the page's filters and the branch scope, that the
-red styling is real CSS, and that staff (non-main) accounts now get the red Due
-card while the main-only totals row stays main-only.
+Ticket ABI-341953034 narrowed that single definition to **returned orders only**
+(a deposit on a merely picked-up order is not actionable yet, and a canceled record
+will never be refunded) and gave staff the two deposit cards beside their Due card.
+The numbers below are re-pinned to the narrowed set; the narrowing itself is pinned
+by ``tests/test_ticket_341953034_deposits_returned_only_staff_cards.py``.
+
+These tests pin: the exact numbers on a seeded mix, that processed/settled and
+non-returned deposits leave both cards, that the cards agree with the rail badge
+and the list's own Due column, that they follow the page's filters and the branch
+scope, that the red styling is real CSS, and that staff (non-main) accounts get the
+same Due / unprocessed-deposit cards - branch-scoped - while the main-only totals
+row and its Hide-metrics toggle stay main-only.
 """
 import os
 import re
@@ -97,9 +104,11 @@ def _insert_order(db, number, status, *, deposit=0, applied=0, refund=0, method=
 def seed_deposits(app):
     """The documented mix. Returns the order numbers by nickname.
 
-    unprocessed   : returned 750 · started 200 · partly applied 1000/refund 200 · canceled 400
+    in the set    : returned 750 · returned 1000/applied 300/refund 200 (remainder
+                    200) · returned 100 on branch 2
     processed     : returned 500 refunded+timestamped · returned 600 with a method stored
-    out of set    : returned with no deposit · reserved 300
+    out of set    : returned with no deposit · reserved 300 · started 200
+                    (ticket ABI-341953034) · canceled 400 (ticket ABI-341953034)
     """
     with app.app_context():
         db = get_db()
@@ -148,6 +157,10 @@ def _cards(html):
     return out
 
 
+def _by_label(html):
+    return {label: (value, classes) for label, value, classes in _cards(html)}
+
+
 def _metric_section(html, marker):
     """The metric <section> carrying ``marker`` (an id or a class)."""
     match = re.search(rb'<section class="[^"]*"[^>]*' + marker + rb'[^>]*>(.*?)</section>',
@@ -156,7 +169,7 @@ def _metric_section(html, marker):
     return match.group(0)
 
 
-def _staff_due(client, app, name, branch_id):
+def _staff_orders(client, app, name, branch_id):
     add_staff(client, app, name, branch_id)
     client.post('/logout')
     login(client, name, 'staff123')
@@ -172,10 +185,11 @@ def test_the_cards_count_and_sum_the_unprocessed_deposits(app):
     seed_deposits(app)
     counts = counters_with_filters(app)
 
-    # returned 750 + started 200 + partly applied 200 + canceled 400 (branch 1)
-    # plus the branch-2 returned deposit of 100 = 5 orders / R1650.
-    assert counts['deposits_unprocessed_total'] == 5
-    assert counts['deposits_unprocessed_amount'] == 1650.0
+    # returned 750 + partly-refunded remainder 200 (branch 1) + returned 100
+    # (branch 2). The started 200 and the canceled 400 are no longer in the set
+    # (ticket ABI-341953034).
+    assert counts['deposits_unprocessed_total'] == 3
+    assert counts['deposits_unprocessed_amount'] == 1050.0
 
 
 def test_processed_and_settled_deposits_leave_both_cards(app):
@@ -195,8 +209,8 @@ def test_processed_and_settled_deposits_leave_both_cards(app):
 
     # Neither 500 (refunded with a timestamp) nor 600 (payout method already stored)
     # may appear in the count or the money.
-    assert counts['deposits_unprocessed_total'] == 5
-    assert counts['deposits_unprocessed_amount'] == 1650.0
+    assert counts['deposits_unprocessed_total'] == 3
+    assert counts['deposits_unprocessed_amount'] == 1050.0
 
 
 def test_a_partly_refunded_deposit_only_counts_its_remainder(app):
@@ -214,11 +228,11 @@ def test_a_partly_refunded_deposit_only_counts_its_remainder(app):
         ctx.pop()
 
     # Applied-but-unrefunded deposits are excluded by the clause entirely...
-    assert only_part['deposits_unprocessed_total'] == 5
-    assert only_part['deposits_unprocessed_amount'] == 1650.0
+    assert only_part['deposits_unprocessed_total'] == 3
+    assert only_part['deposits_unprocessed_amount'] == 1050.0
     # ...while a genuinely untouched 1000 counts whole once the partial refund is gone.
-    assert whole['deposits_unprocessed_total'] == 5
-    assert whole['deposits_unprocessed_amount'] == 2450.0
+    assert whole['deposits_unprocessed_total'] == 3
+    assert whole['deposits_unprocessed_amount'] == 1850.0
 
 
 def test_the_count_card_agrees_with_the_rail_badge(app):
@@ -231,19 +245,23 @@ def test_the_count_card_agrees_with_the_rail_badge(app):
     finally:
         ctx.pop()
 
-    assert badge == counts['deposits_unprocessed_total'] == 5
+    assert badge == counts['deposits_unprocessed_total'] == 3
 
 
 def test_the_cards_follow_the_page_filters(app):
     seed_deposits(app)
-    # Only the started (picked-up) order is left when the page is filtered to it.
+    # The started (picked-up) deposit left the set entirely (ticket ABI-341953034)...
     started = counters_with_filters(app, status='started')
-    assert started['deposits_unprocessed_total'] == 1
-    assert started['deposits_unprocessed_amount'] == 200.0
+    assert started['deposits_unprocessed_total'] == 0
+    assert started['deposits_unprocessed_amount'] == 0.0
+    # ...so filtering to Returned shows the whole set.
+    returned = counters_with_filters(app, status='returned')
+    assert returned['deposits_unprocessed_total'] == 3
+    assert returned['deposits_unprocessed_amount'] == 1050.0
     # Filtering to the Process-deposit folder itself shows the very same figures.
     folder = counters_with_filters(app, payment_status='process_deposit')
-    assert folder['deposits_unprocessed_total'] == 5
-    assert folder['deposits_unprocessed_amount'] == 1650.0
+    assert folder['deposits_unprocessed_total'] == 3
+    assert folder['deposits_unprocessed_amount'] == 1050.0
 
 
 def test_the_cards_and_the_due_card_are_branch_scoped(app):
@@ -254,9 +272,9 @@ def test_the_cards_and_the_due_card_are_branch_scoped(app):
 
     assert branch_two['deposits_unprocessed_total'] == 1
     assert branch_two['deposits_unprocessed_amount'] == 100.0
-    assert branch_one['deposits_unprocessed_total'] == 4
-    assert branch_one['deposits_unprocessed_amount'] == 1550.0
-    assert everything['deposits_unprocessed_amount'] == 1650.0
+    assert branch_one['deposits_unprocessed_total'] == 2
+    assert branch_one['deposits_unprocessed_amount'] == 950.0
+    assert everything['deposits_unprocessed_amount'] == 1050.0
 
     # The Due figure is scoped the same way: depot 2's own charge exists only there.
     assert branch_two['due'] == 100.0
@@ -277,25 +295,35 @@ def test_the_main_profile_sees_every_card_and_the_red_ones(client, app):
         'Unprocessed deposits', 'Unprocessed deposit value',
     ]
     values = {label: value for label, value, _ in cards}
-    assert values['Unprocessed deposits'] == '5'
-    assert values['Unprocessed deposit value'] == 'R1650.00'
+    assert values['Unprocessed deposits'] == '3'
+    assert values['Unprocessed deposit value'] == 'R1050.00'
     alert = [label for label, _, classes in cards if 'is-alert' in classes]
     assert alert == ['Due', 'Unprocessed deposit value']
 
 
-def test_staff_get_the_red_due_card_and_nothing_else(client, app):
+def test_staff_get_the_same_three_cards_branch_scoped(client, app):
+    """Ticket ABI-341953034: the deposit count and value are no longer main-only."""
     seed_deposits(app)
-    html = _staff_due(client, app, 'Depot Two Staff', 2)
+    html = _staff_orders(client, app, 'Depot Two Staff', 2)
     staff_bar = _metric_section(html, b'orders-staff-metrics')
     cards = _cards(staff_bar)
 
-    assert [label for label, _, _ in cards] == ['Due']
-    # Branch 2 only: its own returned order is the only money owed there.
-    assert cards[0][1] == 'R100.00'
-    assert 'is-alert' in cards[0][2]
+    assert [label for label, _, _ in cards] == [
+        'Due', 'Unprocessed deposits', 'Unprocessed deposit value',
+    ]
+    values = {label: value for label, value, _ in cards}
+    # Branch 2 only: its own returned order is the only money owed there, and the
+    # only unprocessed deposit there is the same R100.
+    assert values['Due'] == 'R100.00'
+    assert values['Unprocessed deposits'] == '1'
+    assert values['Unprocessed deposit value'] == 'R100.00'
+    classes = {label: cls for label, _, cls in cards}
+    assert 'is-alert' in classes['Due']
+    assert 'is-alert' not in classes['Unprocessed deposits']
+    assert 'is-alert' in classes['Unprocessed deposit value']
 
-    # The main-only totals row and its Hide-metrics toggle stay out of reach.
-    assert b'Unprocessed deposits' not in html
+    # The main-only totals row and its Hide-metrics toggle stay out of reach; the
+    # deposit cards themselves are now deliberately shared.
     assert b'id="orders-metrics"' not in html
     assert b'metrics-toggle' not in html
     assert b'orders.metrics.hidden' not in html
@@ -314,14 +342,30 @@ def _due_cells(html):
 def test_the_staff_due_card_matches_the_due_column_of_the_list(client, app):
     """DB-to-UI parity: the staff card equals the Due cells they are looking at."""
     seed_deposits(app)
-    html = _staff_due(client, app, 'Depot Two Staff', 2)
+    html = _staff_orders(client, app, 'Depot Two Staff', 2)
     rendered = client.get('/orders?status=returned').data
 
     due_cells = _due_cells(rendered)
     assert len(due_cells) == 1, due_cells
     cell_total = sum(float(re.sub(rb'[^0-9\.]', b'', cell)) for cell in due_cells)
     assert cell_total == 100.0, due_cells
-    assert _cards(_metric_section(html, b'orders-staff-metrics'))[0][1] == 'R%.2f' % cell_total
+    assert _by_label(_metric_section(html, b'orders-staff-metrics'))['Due'][0] == \
+        'R%.2f' % cell_total
+
+
+def test_the_staff_deposit_card_matches_their_rail_badge_and_folder(client, app):
+    """The staff card == the "Process deposit" badge == the rows in that folder."""
+    seed_deposits(app)
+    html = _staff_orders(client, app, 'Depot Two Staff', 2)
+    value = _by_label(_metric_section(html, b'orders-staff-metrics'))['Unprocessed deposits'][0]
+
+    folder = client.get('/orders?payment_status=process_deposit').data
+    assert value == '1'
+    # The rail badge prints the same count, and the folder lists exactly that row.
+    badge = re.search(rb'<span>Process deposit</span>\s*<em>\((\d+)\)</em>', html)
+    assert badge and badge.group(1) == b'1'
+    assert b'ORD-30009' in folder
+    assert b'ORD-30002' not in folder  # the started deposit is not actionable yet
 
 
 def test_the_main_profile_still_gets_the_hide_metrics_toggle(client, app):
@@ -332,15 +376,18 @@ def test_the_main_profile_still_gets_the_hide_metrics_toggle(client, app):
 
 
 def test_the_main_profile_only_rule_is_the_only_thing_that_split(client, app):
-    """Nothing else in the Orders page lost its main-only gate."""
+    """Only the totals row and the toggle stay main-only; the deposit cards are shared."""
     seed_deposits(app)
     login(client)
     main_html = client.get('/orders').data
-    staff_html = _staff_due(client, app, 'Depot Two Staff', 2)
+    staff_html = _staff_orders(client, app, 'Depot Two Staff', 2)
 
-    for marker in (b'id="orders-metrics"', b'Unprocessed deposits', b'metrics-toggle'):
+    for marker in (b'id="orders-metrics"', b'metrics-toggle'):
         assert marker in main_html
         assert marker not in staff_html
+    for marker in (b'Unprocessed deposits', b'Unprocessed deposit value', b'Due'):
+        assert marker in main_html
+        assert marker in staff_html
     # Both profiles still get the tab row and the list itself.
     for html in (main_html, staff_html):
         assert b'aria-label="Order views"' in html
@@ -361,6 +408,9 @@ def test_the_red_cards_use_the_danger_token():
     rule = re.search(r'\.metric-card\.is-alert b\{([^}]*)\}', css)
     assert rule, '.metric-card.is-alert b has no rule in app.css'
     assert 'var(--danger)' in rule.group(1)
-    # The token itself is a red, and the staff bar is a single full-width card.
+    # The token itself is a red, and the staff bar lays its cards out responsively.
     assert '--danger:#d92d20' in css
-    assert re.search(r'\.orders-metrics-staff\{[^}]*grid-template-columns:minmax\(0,1fr\)', css)
+    staff = re.search(r'\.orders-metrics-staff\{([^}]*)\}', css)
+    assert staff, '.orders-metrics-staff has no rule in app.css'
+    assert 'auto-fit' in staff.group(1)
+    assert 'minmax(0,1fr)' not in staff.group(1)
