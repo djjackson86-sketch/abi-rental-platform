@@ -1,4 +1,5 @@
-"""The POPIA document pack as it exists on disk — read-only (feature P, §P1).
+"""The POPIA document pack as it exists on disk — the read-only reader plus the
+phase 14 (Feature Q, §Q1) acceptance service.
 
 Don's ask for Feature P was a real privacy notice a customer can read and a consent
 tick they must give. The notice itself is not written by software: it is the reviewed
@@ -12,34 +13,71 @@ So this module reads the pack and reports, honestly, what is still open in it:
 * :func:`document_paths` — the manifest merged with what is actually on disk. A file
   that is missing is reported as missing; nothing is invented.
 * :func:`document_text` — the Markdown source, verbatim.
+* :func:`document_hash` — the ``sha256`` of that source (phase 14).
 * :func:`outstanding_fields` — every bracketed placeholder token in a document
   (``[TO CONFIRM — …]``, ``[WEBSITE URL]``, ``[Confirm per branch …]``, ``[TODAY]``).
   The rule is **general on purpose** — any ``[...]`` containing a capitalised word —
   so a new placeholder cannot slip past by being worded differently. That is what
-  gates ``/privacy`` today and what will gate ``accept_document()`` in phase 14.
+  gates ``/privacy`` today and what gates :func:`accept_document` in phase 14.
 * :func:`is_complete` / :func:`notice_metadata` — the gate and the few facts the
   public page renders from the document rather than hard-coding.
-
-**Phase 14 (Feature Q, §Q1) extends this module** — it adds ``document_hash``,
-``acceptance_for``, ``is_stale`` and ``accept_document`` (which refuses while
-:func:`outstanding_fields` is non-empty) plus the ``document_acceptances`` table.
-This module deliberately contains no writing and no database access, so that phase
-can build on it without reworking anything here.
+* :func:`acceptance_for` / :func:`is_stale` / :func:`accept_document` /
+  :func:`pack_status` — phase 14's adoption record, backed by the
+  ``document_acceptances`` table in ``app/db.py``. :func:`accept_document` refuses
+  while :func:`outstanding_fields` is non-empty, and stores the minimum: document
+  identity/version/hash, who, when — no IP address, no user agent.
 """
 
+import hashlib
 import re
 from pathlib import Path
 
-#: The document keys the app refers to, mapped to their filenames in ``docs/popia/``.
-#: Keys are stable; the wording of the documents is Sano's.
-DOCUMENTS = {
-    "privacy_notice": "PRIVACY-NOTICE.md",
-    "retention_policy": "RETENTION-POLICY-AND-SCHEDULE.md",
-    "action_plan": "POPIA-COMPLIANCE-ACTION-PLAN.md",
-    "operator_agreement": "OPERATOR-AGREEMENT-ABI-SANO.md",
-    "privacy_notice_review": "PRIVACY-NOTICE-REVIEW.md",
-    "blockers_checklist": "BLOCKERS-CHECKLIST.md",
-}
+from app.db import get_db
+from app.services.timezone import local_now_iso
+
+#: The pack manifest — ``docs/popia/PACK-MANIFEST.md`` is the single source of
+#: truth for each document's key, human title, file name and the signature-required
+#: flag, and the pack order lives there (not in templates).
+MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "popia" / "PACK-MANIFEST.md"
+
+#: Values the manifest's "Signature required" column reads as True.
+_SIGNATURE_TRUE = {"yes", "true", "1", "y", "required"}
+
+
+def _parse_manifest():
+    """Read the pack manifest into an ordered list of entries.
+
+    Each Markdown-table row becomes ``{"key", "title", "file", "signature_required"}``.
+    An unparseable manifest raises rather than silently inventing an empty pack.
+    """
+    entries = []
+    for line in MANIFEST_PATH.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 4:
+            continue
+        key, title, filename, signature = cells[0], cells[1], cells[2], cells[3].strip("`").lower()
+        if key.strip("`").lower() == "key" or set(signature) <= {"-", ":", " "}:
+            continue  # the header row and the ``---`` separator row
+        entries.append(
+            {
+                "key": key.strip("`"),
+                "title": title,
+                "file": filename.strip("`"),
+                "signature_required": signature in _SIGNATURE_TRUE,
+            }
+        )
+    if not entries:
+        raise RuntimeError(f"The POPIA pack manifest parsed no documents: {MANIFEST_PATH}")
+    return entries
+
+
+#: The pack in manifest order — the order templates must render it.
+PACK = _parse_manifest()
+#: Lookup by key, used by :func:`document_paths` and friends.
+MANIFEST = {entry["key"]: entry for entry in PACK}
 
 #: The key the public privacy page and the consent records are pinned to.
 PRIVACY_NOTICE_KEY = "privacy_notice"
@@ -59,9 +97,9 @@ def documents_dir():
 
 
 def document_paths():
-    """Every known document with the path it should be at (whether or not it exists)."""
+    """The manifest merged with ``docs/popia/``: ``{key: resolved Path}`` in pack order."""
     directory = documents_dir()
-    return {key: directory / filename for key, filename in DOCUMENTS.items()}
+    return {entry["key"]: directory / entry["file"] for entry in PACK}
 
 
 def missing_documents():
@@ -163,3 +201,110 @@ def notice_metadata(key=PRIVACY_NOTICE_KEY):
         else:
             meta["cctv"] = True
     return meta
+
+
+# ---------------------------------------------------------------------------
+# Phase 14 (Feature Q, §Q1): acceptance, staleness and pack status
+# ---------------------------------------------------------------------------
+
+
+def document_hash(key):
+    """The ``sha256`` hex digest of the document's Markdown source, verbatim."""
+    return hashlib.sha256(document_text(key).encode("utf-8")).hexdigest()
+
+
+_VERSION_RE = re.compile(r"\*\*Version:\*\*\s*([^·\n]+)")
+
+
+def document_version(key):
+    """The document's own ``**Version:**`` value if it carries one, else ``''``.
+
+    A version that is still a placeholder (brackets) is reported as ``''`` — the
+    same "never publish a token" rule :func:`_clean_fact` already enforces.
+    """
+    match = _VERSION_RE.search(document_text(key))
+    if match:
+        value = _clean_fact(match.group(1))
+        if value:
+            return value
+    return ""
+
+
+def acceptance_for(key):
+    """The newest acceptance row for ``key`` (or ``None``) — newest first.
+
+    ``document_acceptances`` is an audit trail: accepting twice is allowed and the
+    newest row wins, so this orders by ``accepted_at`` then ``id`` to break ties.
+    """
+    return get_db().execute(
+        "SELECT * FROM document_acceptances WHERE document_key = ? "
+        "ORDER BY accepted_at DESC, id DESC LIMIT 1",
+        (key,),
+    ).fetchone()
+
+
+def is_stale(key):
+    """True when the newest stored acceptance's hash differs from the current file.
+
+    The document was edited after it was adopted, so the acceptance no longer
+    evidences the text that is on disk now.
+    """
+    row = acceptance_for(key)
+    if row is None:
+        return False
+    return (row["document_hash"] or "") != document_hash(key)
+
+
+def accept_document(key, user_id, note=""):
+    """Adopt one document on the record, or refuse.
+
+    The hard gate (decision D11): while :func:`outstanding_fields` is non-empty the
+    document is refused with ``ValueError`` and **nothing is written** — the app
+    must never present a document containing ``[TO CONFIRM]``-style tokens as
+    adoptable. Otherwise a row recording document identity/version/hash, who and
+    when is written. No IP address, no user agent (data minimisation).
+    """
+    outstanding = outstanding_fields(key)
+    if outstanding:
+        raise ValueError(
+            "This document cannot be adopted yet: "
+            + "; ".join(outstanding)
+            + " must be completed first."
+        )
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO document_acceptances "
+        "(document_key, document_version, document_hash, accepted_by_user_id, accepted_at, note) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (key, document_version(key), document_hash(key), user_id, local_now_iso(), (note or "").strip()),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def pack_status():
+    """Per-document status in pack order: title, required?, accepted (by whom,
+    when), stale?, and the outstanding fields that still block adoption."""
+    result = []
+    db = get_db()
+    for entry in PACK:
+        key = entry["key"]
+        acceptance = acceptance_for(key)
+        accepted_by = None
+        accepted_by_user_id = acceptance["accepted_by_user_id"] if acceptance else None
+        if accepted_by_user_id is not None:
+            user = db.execute("SELECT name FROM users WHERE id = ?", (accepted_by_user_id,)).fetchone()
+            accepted_by = user["name"] if user else None
+        result.append(
+            {
+                "key": key,
+                "title": entry["title"],
+                "required": entry["signature_required"],
+                "accepted_by": accepted_by,
+                "accepted_by_user_id": accepted_by_user_id,
+                "accepted_at": acceptance["accepted_at"] if acceptance else None,
+                "stale": is_stale(key),
+                "outstanding_fields": outstanding_fields(key),
+            }
+        )
+    return result

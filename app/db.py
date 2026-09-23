@@ -239,6 +239,23 @@ CREATE TABLE IF NOT EXISTS consent_records (
 
 CREATE INDEX IF NOT EXISTS idx_consent_records_customer ON consent_records(customer_id);
 
+-- POPIA document acceptances (programme phase 14 / feature Q, §Q1). One row per
+-- acceptance, newest wins; accepting twice is allowed (it is an audit trail). The
+-- columns are deliberately the minimum — document identity/version/hash, who, when,
+-- note — with **no IP address and no user agent** (POPIA data minimisation, the same
+-- rule as consent_records; a test asserts this column set so it cannot creep back).
+CREATE TABLE IF NOT EXISTS document_acceptances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_key TEXT NOT NULL DEFAULT '',
+    document_version TEXT NOT NULL DEFAULT '',
+    document_hash TEXT NOT NULL DEFAULT '',
+    accepted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    accepted_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_acceptances_key ON document_acceptances(document_key);
+
 CREATE TABLE IF NOT EXISTS product_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -923,6 +940,26 @@ def run_migrations(db):
     )
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_consent_records_customer ON consent_records(customer_id)"
+    )
+
+    # --- POPIA document acceptances (additive, programme phase 14 / feature Q §Q1) ---
+    # A new, empty table on an existing database: no document has been adopted yet,
+    # which is what the pack page reports. Accepting twice is allowed (audit trail),
+    # the newest row wins, and the columns are minimal — no IP address, no user agent
+    # (see the note on the same table in SCHEMA).
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS document_acceptances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_key TEXT NOT NULL DEFAULT '',
+            document_version TEXT NOT NULL DEFAULT '',
+            document_hash TEXT NOT NULL DEFAULT '',
+            accepted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            accepted_at TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT ''
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_acceptances_key ON document_acceptances(document_key)"
     )
 
     # --- Per-branch public portal (additive, programme phase 8 / feature B §B1) ---
