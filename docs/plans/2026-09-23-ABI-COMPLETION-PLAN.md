@@ -75,7 +75,17 @@ Order matters: C1 → C2 → C3 finish the public product; Q1 then W1/W2 finish 
   this category" action, and the 15 harvested Sano photos as defaults. **Guardrail 2:** `static/img/trailer-categories/`
   holds 11 MB of raw source material — commit only **web-sized re-encodes (≤1200px, ~100–200 KB each)**, never the
   originals. Missing categories to source or stub: mobile kitchen trailers, bobcat trailers.
-- **T3 — Phase 12 (§C2) multi-trailer public booking flow.** One public booking → **one order with many lines**
+- **T3 — Phase 12 (§C2) multi-trailer public booking flow. ✅ COMMITTED `7b9aca1`** (full suite re-run in flight when
+  this was written). Verified by me after the builder hit its iteration cap a second time: a real browser booking of
+  **two trailers in one order** at 1440px and 390px — `ORD-10145` / `ORD-10146`, each with **2 line items**, a
+  `consent_records` row for the customer, `source_system='public'` with a `BOOK-` reference, `created_by_user_id`
+  NULL (a visitor's draft, not an admin's), and the D6 dedupe question answered rather than silently merged.
+  **0 console errors, 0 overflow.** With the unfinished notice restored, the booking path is **SHUT again** — the
+  D11 gate verified in both directions over real HTTP.
+  **Three existing suites were re-pointed at the new entry point** (`test_telegram_draft_notifications`,
+  `test_ticket_341953028_customer_blocking`, `test_branch_hours`) and still assert the same guarantees: a blocked
+  customer is refused, a closed collection day is refused, a public booking notifies exactly once, and a visitor's
+  draft stays distinguishable from an admin's. Original spec: One public booking → **one order with many lines**
   (unlike TrailerPro's single-item flow). Must go through the existing availability/blocking checks; `_build_order_payload`
   in `app/services/orders.py` is single-item today and needs deliberate extension. Reuses §B2's dedupe flow and
   §P1's consent block — the consent box must be required, refused server-side, and recorded against the notice version.
@@ -111,6 +121,12 @@ Order matters: C1 → C2 → C3 finish the public product; Q1 then W1/W2 finish 
     and looking at it, per the house standard.
   - **(d) Untracked debris to clean or keep:** `=1.18.0`, `app/__init__.py.backup`, `backups/`, `test_invoice.pdf`,
     `.hermes/`.
+- **T3b — DEFECT found by the T3 browser proof, fix before close-out.** The booking page's live estimate shows the
+  **VAT-inclusive** figure (R1610 for a R1400 basket) while the created draft order stores `tax_total = 0` and the
+  confirmation page prints `order.total` (**R1400**) as "Estimated total". A customer therefore sees two different
+  totals seconds apart. Fix one way or the other: compute VAT onto the draft at creation, or label the form's number
+  as an estimate "incl. VAT" and show the VAT line on the confirmation. Cover it with a test that asserts the two
+  screens agree.
   - **(e) POPIA merge rule — ANSWERED: "yes, when we commit, delete my real vehicle info."** At merge time:
     (1) merge to `master` as **one squashed commit** (never push the intermediate commits — they still carry the real
     plate / NaTIS reg / disc licence / VIN / engine number in their diffs), (2) **delete the feature branch**, which
@@ -130,8 +146,9 @@ Order matters: C1 → C2 → C3 finish the public product; Q1 then W1/W2 finish 
 
 ## 5. Next action
 
-**T2 is done. Start at T3 (phase 12, §C2 — multi-trailer public booking flow)** and work down the list, verifying
-each before moving on. T8a (the five POPIA facts) is answered — the wizard collects them — and T8b/T8c/T8e are
+**T2 and T3 are committed. Next: T3b (the estimate/confirmation VAT mismatch), then T4 (phase 13, §C3).** Work
+down the list, verifying each before moving on, and **do not leave a phase uncommitted** — two builders in a row hit
+their iteration cap mid-phase, which is survivable only because the work was on disk. T8a (the five POPIA facts) is answered — the wizard collects them — and T8b/T8c/T8e are
 decided, so nothing blocks T3–T7.
 
 **Lessons from T2, to apply to every remaining item:**
