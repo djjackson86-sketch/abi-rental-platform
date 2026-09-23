@@ -2,7 +2,7 @@ from flask import Blueprint, abort, flash, make_response, redirect, render_templ
 from urllib.parse import urlparse
 
 from app.db import get_db
-from app.services import popia_pack, portal
+from app.services import consent, popia_pack, portal, portal_intake
 from app.services.customers import create_customer
 from app.services.orders import _build_order_payload, create_order, get_order, order_items
 from app.services.settings import get_company_settings
@@ -154,27 +154,181 @@ def privacy_notice():
     )
 
 
+def _portal_context(branch, **extra):
+    """Everything the portal pages need, so the three routes cannot disagree about the branch."""
+    context = {
+        "settings": get_company_settings(),
+        "branch": branch,
+        "portal_url": portal.portal_url(branch, request.url_root),
+        "intake_closed_message": portal_intake.INTAKE_CLOSED_MESSAGE,
+    }
+    context.update(extra)
+    return context
+
+
 @bp.route("/portal/<slug>")
 def branch_portal(slug):
-    """A branch's public portal page (feature B §B1).
+    """A branch's public portal page (feature B, §B1 link + QR; §B2 the form itself).
 
-    §B1 ships the link and the QR; the form the customer fills in is §B2. Until it exists this is
-    a **GET-only placeholder** that names the branch and says the form is coming, and the route
-    answers only for a branch whose portal is switched on — an unknown slug and a disabled portal
-    are the same 404 to the customer, so a switched-off branch is not discoverable by guessing.
+    This is the page a customer reaches from the branch's shared link or its printed QR, so it *is*
+    the registration form — §B1 shipped a placeholder here and §B2 replaced it, because a page that
+    says "coming soon" behind a printed QR is a dead end in a customer's hand.
 
-    Deliberately not gated by ``store_enabled``: the online store and a branch's own sign-up sheet
-    are separate surfaces, and a branch that is handed a printed QR should not go dark because the
-    catalogue is switched off. The per-branch ``portal_enabled`` flag is the switch that matters.
+    GET only: the submission posts to ``/portal/<slug>/register``. Deliberately not gated by
+    ``store_enabled`` (the online store and a branch's own sign-up sheet are separate surfaces); the
+    per-branch ``portal_enabled`` flag is the switch that matters, and an unknown slug and a
+    switched-off portal are the same 404 to the customer.
     """
     branch = portal.portal_branch(slug)
     if branch is None:
         abort(404)
+    return _render_portal_form(branch)
+
+
+def _render_portal_form(branch, status=200, intake_closed=None, **extra):
+    """Render the registration form, optionally with an HTTP status (400 for a refused post).
+
+    ``intake_closed`` defaults to the real gate so a caller that does not care cannot accidentally
+    render a form while the notice is unfinished.
+    """
+    html = render_template(
+        "public/portal_form.html",
+        **_portal_context(
+            branch,
+            form_values=extra.pop("form_values", {}),
+            error=extra.pop("error", None),
+            lookup_error=extra.pop("lookup_error", None),
+            intake_closed=(
+                not portal_intake.registration_is_open() if intake_closed is None else intake_closed
+            ),
+            **extra,
+        ),
+    )
+    return (html, status) if status != 200 else html
+
+
+@bp.route("/portal/<slug>/register", methods=["GET", "POST"])
+def branch_portal_register(slug):
+    """The branch's self-registration form: capture → dedupe decision → create or link (§B2).
+
+    The order of the checks is the safety story:
+
+    1. an unknown or switched-off branch 404s before anything is read;
+    2. while the published privacy notice still carries an open placeholder the write path is
+       **shut** — the page says so in plain words and a POST writes nothing (decision D11);
+    3. a filled honeypot is swallowed: a bot gets a page that looks like success and no record;
+    4. the submission is validated, then the consent is required *server-side* — an unticked box
+       (or a crafted ``popia_consent=0``) is refused and nothing is written (decision D10);
+    5. only then does dedupe run. A possible match is **presented to the customer, not resolved for
+       them** (decision D6): nothing is created, and the screen asks "Is this you?";
+    6. the acceptance is recorded in the same request that writes the customer, on the portal
+       channel, against the notice version.
+    """
+    branch = portal.portal_branch(slug)
+    if branch is None:
+        abort(404)
+
+    if not portal_intake.registration_is_open():
+        return _render_portal_form(branch, intake_closed=True)
+
+    if request.method == "GET":
+        return _render_portal_form(branch, intake_closed=False)
+
+    form = request.form
+    posted = dict(form)
+
+    # A bot fills in the field nobody can see; a person never does. It gets the success page and
+    # leaves no trace in the database.
+    if portal_intake.honeypot_triggered(form):
+        return render_template(
+            "public/portal_confirm.html",
+            **_portal_context(branch, reference=None, linked=False, first_name=""),
+        )
+
+    try:
+        values = portal_intake.submission_values(form)
+    except ValueError as exc:
+        return _render_portal_form(branch, status=400, error=str(exc), form_values=posted, intake_closed=False)
+
+    if not consent.acceptance_given(form.get("popia_consent")):
+        return _render_portal_form(
+            branch,
+            status=400,
+            error=consent.consent_required_error(),
+            form_values=posted,
+            intake_closed=False,
+        )
+
+    # D6: a possible duplicate is a question for the customer, never a silent merge.
+    if not str(form.get("decision") or "").strip():
+        candidates = portal_intake.find_possible_matches(values["name"], values["phone"], values["email"])
+        if candidates:
+            return render_template(
+                "public/portal_exists.html",
+                **_portal_context(branch, candidates=candidates, form_values=posted),
+            )
+
+    try:
+        result = portal_intake.create_or_link_customer(
+            form, branch["id"], form.get("decision"), slug=branch["public_slug"]
+        )
+    except ValueError as exc:
+        return _render_portal_form(branch, status=400, error=str(exc), form_values=posted, intake_closed=False)
+
+    # The acceptance is recorded on the record it belongs to, in the same request that wrote it.
+    # ``record_consent`` refuses anything that is not a real acceptance, so a created client can
+    # never carry a consent row for an unticked box.
+    consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"))
+
     return render_template(
-        "public/portal_placeholder.html",
-        settings=get_company_settings(),
-        branch=branch,
-        portal_url=portal.portal_url(branch, request.url_root),
+        "public/portal_confirm.html",
+        **_portal_context(
+            branch,
+            reference=result["reference"],
+            linked=result["linked"],
+            first_name=(values["name"].split() or [""])[0],
+        ),
+    )
+
+
+@bp.route("/portal/<slug>/check", methods=["POST"])
+def branch_portal_check(slug):
+    """The standalone "am I already a customer?" lookup (feature B §B2, decision D8).
+
+    POST only, deliberately: a lookup is a search of the client book, and a GET would put the name
+    and number in the browser history, the referrer and every proxy log along the way. The answer is
+    masked (first name, surname initial, last four digits of the number) and never echoes what was
+    typed, and the in-process rate limiter caps it at 10 searches per address per 5 minutes
+    (decision D7) — keyed on a salted digest, so the address itself is never stored.
+    """
+    branch = portal.portal_branch(slug)
+    if branch is None:
+        abort(404)
+
+    if not portal_intake.registration_is_open():
+        return render_template(
+            "public/portal_check.html", **_portal_context(branch, closed=True, result=None, rate_limited=False)
+        )
+
+    if not portal_intake.allow_lookup(request.remote_addr):
+        return (
+            render_template(
+                "public/portal_check.html", **_portal_context(branch, closed=False, result=None, rate_limited=True)
+            ),
+            429,
+        )
+
+    name = request.form.get("name", "")
+    phone = request.form.get("phone", "")
+    if not name.strip() or not phone.strip():
+        return render_template(
+            "public/portal_check.html",
+            **_portal_context(branch, closed=False, rate_limited=False, result={"found": False, "reason": "missing"}),
+        )
+    result = portal_intake.lookup_public(name, phone)
+    return render_template(
+        "public/portal_check.html",
+        **_portal_context(branch, closed=False, rate_limited=False, result=result),
     )
 
 

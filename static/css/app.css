@@ -512,3 +512,36 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .portal-actions{display:grid;gap:8px;margin-top:16px;padding:14px 16px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft)}
 .portal-actions p{margin:0;font-weight:700;color:var(--ink-2)}
 .portal-actions a{color:var(--brand);font-weight:800;overflow-wrap:anywhere}
+
+/* Branch portal registration form (feature B §B2). The page a printed QR opens: mobile-first,
+   no admin chrome, comfortable tap targets. `min-width:0` on the panel is the house guard against
+   the sideways-scroll trap phase 4 measured — a grid child's automatic minimum size is its
+   content's min-content, so any wide child would otherwise push the page itself. ---------------- */
+.portal-panel{max-width:760px;min-width:0}
+.portal-panel h1{margin:6px 0 10px}
+.portal-form{display:grid;gap:14px;margin:18px 0 0}
+.portal-form .btn{width:100%}
+.portal-field{display:grid;gap:6px;min-width:0}
+.portal-field>span{font-weight:700;color:var(--ink-2);font-size:13px}
+.portal-field>span b{color:var(--danger)}
+.portal-field input{width:100%;min-width:0;padding:12px 13px;border:1px solid var(--line);border-radius:12px;font:inherit;font-size:16px;background:#fff;color:var(--ink)}
+.portal-field input:focus{outline:2px solid var(--brand);outline-offset:1px}
+.portal-checkline{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:var(--ink-2)}
+.portal-checkline input{width:18px;height:18px;margin:2px 0 0;flex:0 0 auto}
+/* Off-screen rather than `display:none`: a bot that parses the DOM still fills it in, a person
+   (and a screen reader, and the tab order) never meets it. */
+.honeypot{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.portal-lookup{margin-top:26px;padding-top:20px;border-top:1px solid var(--line-soft)}
+.portal-lookup h2{margin:0 0 6px;font-size:15px}
+.portal-closed{padding:16px 18px;border:1px solid #bfdbfe;border-radius:14px;background:#eff6ff}
+.portal-closed h2{margin:0 0 8px;font-size:16px}
+.portal-candidates{list-style:none;padding:0;margin:16px 0;display:grid;gap:12px}
+.portal-candidate{padding:14px 16px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft);min-width:0}
+.portal-candidate label{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.portal-candidate input[type="radio"]{width:18px;height:18px;margin:2px 0 0;flex:0 0 auto}
+.portal-candidate-name{font-weight:800;color:var(--ink);overflow-wrap:anywhere}
+.portal-candidate p{margin:6px 0 0}
+.portal-result{padding:16px 18px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft);min-width:0}
+.portal-result-name{font-size:19px;font-weight:800;color:var(--ink);overflow-wrap:anywhere}
+.portal-reference{font-size:15px}
+.portal-reference strong{font-size:17px;letter-spacing:.02em}

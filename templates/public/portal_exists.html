@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Is this you? | {{ branch.name }} | {{ settings.company_name }}{% endblock %}
+{# The dedupe decision screen — feature B (§B2), decision D6.
+
+   A submission arrived that looks like somebody already on the system. Nothing has been written:
+   the customer sees each candidate **masked** (first name + surname initial + the last four digits
+   of the number, decision D8) and decides — "This is me" links the submission to that record,
+   "None of these" creates a new one. The app never picks for them: Bubblebounce merges
+   automatically and has no such screen, which is exactly why ABI needs one.
+
+   One form, one radio group: the choice is the submitted `decision` value (`link:<id>` or
+   `create`), so there is a single submit and — importantly — a single consent widget, the shared
+   one (§P1). Duplicating the widget per candidate would have meant duplicate element ids on a
+   customer-facing page, and the walk-in test in `test_programme_20260923_popia_consent.py` exists
+   precisely so a second consent widget cannot appear.
+
+   The submission is repeated in hidden inputs rather than parked in server-side state: nothing
+   about a customer is held in memory or in a cookie, and the decision posts the same data back.
+   The acceptance is asked for **again** here, and the page says why: the first tick was never
+   recorded, so the tick that is stored is the one accompanying the submission that writes. #}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+</header>
+<main class="store-main">
+  <article class="panel portal-panel">
+    <p class="eyebrow">Customer registration</p>
+    <h1>Is this you?</h1>
+    <p>We may already have your details at <strong>{{ branch.name }}</strong>. Nothing has been
+    saved yet — please tell us which of these is you, or tell us that none of them is. We only ever
+    show a first name and the last four digits of the number, so the rest of the record stays
+    private.</p>
+
+    <form method="post" action="{{ url_for('public.branch_portal_register', slug=branch.public_slug) }}">
+      {% for key, value in form_values.items() %}
+      {% if key not in ['decision', 'popia_consent'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}
+      {% endfor %}
+
+      <ul class="portal-candidates">
+        {% for candidate in candidates %}
+        <li class="portal-candidate">
+          <label for="candidate-{{ candidate.customer_id }}">
+            <input id="candidate-{{ candidate.customer_id }}" type="radio" name="decision" value="link:{{ candidate.customer_id }}">
+            <span class="portal-candidate-name">{{ candidate.masked_display }}</span>
+          </label>
+          <p class="muted">Matched on {{ candidate.matched_on|join(' and ') }}.</p>
+        </li>
+        {% endfor %}
+        <li class="portal-candidate">
+          <label for="candidate-none">
+            <input id="candidate-none" type="radio" name="decision" value="create">
+            <span class="portal-candidate-name">None of these is me &mdash; I am new here</span>
+          </label>
+        </li>
+      </ul>
+
+      <p class="muted">Please tick the privacy box again — your acceptance is only recorded with the
+      submission that saves your details.</p>
+      {% set consent_purpose = "registration" %}
+      {% include "public/_consent_block.html" %}
+
+      <button class="btn primary" type="submit">Continue</button>
+    </form>
+  </article>
+</main>
+<footer class="store-footer">
+  © 2026, {{ settings.company_name }}
+  <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+</footer>
+{% endblock %}

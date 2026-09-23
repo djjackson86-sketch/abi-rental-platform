@@ -206,14 +206,23 @@ def test_disabled_portal_is_404_for_page_and_qr(app, client):
     assert client.get(f"/portal/{slug}/qr.png").status_code == 404
 
 
-def test_portal_page_shows_the_branch_and_says_the_form_is_coming(app, client):
+def test_portal_page_carries_the_registration_form(app, client, monkeypatch):
+    """§B1 shipped a placeholder here; §B2 replaced it — the QR target is the form itself.
+
+    The gate is opened explicitly because the *shipped* notice still carries Sano's open facts, and
+    while it does the page correctly shows no form at all (proven in the §B2 test file).
+    """
+    from app.services import portal_intake
+
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
     branch_id = make_branch(app, "Polokwane")
     slug = slug_of(app, branch_id)
     response = client.get(f"/portal/{slug}")
     body = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "Polokwane" in body
-    assert "coming" in body.lower()
+    assert 'name="name"' in body, "the page a printed QR opens must be the form"
+    assert 'name="popia_consent"' in body, "the shared consent block belongs on the capture point"
     assert "[" not in body, "a customer-facing page must not carry a bracketed placeholder token"
 
 

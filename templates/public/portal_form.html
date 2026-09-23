@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Register with {{ branch.name }} | {{ settings.company_name }}{% endblock %}
+{# A branch's public registration form — feature B (§B2).
+
+   This is the page a customer reaches from the branch's shared link or its printed QR, so it is
+   the one client-facing capture point Feature B owns. House rules it obeys:
+
+   * it is mobile-first and carries no admin chrome — it is opened on a phone, standing at a
+     trailer, often on a bad connection;
+   * the privacy acceptance comes from the ONE shared widget (§P1, decision D10) and arrives
+     unticked; a test walks `templates/public/*.html` so no page may grow its own consent input;
+   * the honeypot is hidden from people (and from the tab order) but a form-filling bot finds it;
+   * while the published notice still carries an open placeholder (decision D11) the page says so
+     in plain words and shows no form at all — nothing is collected before the notice is finished;
+   * no bracketed placeholder token ever appears here, and nothing typed by an existing client is
+     echoed back by the lookup.
+
+   The `.portal-actions` block is §B1's (the link stays tappable and visible on the page a printed
+   QR opens); `form_values` is read with `.get(...)` everywhere, because a bare `.name`/`.values`
+   on a mapping resolves to a dict method in Jinja rather than to the field. #}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+</header>
+<main class="store-main">
+  <article class="panel portal-panel">
+    <p class="eyebrow">Customer registration</p>
+    <h1>{{ branch.name }}</h1>
+    {% if branch.portal_intro %}<p>{{ branch.portal_intro }}</p>{% endif %}
+    <p class="muted">You are at the <strong>{{ branch.name }}</strong> branch{% if branch.address_line1 %} — {{ branch.address_line1 }}{% if branch.city %}, {{ branch.city }}{% endif %}{% endif %}.</p>
+
+    {% if intake_closed %}
+    <div class="portal-closed">
+      <h2>Online registration isn&rsquo;t open yet</h2>
+      <p>{{ intake_closed_message }}</p>
+    </div>
+    {% else %}
+    {% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+
+    <form method="post" action="{{ url_for('public.branch_portal_register', slug=branch.public_slug) }}" class="portal-form">
+      <input type="hidden" name="portal_slug" value="{{ branch.public_slug }}">
+
+      <label class="portal-field" for="portal-name">
+        <span>Full name <b aria-hidden="true">*</b></span>
+        <input id="portal-name" name="name" type="text" autocomplete="name" required value="{{ form_values.get('name', '') }}">
+      </label>
+      <label class="portal-field" for="portal-phone">
+        <span>Cellphone number</span>
+        <input id="portal-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="e.g. 082 123 4567" value="{{ form_values.get('phone', '') }}">
+      </label>
+      <label class="portal-field" for="portal-email">
+        <span>Email address</span>
+        <input id="portal-email" name="email" type="email" autocomplete="email" value="{{ form_values.get('email', '') }}">
+      </label>
+      <label class="portal-field" for="portal-address">
+        <span>Street address</span>
+        <input id="portal-address" name="address_line1" type="text" autocomplete="street-address" value="{{ form_values.get('address_line1', '') }}">
+      </label>
+      <label class="portal-field" for="portal-suburb">
+        <span>Suburb</span>
+        <input id="portal-suburb" name="suburb" type="text" value="{{ form_values.get('suburb', '') }}">
+      </label>
+      <label class="portal-field" for="portal-city">
+        <span>Town or city</span>
+        <input id="portal-city" name="city" type="text" autocomplete="address-level2" value="{{ form_values.get('city', '') }}">
+      </label>
+      <label class="portal-field" for="portal-province">
+        <span>Province</span>
+        <input id="portal-province" name="province" type="text" autocomplete="address-level1" value="{{ form_values.get('province', '') }}">
+      </label>
+      <label class="portal-field" for="portal-postal">
+        <span>Postal code</span>
+        <input id="portal-postal" name="postal_code" type="text" inputmode="numeric" autocomplete="postal-code" value="{{ form_values.get('postal_code', '') }}">
+      </label>
+
+      <label class="portal-checkline" for="portal-marketing">
+        <input id="portal-marketing" name="marketing_opt_in" type="checkbox" value="1">
+        <span>You may send me specials and news.</span>
+      </label>
+
+      {# The honeypot: off-screen, out of the tab order and not announced, so a person never
+         fills it in and a bot always does. #}
+      <div class="honeypot" aria-hidden="true">
+        <label for="portal-website">Website</label>
+        <input id="portal-website" name="company_website" type="text" tabindex="-1" autocomplete="off">
+      </div>
+
+      {% set consent_purpose = "registration" %}
+      {% include "public/_consent_block.html" %}
+
+      <button class="btn primary" type="submit">Send my details</button>
+    </form>
+
+    <section class="portal-lookup">
+      <h2>Are you already registered with us?</h2>
+      <p class="muted">Enter your name and cellphone number and we will tell you whether we already
+      have your details. We only ever show your first name and the last four digits of your number.</p>
+      {% if lookup_error %}<div class="flash error" role="alert">{{ lookup_error }}</div>{% endif %}
+      <form method="post" action="{{ url_for('public.branch_portal_check', slug=branch.public_slug) }}" class="portal-form">
+        <label class="portal-field" for="lookup-name">
+          <span>Full name</span>
+          <input id="lookup-name" name="name" type="text" required>
+        </label>
+        <label class="portal-field" for="lookup-phone">
+          <span>Cellphone number</span>
+          <input id="lookup-phone" name="phone" type="tel" inputmode="tel" required>
+        </label>
+        <button class="btn ghost" type="submit">Check</button>
+      </form>
+    </section>
+    {% endif %}
+
+    <div class="portal-actions">
+      <p>Keep this page: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
+      {% if branch.phone %}<p>Branch phone: <a href="tel:{{ branch.phone }}">{{ branch.phone }}</a></p>{% endif %}
+    </div>
+  </article>
+</main>
+<footer class="store-footer">
+  © 2026, {{ settings.company_name }}
+  {% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}
+  <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+</footer>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Are you registered? | {{ branch.name }} | {{ settings.company_name }}{% endblock %}
+{# The "am I already a customer?" answer page — feature B (§B2), decision D8.
+
+   The answer is the whole point of the page, and it is the only thing on it:
+
+   * a match shows the **masked** display only (first name, surname initial, last four digits of the
+     number) — never the full name, the email, the address, the balance or the history;
+   * nothing the customer typed is echoed back, so a wrong guess cannot be used to read a name back
+     out of the page, and the page a person screenshots holds no one else's details;
+   * "we could not find you" is deliberately the same answer for a blocked client, because "we have
+     a record on this number" is a conversation for the counter, not a web response.
+
+   The page is a dead end by design, with one way back to the form. #}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+</header>
+<main class="store-main">
+  <article class="panel portal-panel">
+    <p class="eyebrow">Customer registration</p>
+    <h1>Are you registered with {{ branch.name }}?</h1>
+
+    {% if rate_limited %}
+    <div class="portal-result">
+      <p>That is a lot of checks in a short time. Please wait a few minutes and try again, or ask
+      the counter staff to look you up.</p>
+    </div>
+    {% elif closed %}
+    <div class="portal-result">
+      <p>{{ intake_closed_message }}</p>
+    </div>
+    {% elif result.found %}
+    <div class="portal-result">
+      <p>Yes &mdash; we have you on our system as:</p>
+      <p class="portal-result-name">{{ result.display }}</p>
+      <p class="muted">If that is you, fill in the registration form and we will add your details to
+      the record we already have. If it is not you, please carry on with the form as a new customer.</p>
+    </div>
+    {% else %}
+    <div class="portal-result">
+      <p>We could not find a customer with that name and number at this branch. Please fill in the
+      registration form and we will open a new record for you.</p>
+    </div>
+    {% endif %}
+
+    <div class="portal-actions">
+      <p><a href="{{ url_for('public.branch_portal_register', slug=branch.public_slug) }}">Back to the registration form</a></p>
+    </div>
+  </article>
+</main>
+<footer class="store-footer">
+  © 2026, {{ settings.company_name }}
+  <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+</footer>
+{% endblock %}
