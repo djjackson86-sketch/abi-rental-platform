@@ -217,8 +217,9 @@ customer-delete path (SQLite FK cascade, with `PRAGMA foreign_keys` asserted = 1
   `duplicate refused: Registration KP35XKGP is already recorded for Smoke Client — transfer it
   explicitly if it is now this client's vehicle` · `deleted customer -> True` · `vehicles left: 0`
 
-**Commit:** this entry's commit (code + tests + ledger together). The main-session doc edits found
-uncommitted in the tree were committed first, separately, as `ad6588f`.
+**Commit:** `2755e84` — `feat(vehicles): vehicles table + service layer, one owner per registration (A2)`
+(code + tests + ledger together). The main-session doc edits found uncommitted in the tree were
+committed first, separately, as `ad6588f`, and the untracked Feature D plan as `78f979f`.
 
 **Blockers:** none. No UI work in this phase, so no screenshots were due (that is A4).
 `docs/plans/.tick.lock` was created at the start of this tick (no lock existed, so nothing was stale)
