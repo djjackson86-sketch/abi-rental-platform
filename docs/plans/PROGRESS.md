@@ -21,7 +21,7 @@
 | 7 | P1 POPIA privacy notice + consent service | done | tick 7 | `/privacy` is driven by `docs/popia/PRIVACY-NOTICE.md`: the short **interim page** while any `[PLACEHOLDER]` remains (it does — Sano's five facts), the full 12-section notice the moment they land, no code change (D11). `consent_records` + `app/services/consent.py` (who/version/channel/when only — no IP/UA), one shared unticked consent block for B2/C2, admin evidence line on the client page; 32 new tests, full suite **896 green**, browser proof **31/31** on 5058 + a completed-document harness on 5059 |
 | 8 | B1 branch portal schema + link + QR | done | tick 8 | `branches.public_slug`/`portal_enabled`/`portal_intro` + `company_settings.public_base_url` (additive) with a deterministic slug backfill, `idx_branches_slug` partial unique index, new `app/services/portal.py` (`slugify`/`ensure_slug`/`portal_url`/`qr_png_bytes`/`all_portal_links`), `GET /portal/<slug>` + `GET /portal/<slug>/qr.png` (PNG rendered in-process, encodes the absolute link); 23 new tests (5 failed first), full suite **919 green**, browser proof **23/23**, 0 console errors, 0 overflow at 1440px + 390px, QR decoded back with zxing-cpp |
 | 9 | B2 public form + dedupe + "am I already a customer?" | done | tick 9 | `app/services/portal_intake.py`; `/portal/<slug>` **is** the form, `/portal/<slug>/register` (GET+POST), `/portal/<slug>/check` (POST only); dedupe is the customer's decision (masked "Is this you?", never a silent merge), §P1 consent required server-side, honeypot + rate-limited masked lookup (D6/D7/D8/D10); 55 new tests, full suite **974 green**, browser proof **21/21 (closed) + 52/52 (open)**, 0 console errors, 0 overflow at 1440px + 390px; **on the shipped app the form stays SHUT until Sano's five facts land (D11)** |
-| 10 | B3 admin QR/link page with A4 print + browser proof | pending | | |
+| 10 | B3 admin QR/link page with A4 print + browser proof | done | tick 10 | `/settings/portal` (one card per branch: readonly full link, Copy link writing the real clipboard, live QR preview, A4 print sheet, slug/on-off/welcome-line save with **409** on a duplicate and **400** on a bad slug) + nav entry + `access.py` mapping + `app/services/portal.py` extensions; **closes the DB↔UI parity gap phase 8 recorded** (§B1's three columns now have a screen); 28 new tests, full suite **1002 green**, browser proof **58/58** (6 console errors, all deliberate 404/409), 0 overflow at 1440px + 390px, print-media sheet has no admin chrome; the 1440px screenshot showed the link field clipping the URL, fixed by stacking the link row (found by looking, not by testing) |
 | 11 | C1 store categories with photos + multi-trailer linking | pending | | |
 | 12 | C2 multi-trailer public booking flow | pending | | **§P1 privacy agreement required** |
 | 13 | C3 full-suite + end-to-end local proof + close-out | pending | | |
@@ -1093,3 +1093,145 @@ the lookup; the honeypot returns the *success* page — a bot that is told "no" 
    proof measures the previous page — tick 8's bug.
 6. Ports: 5057 is still the 09:16 dev server; use 5058 (and 5059 only if a second app instance is needed)
    and `fuser -k` both afterwards.
+
+### Phase 10 — B3 admin QR/link page + A4 print sheet + browser proof — status `done` (tick 10 — finishing a crashed slot's work)
+**Branch:** `feature/abi-programme-2026-09-23` · **commit:** `045c4d9` (the §B3 work; this ledger entry is
+its own commit, so the hash above is real) · **lock:** found stale — `.tick.lock` written **15:14:04**, 23
+min old when this slot started at 15:37:02, so this tick recorded it, `rm`'d it and created its own
+(15:37:11, removed at the end). Both of its own proof ports were `fuser -k`'d; **5057 is still held** (see
+below).
+
+**Provenance, stated plainly — this slot did not die, it ran out of budget.** The §B3 code was built by the
+**15:13:56 slot**, which hit its ceiling mid-tick: `Turn ended: reason=max_iterations_reached(90/90) …
+session=cron_b925af49c5a7_20260923_151356` at **15:35:52**, *after* writing its files (15:17–15:34) and
+*after* launching the full suite in the background (pid 774855, started 15:35:31) — but **before its ledger
+entry and commit**. That orphan pytest ran until 15:45:12 with its output going to a dead pipe, so it proved
+nothing; this tick ignored it. The code was not trusted and not rebuilt: `compileall` was re-run, the phase's
+own 28 tests were re-run, the **whole browser proof was re-run end to end (twice)** and **every screenshot was
+looked at with `vision_analyze`** — the part the dead slot's 15:35:44 vision call only half-reached.
+
+**One real defect found by looking, and fixed in this tick.** On the first re-run's 1440px screenshot the
+`Link to share` field was cramped into a 220px flex slot beside the Copy button, so a ~330px card showed only
+`https://sano-trailers.example/po` — the vision pass itself misread two cards' URLs (`…/r`, `…/po`), which is
+exactly the "looks like the wrong link" failure that matters on a page staff copy links from. The link row is
+now **stacked** (the URL input takes the full card width, Copy link sits under it) with `text-overflow:
+ellipsis` and a `title` carrying the whole URL; `static/css/app.css` + `templates/admin/portal_index.html`
+only. The proof was re-run after the change (fresh DB) and the screenshot re-read: every card now shows its
+full URL (`https://sano-trailers.example/portal/roodepoort`) with no ellipsis and nothing clipped.
+
+**Files (10, +986/−4):** `app/routes/settings.py` (+121 — `GET /settings/portal`,
+`POST /settings/portal/<branch_id>`, `GET /settings/portal/<branch_id>/print`), `app/services/portal.py`
+(+152 — `DuplicateSlugError`, `slug_owner`, `clamp_box_size`, `branch_address`, richer `all_portal_links`,
+`update_portal_settings`), `app/routes/public.py` (the QR route's `?box=` knob, clamped 4–20), 
+`app/services/access.py` (3 endpoints → `settings`), `templates/admin/portal_index.html` +
+`templates/admin/portal_print.html` (new), `templates/admin/layout.html` (nav "Customer portal", gated on
+`settings`), `templates/admin/settings/nav.html` (the tab), `static/css/app.css` (`.portal-*`),
+`tests/test_programme_20260923_portal_admin.py` (new, 28 tests).
+
+**What §B3 actually does:** one card per branch (`active DESC, name`) with a **Live / Portal off** badge that
+distinguishes "the portal switch is off" from "the branch itself is inactive" — the one vague "off" §B1 left;
+a readonly absolute link; **Copy link** which writes to the *real* clipboard (`navigator.clipboard` with an
+`execCommand` fallback for a plain-http LAN address) and confirms on the page; the live QR preview; **Print QR
+sheet** to a standalone A4 template (extends `base.html`, not `admin/layout.html`, so no app chrome can ever
+print; `@page { size: A4; margin: 12mm }`, `@media print` hides `.no-print`); and the save. The save is where
+the **DB↔UI parity gap phase 8 recorded is closed**: §B1's `public_slug` / `portal_enabled` / `portal_intro`
+had no screen at all, and `update_portal_settings()` now writes exactly those three columns plus `updated_at`
+— which is what lets it and the ordinary branch form coexist (a rename still does not re-slug, pinned by
+test). A duplicate slug is **409** and *names the branch that owns the link*; a bad slug / over-long welcome
+line is **400** and keeps what was typed instead of dumping staff back on a blank form; switching a branch off
+takes its link, its QR preview and its print link away together, and the customer's URL **404s** (one switch,
+decision D7's shape). The print route *refuses* a switched-off or inactive branch rather than printing a dead
+code. D11 is kept visible to staff deliberately: while the notice carries Sano's five open facts the page
+carries a plain amber banner ("Registration is not open yet … 5 facts on the notice are still open") and the
+sheet carries a counter-copy note — **how many** facts, never **which**: the code's own docstring records
+that the first draft of this screen quoted a stripped placeholder straight onto the counter sheet (`our
+branches at ____ are covered by CCTV`), which is the exact leak D11 exists to prevent (that draft was never
+committed, so it is quoted from `settings.py`'s comment, not re-measured here).
+
+**Commands + REAL results (all run by this tick):**
+- `python3 -m compileall app tests -q` → clean
+- `.venv/bin/pytest tests/test_programme_20260923_portal_admin.py -q` → **28 passed in 21.27s** (re-run after
+  the CSS fix → **28 passed in 25.88s**)
+- `.venv/bin/pytest -q` (full suite, background) → **1002 passed in 647.44s (0:10:47)** — green (974 before,
+  +28)
+- Browser proof, **run 1** on a *reused* DB (`/tmp/abi_p10_verify.db`, seeded, app on 5058 + the
+  notice-completed harness instance on 5059): **53/58** — all 5 failures traced to the DB, not the code: the
+  dead slot's own run had already renamed Midrand's slug (`midrand-north`) and cleared `public_base_url`
+  (part B does that itself), so the "absolute URL" checks saw `http://127.0.0.1:5058/…` and the rename was a
+  no-op. Recorded rather than hidden, because a proof that only passes on a virgin database is a fact about
+  the harness, not the product.
+- Browser proof, **run 2** on a freshly seeded DB (`/tmp/abi_p10_verify2.db`, `fuser -k` 5058/5059, re-seeded,
+  both instances restarted): **58/58 checks, 6 console errors — all six deliberate** (the 404s and the 409 the
+  proof triggers on purpose); 0 unexpected errors; 0 horizontal overflow at **1440/1440** and **390/390**.
+  Highights from the run: 6 cards / 6 branches; every QR preview really loaded (`naturalWidth` 410 each);
+  every link input's `value` is the full absolute URL and `readOnly`; clipboard really received
+  `https://sano-trailers.example/portal/roodepoort`; the sheet's QR is 492 px (302 CSS px) and in **print
+  media the toolbar is gone**; switching Pretoria off → 302 + flash, card flips to "Portal off", QR preview
+  and print link disappear, the customer's link **404s**; a duplicate slug → **409** with
+  `/portal/roodepoort is already Roodepoort's link — pick a different word for Midrand.` and **nothing
+  written**; a normalised slug saves → `/portal/midrand-north (saved in lower case with dashes)`, the old link
+  404s and the QR follows the new slug; then the real flow on 5059 — the printed link opens the form, the
+  submission is accepted (200), the customer gets "Thank you, Thandiwe" and **the client appears on
+  `/customers`**.
+- `fuser -k 5058/tcp 5059/tcp` → both freed.
+
+**What the screenshots actually showed (`vision_analyze`, 15 screenshots in `/tmp/abi_p10_shots/`; the dead
+slot's set is preserved at `/tmp/abi_p10_shots_deadslot_backup/`):** *1440px links page* — the dark sidebar
+with "Customer portal" added between "Scan to return" and "Settings", breadcrumb **Settings**, H1 **Customer
+portal**, the tab row with **Customer portal** active, the amber **"Registration is not open yet"** banner
+(says *5 facts*, quotes **no** placeholder token), then six cards in a 3×2 grid: name + **Live** pill, address
+(`229 Summit Road, Midrand · 010 221 1723`; the three seeded `Branch 1..3` say "No address recorded on this
+branch yet."), **Link to share** with the **full URL now legible**, **Copy link**, a QR with the helper line
+"Scan this to reach the form on any phone…", **Print QR sheet**, **Link slug**, the **Portal switched on**
+checkbox, **Welcome line (optional)** and **Save portal settings** — no raw column names, no bracketed token.
+*Copy state* — the Roodepoort button reads **Copied** with green "Link copied to your clipboard." *409 state*
+— a pink strip above the content reading `/portal/roodepoort is already Roodepoort's link — pick a different
+word for Midrand.`, the Midrand slug field still `midrand`, **no traceback, sidebar and all six cards intact**.
+*Print-media sheet* — SANO TRAILERS logo, **Roodepoort**, `14 Hendrik Potgieter Road, Roodepoort`,
+`011 002 0002`, "Scan to register your details before you hire.", a large clean black-on-white QR, the plain
+URL `https://sano-trailers.example/portal/roodepoort` in monospace, the amber counter note, footer
+`Sano Trailers · Customer registration` — **no sidebar, no toolbar, no breadcrumb, no browser chrome**, single
+column inside the A4 safe area: a human would accept this as "print this on A4". *390px links page* — same
+banner and cards stacked, everything inside the viewport (0 overflow), QR legible, nothing overlapping.
+*390px sheet* — no overflow. *`/customers` after the real QR flow* — Thandiwe Nkosi present. (The
+`sano-trailers.example` host in the screenshots is the seed's `public_base_url`, a temp-DB value, not a
+product default.)
+
+**Where the plan and the deliverable differ (honest gaps, no spin):** §B3's mandated proof says "against a
+temp SQLite DB on 5057"; 5057 has been held all day by an unrelated 09:16 dev server, so this tick proved on
+**5058/5059** instead — two instances, shipped state and notice-completed state, which is strictly more than
+5057 would have given. The plan's "Print QR sheet" is a link to a print-optimised page (the browser's own
+print dialog does the printing), not a server-side PDF — that is what the plan's file list specifies, and the
+print-media screenshot is the proof it is printable; say the word if you want a real PDF endpoint.
+
+**Blockers / notes for Don:**
+- **The form is still SHUT on the shipped app, by design** (D11): `docs/popia/PRIVACY-NOTICE.md` still carries
+  Sano's five open facts, so every public write path renders the counter message and the portal page says so
+  in the amber banner. Unchanged ask from tick 7: land the five facts, or explicitly accept an interim notice.
+- **Port 5057 is still held** by the 09:16 `.venv/bin/python app.py` (pid 558440, cwd this repo, no
+  `DATABASE_PATH` → the house dev DB). **Eighth tick flagging it.** Say the word and a tick stops it.
+- **Feature B (phases 8–10) is now complete and locally signed off.** The two follow-ups still worth Don's
+  attention: (a) clients are not **branch-scoped** — `/customers` has no branch filter (flagged by A4 and B2,
+  third time), and (b) `static/img/trailer-categories/` (11 MB of harvested Sano source photos) is still
+  untracked; phase 11 commits only the web-sized re-encodes.
+- Left untracked on purpose (not this phase's, guardrail 2 / main-session documents):
+  `"Customer comms/"`, `app/__init__.py.backup`, `backups/`, `=1.18.0`, `test_invoice.pdf`, `.hermes/`,
+  `docs/plans/2026-09-23-popia-setup-wizard.md`, `docs/plans/PROGRESS-popia-wizard.md`,
+  `docs/popia/CLIENT-DATA-NOTICE-JACKAPP-SANO.md`.
+
+**Must-know for tick 11 (phase 11 = §C1 store categories with photos + multi-trailer linking):**
+1. §C1's plan is `docs/plans/2026-09-23-public-booking-and-store-categories.md` **§C1**. Read it with
+   `docs/plans/reference-notes-trailerpro-bubblebounce.md` — §C1 is a reference-implementation phase.
+2. **Guardrail 2 is live here:** `static/img/trailer-categories/` holds raw source material; commit only
+   web-sized re-encodes (≤1200px, ~100–200 KB each), never the originals.
+3. The admin portal page is the house pattern for a settings screen now: module-gated endpoints in
+   `access.py`, a tab in `settings/nav.html`, one card per row, 409/400 instead of a redirect for a refused
+   save. Reuse it rather than inventing a second style.
+4. `portal.all_portal_links()` and `portal.branch_address()` are the shapes to copy if a category needs an
+   address/QR-style panel; `all_portal_links()` now returns `enabled`, `portal_enabled`, `active`, `address`,
+   `phone`, `intro`, `qr_path` — don't re-query branches separately.
+5. Restart the smoke server after **any** template edit (Jinja is cached with `debug=False`) — tick 8's bug,
+   and this tick hit it again when it re-proved after the CSS change.
+6. Ports: 5058 is this phase's proven-good pair with 5059; 5057 is still the 09:16 dev server. Seed a **fresh**
+   temp DB per proof run — reusing one makes state-dependent checks fail and looks like a regression (this
+   tick's run 1).
