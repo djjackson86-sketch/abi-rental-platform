@@ -43,10 +43,10 @@
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
       <div class="form-grid compact">
-        <label>Calls<input type="number" min="0" step="1" name="interaction_calls" value="" placeholder="0"></label>
-        <label>WhatsApp<input type="number" min="0" step="1" name="interaction_whatsapp" value="" placeholder="0"></label>
-        <label>Emails<input type="number" min="0" step="1" name="interaction_emails" value="" placeholder="0"></label>
-        <label>Walk-in<input type="number" min="0" step="1" name="interaction_walk_in" value="" placeholder="0"></label>
+        <label>Calls<input type="number" min="0" step="1" name="interaction_calls" value="{{ cash_day.interactions.calls }}" placeholder="0"></label>
+        <label>WhatsApp<input type="number" min="0" step="1" name="interaction_whatsapp" value="{{ cash_day.interactions.whatsapp }}" placeholder="0"></label>
+        <label>Emails<input type="number" min="0" step="1" name="interaction_emails" value="{{ cash_day.interactions.emails }}" placeholder="0"></label>
+        <label>Walk-in<input type="number" min="0" step="1" name="interaction_walk_in" value="{{ cash_day.interactions.walk_in }}" placeholder="0"></label>
       </div>
       <label>Notes for new client interactions<textarea name="interaction_notes" rows="3" placeholder="Notes for calls, WhatsApp, emails or walk-ins">{{ cash_day.interactions.notes }}</textarea></label>
       <div class="form-actions"><button class="btn primary" type="submit">Save client interactions</button></div>

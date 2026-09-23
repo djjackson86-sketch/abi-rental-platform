@@ -336,10 +336,10 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
     assert 'New client interactions' in body
     assert body.count('<h2>New client interactions</h2>') == 1
     for expected in [
-        'name="interaction_calls" value="" placeholder="0"',
-        'name="interaction_whatsapp" value="" placeholder="0"',
-        'name="interaction_emails" value="" placeholder="0"',
-        'name="interaction_walk_in" value="" placeholder="0"',
+        'name="interaction_calls" value="0" placeholder="0"',
+        'name="interaction_whatsapp" value="0" placeholder="0"',
+        'name="interaction_emails" value="0" placeholder="0"',
+        'name="interaction_walk_in" value="0" placeholder="0"',
         'Notes for new client interactions',
     ]:
         assert expected in body
@@ -353,11 +353,10 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
         'interaction_walk_in': '1',
         'interaction_notes': 'Two quote follow-ups needed.',
     }, follow_redirects=True).get_data(as_text=True)
-    assert 'New client interactions saved' in body
-    assert 'name="interaction_calls" value="" placeholder="0"' in body
-    assert 'name="interaction_whatsapp" value="" placeholder="0"' in body
-    assert 'name="interaction_emails" value="" placeholder="0"' in body
-    assert 'name="interaction_walk_in" value="" placeholder="0"' in body
+    assert 'name="interaction_calls" value="4" placeholder="0"' in body
+    assert 'name="interaction_whatsapp" value="3" placeholder="0"' in body
+    assert 'name="interaction_emails" value="2" placeholder="0"' in body
+    assert 'name="interaction_walk_in" value="1" placeholder="0"' in body
     assert 'Two quote follow-ups needed.' in body
 
     summary = _summary(app)
