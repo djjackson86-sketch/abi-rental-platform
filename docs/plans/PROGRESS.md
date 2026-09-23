@@ -17,15 +17,30 @@
 | 3 | A3 staff scan UI + allocate to client | done | tick 3 | `/scan-vehicle` capture + review form, allocate/transfer, JSON feed + typeahead, module `scan_vehicle`; D3 identifier mapping now placed (plate / NaTIS / disc licence no); 25 new tests, full suite **794 green**, real-browser proof 27/27 checks, 0 console errors, 0 overflow at 1440px and 390px |
 | 4 | A4 client page vehicles panel + browser proof | done | tick 4 | client-page `Vehicles` panel (plate + NaTIS, make, model, year, tare, GVM, disk expiry; blank = dash, no towing column per D3b), collapsed per-vehicle edit/remove `<details>`, empty state with a scan CTA; 14 new tests (written failing-first: 11 failed with the impl stashed), full suite **808 green**, real-browser 39/39 checks, 0 console errors, 0 overflow at 1440px + 390px; feature A signed off locally |
 | 5 | D1 trailer identity + return-matching service | done | tick 5 | `products.registration`/`licence_number`/`registration_number` + partial unique index (one plate = one trailer) + inventory "Trailer identification" panel behind a marker; `orders.return_scan_*` audit; new `app/services/returns.py` (`match_open_rentals`, `returnable_order`, `mark_returned_via_scan` → existing `transition_order(...,"return")`); 37 new tests (34 failed first), full suite **845 green**, browser proof **26/26**, 0 console errors, 0 overflow at 1440px + 390px |
-| 6 | D2 scan-to-return screen + marks returned + proof | pending | | |
-| 7 | B1 branch portal schema + link + QR | pending | | |
-| 8 | B2 public form + dedupe + "am I already a customer?" | pending | | |
-| 9 | B3 admin QR/link page with A4 print + browser proof | pending | | |
-| 10 | C1 store categories with photos + multi-trailer linking | pending | | |
-| 11 | C2 multi-trailer public booking flow | pending | | |
-| 12 | C3 full-suite + end-to-end local proof + close-out | pending | | |
+| 6 | D2 scan-to-return screen + marks returned + proof | done | tick 6 | `/scan-return` capture + review + confirm (`app/routes/returns.py`, new blueprint), one candidate → one "Mark returned", two or more → an explicit choice is required, none → a message + a link to the started-orders list, a repeat scan says "already returned" (`returns.recently_returned()`, added this tick); module `scan_return` + nav entry; the audit line on the order page; evidence named for the value that actually matched; 19 new tests (16 failed first), full suite **864 green**, browser proof **45/45**, 0 console errors, 0 overflow at 1440px + 390px; feature D signed off locally |
+| 7 | P1 POPIA privacy notice + consent service | pending | | `/privacy` page + shared consent block + `consent_records` (added by Don 2026-09-23) |
+| 8 | B1 branch portal schema + link + QR | pending | | |
+| 9 | B2 public form + dedupe + "am I already a customer?" | pending | | **§P1 consent required** |
+| 10 | B3 admin QR/link page with A4 print + browser proof | pending | | |
+| 11 | C1 store categories with photos + multi-trailer linking | pending | | |
+| 12 | C2 multi-trailer public booking flow | pending | | **§P1 privacy agreement required** |
+| 13 | C3 full-suite + end-to-end local proof + close-out | pending | | |
+| 14 | Q1 POPIA document pack in-app (notification + Sano's acceptance + print) | pending | | added by Don 2026-09-23; **gated on blockers B1–B5** of `docs/popia/PRIVACY-NOTICE-REVIEW.md` |
 
 Status values: `pending` · `in-progress` · `done` · `partial` · `blocked`.
+
+**Phase numbering — the authoritative list is the master plan's 14-row table** (checked 2026-09-23 12:52).
+Rows 5–6 are Feature D (scan-to-return), row 7 is Feature P (POPIA privacy notice + consent, added by Don
+2026-09-23), rows 8–13 are the branch portal then the store/booking work. If this table ever shows **12** rows
+with B1 at number 7, a tick has written a stale copy — rebuild it from the master plan before doing any work.
+
+**Change log (main session, not ticks):** 09:40 programme created · 10:05 recon folded in (real disc scanner
+found, Sano photos harvested) · 11:12 Don's disc-identifier mapping locked, towing capacity removed, Feature D
+(scan-to-return) added → phases renumbered to 12 · 12:40 Feature P (POPIA privacy notice + client consent,
+mirroring the TrailerPro app) added → phases renumbered to 13; cadence set to one minute between ticks · 12:52 Feature Q (POPIA document pack in-app: notification for the
+main profile, Sano's adoption recorded, printable pack + acceptance certificate) added as **phase 14, last**;
+`docs/popia/PRIVACY-NOTICE-REVIEW.md` written (POPIA review of the pack: five blockers, seven content gaps) and
+its B1–B5 blockers gate phase 14.
 
 > Table renumbered to the master plan's 12 phases by tick 2 — the renumbering note (Feature D added as
 > phases 5–6, old 5–10 → 7–12) had landed in the plan and the tick log but not in this table.
@@ -587,4 +602,102 @@ its refusal message is surfaced verbatim and nothing is written (test: no finali
    second mapping.
 5. Proof DB note: the previous proof scripts are `/tmp/abi_a3_proof.py` (scan screen) and `/tmp/abi_d1_proof.py`
    (this tick's inventory-form proof) — reuse the login + overflow + screenshot harness from them.
+
+### Phase 6 — D2 scan-to-return screen + marks returned + browser proof — status `done`
+**Branch:** `feature/abi-programme-2026-09-23` (nothing pushed; `master` untouched).
+**Files:** `app/routes/returns.py` (new, blueprint `returns`), `templates/admin/scan_return.html` (new),
+`tests/test_programme_20260923_scan_return_flow.py` (new, 19 tests), `app/__init__.py` (register the blueprint),
+`app/services/access.py` (module `scan_return` "Scan to return a trailer" + the `returns.` endpoint rule),
+`templates/admin/layout.html` (nav entry beside "Scan a vehicle disk"), `templates/admin/orders/detail.html`
+(the "Returned via disc scan" audit line), `app/services/returns.py` (`recently_returned()` + the audit plate is
+now stored in the house normalised shape), `static/css/app.css` (scan-to-return block).
+
+**Failing first (real, not asserted):** the test file was written and run before any of the implementation
+existed → `.venv/bin/pytest tests/test_programme_20260923_scan_return_flow.py -q` → **16 failed in 14.80s**
+(every failure a `404 Not Found` — `/scan-return` did not exist yet).
+
+**Commands + real results:**
+- `.venv/bin/pytest tests/test_programme_20260923_scan_return_flow.py tests/test_programme_20260923_returns_match.py -q`
+  → **56 passed in 29.99s** (19 new + phase 5's 37, still green after the two fixes below)
+- `.venv/bin/pytest tests/test_app.py tests/test_programme_20260923_returns_match.py
+  tests/test_programme_20260923_vehicle_scan_flow.py tests/test_user_module_grants.py tests/test_user_multi_branch.py -q`
+  → **290 passed in 206.90s** (the module-list / access / orders suites are unaffected by the new module)
+- `.venv/bin/pytest -q` (full suite) → **864 passed in 517.73s (0:08:37)** — green (845 before, +19)
+- `python3 -m compileall app tests -q` → clean
+- Browser proof (venv Playwright Chromium, temp DB `/tmp/abi_d2.db`, app on **5058** because 5057 is still held
+  by the 09:16 non-programme `app.py`; 9 screenshots in `/tmp/abi_d2_shots/`, report `/tmp/abi_d2_report.json`):
+  **45/45 checks passed, 0 console errors, 0 horizontal overflow** at 1440×1100 and 390×844 — sign in (the sidebar
+  carries the new "Scan to return" link) → paste the trailer's disk text → one candidate (`ORD-10145 ·
+  Charmaine Mokoena`, Started, "Matched on the trailer's number plate — ABC123GP · 6m Trailer") → Mark returned →
+  landed on `/orders/1` with the flash "Trailer ABC123GP returned via disc scan — finish the return checklist and
+  the deposit on the order below", status **Returned**, DB audit `return_scan_registration=ABC123GP`,
+  `return_scan_source=trailer_disc`, `return_scan_at=2026-09-23T12:49…`, `picked_up_at` unchanged → paste the
+  **car's** disk text → **two** candidates, two Mark returned buttons, warning "2 rentals match this disk", both
+  orders still `started` (nothing auto-picked) → choose `ORD-10146` → only that one returned → the car's disk
+  again → one candidate left → returned, `return_scan_source=vehicle_disc` → the trailer's disk again → nothing
+  offered, "This disk already came back: ORD-10145 · Charmaine Mokoena — already returned via disc scan on
+  2026-09-23 12:49 (ABC123GP)" → an unknown plate → "No open rental matches that disk — read off it: number plate
+  ZZZ999ZZ. Nothing has been changed." plus the started-orders link.
+- `vision_analyze` on the screenshots (what was actually seen — `/tmp/abi_d2_shots/`): 1440px **capture** = the
+  three ways to read a disk (camera input, paste box, "…or type the plate on the disk") with "Find the open
+  rental", nothing clipped or overlapping; 1440px **trailer review** = the READ OFF THE DISK chips (Number plate
+  ABC123GP · NaTIS registration number ZZ1234Z · Disc licence number T9876543210X · VIN · Engine number), one
+  card, one Mark returned button; 1440px **ambiguous review** = the salmon warning "2 rentals match this disk.
+  Check the order number and the customer — nothing is returned until you choose one of them." above two cards,
+  two buttons; 1440px **order page** = "Status Returned" and "Returned via disc scan 2026-09-23 12:49 ·
+  ABC123GP · trailer disk" under the green flash; 1440px **already-returned** = the callout naming the order,
+  customer, time and plate, with no Mark returned button anywhere; 390px **capture + review** = one column, nav
+  chips wrap onto two rows, chips/cards contained, nothing cut off.
+
+**Two REAL findings this tick's own proof produced (both fixed, both now tested):**
+1. **The audit line stored the raw parsed plate** (e.g. `jhb 789 gp`) while every product and vehicle plate in the
+   app is stored normalised — `_scan_identity_for_order()` now runs the value through `normalise_registration()`,
+   so the order page reads `JHB 789 GP` like everywhere else (test: "the audit line records the plate in the house
+   normalised shape").
+2. **A disk licence number was labelled "the trailer's number plate".** The matcher reports all three product
+   identifiers as `matched_on=trailer_plate` (phase 5's design), so the review read "the trailer's number plate
+   T9876543210X". `vision_analyze` caught it on the screenshot; the route now names the value that actually
+   matched ("the trailer's disk licence number" / "the trailer's NaTIS registration number"), with two tests and a
+   proof check pinning it, and the re-shot screenshot confirms the new wording.
+Also added: `returns.recently_returned()` — a returned order is (correctly) no longer a live match, so a repeat
+scan would otherwise only say "nothing found"; staff now get "this disk already came back: <order> … on <date>".
+
+**Commit:** `6f144ce` — `feat(returns): scan-to-return screen — scan a disc, mark the rental returned (D2)`
+(9 files). Committed **separately**, because they were already in the working tree uncommitted when this tick
+started and they are the **main session's** work, not this tick's: `f0e3cf6` — `docs(programme): main-session
+Feature P/Q renumbering, D10 + D11, POPIA plans` (the five modified plan docs + the two new POPIA feature plans +
+`docs/popia/PRIVACY-NOTICE-REVIEW.md`). This ledger entry is its own commit so the hash is real.
+
+**Blockers / notes for Don:**
+- **Port 5057 is still held** by the 09:16 `.venv/bin/python app.py` (pid 558440, cwd = this repo, no
+  `DATABASE_PATH` → the local dev DB). Fourth tick in a row flagging it: this tick proved on 5058 again and did
+  **not** kill it. Say the word and the next tick stops it.
+- **Open question 3 is still open** (may staff type a trailer plate on the scan screen and have it saved onto the
+  trailer?). The screen keeps the fallback so nobody is ever blocked, and deliberately does **not** write a typed
+  plate onto the trailer.
+- **Renumbering landed mid-tick** (main session, 12:39–12:52): Feature P is now phase **7** and Feature Q is phase
+  14. Phase 6 (D2) did not move, so this entry is unaffected — but the next tick must read the master plan's
+  **14-row** table (phase 7 = P1), not a 12-row copy.
+- **POPIA flag for your call:** `tests/test_programme_20260923_returns_match.py` (phase 5) carries the real disc
+  identifiers you quoted — `KP35XKGP`, `SHS812W`, `4024048GB8LY`, `MMBJNKB40FD123456`, `4B11LC0187`. The
+  guardrail says repo fixtures stay synthetic. This tick added none of its own (its fixture values are invented:
+  `JHB 789 GP` / `NAT 5678 G` / `AHTFR22G10L999888` / `K9K123456`). Want the phase-5 constants swapped for
+  synthetic ones in a later tick?
+- The **1-minute cadence** means every skipped slot appends a "skipped" line to this ledger while a phase runs
+  (the overlap guard), so the tick log will get noisier than the 12-row note implies. Say the word if you want
+  those collapsed into one line per phase instead.
+
+**Must-know for tick 7 (phase 7 = P1 POPIA privacy notice + consent, per the master plan's current 14-row table):**
+1. Phase 7's plan is `docs/plans/2026-09-23-popia-privacy-consent.md` §P1 — **not** `branch-public-portal.md`
+   (that is phase 8 now). The feature docs cross-reference by section, so read `§P1`.
+2. `app/routes/returns.py` is the pattern to copy for a capture → review → confirm screen: module key in
+   `MODULES` + an endpoint rule in `access.py`, a nav link in `layout.html`, tests in
+   `tests/test_programme_20260923_*.py`.
+3. Reuse `ALLOWED_IMAGE_TYPES` / `MAX_DISK_UPLOAD_BYTES` / `DECODE_ERROR_MESSAGES` from `app/routes/vehicles.py`
+   rather than re-writing them — that is what keeps the two scan screens' error wording identical.
+4. The proof harnesses are `/tmp/abi_d2_proof.py` + `/tmp/abi_d2_seed.py` (login, overflow, screenshots in both
+   widths, sqlite read-back) — the closest starting point for any screen that changes a record.
+5. The full suite is ~8–9 minutes (517s this tick). If the slot is tight, run the new file plus `tests/test_app.py`
+   and record in the ledger that the full suite is due next tick.
+
 
