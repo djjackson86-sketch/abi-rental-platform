@@ -63,16 +63,22 @@ locally via `libsql-client` abstraction, pytest 8 + Playwright 1.62 (chromium al
 | 4 | A4 client page vehicles panel + browser proof | staff-vehicle-scan.md §A4 | customer detail panel, Playwright proof, feature A signed off |
 | 5 | D1 trailer identity + return-matching service | scan-to-return.md §D1 | product plate columns, `app/services/returns.py`, tests |
 | 6 | D2 scan-to-return screen + marks returned + proof | scan-to-return.md §D2 | `/scan-return` route + template + browser proof, feature D signed off |
-| 7 | B1 branch portal schema + link + QR | branch-public-portal.md §B1 | `branches.public_slug`, `/portal/<slug>`, QR endpoint |
-| 8 | B2 public form + dedupe + "am I already a customer?" | branch-public-portal.md §B2 | public portal page, dedupe flow, safe lookup |
-| 9 | B3 admin QR/link page with A4 print + browser proof | branch-public-portal.md §B3 | print sheet, copy link, feature B signed off |
-| 10 | C1 store categories with photos + multi-trailer linking | public-booking-and-store-categories.md §C1 | group images (DB-stored), bulk assign, Sano defaults |
-| 11 | C2 multi-trailer public booking flow | public-booking-and-store-categories.md §C2 | new public booking page → one order, many lines |
-| 12 | C3 full-suite + end-to-end local proof + close-out | all four docs | green suite, e2e Playwright proof, Obsidian note |
+| 7 | P1 POPIA privacy notice + consent service | popia-privacy-consent.md §P1 | `/privacy` page, shared consent block, `consent_records`, admin evidence line |
+| 8 | B1 branch portal schema + link + QR | branch-public-portal.md §B1 | `branches.public_slug`, `/portal/<slug>`, QR endpoint |
+| 9 | B2 public form + dedupe + "am I already a customer?" | branch-public-portal.md §B2 | public portal page, dedupe flow, safe lookup, **consent required** |
+| 10 | B3 admin QR/link page with A4 print + browser proof | branch-public-portal.md §B3 | print sheet, copy link, feature B signed off |
+| 11 | C1 store categories with photos + multi-trailer linking | public-booking-and-store-categories.md §C1 | group images (DB-stored), bulk assign, Sano defaults |
+| 12 | C2 multi-trailer public booking flow | public-booking-and-store-categories.md §C2 | new public booking page → one order, many lines, **privacy agreement required** |
+| 13 | C3 full-suite + end-to-end local proof + close-out | all five docs | green suite, e2e Playwright proof, Obsidian note |
+| 14 | Q1 POPIA pack in-app: notification + Sano's acceptance + print | popia-document-pack.md §Q1 | `/popia` pack, notification bar, `document_acceptances`, printable pack + acceptance certificate |
 
-> **Phases were renumbered on 2026-09-23 at Don's request** (scan-to-return was added as Feature D and queue-jumps
-> ahead of the portal work because staff need it in daily use). Phases 5–6 are new; the old 5–10 are now 7–12.
-> Tick-log entries carry the phase **name** as well as the number, so older entries still read correctly.
+> **Phases were renumbered three times on 2026-09-23 at Don's request.** (1) scan-to-return was added as Feature D
+> and queue-jumped ahead of the portal work (phases 5–6, old 5–10 shifted to 7–12); (2) POPIA privacy notice +
+> consent was added as Feature P and sits immediately before the first public capture point (phase 7, old 7–12
+> shifted to 8–13); (3) Feature Q — the POPIA document pack in the app (notification + Sano's adoption + print)
+> was added **last**, as phase 14, so it runs after everything it has to render is final. Tick-log entries carry the phase **name** as well as the number, and the feature docs
+> reference each other by **section** (§B2, §C2) rather than by phase number, so renumbering cannot strand a
+> cross-reference.
 
 ## Decisions already taken (do not re-litigate; raise in the ledger if evidence contradicts)
 
@@ -129,6 +135,24 @@ locally via `libsql-client` abstraction, pytest 8 + Playwright 1.62 (chromium al
   `orders.py:1133`, route `orders.py:676`) — **no transition logic is duplicated**, and the checklist/deposit
   work (`update_return_checklist`, `settle_return_deposit`, charges) stays exactly where it is: the scan marks
   the order Returned and hands staff to that page. Trailer plates live on `products.registration`.
+- **D10 — POPIA consent is part of every public capture point (Don, 2026-09-23).** The client-facing capture
+  screens — the per-branch portal form (§B2) and the public booking form (§C2) — must each show the privacy
+  notice link and a **required, unticked-by-default** acceptance, worded as TrailerPro words it
+  (`/mnt/d/Claude/trailer-rental-app/src/app/booking/[slug]/page.tsx`), with the submission **refused
+  server-side** when it is unticked. Every acceptance is **recorded** (customer, notice version, channel,
+  timestamp) — TrailerPro keeps it in component state only; ABI can evidence it. The `/privacy` page is served
+  from the same wording as `docs/popia/PRIVACY-NOTICE.md` (Sano Trailers = responsible party, we = operator),
+  and `PRIVACY_NOTICE_VERSION` is pinned to that document by a test so the published page and the reviewed
+  document cannot drift apart. No IP address or user-agent is stored (data minimisation). See
+  `popia-privacy-consent.md`.
+- **D11 — The app may never adopt a document that is still unfinished (Feature Q).** The POPIA pack surfaces
+  `docs/popia/*` inside the app for the main profile to read, adopt and print. `accept_document()` **refuses
+  while any `[TO CONFIRM]`-style token remains** in that document, and the UI says exactly which fields are
+  outstanding. The privacy notice, retention policy and action plan are **adoptions** (recorded with who +
+  when + hash); the **operator agreement is a contract** — s21(1) wants it in writing, so its printed copy
+  carries the signature block plus the electronic-acceptance statement (ECTA 25 of 2002) and our countersignature.
+  Nothing in that phase edits the pack's wording: filling B1–B5 in `docs/popia/PRIVACY-NOTICE-REVIEW.md` is
+  Sano's decision (and their attorney's sign-off).
 
 ## Open questions for Don (answers welcome any time; do not block on them)
 

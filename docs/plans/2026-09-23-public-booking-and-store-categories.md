@@ -16,7 +16,7 @@ trailers website to acquire default photos — these should be changeable by use
   `static/img/trailer-categories/` (12 mapped to `/trailer-hire` categories, 3 alternates), with sources and
   dimensions in `docs/plans/sano-trailer-photo-sources.md`. Two categories on the site have **no usable
   photo**: *mobile kitchen trailers* and *bobcat trailers* — the seed script must leave those groups on the
-  text fallback rather than inventing an image. Note the files are large (0.4–1.9 MB, ~11 MB total): phase 8
+  text fallback rather than inventing an image. Note the files are large (0.4–1.9 MB, ~11 MB total): §C1
   re-encodes to a web-friendly size before storing bytes in the DB.
 
 **Already in the app (do not rebuild):**
@@ -33,7 +33,7 @@ trailers website to acquire default photos — these should be changeable by use
 
 ---
 
-## C1 (phase 8) — Categories with photos + bulk trailer linking
+## C1 — Categories with photos + bulk trailer linking
 
 **Objective:** each category (product group) carries a photo used by the store, staff can assign many trailers
 to it at once, and the Sano photos ship as sensible defaults that staff can replace.
@@ -71,7 +71,7 @@ to it at once, and the Sano photos ship as sensible defaults that staff can repl
 
 ---
 
-## C2 (phase 9) — Multi-trailer public booking flow
+## C2 — Multi-trailer public booking flow
 
 **Objective:** a customer picks a rental period and picks **more than one** trailer, and it arrives as one
 public order with several lines for staff to confirm.
@@ -86,7 +86,7 @@ public order with several lines for staff to confirm.
   - `GET/POST /store/book` — the new booking page: branch/location chooser, start + end date/time,
     then a trailer list (grouped by category, with category photo) where each row has a quantity/select control,
     live rental-day maths, a running estimate (subtotal, VAT via the existing global VAT rate, deposit total),
-    and a single customer block (name/email/phone + POPIA consent) that reuses the **phase 6 dedupe flow**
+    and a single customer block (name/email/phone) that reuses the **§B2 dedupe flow** and carries the **§P1 consent block**: a link to the privacy notice plus a required, unticked-by-default acceptance — TrailerPro's own wording — with the POST refused server-side when it is unticked and the acceptance recorded against `PRIVACY_NOTICE_VERSION`
     (`app/services/portal_intake.py`) so a public booking cannot create a duplicate client either.
   - Keep `POST /store/products/<id>/book` working for one-click bookings from a product page — it should
     redirect into the new page pre-filled rather than staying a second implementation.
@@ -100,11 +100,11 @@ public order with several lines for staff to confirm.
   trailer refuses the whole booking with a clear message and writes **nothing**; a maintenance-flagged or
   hidden trailer cannot be selected even by a crafted POST; a duplicate customer phone links instead of
   creating a second row; a blocked customer's booking is refused; an empty selection is refused; the
-  confirmation page lists both lines; the customer page shows the order.
+  the confirmation page lists both lines; the customer page shows the order; an **unticked consent box refuses the whole booking and writes nothing**, while a ticked one stores a `consent_records` row tied to the new customer and the notice version.
 
 ---
 
-## C3 (phase 10) — End-to-end local proof, full suite, close-out
+## C3 — End-to-end local proof, full suite, close-out
 
 **Objective:** prove all three features work together locally, on one running app, and hand Don a report.
 

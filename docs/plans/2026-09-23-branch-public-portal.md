@@ -27,7 +27,7 @@ Existing ABI pieces:
 
 ---
 
-## B1 (phase 5) — Schema, branch link, QR endpoint
+## B1 — Schema, branch link, QR endpoint
 
 **Objective:** every branch gets a stable public URL and a QR image; nothing customer-facing yet.
 
@@ -55,7 +55,7 @@ Existing ABI pieces:
 
 ---
 
-## B2 (phase 6) — Public form, dedupe flow, safe existing-customer lookup
+## B2 — Public form, dedupe flow, safe existing-customer lookup
 
 **Objective:** a client scans the QR (or taps the link), fills in their data, the app checks for duplicates,
 and the client record lands on the staff Customers page against the right branch.
@@ -73,7 +73,7 @@ and the client record lands on the staff Customers page against the right branch
 - Modify `app/routes/public.py` — `GET/POST /portal/<slug>/register`:
   - GET renders the form (branch name/address at the top so the client knows which branch they are at).
   - POST validates with the same rules as staff-side `_clean()` (name required, email format, phone shape),
-    requires the POPIA consent checkbox, checks the honeypot field is empty, runs dedupe:
+    requires the **§P1 consent block** (privacy-notice link + a required, unticked-by-default acceptance; the POST is refused server-side when it is absent, and the acceptance is recorded against `PRIVACY_NOTICE_VERSION` in the same request that creates the customer), checks the honeypot field is empty, runs dedupe:
     - no match → create the customer, show a success page with a reference.
     - match found → **do not create**; re-render the form with a "Is this you?" panel listing each candidate's
       masked display, with `This is me` (posts `decision=link:<id>`) and `None of these — I'm new`
@@ -94,7 +94,7 @@ response, and a created client appears on `/customers` with the branch filter sh
 
 ---
 
-## B3 (phase 7) — Admin links + A4 print sheet + browser proof
+## B3 — Admin links + A4 print sheet + browser proof
 
 **Objective:** staff can copy a branch's link for WhatsApp and print an A4 QR sheet per branch.
 

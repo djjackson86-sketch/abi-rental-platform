@@ -21,7 +21,7 @@ Existing ABI pieces to imitate, not reinvent:
 
 ---
 
-## A1 (phase 1) — Port the NaTIS disc parser + decode spike
+## A1 — Port the NaTIS disc parser + decode spike
 
 **Objective:** land a Python parser that is a faithful port of the proven TypeScript one, and pick the
 image→barcode engine by measurement against a real disc photo.
@@ -84,7 +84,7 @@ choice is justified by measurement, and the parser round-trips a synthetic paylo
 
 ---
 
-## A2 (phase 2) — Vehicle data model
+## A2 — Vehicle data model
 
 **Objective:** a `vehicles` table owned by the customer, with cascade delete and a service layer.
 
@@ -121,7 +121,7 @@ and never default to 0; migration re-adds the table on an existing DB.
 
 ---
 
-## A3 (phase 3) — Staff scan screen + allocate to a client
+## A3 — Staff scan screen + allocate to a client
 
 **Objective:** staff open a page on a phone, capture the disk (or paste/type), review parsed fields, pick the
 client, save — and the client's page immediately shows the vehicle.
@@ -153,7 +153,7 @@ another client is refused with the transfer option; customer delete still leaves
 
 ---
 
-## A4 (phase 4) — Client page panel + real-browser proof
+## A4 — Client page vehicles panel + real-browser proof
 
 **Objective:** the client page shows "Vehicles" (with the figures the disc actually carries — **no towing
 capacity**, removed by decision D3b), staff can edit or release a vehicle there, and the whole feature is

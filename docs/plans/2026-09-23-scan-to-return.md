@@ -30,7 +30,7 @@ find the *open rental* it belongs to — plus a call into the return flow that a
 
 ---
 
-## D1 (phase 5) — Trailer identity + the return-matching service
+## D1 — Trailer identity + the return-matching service
 
 **Objective:** a scanned disc can be resolved to the open rental(s) it could belong to, with the reason for each
 match shown, and nothing guessed when it is ambiguous.
@@ -78,7 +78,7 @@ better than guessing — assert the empty case explicitly.
 
 ---
 
-## D2 (phase 6) — The scan-to-return screen + real-browser proof
+## D2 — The scan-to-return screen + real-browser proof
 
 **Objective:** staff scan a disc on a phone and the rental comes back on the admin side, with the return
 checklist still there to finish.
