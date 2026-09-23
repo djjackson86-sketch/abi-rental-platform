@@ -128,7 +128,7 @@
                     <td>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</td>
                     <td>{% if p.product_type == 'service' or p.tracking_method == 'none' %}Not tracked{% else %}{{ p.quantity }}{% if p.product_type == 'sale' and stock_breakdown.get(p.id) %}<small>{{ stock_breakdown.get(p.id) }}</small>{% endif %}{% endif %}</td>
                     <td><small>{{ live_rental_status_label(live_status.get(p.id)) }}</small></td>
-                    <td>{% if p.product_type == 'service' %}—{% else %}<b>R{{ '%.2f'|format(revenue.get(p.id) or 0) }}</b>{% endif %}</td>
+                    <td><b>R{{ '%.2f'|format(revenue.get(p.id) or 0) }}</b></td>
                     <td>{% if p.product_type == 'rental' %}Per order{% else %}—{% endif %}</td>
                     <td>{% if p.product_type == 'sale' and p.id in branch_split %}Multiple branches{% else %}{{ p.branch_name or 'Unassigned' }}{% endif %}</td>
                     <td>R{{ '%.2f'|format(p.security_deposit) }}</td>

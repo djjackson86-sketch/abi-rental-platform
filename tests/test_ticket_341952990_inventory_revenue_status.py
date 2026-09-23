@@ -323,19 +323,23 @@ def test_product_revenue_window_choices(app):
     ids = seed(app)
     trailer = ids["Tracked Trailer"]
     wheel = ids["Spare Wheel"]
+    service = ids["Repair Service"]
     with app.app_context():
         default_window = product_revenue(
-            [trailer, wheel], start_date=FIRST_OF_THIS_MONTH.isoformat(), end_date=TODAY.isoformat()
+            [trailer, wheel, service], start_date=FIRST_OF_THIS_MONTH.isoformat(), end_date=TODAY.isoformat()
         )
         last_month = product_revenue(
-            [trailer, wheel], start_date=LAST_MONTH_DAY.isoformat(), end_date=LAST_MONTH_END.isoformat()
+            [trailer, wheel, service], start_date=LAST_MONTH_DAY.isoformat(), end_date=LAST_MONTH_END.isoformat()
         )
-        all_time = product_revenue([trailer, wheel])
+        all_time = product_revenue([trailer, wheel, service])
     assert default_window[trailer] == 1500.0
     assert default_window[wheel] == 0.0  # its only current-month line is a draft
+    assert default_window.get(service, 0.0) == 0.0
     assert last_month[trailer] == 250.0
+    assert last_month[service] == 40.0  # services use the same line-revenue rule as stock products
     assert all_time[trailer] == 1750.0
     assert all_time[wheel] == 180.0  # the older returned order
+    assert all_time[service] == 40.0
 
 
 def test_inventory_revenue_column_defaults_to_current_month(app, client):
@@ -364,6 +368,10 @@ def test_inventory_revenue_filter_switches_the_window(app, client):
     assert '<option value="last_month" selected>' in last_month
     assert '<option value="all_time" selected>' in all_time
     assert "R250.00" in last_month
+    # A service row with recognised revenue must show its money value, not a dash.
+    service_row = re.search(r"<tr>.*?<strong>Repair Service</strong>.*?</tr>", last_month, re.S)
+    assert service_row, "the service product row should render"
+    assert "R40.00" in service_row.group(0)
     # All time includes both months for the trailer.
     assert "R1750.00" in all_time
 
