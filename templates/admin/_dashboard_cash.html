@@ -166,6 +166,11 @@
     {% endif %}
   </section>
 
+  {# Spare wheel count (ticket ABI-341953036). Sits between the Cash up panel
+     and the End of day notes panel, inside the same .two-col flow, so it is
+     the section the client reads between the two. #}
+  {% include "admin/_dashboard_spare_wheels.html" %}
+
   <section class="panel">
     <div class="panel-title"><h2>End of day notes</h2></div>
     {% if cash_day.aggregate %}

@@ -331,7 +331,9 @@ def test_the_dashboard_panel_lists_the_sizes_in_order_with_their_expected(client
     make_product(app, "Trailer B", 2, SIZES[4])
     login(client, app)
     html = client.get("/dashboard?branch=1").data.decode()
-    assert "Spare Wheel Count" in html
+    # Superseded wording (ABI-341953036): the panel heading now reads
+    # "Spare wheel count" instead of the old "Spare wheels by wheel size".
+    assert "Spare wheel count" in html
     rows = re.findall(r'<td>(1[0-4]&#34; - \dH)</td>\s*<td class="spare-wheel-count"[^>]*>(\d+)</td>', html)
     assert [r[0] for r in rows] == [s.replace('"', "&#34;") for s in SIZES]
     assert [r[1] for r in rows] == ["3", "0", "0", "0", "2"]

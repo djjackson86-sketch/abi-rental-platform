@@ -5,10 +5,14 @@
    branches" is a read-only sum), so one save can never update several depots. #}
 <section class="panel spare-wheel-panel">
   <div class="panel-title">
-    <h2>Spare wheels by wheel size</h2>
+    <h2>Spare wheel count</h2>
     <span class="pill">{% if spare_wheel_editable %}{{ cash_day.branch_name }}{% else %}All branches{% endif %} · {{ spare_wheel_day }}</span>
   </div>
   <style>
+    /* min-width:0 lets the panel shrink to its grid track. Without it the
+       wheel table's min-content width sets the track and a phone gets a
+       horizontally scrolling page; with it .table-wrap scrolls instead. */
+    .spare-wheel-panel{min-width:0}
     .spare-wheel-panel .spare-wheel-table{width:100%;border-collapse:collapse}
     .spare-wheel-panel .spare-wheel-table th{text-align:left;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
     .spare-wheel-panel .spare-wheel-table td{padding:8px 10px;border-bottom:1px solid var(--line-soft);font-weight:650}
