@@ -682,7 +682,7 @@ def previous_day_notes(day, branch_id):
     }
 
 
-def day_report(day=None, branch_id=None):
+def day_report(day=None, branch_id=None, aggregate=False):
     """The day's dashboard figures plus its cash reconciliation.
 
     The dashboard metrics keep the dashboard's own branch scope (the session),
@@ -692,13 +692,23 @@ def day_report(day=None, branch_id=None):
     Ticket ABI-341953042: the report also carries the day's **spare wheel count**
     and any **trailer service and maintenance** logged for that day, so the
     download matches the dashboard panels for the same business day.
+
+    Ticket ABI-341953048: ``aggregate=True`` builds the very same report from
+    ``aggregate_day_summary`` instead of one depot — the combined performance
+    numbers the dashboard's "All branches" view shows. It stays read-only (the
+    spare wheel counts come back non-editable) and it is still bounded by the
+    session: ``aggregate_day_summary`` walks ``cash_branches()``, so an account
+    that may reach one depot gets exactly that depot's figures.
     """
     from app.services.reports import dashboard_day_metrics
     from app.services.settings import get_company_settings
     from app.services import spare_wheels
     from app.services import trailer_service
 
-    summary = day_summary(day=day, branch_id=branch_id)
+    if aggregate:
+        summary = aggregate_day_summary(day=day)
+    else:
+        summary = day_summary(day=day, branch_id=branch_id)
     settings = get_company_settings() or {}
     report = {
         'company': str(_value(settings, 'company_name') or ''),

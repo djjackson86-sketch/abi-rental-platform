@@ -28,6 +28,7 @@ from flask import Blueprint, Response, flash, redirect, request, session, url_fo
 
 from app.routes.auth import login_required
 from app.services import cash
+from app.services.access import resolve_branch_filter
 from app.services.pdf_documents import report_pdf_bytes
 from app.services.telegram import _send_document
 from app.services import trailer_service
@@ -221,9 +222,30 @@ def delete_bank_drop(entry_id):
     return _done(f"Bank drop off line removed for {day}", branch_id)
 
 
+def _all_branches_report():
+    """True when the download asks for the combined (All branches) day report.
+
+    Ticket ABI-341953048. The dashboard's own branch filter is what decides, so
+    this goes through the shared resolver: the session scope always wins and a
+    crafted ``?branch=`` can only ever narrow. A single-depot account is pinned
+    by that resolver to its own depot, so it can never be handed a wider report
+    than its own dashboard shows; an all-branch viewer that asks for no depot —
+    or for the explicit ``?branch=all`` the dashboard's own link uses — gets the
+    combined figures.
+    """
+    requested = str(request.args.get("branch", "") or "").strip()
+    if requested.lower() == "all":
+        requested = ""
+    _selected, branch_id, _label, _branches, scope = resolve_branch_filter(requested)
+    return branch_id is None and not isinstance(scope, int)
+
+
 def _report():
+    day = _day_from_request()
+    if _all_branches_report():
+        return cash.day_report(day=day, aggregate=True)
     return cash.day_report(
-        day=_day_from_request(),
+        day=day,
         branch_id=cash.branch_for_request(request.args.get("branch", "")),
     )
 

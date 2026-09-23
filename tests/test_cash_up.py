@@ -12,6 +12,10 @@ own depot's drawer), because those are the parts that would quietly misreport
 money if they drifted.
 
 All fixtures use fixed dates so nothing depends on the wall clock.
+
+The report downloads follow the dashboard's branch filter (ticket ABI-341953048),
+so a report test that means one depot asks for that depot by name - no ``branch``
+at all is the combined "All branches" report an unrestricted sign-in sees.
 """
 import csv
 import io
@@ -158,11 +162,14 @@ def test_dashboard_shows_the_opening_cash_card_and_the_day_end_panel(client):
     assert 'Opening cash' in body
     assert 'Cash up · end of day' in body
     assert 'Cash up · All branches' in body
-    # All-branch cash is a read-only total until a branch is selected.
+    # All-branch cash is a read-only total until a branch is selected, but the
+    # combined day report is downloadable (ticket ABI-341953048).
     assert 'End of day notes' in body
     assert 'Select a branch in the top Branch filter to enter counted cash.' in body
     assert 'name="cash_branch"' not in body
-    assert 'Download day report (PDF)' not in body
+    assert 'Submit day report' not in body
+    assert 'Download day report (PDF)' in body
+    assert 'branch=all' in body
     assert 'Not cashed up yet' in body
 
 
@@ -368,7 +375,7 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
         'walk_in': 1,
         'notes': 'Two quote follow-ups needed.',
     }
-    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
     for expected in [
         'New client interactions,Calls,4',
         'New client interactions,WhatsApp,3',
@@ -377,7 +384,7 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
         'New client interactions,Notes,Two quote follow-ups needed.',
     ]:
         assert expected in csv_body
-    drawn = _drawn_text(client.get('/cash-up/report.pdf').data)
+    drawn = _drawn_text(client.get('/cash-up/report.pdf?branch=1').data)
     # Ticket ABI-341953030: the free-text note no longer sits in a fixed-height
     # card, so the block now reads as the four count cards plus a wrapping panel.
     for expected in ['NEW CLIENT INTERACTIONS', 'Calls', '4', 'WhatsApp', '3',
@@ -430,7 +437,7 @@ def test_a_long_interaction_note_is_drawn_in_full_and_never_cut(client, app):
     }, follow_redirects=True).get_data(as_text=True)
     assert 'New client interactions saved' in body
 
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     text = blob.decode('latin-1')
     drawn = _drawn_text(blob)
     lines = _panel_lines(blob, 'NEW CLIENT INTERACTION NOTES')
@@ -446,7 +453,7 @@ def test_a_long_interaction_note_is_drawn_in_full_and_never_cut(client, app):
     assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
     # The CSV export was never the surface that cut the words, so it is unchanged
     # (read as CSV — a long note with a comma in it is quoted, not mangled).
-    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
     assert ['New client interactions', 'Notes', LONG_INTERACTION_NOTE] in list(csv.reader(io.StringIO(csv_body)))
 
 
@@ -459,7 +466,7 @@ def test_a_notes_only_interaction_day_still_renders_its_panel(client, app):
         'interaction_emails': '0', 'interaction_walk_in': '0',
         'interaction_notes': LONG_INTERACTION_NOTE,
     }, follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     drawn = _drawn_text(blob)
     assert 'NEW CLIENT INTERACTIONS' in drawn
     assert 'NEW CLIENT INTERACTION NOTES' in drawn
@@ -484,7 +491,7 @@ def test_a_short_interaction_note_renders_its_panel_in_full(client, app):
         'interaction_emails': '2', 'interaction_walk_in': '1',
         'interaction_notes': 'Two quote follow-ups needed.',
     }, follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     drawn = _drawn_text(blob)
     assert blob.decode('latin-1').count('/Type /Page ') == 2
     assert _panel_lines(blob, 'NEW CLIENT INTERACTION NOTES') == ['Two quote follow-ups needed.']
@@ -504,7 +511,7 @@ def test_a_day_without_interaction_notes_keeps_the_counts_only_report(client, ap
         'interaction_emails': '2', 'interaction_walk_in': '1',
         'interaction_notes': '',
     }, follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     drawn = _drawn_text(blob)
     assert 'NEW CLIENT INTERACTIONS' in drawn
     assert 'NEW CLIENT INTERACTION NOTES' not in drawn
@@ -565,8 +572,8 @@ def test_end_of_day_notes_save_without_a_cash_up_and_reach_the_report(client, ap
     assert summary['cashed_up'] is False
     body = client.get('/dashboard').get_data(as_text=True)
     assert 'Two tyres booked for Monday.' in body
-    assert 'Two tyres booked for Monday.' in client.get('/cash-up/export.csv').get_data(as_text=True)
-    assert b'Two tyres booked for Monday.' in client.get('/cash-up/report.pdf').data
+    assert 'Two tyres booked for Monday.' in client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
+    assert b'Two tyres booked for Monday.' in client.get('/cash-up/report.pdf?branch=1').data
 
 
 def test_another_depots_cash_used_line_cannot_be_deleted(client, app):
@@ -646,11 +653,11 @@ def test_a_bank_drop_reduces_the_cash_expected_in_the_drawer(client, app):
     assert summary['variance_label'] == 'Balanced'
 
     # Both downloads state what went to the bank, and the arithmetic on screen does too.
-    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
     assert 'Total dropped at the bank,R200.00' in csv_body
     assert 'Expected cash in the drawer,R300.00' in csv_body
     assert 'Cash drop off (to bank),Dropped at the bank' in csv_body
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     assert 'CASH DROP OFF \\(TO BANK\\)' in blob.decode('latin-1')
     # The cards draw the label and its figure separately, so read them as drawn.
     cards = _card_values(blob)
@@ -727,7 +734,7 @@ def test_a_dozen_bank_drop_offs_keep_every_line(client, app):
     login(client)
     for index in range(12):
         client.post('/cash-up/bank', data={'day': '', 'amount': '10'}, follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     text = blob.decode('latin-1')
     drawn = _drawn_text(blob)
     assert 'CASH DROP OFF \\(TO BANK\\)' in text
@@ -744,7 +751,7 @@ def test_a_dozen_bank_drop_offs_keep_every_line(client, app):
     assert min(baselines) >= pdf_documents.REPORT_FOOTER_Y
     assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
     # The CSV export is uncapped, so all twelve drop offs survive there too.
-    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
     assert csv_body.count('Cash drop off (to bank),Dropped at the bank') == 12
 
 
@@ -763,7 +770,7 @@ def test_a_busy_day_flows_onto_page_two_without_losing_a_line(client, app):
     client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
     client.post('/cash-up/notes', data={'day': '', 'notes': 'One.\nTwo.\nThree.'},
                 follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     text = blob.decode('latin-1')
     drawn = _drawn_text(blob)
     assert text.count('/Type /Page ') == 2, 'the report continues onto page 2'
@@ -784,7 +791,7 @@ def test_a_busy_day_flows_onto_page_two_without_losing_a_line(client, app):
     baselines = _baselines(blob)
     assert min(y for y in baselines if y != pdf_documents.REPORT_FOOTER_Y) >= pdf_documents.REPORT_BOTTOM
     # The CSV export still carries every one of the 24 lines.
-    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
     assert csv_body.count('Cash drop off (to bank),Dropped at the bank') == 12
     assert csv_body.count('Cash used,Line ') == 12
 
@@ -809,7 +816,7 @@ def test_the_csv_report_carries_the_dashboard_and_the_cash_figures(client, app):
                 follow_redirects=True)
     client.post('/cash-up', data={'day': '', 'counted_cash': '349.50', 'notes': 'All receipts filed.'},
                 follow_redirects=True)
-    res = client.get('/cash-up/export.csv')
+    res = client.get('/cash-up/export.csv?branch=1')
     assert res.status_code == 200
     assert 'text/csv' in res.headers['Content-Type']
     assert f'dashboard-report-{TODAY}.csv' in res.headers['Content-Disposition']
@@ -831,7 +838,7 @@ def test_the_pdf_report_renders_the_day_figures(client, app):
                 follow_redirects=True)
     client.post('/cash-up', data={'day': '', 'counted_cash': '400.00', 'notes': 'Drawer counted twice.'},
                 follow_redirects=True)
-    res = client.get('/cash-up/report.pdf')
+    res = client.get('/cash-up/report.pdf?branch=1')
     assert res.status_code == 200
     assert res.data.startswith(b'%PDF-')
     assert res.data.rstrip().endswith(b'%%EOF')
@@ -860,7 +867,7 @@ def test_a_long_cash_used_list_continues_instead_of_being_cut_off(client, app):
     for index in range(16):
         client.post('/cash-up/used', data={'day': '', 'amount': '10', 'description': f'Line {index + 1}'},
                     follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     text = blob.decode('latin-1')
     drawn = _drawn_text(blob)
     for index in range(1, 17):
@@ -872,7 +879,7 @@ def test_a_long_cash_used_list_continues_instead_of_being_cut_off(client, app):
     assert 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn
     assert 'more cash used line' not in text
     # The CSV export is uncapped, so nothing is actually lost.
-    csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)
+    csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
     assert 'Line 16,R10.00' in csv_body
 
 
@@ -880,7 +887,7 @@ def test_the_pdf_report_is_branded_and_names_the_user_who_ran_it(client, app):
     """Ticket ABI-341952956: the day report carries the logo, cards and the user."""
     login(client)
     client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     text = blob.decode('latin-1')
     # The SANO wordmark is embedded as a JPEG XObject and actually drawn.
     assert '/Subtype /Image' in text and '/Filter /DCTDecode' in text
@@ -917,7 +924,7 @@ def test_the_day_report_title_block_is_centred(client, app):
     """
     login(client)
     client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     page_centre = pdf_documents.A4_PORTRAIT_WIDTH / 2
     logo_right = pdf_documents.REPORT_LEFT + pdf_documents.REPORT_LOGO_WIDTH
     runs = _runs_with_font(blob)
@@ -987,7 +994,7 @@ def test_a_long_end_of_day_note_flows_onto_page_two(client, app):
     ]
     client.post('/cash-up', data={'day': '', 'counted_cash': '100.00'}, follow_redirects=True)
     client.post('/cash-up/notes', data={'day': '', 'notes': '\n'.join(note_lines)}, follow_redirects=True)
-    blob = client.get('/cash-up/report.pdf').data
+    blob = client.get('/cash-up/report.pdf?branch=1').data
     text = blob.decode('latin-1')
     drawn = _drawn_text(blob)
     # First and last line of the note both reach the page, whole.
@@ -1134,7 +1141,10 @@ def test_all_branch_dashboard_cash_totals_are_aggregated_and_read_only(client, a
     assert 'name="cash_branch"' not in body
     assert 'action="/cash-up"' not in body
     assert 'Submit day report' not in body
-    assert 'Download day report (PDF)' not in body
+    # The combined report is downloadable, and only as a download (ticket
+    # ABI-341953048) - no write or submit action appears on this view.
+    assert 'Download day report (PDF)' in body
+    assert '<form' not in body[body.index('Day report actions'):body.index('Movement')]
     assert re.search(r'Cash received</small>\s*<b>R1200\.00</b>', body), 'all branch cash is summed'
     assert re.search(r'Cash used</small>\s*<b>R75\.00</b>', body), 'all branch cash-used lines are summed'
     assert 'Branch 1: Depot one fuel' in body

@@ -269,9 +269,19 @@
   </div>
 </section>
 {% else %}
+{# Ticket ABI-341953048: All branches offers the same two downloads, over the
+   combined figures for every depot this sign-in may already see (the figures the
+   panel above is showing). Submitting to the group stays a per-depot action, so
+   no submit button appears here. #}
 <section class="panel dashboard-report-actions">
   <div class="panel-title"><h2>Day report actions</h2></div>
-  <p class="cash-note">Select a branch in the top Branch filter to submit or download a branch day report.</p>
+  <p class="cash-note">Combined figures for all {{ cash_day.branch_count }} depots{% if not day_is_today %} on {{ cash_day.day }}{% endif %}. Select a branch in the top Branch filter to submit a depot day report to the group.</p>
+  {% if current_user_is_main %}
+  <div class="form-actions">
+    <a class="btn ghost dashboard-report-action" href="{{ url_for('cash.report_pdf', day=cash_day.day, branch='all') }}">Download day report (PDF)</a>
+    <a class="btn ghost dashboard-report-action" href="{{ url_for('cash.export_csv', day=cash_day.day, branch='all') }}">Download CSV</a>
+  </div>
+  {% endif %}
 </section>
 {% endif %}
 <script>
