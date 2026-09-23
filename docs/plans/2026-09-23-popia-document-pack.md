@@ -3,6 +3,20 @@
 **Ask (Don, 2026-09-23):** "Add a job last on list — that privacy notice that we came up with between us and
 Sano: create notification on app that pulls it up, and that allows Sano to accept and print."
 
+**CLARIFIED by Don (2026-09-23, second message):** the document he means is the **operator agreement between us
+and Sano** — the one that says who is responsible for what — **not** the customer-facing privacy notice. That
+makes the operator agreement the **headline item** of this phase: the notification is headlined on it, its status
+reads *awaiting signature*, and its printed copy carries the signature block. The rest of the pack is still
+surfaced and adoptable, and the privacy notice is still what the app *publishes* to customers (Feature P), because
+the two documents have different audiences and both duties are real.
+
+**Read `docs/popia/OPERATOR-AGREEMENT-REVIEW.md` before building this phase** — it lists six blockers (B1–B6),
+including the one that changes the meaning of the liability cap (whose legal name is on the agreement), the cap
+decision itself (clause 9.3), insurance (9.4), jurisdiction (11.3), the service-agreement reference (11.4) and the
+two unfilled Schedule C sub-processor rows. It also drafts **Schedule D (responsibility matrix)** ready to paste
+in, and calls for an **electronic-signature clause** (ECTA 25 of 2002) — which is precisely what makes the in-app
+accept button legally tidy for the agreement.
+
 **Read first:** `docs/popia/PRIVACY-NOTICE-REVIEW.md` (the assistant's review of the pack against POPIA). It
 lists five blockers (B1–B5) and seven content gaps (G1–G7). **This phase builds the mechanism; it must not
 paper over the blockers** — see the hard gate below.
@@ -11,7 +25,7 @@ paper over the blockers** — see the hard gate below.
 `docs/popia/PRIVACY-NOTICE.md` · `RETENTION-POLICY-AND-SCHEDULE.md` · `POPIA-COMPLIANCE-ACTION-PLAN.md` ·
 `OPERATOR-AGREEMENT-ABI-SANO.md`.
 
-**What "accept" means legally** (from the review §6): the privacy notice, retention policy and action plan are
+**What "accept" means legally** (review §6): the privacy notice, retention policy and action plan are
 documents Sano **adopts** — an in-app "Adopted v1.0 by <name>, <date>" record is the evidence wanted. The
 **operator agreement is a contract** and s21(1) requires it in writing; an in-app acceptance is a valid
 electronic signature (ECTA 25 of 2002) **provided** it records the document identity/version/hash and the person
@@ -34,8 +48,11 @@ acceptance certificate.
 - Create `app/services/popia_pack.py`:
   - `document_paths()` → the manifest merged with `docs/popia/` (a missing file is reported, never invented).
   - `document_text(key)` / `document_hash(key)` — the Markdown source and its `sha256`.
-  - `outstanding_fields(key)` — every `[TO CONFIRM]`, `[WEBSITE URL]`, `[NAME …]`, `[TODAY]`, `[SQUARE BRACKET]`
-    token found in that document, as a list. Drives the gate and the "pending details" banner.
+  - `outstanding_fields(key)` — **every bracketed placeholder token** found in that document, as a list: scan for
+    any `[...]` whose contents include an uppercase word, which covers the real tokens in the pack today
+    (`[TO CONFIRM — …]`, `[WEBSITE URL]`, `[Confirm per branch …]`, `[TODAY]`). Drives the gate, the interim
+    page and the "pending details" banner. Implement it as the general rule, not a fixed list, so a new
+    placeholder cannot slip past by being worded differently.
   - `acceptance_for(key)` → latest row or `None`; `is_stale(key)` → `True` when the stored hash differs from the
     current file's hash (the document was edited after it was adopted); `accept_document(key, user_id)` →
     **refuses (`ValueError`) while `outstanding_fields(key)` is non-empty**, otherwise writes a row.

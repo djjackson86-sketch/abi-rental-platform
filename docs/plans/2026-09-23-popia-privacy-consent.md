@@ -54,8 +54,13 @@ must use — so consent is never bolted on later by hand.
   agent, no device fingerprint — only who/which version/which channel/when. Say so in a comment, because the
   next reader will wonder why the obvious columns are missing.
 - Create `app/routes/public.py` additions: `GET /privacy` → render the notice (`store_enabled` must NOT gate it —
-  a customer has to be able to read the notice even if the store is switched off). Add `View our privacy notice`
-  to the store footer and to `templates/public/confirmation.html`.
+  a customer has to be able to read the notice even if the store is switched off). **Gate on completeness:** while
+  `popia_pack.outstanding_fields("privacy_notice")` is non-empty, `/privacy` serves a short **interim page**
+  ("Our full privacy notice is being finalised — ask at the counter or email info@sanotrailers.co.za for a copy")
+  rather than a notice carrying `[TO CONFIRM]` text, and it must be impossible for a raw `[` token to reach a
+  customer in either state. The moment the four facts land and the tokens are gone, the same route serves the
+  full notice with no code change. Add `View our privacy notice` to the store footer and to
+  `templates/public/confirmation.html`.
 - Create `templates/public/privacy_notice.html` — hand-written Jinja mirroring
   `docs/popia/PRIVACY-NOTICE.md` heading-for-heading, with `PRIVACY_NOTICE_VERSION` shown as the "last updated"
   line, back-to-where-you-came-from behaviour (a plain link back rather than TrailerPro's JS), and print-friendly

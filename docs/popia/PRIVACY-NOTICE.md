@@ -1,6 +1,19 @@
 # Privacy Notice — Sano Trailers
 
-**Version:** 1.0 · **Effective date:** [TO CONFIRM] · **Last reviewed:** [TO CONFIRM]
+**Version:** 1.1 · **Effective date:** [TO CONFIRM — the date Sano Trailers publishes this notice] ·
+**Last reviewed:** 2026-09-23
+
+> **Five items must be completed before this notice is published.** They are marked in square brackets below and
+> listed here for convenience — no software may present this notice for acceptance, and no page may publish it,
+> while any of them remains open:
+>
+> 1. **Registered name and registration number of the responsible party** (§1)
+> 2. **Information Officer — full name** (and confirmation that the officer is registered with the Information Regulator) (§1)
+> 3. **Effective date** (the date of publication) — header above
+> 4. **The public web address of this notice** (§12)
+> 5. **Whether each branch has CCTV**, so the CCTV paragraph in §2 is either confirmed or deleted (§2)
+>
+> Everything else in this version has been reviewed and updated.
 
 > This notice is issued in terms of **section 18 of the Protection of Personal Information Act 4 of 2013 (POPIA)**.
 > It explains what personal information Sano Trailers collects, why, who we share it with, how long we keep it,
@@ -10,22 +23,32 @@
 
 ## 1. Who we are (the responsible party)
 
-**Sano Trailers** ("we", "us", "our")
-Address: 229 Summit Road, Midrand, Gauteng, South Africa
-Telephone: 010 221 1723
-Email: info@sanotrailers.co.za
+**Sano Trailers** — [TO CONFIRM — registered legal name, e.g. "Sano Trailers (Pty) Ltd", and the company
+registration number; if a sole proprietor, the proprietor's name with "t/a Sano Trailers"]
 
-**Information Officer:** [NAME TO CONFIRM] — the person registered with the Information Regulator
-who is responsible for POPIA compliance.
-Contact for any privacy question or request: **info@sanotrailers.co.za** (subject line: *Privacy Request*)
+**Address:** 229 Summit Road, Midrand, Gauteng, South Africa  
+**Telephone:** 010 221 1723  
+**Email:** info@sanotrailers.co.za
+
+**Information Officer:** [TO CONFIRM — full name of the Information Officer] — the person registered with the
+Information Regulator who is responsible for POPIA compliance. Our Information Officer is registered with the
+Regulator in terms of section 55 of POPIA.  
+**Contact for any privacy question or request:** info@sanotrailers.co.za (subject line: *Privacy Request*)  
+**Postal address for privacy requests:** 229 Summit Road, Midrand, Gauteng, South Africa
 
 **Branches:** Midrand · Wonderboom (Pretoria) · Rooderport
 
 ---
 
-## 2. What personal information we collect
+## 2. What personal information we collect, and where it comes from
 
 We collect only what we need to hire out, sell, service and recover trailers.
+
+**Almost all of the personal information we hold is given to us by you** — on a form at the branch, over the
+phone or WhatsApp, or through our online store, booking and registration pages. Where we receive information
+about you from somebody else (for example your alternative contact, an insurer or assessor handling a claim, a
+tracing agent, or a credit or verification service), we will tell you what we received and who gave it to us
+when you ask.
 
 **When you are a customer / hirer:**
 
@@ -34,14 +57,30 @@ We collect only what we need to hire out, sell, service and recover trailers.
 | Identity & contact | Name, email address, telephone number |
 | Address | Street address, suburb, city, province, postal code |
 | Verification | Whether your details were verified, and a copy of your identity document or driver's licence **only where you provide it for verification** |
-| Vehicle details | The make, colour and registration number of the vehicle that will tow the trailer (where applicable and voluntarily provided) |
-| Alternative contact | The name and number of a person we may contact if we cannot reach you |
+| Vehicle details | The make, model, colour, **registration number, NaTIS registration number, VIN and engine number** of the vehicle that will tow the trailer |
 | Business details | Company name, VAT number and company registration number (business customers) |
 | Transaction | Orders, quotations, invoices, rental periods, deposits, payments, outstanding balances, damage and return records |
 | Communications | Emails, WhatsApp messages and notes from calls with us |
 
-**When you use our online store or booking system:** the information you type into a form, plus standard
-technical data (IP address, browser type, pages visited) needed to run and secure the site.
+**How we capture your vehicle details.** You may give us your vehicle details on a form, or we may read them
+from the **licence disc or licence document of the vehicle** you bring to us — either by photographing the disc
+and reading its barcode, or by typing what is printed on it. A vehicle's **registration number, NaTIS
+registration number, VIN and engine number are personal information**: they identify a vehicle, and through it a
+person. We use them only to record which vehicle is towing which trailer, to check that the vehicle is
+roadworthy and licensed for the hire, and — if a trailer is not returned — to trace it.
+
+**If you are an alternative contact** (the person a customer asks us to ring if we cannot reach them): we hold
+your name and telephone number, given to us by that customer, and we use them only to contact you about a
+trailer that is due back. **We will tell you what we hold about you and why, if you ask us to, or if we contact
+you.** You may ask us to remove your details at any time.
+
+**Closed-circuit television.** [Confirm per branch before publication: our branches at ____ are covered by CCTV.]
+Where a branch has cameras, we record images of the yard and entrance for the security of our property and of
+people on our premises. Signage at the branch tells you that recording is taking place. Footage is kept for a
+short rolling period and is only kept longer where an incident makes a specific recording evidence.
+
+**When you use our online store, booking or registration pages:** the information you type into a form, plus
+standard technical data (IP address, browser type, pages visited) needed to run and secure the site.
 
 **We do not knowingly collect the personal information of children** (under 18) without the consent of a
 competent person. Our rentals are not aimed at children.
@@ -56,10 +95,11 @@ biometric, criminal or sexual information. If you volunteer something of that ki
 | Purpose | Lawful basis (POPIA s11) |
 |---|---|
 | Quoting, booking, hiring out, returning and servicing trailers | Performance of the contract with you |
+| Recording which vehicle is towing which trailer, and that the vehicle is licensed and roadworthy for the hire | Performance of the contract + our legitimate interest in protecting an asset worth tens of thousands of rand |
 | Invoicing, taking payment, recovering deposits and outstanding money | Contract + our legitimate interest in being paid |
-| Verifying who you are before handing over an asset worth tens of thousands of rand | Legitimate interest + our contractual right to protect our property |
+| Verifying who you are before handing over an asset | Legitimate interest + our contractual right to protect our property |
 | Contacting your alternative contact if we cannot reach you (e.g. overdue return) | Legitimate interest |
-| Keeping records we are required by law to keep (tax, company, consumer) | Legal obligation |
+| Keeping records we are required by law to keep | **Legal obligation** — specifically the **Tax Administration Act 28 of 2011** (section 29: tax, VAT and accounting records), the **Companies Act 71 of 2008** (section 24: company records), the **National Road Traffic Act 93 of 1996** (vehicle registration and licence records) and the **Consumer Protection Act 68 of 2008** where it applies |
 | Recovering our property, defending or pursuing claims, insurance claims | Legitimate interest |
 | Sending you marketing about our products and services | **Your consent** — see section 8 |
 | Keeping the website secure and preventing fraud or abuse | Legitimate interest |
@@ -81,6 +121,7 @@ We share personal information only with the following **categories of recipients
 - **Payment and banking providers**, to process payments and refunds.
 - **Insurers and assessors**, if a trailer is damaged or a claim arises.
 - **Debt collectors, tracing agents and attorneys**, if money is owed to us or our property is not returned.
+- **Security service providers**, where a branch is monitored by CCTV and an incident is investigated.
 - **Law enforcement, courts, the Information Regulator, SARS and other regulators**, where the law requires or permits it.
 - **Your alternative contact**, if we cannot reach you about a trailer that is due back.
 
@@ -117,16 +158,19 @@ record type with the reason for it.
 In short:
 
 - **Tax, VAT and accounting records** — at least **5 years** from the date of the relevant return (Tax Administration Act), and **7 years** for company records (Companies Act).
-- **Rental agreements, damage and deposit records** — **7 years**, because they are the evidence we need under the Companies Act and for potential claims.
+- **Rental agreements, vehicle records, damage and deposit records** — **7 years**, because they are the evidence we need under the Companies Act and for potential claims.
 - **Customer contact details** — kept while you are an active customer and for a reasonable period afterwards, then deleted or de-identified.
 - **Identity document / licence copies taken for verification** — deleted once verification is done and the rental is closed and settled, unless a claim or dispute is live.
 - **Marketing consents and opt-outs** — kept as long as needed to honour your choice; an opt-out is kept indefinitely so we do not contact you again by mistake.
 - **Website enquiries that never became a customer** — **12 months**.
-- **CCTV footage** (if a branch has cameras) — a short rolling window, kept longer only if an incident makes a specific clip evidence.
+- **CCTV footage** — a short rolling window, kept longer only if an incident makes a specific clip evidence.
 - **Staff / employment records** — per the Basic Conditions of Employment Act and tax law.
 
-When a retention period ends we delete or destroy the record in a way that prevents it being reconstructed,
-or we de-identify it so it can no longer be linked to you.
+When a retention period ends we delete or destroy the record in a way that **prevents it from being
+reconstructed or linked back to you**, or we de-identify it so that it can no longer be linked to you. Where a
+backup copy is restored, we **re-apply any deletions that happened after that backup was taken**. Records kept
+because of a legal hold (a tax audit, a dispute, a regulator's request) are released from the hold and deleted
+when the matter ends.
 
 ---
 
@@ -200,10 +244,14 @@ You can complain to the Regulator without going to us first, but we would apprec
 ## 12. Changes to this notice
 
 We review this notice at least once a year, and whenever we start doing something new with personal information.
-The current version is always available at [WEBSITE URL]. The version and date at the top of this page tell you
-which one you are reading.
+The current version is always available at **[TO CONFIRM — the public web address of this notice]** and at our
+branches. The version and date at the top of this page tell you which one you are reading.
+
+**Where a change materially affects how we use your information, we will tell you** — by email, SMS or WhatsApp
+using the contact details we hold for you — before the change takes effect, or as soon as reasonably practicable
+afterwards.
 
 ---
 
 *This notice is a practical document prepared for Sano Trailers' operations. It is not legal advice: have your
-attorney or compliance advisor review it before publication, and confirm every bracketed item.*
+attorney or compliance advisor review it before publication, and confirm the four open items listed at the top.*
