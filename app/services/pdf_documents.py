@@ -1119,3 +1119,97 @@ def document_pdf_filename(document):
     prefix = label_for(document['document_type']).upper().replace(' ', '-')
     number = (document['number'] or '').strip() or 'PROFORMA'
     return f'{prefix}-{number}.pdf'
+
+
+# --- branch portal QR sheet (A4, one code per sheet) --------------------------
+#
+# The sheet the counter prints and displays so a customer can register their
+# trailer details from their own phone. Don chose ONE code per sheet (not a grid
+# of codes), so this is a poster: the branch, the code, and the address in plain
+# text underneath for anyone whose camera will not cooperate.
+#
+# The code is drawn as VECTOR squares straight from the QR module matrix rather
+# than embedding the PNG: a bitmap blown up to poster size goes soft, and a soft
+# code is a code that does not scan. Horizontal runs of dark modules are merged
+# into one rectangle each, so a version-4 code costs a few hundred operators
+# instead of a few thousand, and the file stays small enough to open on a phone.
+QR_SHEET_MARGIN = 48
+QR_SHEET_QR_WIDTH = 320
+QR_SHEET_PLATE_PAD = 16
+QR_SHEET_PLATE_TOP = 676
+QR_SHEET_INK = '0.10 0.13 0.18'
+QR_SHEET_MUTED = '0.36 0.42 0.51'
+QR_SHEET_PLATE_FILL = '1 1 1'
+QR_SHEET_PLATE_STROKE = '0.82 0.86 0.90'
+# The same sentence the on-screen print sheet uses (templates/admin/portal_print.html), so the
+# PDF and the browser printout cannot describe the same code two different ways.
+QR_SHEET_INSTRUCTION = 'Scan to register your details before you hire.'
+
+
+def _qr_run_rects(matrix, left, top, module_size):
+    """Each row's runs of dark modules, as one filled rectangle per run."""
+    commands = []
+    for row_index, row in enumerate(matrix):
+        column = 0
+        width = len(row)
+        while column < width:
+            if not row[column]:
+                column += 1
+                continue
+            start = column
+            while column < width and row[column]:
+                column += 1
+            commands.append(
+                _pdf_rect(
+                    left + start * module_size,
+                    top - (row_index + 1) * module_size,
+                    (column - start) * module_size,
+                    module_size,
+                    fill='0 0 0',
+                )
+            )
+    return commands
+
+
+def qr_sheet_pdf_bytes(branch_name, url, matrix, company_name=None, address=None, instruction=None):
+    """One A4 page: the branch's portal code, big enough to scan from a counter.
+
+    ``matrix`` is the QR module matrix (:func:`app.services.portal.qr_matrix`) so
+    this module never has to know how the code was built.
+    """
+    plate_size = QR_SHEET_QR_WIDTH + (QR_SHEET_PLATE_PAD * 2)
+    plate_left = (A4_PORTRAIT_WIDTH - plate_size) / 2
+    plate_bottom = QR_SHEET_PLATE_TOP - plate_size
+    module_size = QR_SHEET_QR_WIDTH / len(matrix)
+
+    commands = [
+        _pdf_rect(
+            plate_left,
+            plate_bottom,
+            plate_size,
+            plate_size,
+            fill=QR_SHEET_PLATE_FILL,
+            stroke=QR_SHEET_PLATE_STROKE,
+            line_width=0.8,
+        )
+    ]
+    # The white plate goes down before the modules: a code printed on tinted paper
+    # is readable to a human and invisible to a scanner.
+    commands.extend(_qr_run_rects(matrix, plate_left + QR_SHEET_PLATE_PAD, QR_SHEET_PLATE_TOP - QR_SHEET_PLATE_PAD, module_size))
+
+    text = []
+    if company_name:
+        text.append(_pdf_centre_text(772, str(company_name).upper(), size=10, font='F2'))
+    text.append(_pdf_centre_text(736, _pdf_fit(branch_name, 26, A4_PORTRAIT_WIDTH - (QR_SHEET_MARGIN * 2), bold=True), size=26, font='F2'))
+    if address:
+        text.append(_pdf_centre_text(716, _pdf_fit(address, 10, A4_PORTRAIT_WIDTH - (QR_SHEET_MARGIN * 2)), size=10))
+    text.append(_pdf_centre_text(684 if address else 700, _pdf_fit(instruction or QR_SHEET_INSTRUCTION, 12, A4_PORTRAIT_WIDTH - (QR_SHEET_MARGIN * 2), bold=True), size=12, font='F2'))
+
+    text.append(_pdf_centre_text(plate_bottom - 36, _pdf_fit(url, 12, A4_PORTRAIT_WIDTH - (QR_SHEET_MARGIN * 2), bold=True), size=12, font='F2'))
+    text.append(_pdf_centre_text(plate_bottom - 56, 'or type this address into your browser', size=9))
+    text.append(_pdf_centre_text(64, 'Print this sheet and display it where customers can see it.', size=9))
+
+    commands.append('BT')
+    commands.extend(text)
+    commands.append('ET')
+    return _pdf_objects('\n'.join(commands).encode('latin-1', 'replace'))

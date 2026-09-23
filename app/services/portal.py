@@ -97,11 +97,19 @@ def branch_by_slug(slug):
 def portal_branch(slug):
     """The branch a slug belongs to **and whose portal is live** — otherwise ``None``.
 
-    One call, so the page and the QR endpoint cannot answer differently about a disabled branch:
-    today both 404, which is what a customer who kept old sheet should see.
+    One call, so the page, the QR image and the print sheet cannot answer differently about a
+    disabled branch: today all of them 404, which is what a customer who kept an old sheet should
+    see.
+
+    ``active`` is checked as well as ``portal_enabled`` because the admin portal page has always
+    told staff that a switched-off *branch* takes its portal with it — "This branch is inactive,
+    so its portal is off — switch the branch on under Branches first", and it shows no code for
+    such a branch. Reading only ``portal_enabled`` meant the page promised a 404 while the route
+    kept serving a live registration form for a depot that is closed (found while adding the A4
+    PDF sheet, which is the same gate).
     """
     branch = branch_by_slug(slug)
-    if branch is None or not branch["portal_enabled"]:
+    if branch is None or not branch["portal_enabled"] or not branch["active"]:
         return None
     return branch
 
@@ -191,6 +199,25 @@ def qr_png_bytes(url, box_size=QR_BOX_SIZE_PX):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def qr_matrix(url):
+    """The module matrix behind :func:`qr_png_bytes`.
+
+    The PNG is a bitmap, which is the wrong thing for paper: scaled up it goes
+    soft, and a soft code is a code that does not scan. The A4 sheet draws the
+    matrix itself as vector squares instead, using the *same* data, so what is
+    printed on the counter sheet is exactly what the endpoint encodes.
+    """
+    code = qrcode.QRCode(
+        version=None,
+        error_correction=ERROR_CORRECT_M,
+        box_size=1,
+        border=QR_BORDER_MODULES,
+    )
+    code.add_data(url)
+    code.make(fit=True)
+    return code.modules
 
 
 def clamp_box_size(value, default=QR_BOX_SIZE_PX):

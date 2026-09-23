@@ -5,7 +5,7 @@ import secrets
 
 from app.db import get_db
 from app.services import branches as branches_service
-from app.services import consent, group_images, popia_pack, portal, portal_intake
+from app.services import consent, group_images, pdf_documents, popia_pack, portal, portal_intake
 from app.services.orders import (
     PUBLIC_BOOKING_NOTE,
     PUBLIC_SOURCE_SYSTEM,
@@ -580,5 +580,36 @@ def branch_portal_qr(slug):
     png = portal.qr_png_bytes(portal.portal_url(branch, request.url_root), box_size=box_size)
     response = make_response(png)
     response.headers["Content-Type"] = "image/png"
+    response.headers["Cache-Control"] = f"public, max-age={PORTAL_QR_MAX_AGE_SECONDS}"
+    return response
+
+
+@bp.route("/portal/<slug>/qr.pdf")
+def branch_portal_qr_sheet(slug):
+    """The printable A4 sheet for a branch's portal code (Don's decision on 23 Sept).
+
+    Same gate as the page and the PNG, so a sheet can never be printed for a link that 404s:
+    an unknown slug, or a portal that has been switched off, is a 404 here too.
+
+    The sheet is a real PDF with the code drawn as vectors from the very matrix the PNG
+    encodes (:func:`portal.qr_matrix`), so the printed code and the endpoint cannot disagree.
+    It is served ``inline`` because staff open it to print it, and it is the counterpart of the
+    on-screen print sheet at ``settings.portal_print``, not a replacement for it.
+    """
+    branch = portal.portal_branch(slug)
+    if branch is None:
+        abort(404)
+    url = portal.portal_url(branch, request.url_root)
+    settings = get_company_settings()
+    sheet = pdf_documents.qr_sheet_pdf_bytes(
+        branch["name"],
+        url,
+        portal.qr_matrix(url),
+        company_name=(settings["company_name"] or "").strip(),
+        address=portal.branch_address(branch),
+    )
+    response = make_response(sheet)
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = f'inline; filename="{slug}-trailer-portal.pdf"'
     response.headers["Cache-Control"] = f"public, max-age={PORTAL_QR_MAX_AGE_SECONDS}"
     return response

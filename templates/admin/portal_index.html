@@ -39,6 +39,7 @@
       <div class="portal-qr-side">
         <p class="form-help">Scan this to reach the form on any phone. Print it for the counter when the notice is published.</p>
         <a class="btn ghost" href="{{ url_for('settings.portal_print', branch_id=link.branch_id) }}">Print QR sheet</a>
+        <a class="btn ghost" href="{{ url_for('public.branch_portal_qr_sheet', slug=link.slug) }}">Download A4 PDF</a>
       </div>
     </div>
     {% else %}
