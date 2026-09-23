@@ -237,6 +237,15 @@ CREATE TABLE IF NOT EXISTS products (
     quantity INTEGER NOT NULL DEFAULT 1,
     tracking_method TEXT NOT NULL DEFAULT 'bulk',
     wheel_size TEXT NOT NULL DEFAULT '',
+    -- Trailer identity (programme phase 5 / feature D). What a scanned NaTIS
+    -- licence disc is matched against to find the open rental it belongs to:
+    -- registration = number plate, registration_number = NaTIS number,
+    -- licence_number = the disc's own licence number. Blank means "not recorded",
+    -- so every existing product is unaffected and only ever gains a plate when
+    -- staff type one in on the inventory form.
+    registration TEXT NOT NULL DEFAULT '',
+    licence_number TEXT NOT NULL DEFAULT '',
+    registration_number TEXT NOT NULL DEFAULT '',
     -- Ticket ABI-341953038(3): a trailer flagged here cannot be rented and is
     -- hidden from the online store until it is released.
     under_maintenance INTEGER NOT NULL DEFAULT 0,
@@ -302,6 +311,15 @@ CREATE TABLE IF NOT EXISTS orders (
     -- before it was archived, so the main profile can unarchive it back to where
     -- it was. Blank on rows archived before this column existed.
     status_before_archive TEXT NOT NULL DEFAULT '',
+    -- Return-by-disc-scan audit (programme phase 5 / feature D). Written only by
+    -- ``returns.mark_returned_via_scan``: when a staff member scans a licence
+    -- disc and the matching rental is marked returned, these record the moment,
+    -- the scanned identifier and whether the disc was the trailer's or the towing
+    -- car's. Blank on every order returned the normal way.
+    return_scan_at TEXT NOT NULL DEFAULT '',
+    return_scan_registration TEXT NOT NULL DEFAULT '',
+    return_scan_source TEXT NOT NULL DEFAULT '',
+    return_scan_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
 
@@ -778,6 +796,32 @@ def run_migrations(db):
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration "
         "ON vehicles(registration) WHERE registration <> ''"
     )
+
+    # --- Trailer identity on a rental product (additive, programme phase 5 / feature D) ---
+    # Feature D returns a rental by scanning a licence disc, so a trailer has to
+    # carry the same three identifiers a disc does: registration = number plate,
+    # registration_number = NaTIS number, licence_number = the disc's own licence
+    # number (decision D3). Blank defaults, so on an existing database every
+    # product simply has no identity recorded and nothing else changes — the plate
+    # is only ever typed in on the inventory form. The partial unique index makes
+    # "one plate belongs to one trailer" a database-level fact (an empty plate may
+    # repeat, so products without a plate are never blocked), which is what keeps
+    # a scan unambiguous.
+    ensure_column(db, "products", "registration", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "products", "licence_number", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "products", "registration_number", "TEXT NOT NULL DEFAULT ''")
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_registration "
+        "ON products(registration) WHERE registration <> ''"
+    )
+
+    # --- Return-by-disc-scan audit on an order (additive, programme phase 5 / feature D) ---
+    # Written only by returns.mark_returned_via_scan(); blank on every order that
+    # was returned the normal way, so no existing row or report is affected.
+    ensure_column(db, "orders", "return_scan_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "return_scan_registration", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "return_scan_source", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "return_scan_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
 
 
 def init_db():

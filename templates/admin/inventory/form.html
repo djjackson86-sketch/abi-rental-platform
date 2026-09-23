@@ -87,6 +87,25 @@
     <p class="form-help">Rental trailers only. While this is ticked the trailer cannot be added to any order &mdash; staff see a &ldquo;Trailer under maintenance&rdquo; warning &mdash; and it is hidden from the online store. Untick it to release the trailer.</p>
   </section>
 
+  {# Trailer identification (programme phase 5 / feature D). These three values are
+     what a scanned NaTIS licence disc is matched against when staff return a
+     rental, so the plate here must be spelled the way it is on the disc — the
+     stored shape is upper case with inner spaces collapsed, and one plate can sit
+     on exactly one trailer. Rental items only; the hidden marker is disabled
+     together with the inputs so a sale/service post carries none of the fields and
+     can never blank a recorded plate. #}
+  {% set identity_mode = initial_type == 'rental' %}
+  <section class="form-section" data-trailer-identity-field {% if not identity_mode %}hidden{% endif %}>
+    <h2>Trailer identification</h2>
+    <input type="hidden" name="trailer_identity_panel" value="1" data-identity-marker {% if not identity_mode %}disabled{% endif %}>
+    <div class="form-grid">
+      <label>Number plate<input name="registration" value="{{ product.registration if product else '' }}" placeholder="e.g. ABC123GP" {% if not identity_mode %}disabled{% endif %}></label>
+      <label>Disk licence number<input name="licence_number" value="{{ product.licence_number if product else '' }}" placeholder="e.g. 4024048GB8LY" {% if not identity_mode %}disabled{% endif %}></label>
+      <label>NaTIS registration number<input name="registration_number" value="{{ product.registration_number if product else '' }}" placeholder="e.g. SHS812W" {% if not identity_mode %}disabled{% endif %}></label>
+    </div>
+    <p class="form-help">Rental trailers only. The same three identifiers a NaTIS licence disk carries: the <b>number plate</b> is the main one &mdash; staff scanning the trailer&rsquo;s disk at return time match on it &mdash; with the disk&rsquo;s own licence number and its NaTIS registration number as extra evidence. Leave blank until the trailer&rsquo;s disk is captured. One plate can only be recorded on one trailer.</p>
+  </section>
+
   <section class="form-section">
     <h2>Tracking method</h2>
     <div class="option-grid">
@@ -139,6 +158,9 @@
   const maintenanceField=document.querySelector('[data-maintenance-field]');
   const maintenanceInput=maintenanceField?maintenanceField.querySelector('input[name="under_maintenance"]'):null;
   const maintenanceMarker=maintenanceField?maintenanceField.querySelector('[data-maintenance-marker]'):null;
+  const identityField=document.querySelector('[data-trailer-identity-field]');
+  const identityInputs=identityField?[...identityField.querySelectorAll('input')]:[];
+  const identityMarker=identityField?identityField.querySelector('[data-identity-marker]'):null;
   const branchInputs=[...document.querySelectorAll('[data-stock-field] input[name^="qty_branch_"]')];
   const totalOut=document.querySelector('[data-stock-total]');
   const modeOut=document.querySelector('[data-stock-mode]');
@@ -181,6 +203,13 @@
     if(maintenanceField) maintenanceField.hidden=!wheelMode;
     if(maintenanceInput) maintenanceInput.disabled=!wheelMode;
     if(maintenanceMarker) maintenanceMarker.disabled=!wheelMode;
+    // Trailer identification belongs to rental items (programme phase 5): a sale or
+    // service product carries no disc to scan, so its inputs and the marker are
+    // disabled and its stored plate is left alone.
+    const identityMode=(type==='rental');
+    if(identityField) identityField.hidden=!identityMode;
+    identityInputs.forEach(input=>{ input.disabled=!identityMode; });
+    if(identityMarker) identityMarker.disabled=!identityMode;
     syncTotal();
   }
   typeInputs.forEach(input=>input.addEventListener('change',syncStockField));
