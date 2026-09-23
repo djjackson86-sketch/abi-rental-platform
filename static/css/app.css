@@ -504,3 +504,11 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
   .privacy-notice{border:none;box-shadow:none;padding:0}
   .privacy-main{max-width:none}
 }
+
+/* Branch portal placeholder page (feature B §B1). The branch link and the branch phone are the
+   two things a customer opened this page for, and in muted small print both read as decoration
+   rather than as tappable — vision_analyze on the 390px screenshot said exactly that. Give them
+   the house brand colour and a real tap target. */
+.portal-actions{display:grid;gap:8px;margin-top:16px;padding:14px 16px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft)}
+.portal-actions p{margin:0;font-weight:700;color:var(--ink-2)}
+.portal-actions a{color:var(--brand);font-weight:800;overflow-wrap:anywhere}

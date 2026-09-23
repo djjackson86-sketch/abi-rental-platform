@@ -1,13 +1,19 @@
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, make_response, redirect, render_template, request, url_for
 from urllib.parse import urlparse
 
 from app.db import get_db
-from app.services import popia_pack
+from app.services import popia_pack, portal
 from app.services.customers import create_customer
 from app.services.orders import _build_order_payload, create_order, get_order, order_items
 from app.services.settings import get_company_settings
 
 bp = Blueprint("public", __name__)
+
+# How long a browser may cache a branch's QR image. A day: long enough that a counter screen or a
+# cashier's browser does not re-render it on every page view, short enough that a corrected
+# ``public_base_url`` stops being served within a shift (the QR's *content* is the link, so a
+# stale image is a stale link).
+PORTAL_QR_MAX_AGE_SECONDS = 86400
 
 
 def _public_products():
@@ -146,3 +152,45 @@ def privacy_notice():
         notice=popia_pack.notice_metadata(popia_pack.PRIVACY_NOTICE_KEY),
         back_url=_privacy_back_url(),
     )
+
+
+@bp.route("/portal/<slug>")
+def branch_portal(slug):
+    """A branch's public portal page (feature B §B1).
+
+    §B1 ships the link and the QR; the form the customer fills in is §B2. Until it exists this is
+    a **GET-only placeholder** that names the branch and says the form is coming, and the route
+    answers only for a branch whose portal is switched on — an unknown slug and a disabled portal
+    are the same 404 to the customer, so a switched-off branch is not discoverable by guessing.
+
+    Deliberately not gated by ``store_enabled``: the online store and a branch's own sign-up sheet
+    are separate surfaces, and a branch that is handed a printed QR should not go dark because the
+    catalogue is switched off. The per-branch ``portal_enabled`` flag is the switch that matters.
+    """
+    branch = portal.portal_branch(slug)
+    if branch is None:
+        abort(404)
+    return render_template(
+        "public/portal_placeholder.html",
+        settings=get_company_settings(),
+        branch=branch,
+        portal_url=portal.portal_url(branch, request.url_root),
+    )
+
+
+@bp.route("/portal/<slug>/qr.png")
+def branch_portal_qr(slug):
+    """The branch's QR as a PNG, rendered in process (decisions D4 and D5).
+
+    The same gate as the page: an unknown slug or a disabled portal 404s, so a QR that was printed
+    before a branch was switched off stops resolving rather than opening a dead form. Nothing is
+    written to disk, and the link is never handed to a third-party QR service.
+    """
+    branch = portal.portal_branch(slug)
+    if branch is None:
+        abort(404)
+    png = portal.qr_png_bytes(portal.portal_url(branch, request.url_root))
+    response = make_response(png)
+    response.headers["Content-Type"] = "image/png"
+    response.headers["Cache-Control"] = f"public, max-age={PORTAL_QR_MAX_AGE_SECONDS}"
+    return response

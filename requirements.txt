@@ -11,6 +11,11 @@ libsql-client==0.3.1
 Pillow==12.3.0
 zxing-cpp==3.1.1
 
+# Feature B (§B1): the per-branch portal QR is rendered in process, so the link never leaves the
+# app and there is no QR file on disk to lose on a Render redeploy (decisions D4 + D5). qrcode is
+# pure Python and the [pil] extra reuses the Pillow above — no new native dependency.
+qrcode[pil]==8.2
+
 # Deliberately NOT a dependency: pdf417decoder. It also reads the real disc (251 ms) but pulls
 # numpy + opencv-python (~115 MB installed, a 74 MB wheel) for the privilege, and its only extra
 # wins over zxing-cpp were two driver's-licence-card samples — not the licence disc ABI scans.

@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS company_settings (
     checkout_instructions TEXT NOT NULL DEFAULT 'Submit your booking request and our team will confirm availability before payment.',
     store_contact_email TEXT NOT NULL DEFAULT '',
     store_contact_phone TEXT NOT NULL DEFAULT '',
+    -- The absolute base for every public link the app hands out (feature B §B1, decision D5).
+    -- Blank means "use the host of the request that is asking", which is right on localhost and
+    -- wrong the moment a QR code is printed, so staff set it once per environment.
+    public_base_url TEXT NOT NULL DEFAULT '',
     invoice_email_message TEXT NOT NULL DEFAULT 'Dear {customer_name},
 
 Please find attached {document_label} {document_number} for order {order_number}.
@@ -124,6 +128,13 @@ CREATE TABLE IF NOT EXISTS branches (
     bank_branch_code TEXT NOT NULL DEFAULT '',
     bank_account_type TEXT NOT NULL DEFAULT '',
     bank_reference_note TEXT NOT NULL DEFAULT '',
+    -- Per-branch public portal (programme phase 8 / feature B §B1, decision D5). The slug is
+    -- STORED, not derived at request time: a QR code printed on an A4 sheet has to keep working
+    -- after the branch is renamed, so ensure_slug() only ever fills a blank one. Existing rows
+    -- are backfilled from the branch name once, by run_migrations() below.
+    public_slug TEXT NOT NULL DEFAULT '',
+    portal_enabled INTEGER NOT NULL DEFAULT 1,
+    portal_intro TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -495,6 +506,35 @@ def rename_column(db, table, old_name, new_name):
         db.execute(f"ALTER TABLE {table} RENAME COLUMN {old_name} TO {new_name}")
 
 
+def _backfill_branch_slugs(db):
+    """Give every branch a public slug, once, deterministically (programme phase 8 / §B1).
+
+    Only BLANK slugs are filled, so this is a no-op on every later app start — a slug that staff
+    have already printed on an A4 sheet is never silently re-derived from a renamed branch.
+    Collisions take the first free ``-2``, ``-3`` … suffix in branch-id order, so two machines
+    running the same migration on the same data end up with the same links.
+
+    ``app.services.portal`` is imported inside the function on purpose: it reads ``app.db``, so a
+    module-level import here would be circular.
+    """
+    from app.services.portal import slugify
+
+    taken = {
+        row["public_slug"]
+        for row in db.execute("SELECT public_slug FROM branches WHERE public_slug <> ''").fetchall()
+    }
+    for row in db.execute("SELECT id, name, public_slug FROM branches ORDER BY id").fetchall():
+        if (row["public_slug"] or "").strip():
+            continue
+        base = slugify(row["name"]) or f"branch-{row['id']}"
+        candidate, suffix = base, 2
+        while candidate in taken:
+            candidate = f"{base}-{suffix}"
+            suffix += 1
+        db.execute("UPDATE branches SET public_slug = ? WHERE id = ?", (candidate, row["id"]))
+        taken.add(candidate)
+
+
 def run_migrations(db):
 
     db.execute("""CREATE TABLE IF NOT EXISTS product_groups (
@@ -861,6 +901,23 @@ def run_migrations(db):
         "CREATE INDEX IF NOT EXISTS idx_consent_records_customer ON consent_records(customer_id)"
     )
 
+    # --- Per-branch public portal (additive, programme phase 8 / feature B §B1) ---
+    # Every branch gets a stable public link of the shape /portal/<slug> and a QR that encodes the
+    # absolute URL (decision D5). All four columns are additive with defaults, so on an existing
+    # database every branch keeps behaving exactly as it does today; the backfill fills only the
+    # blank slugs, once. The partial unique index is the database-level half of "one slug, one
+    # branch": an empty slug may repeat (so a branch that has never been given a link never blocks
+    # anything), which is the same shape as idx_vehicles_registration / idx_products_registration.
+    ensure_column(db, "branches", "public_slug", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "portal_enabled", "INTEGER NOT NULL DEFAULT 1")
+    ensure_column(db, "branches", "portal_intro", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "company_settings", "public_base_url", "TEXT NOT NULL DEFAULT ''")
+    _backfill_branch_slugs(db)
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_slug "
+        "ON branches(public_slug) WHERE public_slug <> ''"
+    )
+
 
 def init_db():
     db = get_db()
@@ -873,6 +930,10 @@ def init_db():
     if branch_count and branch_count["c"] == 0:
         for branch_name, code in [('Branch 1', 'BR1'), ('Branch 2', 'BR2'), ('Branch 3', 'BR3')]:
             db.execute("INSERT INTO branches (name, code, created_at, updated_at) VALUES (?, ?, ?, ?)", (branch_name, code, ts, ts))
+        # These three starter branches are created *after* run_migrations(), so the migration's
+        # slug backfill never sees them: fill them here as well, so a brand-new install has working
+        # portal links from the first start (feature B §B1). Idempotent — it only fills blank slugs.
+        _backfill_branch_slugs(db)
     default_branch = db.execute("SELECT id FROM branches ORDER BY id LIMIT 1").fetchone()
     for day in range(7):
         db.execute("INSERT OR IGNORE INTO operating_hours (day_of_week, open_time, close_time, closed) VALUES (?, '09:00', '17:00', ?)", (day, 1 if day in (0,6) else 0))

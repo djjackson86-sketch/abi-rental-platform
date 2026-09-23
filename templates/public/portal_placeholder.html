@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ branch.name }} | {{ settings.company_name }}{% endblock %}
+{# A branch's public portal page — feature B (§B1).
+
+   This is the page a customer reaches from the branch's shared link or printed QR. §B1 ships the
+   link and the QR only; the form that collects the customer's details is §B2, so this page is
+   honestly a placeholder: it names the branch, shows the address the customer is standing at, and
+   says the form is coming. It collects nothing, so there is no consent block here yet — that
+   arrives with the form, and the privacy notice is linked in the footer either way.
+
+   No bracketed placeholder token may appear on this page: a token is what the POPIA gate (D11)
+   exists to keep away from a customer's screen, and a test asserts the rendered page has none. #}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+</header>
+<main class="store-main">
+  <article class="panel">
+    <p class="eyebrow">Customer registration</p>
+    <h1>{{ branch.name }}</h1>
+    {% if branch.portal_intro %}<p>{{ branch.portal_intro }}</p>{% endif %}
+    <p>You are at the <strong>{{ branch.name }}</strong> branch{% if branch.address_line1 %} — {{ branch.address_line1 }}{% if branch.city %}, {{ branch.city }}{% endif %}{% endif %}.</p>
+    <p>The online registration form for this branch is coming. Until it is live, please give your
+    details to the counter staff at this branch and they will load you onto the system for you.</p>
+    {# Tappable and visibly so: this page is normally opened on a phone after scanning a QR, the
+       link is what the customer saves or forwards to whoever is hiring the trailer, and the
+       number is what they ring to ask about it. (The first draft put both in muted small print,
+       where they read as decorative — see the .portal-actions rule in app.css.) #}
+    <div class="portal-actions">
+      <p>Keep this page: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
+      {% if branch.phone %}<p>Branch phone: <a href="tel:{{ branch.phone }}">{{ branch.phone }}</a></p>{% endif %}
+    </div>
+  </article>
+</main>
+<footer class="store-footer">
+  © 2026, {{ settings.company_name }}
+  {% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}
+  <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+</footer>
+{% endblock %}

@@ -279,6 +279,12 @@ def create_branch(form):
     # A brand-new branch starts with an editable copy of the default week so the
     # trading-hours section is never blank.
     seed_branch_hours(branch_id)
+    # ...and with a public portal slug (feature B §B1, decision D5), so its link and QR work
+    # the moment the branch exists rather than only after the next app start. Additive and
+    # idempotent: ensure_slug() returns the existing slug if one is already set.
+    from app.services.portal import ensure_slug
+
+    ensure_slug(branch_id)
     return branch_id
 
 
