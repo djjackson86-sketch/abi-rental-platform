@@ -8,6 +8,7 @@ import pytest
 
 from app import create_app
 from app.db import get_db, init_db
+from app.services import portal_intake
 from app.services.orders import rental_days
 
 
@@ -3643,7 +3644,8 @@ def test_generated_document_pdfs_are_a4_portrait(client, app):
             assert b'/MediaBox [0 0 842 595]' not in pdf
 
 
-def test_public_store_checkout_creates_draft_order(client):
+def test_public_store_checkout_creates_draft_order(client, monkeypatch):
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
     login(client)
     seed_customer_and_product(client)
 
@@ -3656,16 +3658,17 @@ def test_public_store_checkout_creates_draft_order(client):
     assert b'Book Order Trailer' in product_page.data
     assert b'Pickup date' in product_page.data
 
-    confirmation = client.post('/store/products/1/book', data={
-        'customer_name': 'Public Booker',
-        'customer_email': 'public@example.test',
-        'customer_phone': '+270****0003',
-        'quantity': '1',
+    confirmation = confirmation = client.post('/store/book', data={
+        'name': 'Public Booker',
+        'email': 'public@example.test',
+        'phone': '0830000003',
+        'popia_consent': '1',
         'start_date': '2026-10-01',
         'start_time': '09:00',
         'end_date': '2026-10-03',
         'end_time': '15:00',
-        'notes': 'Public booking request',
+        'product_id': ['1'],
+        'quantity': ['1'],
     }, follow_redirects=True)
     assert confirmation.status_code == 200
     assert b'Booking request received' in confirmation.data
@@ -3679,19 +3682,45 @@ def test_public_store_checkout_creates_draft_order(client):
     assert b'Public Booker' in orders.data
 
 
-def test_public_checkout_validates_required_fields(client):
+def test_public_checkout_validates_required_fields(client, monkeypatch):
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
     login(client)
     seed_customer_and_product(client)
 
-    response = client.post('/store/products/1/book', data={
-        'customer_name': '',
-        'customer_email': '',
-        'quantity': '1',
+    response = response = client.post('/store/book', data={
+        'name': '',
+        'email': '',
+        'phone': '',
+        'popia_consent': '1',
         'start_date': '2026-10-01',
+        'start_time': '09:00',
         'end_date': '2026-10-03',
+        'end_time': '09:00',
+        'product_id': ['1'],
+        'quantity': ['1'],
     }, follow_redirects=True)
-    assert b'Name and email are required' in response.data
-    assert b'Book Order Trailer' in response.data
+    # The new multi-trailer page validates through the shared intake service, so the guarantee
+    # (nothing is booked without a name and a way to reach the customer) is the same, and the
+    # wording now comes from that one place.
+    assert response.status_code == 400
+    assert b'Please enter your name.' in response.data
+    assert b'Send booking request' in response.data      # the trailer form comes back, not a dead end
+
+    # A name with no phone and no email is still refused - the branch has to be able to reach them.
+    unreachable = client.post('/store/book', data={
+        'name': 'Reachable Required',
+        'email': '',
+        'phone': '',
+        'popia_consent': '1',
+        'start_date': '2026-10-01',
+        'start_time': '09:00',
+        'end_date': '2026-10-03',
+        'end_time': '09:00',
+        'product_id': ['1'],
+        'quantity': ['1'],
+    }, follow_redirects=True)
+    assert unreachable.status_code == 400
+    assert b'Please give a phone number or an email address' in unreachable.data
 
 
 def test_order_manual_payments_update_payment_status_and_history(client, app):
@@ -6344,20 +6373,25 @@ def test_order_form_renders_the_client_verified_control(client, app):
     assert '<span>Client Verified</span><b>Yes</b>' in edited_body
 
 
-def test_public_booking_creates_an_unverified_client(client, app):
+def test_public_booking_creates_an_unverified_client(client, app, monkeypatch):
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
     login(client)
     seed_customer_and_product(client)
 
-    res = client.post('/store/products/1/book', data={
-        'customer_name': 'Public Booking Client',
-        'customer_email': 'public@example.test',
-        'quantity': '1',
-        'start_date': '2026-08-03',
+    res = res = client.post('/store/book', data={
+        'name': 'Public Booking Client',
+        'email': 'public@example.test',
+        'phone': '0830000004',
+        'popia_consent': '1',
+        'start_date': '2026-10-01',
         'start_time': '09:00',
-        'end_date': '2026-08-04',
+        'end_date': '2026-10-02',
         'end_time': '09:00',
+        'product_id': ['1'],
+        'quantity': ['1'],
     }, follow_redirects=True)
     assert res.status_code == 200
+    _b = res.data.decode("utf-8", "replace")
     with app.app_context():
         row = get_db().execute(
             "SELECT client_verified FROM customers WHERE name = 'Public Booking Client'"
