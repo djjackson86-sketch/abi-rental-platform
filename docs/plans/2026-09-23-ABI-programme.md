@@ -40,25 +40,39 @@ locally via `libsql-client` abstraction, pytest 8 + Playwright 1.62 (chromium al
 
 ## Cron protocol
 
-- One dispatcher job, schedule `every 30m`, `repeat=10`, `continuity=true`, `deliver=origin`.
-- Each fire = fresh agent = fresh context window. It reads this file + `PROGRESS.md` + the phase's feature
-  plan, implements the **next unfinished phase**, appends the ledger entry, reports to Don, and stops.
-- When all 10 phases are `done`, the tick replies "Programme complete" and does no further work.
+- One dispatcher job, schedule `*/30 * * * *` — **fixed wall-clock slots at :00 and :30**, so phases really
+  start 30 minutes apart regardless of how long the previous phase took (the interval form `every 30m` is
+  measured from the *completion* of a run, which stretched a ~25-minute phase into a ~55-minute cycle —
+  observed on tick 1: fired 10:22, finished 10:47, next fire 11:17).
+- `repeat=14` for a 10-phase programme: enough headroom to absorb any slot that gets skipped because a phase
+  ran long, without the job nagging forever afterwards.
+- `continuity=true`, `deliver=origin`. Each fire = fresh agent = fresh context window.
+- **Overlap guard (mandatory first step of every tick):** the job writes `docs/plans/.tick.lock` when it starts
+  and removes it when it finishes. A tick that finds an existing lock **less than 45 minutes old** must append
+  one line to the ledger saying the slot was skipped and stop immediately — never two agents in one working
+  tree. A lock older than 45 minutes is stale: note it, delete it, and carry on.
+- When all 10 phase rows read `done`, the tick replies "Programme complete" and does no further work.
 
 ## Phase table
 
 | # | Phase | Feature plan | Output |
 |---|---|---|---|
-| 1 | Licence-disk decode spike + decision | staff-vehicle-scan.md §A1 | `app/services/vehicle_disk.py` + findings doc + tests |
-| 2 | Vehicle data model + service | staff-vehicle-scan.md §A2 | `vehicles` table, migrations, CRUD, cascade tests |
-| 3 | Staff scan UI + allocate to client | staff-vehicle-scan.md §A3 | `/scan-vehicle` route + template + access module |
-| 4 | Client page vehicles panel + towing capacity + browser proof | staff-vehicle-scan.md §A4 | customer detail panel, Playwright proof, feature A signed off |
-| 5 | Branch portal schema + link + QR | branch-public-portal.md §B1 | `branches.public_slug`, `/portal/<slug>`, QR endpoint |
-| 6 | Public form + dedupe + "am I already a customer?" | branch-public-portal.md §B2 | public portal page, dedupe flow, safe lookup |
-| 7 | Admin QR/link page with A4 print + browser proof | branch-public-portal.md §B3 | print sheet, copy link, feature B signed off |
-| 8 | Store categories with photos + multi-trailer linking | public-booking-and-store-categories.md §C1 | group images (DB-stored), bulk assign, Sano defaults |
-| 9 | Multi-trailer public booking flow | public-booking-and-store-categories.md §C2 | new public booking page → one order, many lines |
-| 10 | Full-suite + end-to-end local proof + close-out | all three docs | green suite, e2e Playwright proof, Obsidian note |
+| 1 | A1 NatIS disc parser + decode engine | staff-vehicle-scan.md §A1 | **done** — `app/services/vehicle_disk.py` + findings + 51 tests |
+| 2 | A2 vehicle data model + service | staff-vehicle-scan.md §A2 | `vehicles` table, migrations, CRUD, cascade tests |
+| 3 | A3 staff scan UI + allocate to client | staff-vehicle-scan.md §A3 | `/scan-vehicle` route + template + access module |
+| 4 | A4 client page vehicles panel + browser proof | staff-vehicle-scan.md §A4 | customer detail panel, Playwright proof, feature A signed off |
+| 5 | D1 trailer identity + return-matching service | scan-to-return.md §D1 | product plate columns, `app/services/returns.py`, tests |
+| 6 | D2 scan-to-return screen + marks returned + proof | scan-to-return.md §D2 | `/scan-return` route + template + browser proof, feature D signed off |
+| 7 | B1 branch portal schema + link + QR | branch-public-portal.md §B1 | `branches.public_slug`, `/portal/<slug>`, QR endpoint |
+| 8 | B2 public form + dedupe + "am I already a customer?" | branch-public-portal.md §B2 | public portal page, dedupe flow, safe lookup |
+| 9 | B3 admin QR/link page with A4 print + browser proof | branch-public-portal.md §B3 | print sheet, copy link, feature B signed off |
+| 10 | C1 store categories with photos + multi-trailer linking | public-booking-and-store-categories.md §C1 | group images (DB-stored), bulk assign, Sano defaults |
+| 11 | C2 multi-trailer public booking flow | public-booking-and-store-categories.md §C2 | new public booking page → one order, many lines |
+| 12 | C3 full-suite + end-to-end local proof + close-out | all four docs | green suite, e2e Playwright proof, Obsidian note |
+
+> **Phases were renumbered on 2026-09-23 at Don's request** (scan-to-return was added as Feature D and queue-jumps
+> ahead of the portal work because staff need it in daily use). Phases 5–6 are new; the old 5–10 are now 7–12.
+> Tick-log entries carry the phase **name** as well as the number, so older entries still read correctly.
 
 ## Decisions already taken (do not re-litigate; raise in the ledger if evidence contradicts)
 
@@ -81,13 +95,16 @@ locally via `libsql-client` abstraction, pytest 8 + Playwright 1.62 (chromium al
   unless the spike shows it fails on the real photo. Either way there are **two mandatory fallbacks** so
   staff are never blocked: paste/type the raw barcode text, and manual entry of the fields.
   Record the measured result and the resulting `requirements.txt` weight — it affects the Render deploy.
-- **D3 — Never invent a vehicle figure.** The disk's real field set (per `saDiscParser.ts:10-18`, confirmed by
-  the recon notes) is: registering authority, control number, **licence number (= the number plate)**,
-  vehicle registration number, make, model/description, colour, VIN (17 chars), engine number, licence expiry
-  date, **tare (kg)** and **GVM (kg)** — that is all. **There is no towing capacity and no GCM on a licence
-  disk.** So store only those fields as `source='scan'`, and treat `towing_capacity_kg` as a staff-entered
-  number with help text saying where to get it (vehicle papers / handbook / manufacturer), shown next to the
-  disk's tare + GVM for reference. No guessed, derived-by-default or "typical" values, ever.
+- **D3 — Never invent a vehicle figure, and the identifier mapping is settled.** On 2026-09-23 Don gave the
+  definitive reading of the real disc payload: **`KP35XKGP` is the number plate**, **`SHS812W` is the NaTIS
+  registration number** ("Natis reg is last one"), and `4024048GB8LY` is the disc's licence number (by
+  elimination — it is the disc's own *Lisensienommer*). Store them in `vehicles.registration` (plate),
+  `vehicles.registration_number` (NaTIS) and `vehicles.licence_number` (licence no). The disk also carries
+  registering authority, control number, vehicle type, make, model, colour, VIN, engine number and expiry —
+  and **no masses at all on the real modern payload**, hence `tare_kg`/`gvm_kg` are optional REAL NULL columns.
+- **D3b — Towing capacity is REMOVED (Don, 2026-09-23).** It is not on the disc and the field is not wanted.
+  Do **not** create `towing_capacity_kg`, do not surface a towing column anywhere, and do not carry it into the
+  client page, the vehicle form or a report. If a future ticket asks for it, it comes back as a fresh decision.
 - **D4 — Uploads live in the database, not on disk.** Render's filesystem is ephemeral, so a category photo
   (or any staff upload) written to `static/` disappears on redeploy. Store image bytes in a DB column and
   serve them through a route with cache headers. Phase 8 must prove an image survives an app restart.
@@ -103,14 +120,25 @@ locally via `libsql-client` abstraction, pytest 8 + Playwright 1.62 (chromium al
   `/store/products/<id>/book` behaviour).
 - **D8 — Lookup never leaks.** "Am I already a customer?" answers with match confidence + first name only
   (e.g. "We have a Charmaine M. on this number") — never full name, email, address, ID, balance or history.
+- **D9 — Scan-to-return reuses the existing return flow (Don, 2026-09-23).** Staff scan a disc — either the
+  **trailer's** disc or the **towing car's** disc — and the matching rental is marked returned on the admin
+  side. Matching goes: trailer plate → the `started` order holding that product; else the customer vehicle's
+  plate (feature A) → that customer's `started` orders; else VIN / engine number. An ambiguous scan offers the
+  candidates and **never auto-picks**; a scan with no match says so and links to the started-orders list. The
+  return itself is `transition_order(order_id, "return")` (`orders.py:1292`, `TRANSITIONS["return"]` at
+  `orders.py:1133`, route `orders.py:676`) — **no transition logic is duplicated**, and the checklist/deposit
+  work (`update_return_checklist`, `settle_return_deposit`, charges) stays exactly where it is: the scan marks
+  the order Returned and hands staff to that page. Trailer plates live on `products.registration`.
 
 ## Open questions for Don (answers welcome any time; do not block on them)
 
-1. **Towing capacity — answered by evidence: it is not on the disk.** The NaTIS payload carries tare (kg) and
-   GVM (kg) only. So where should staff get the towing figure — the vehicle's papers, the manufacturer's
-   handbook, or your own rule of thumb? Plan: a staff-typed field shown next to the disk's tare/GVM, never
-   auto-filled (D3). Confirm or correct.
-2. Should a scanned vehicle be allowed on more than one client (co-signer / business vehicle), or strictly
+1. Should a scanned vehicle be allowed on more than one client (co-signer / business vehicle), or strictly
    one owner? (Plan assumes one owner, with an explicit "transfer to another client" action and a warning.)
-3. Portal link per branch — does each branch keep a permanent slug (e.g. `/portal/midrand`) or should links
+2. Portal link per branch — does each branch keep a permanent slug (e.g. `/portal/midrand`) or should links
    be revocable tokens? (Plan assumes a stable, editable slug.)
+3. A trailer with no plate recorded in Inventory can only be returned by scanning the **car's** disc. Should
+   staff be able to enter a trailer plate from the scan-return screen on the spot (and have it saved to the
+   trailer)? (Plan assumes yes — it is one extra field on the confirm step, off until you say otherwise.)
+
+**Resolved:** the licence-disc identifier mapping (KP35XKGP = plate, SHS812W = NaTIS reg, 4024048GB8LY =
+licence number) — answered by Don 2026-09-23, now decision D3. Towing capacity — **removed**, see D3b.

@@ -92,14 +92,15 @@ choice is justified by measurement, and the parser round-trips a synthetic paylo
 - Modify `app/db.py` — add `CREATE TABLE IF NOT EXISTS vehicles (...)` to `SCHEMA` **and** the same
   `CREATE TABLE IF NOT EXISTS` to `run_migrations()`, plus `ensure_column` calls for any later-added column.
   Columns: `id`, `customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE`, `registration
-  TEXT NOT NULL DEFAULT ''`, `make`, `model`, `year TEXT`, `vin`, `engine_number`, `colour`,
-  `licence_number` (the number plate), `registration_number` (NaTIS internal ref), `control_number`,
-  `registering_authority`, `vehicle_type`, `tare_kg REAL`, `gvm_kg REAL`, `towing_capacity_kg REAL`
-  (**staff-typed only** — never filled from a scan, see master plan D3), `licence_disk_expiry`,
+  TEXT NOT NULL DEFAULT ''` (**the number plate**, e.g. `KP35XKGP` — the primary identifier), `make`, `model`,
+  `year TEXT`, `vin`, `engine_number`, `colour`, `licence_number` (the disc's licence number, `4024048GB8LY`),
+  `registration_number` (the **NaTIS** registration number, `SHS812W`), `control_number`,
+  `registering_authority`, `vehicle_type`, `tare_kg REAL`, `gvm_kg REAL` (both optional, REAL NULL —
+  **no towing capacity column at all**, master plan D3b), `licence_disk_expiry`,
   `raw_scan_text TEXT NOT NULL DEFAULT ''`,
   `source TEXT NOT NULL DEFAULT 'manual'`, `created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET
   NULL`, `created_at`, `updated_at`. Index on `customer_id`; unique partial index on
-  `(registration)` where `registration <> ''` (one owner per vehicle, per decision D3/open-question 2).
+  `(registration)` where `registration <> ''` (one owner per vehicle, per decision D3/open-question 1).
   **Caveat:** SQLite `ON DELETE CASCADE` needs `PRAGMA foreign_keys=ON` — check how existing tables rely on
   cascade (`delete_customer` in `app/services/customers.py`) and delete vehicle rows explicitly if the
   connection does not enforce FKs, exactly like the existing customer-order cleanup does.
@@ -111,7 +112,7 @@ choice is justified by measurement, and the parser round-trips a synthetic paylo
 **Steps (TDD)** — write the test, watch it fail, implement, watch it pass, commit. Cover: create/read/
 update/delete; customers table untouched by vehicle writes; deleting a customer leaves **zero** orphan
 vehicle rows; a second customer cannot claim a registration that already has an owner (ValueError);
-blank registration allowed more than once (partial index); `tare_kg`/`gvm_kg`/`gcm_kg` accept blank (NULL)
+blank registration allowed more than once (partial index); `tare_kg`/`gvm_kg` accept blank (NULL)
 and never default to 0; migration re-adds the table on an existing DB.
 
 **Acceptance:** new tests pass, `python3 -m compileall app tests -q` clean, and the full suite still passes
@@ -159,13 +160,14 @@ release a vehicle there, and the whole feature is proven in a real browser at 39
 
 **Files**
 - Modify `templates/admin/customers/detail.html` (or the partial it includes) — a `Vehicles` panel: table of
-  registration / make / model / year / towing capacity / disk expiry, an "Add vehicle" button into
-  `/scan-vehicle?customer_id=<id>`, edit + remove actions, and empty state copy.
+number plate / make / model / year / disk expiry, an "Add vehicle" button into
+`/scan-vehicle?customer_id=<id>`, edit + remove actions, and empty state copy. **No towing column** — see the
+master plan's D3b (towing capacity was removed by Don on 2026-09-23).
 - Modify `app/routes/customers.py:detail` — pass `vehicles=list_vehicles(customer_id)`.
 - Modify `app/services/customers.py` only if the customer form help text needs the new panel link.
 - Create `tests/test_programme_20260923_vehicle_client_page.py` — panel renders per client, is branch/scope
-  correct (a depot account sees its own client's vehicles only), towing capacity shows blank rather than 0
-  when unknown, and the removal action leaves the customer intact.
+  correct (a depot account sees its own client's vehicles only), an unrecorded tare/GVM shows blank rather than
+  0 (there is no towing field to assert — D3b removed it), and the removal action leaves the customer intact.
 
 **Browser proof (mandatory, this is how Don judges UI work)**
 - Use `.venv/bin/playwright`'s Chromium (already installed in `~/.cache/ms-playwright`) against a **temp

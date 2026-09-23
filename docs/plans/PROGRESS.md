@@ -121,3 +121,46 @@ capacity in the payload at all** (D3 confirmed on real input) — both masses st
 5. Also corrected `~/disc-samples/disc-decode-FINDINGS.md` on two points (the plate regex does **not** match
    the inner `GB8LY`; the mass rules do **not** fire on this payload) — details in the findings doc §7.
 
+### Cadence fix + independent verification — 2026-09-23 11:05 (main session, not a tick)
+- Tick 1 (phase 1/A1) fired **10:22**, finished **10:47** → `done`. Deliverables: `app/services/vehicle_disk.py`
+  (35.9 KB), `tests/test_programme_20260923_vehicle_disk.py` (20.8 KB), a Node parity harness
+  (`scripts/disc_parity_ts.mts` → `tests/fixtures/disc/expected_ts.json`), and commits `d8cc156` + `dec2d9a`.
+- **Verified from the main session, not taken on trust:** re-ran
+  `.venv/bin/pytest tests/test_programme_20260923_vehicle_disk.py -q` → **51 passed in 5.23s** (matches the
+  tick's claim). `requirements.txt` pins `Pillow==12.3.0` + `zxing-cpp==3.1.1` and **explicitly documents why
+  `pdf417decoder` is left out** (numpy + OpenCV ≈ 115 MB for no gain on a licence disc) — the right call for
+  the Render image size.
+- **Pacing bug in the original setup, fixed:** `every 30m` measures the next fire from the **completion** of a
+  run, so a ~25-minute phase produced a ~55-minute cycle (10:22 fire → 10:47 finish → 11:17 next). The job is
+  now `*/30 * * * *` — **fixed :00/:30 slots, 30 minutes apart as asked** — with `repeat=14` for headroom, and
+  an overlap guard so two ticks can never share one working tree: `docs/plans/.tick.lock`, a tick that finds a
+  lock <45 minutes old appends a "slot skipped" line and stops, a lock older than 45 minutes is stale and gets
+  cleared. The job prompt gained a STEP 0 for this, and the master plan's cron protocol section now matches.
+- Fixed the A2 plan's stray `gcm_kg` mention (flagged by tick 1): there is no GCM on a disc, so that column is
+  not to be created. `tare_kg`/`gvm_kg` stay optional REAL NULL columns.
+- Next fire **11:30** → phase 2 (A2, `vehicles` table + service).
+
+### Don's decisions folded in + cadence → 1 minute — 2026-09-23 11:12 (main session, not a tick)
+- **The licence-disc identifier mapping is settled by Don** (this was the open question tick 1 parked):
+  `KP35XKGP` = **number plate**, `SHS812W` = **NaTIS registration number** ("Natis reg is last one"),
+  `4024048GB8LY` = the disc's licence number (by elimination — the disc's own *Lisensienommer*). Written into
+  decision D3 and the A2 column list, so the A3 scan screen does not have to ask staff to choose.
+- **Towing capacity REMOVED** (new decision **D3b**): no `towing_capacity_kg` column, no towing field on the
+  vehicle form, no towing column on the client page. `tare_kg`/`gvm_kg` stay optional REAL NULLs because the
+  real modern payload carries no masses at all.
+- **New Feature D — scan-to-return** → `docs/plans/2026-09-23-scan-to-return.md`. Staff scan the **trailer's**
+  disc *or* the **towing car's** disc and the matching rental is marked returned on the admin side. Matching:
+  trailer plate → the `started` order holding that product; else the customer vehicle's plate → that customer's
+  `started` orders; else VIN/engine. Ambiguous scans offer candidates and never auto-pick. It reuses
+  `transition_order(order_id, "return")` (`app/services/orders.py:1292`; `TRANSITIONS["return"]` at `:1133`;
+  route `app/routes/orders.py:676`) and leaves the checklist/deposit work (`update_return_checklist`,
+  `settle_return_deposit`, charges) exactly where it is.
+- **Phases renumbered to 12.** D1 (trailer identity on `products` + `app/services/returns.py`) and D2
+  (`/scan-return` screen + browser proof) are now **phases 5 and 6**, ahead of the portal work, because staff
+  need returns in daily use; the old phases 5–10 are now 7–12. The phase table carries a renumbering note and
+  every tick-log entry names its phase as well as its number.
+- **Cadence changed at Don's request:** the job is now `every 1m` with `repeat=20` — each phase starts **one
+  minute after the previous one finishes**, so the remaining 11 phases run back-to-back this afternoon rather
+  than one per half hour. (The `*/30` fixed-slot scheme is recorded in the master plan as the alternative; the
+  `.tick.lock` overlap guard stays, now just guarding against a genuinely runaway tick.)
+
