@@ -65,6 +65,31 @@ def list_customers(query="", customer_type="", marketing=""):
     return get_db().execute(sql, params).fetchall()
 
 
+def search_customers(query, limit=8):
+    """Typeahead for the scan screen's "allocate to client" step: id, name and phone only.
+
+    Deliberately narrow (master-plan D8's spirit): the picker has to identify a client, so it gets
+    the two things a staff member says out loud on the phone — never email, address, ID, balance or
+    order history. A blank query returns nothing rather than the whole book.
+    """
+    needle = (query or "").strip()
+    if not needle:
+        return []
+    like = f"%{needle.lower()}%"
+    try:
+        limit = max(1, min(25, int(limit)))
+    except (TypeError, ValueError):
+        limit = 8
+    rows = get_db().execute(
+        """SELECT id, name, phone FROM customers
+        WHERE LOWER(name) LIKE ? OR LOWER(phone) LIKE ?
+        ORDER BY CASE WHEN LOWER(name) LIKE ? THEN 0 ELSE 1 END, LOWER(name), id
+        LIMIT ?""",
+        (like, like, f"{needle.lower()}%", limit),
+    ).fetchall()
+    return [{"id": row["id"], "name": row["name"] or "", "phone": row["phone"] or ""} for row in rows]
+
+
 def customer_counts():
     row = get_db().execute(
         "SELECT COUNT(*) total, SUM(customer_type='individual') individuals, SUM(customer_type='company') companies, SUM(marketing_opt_in) subscribed FROM customers"

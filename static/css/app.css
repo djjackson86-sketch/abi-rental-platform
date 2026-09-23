@@ -402,3 +402,25 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .dashboard-custom-range .btn{height:38px}
 .dashboard-custom-range .filter-clear{align-self:center}
 @media(max-width:720px){.dashboard-custom-range .dashboard-range-field{flex:1 1 130px;min-width:0}.dashboard-custom-range .filter-group{gap:8px}}
+
+/* --- Licence-disk scan screen (programme phase 3, feature A / A3) ---------
+   Phone-first: the capture step is one column of two big targets, and the review
+   step is the house .form-grid (which already falls to one column at 860px).
+   Everything is min-width:0 / overflow-wrap:anywhere so a long VIN, a raw
+   payload or a 390px viewport can never push the page sideways. ------------- */
+.scan-vehicle-header .module-title p{max-width:760px}
+.scan-capture-panel{margin-bottom:18px}
+.scan-capture-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:14px}
+.scan-capture-grid>label{min-width:0}
+.scan-capture-form textarea{min-height:88px}
+.scan-capture-actions{margin-bottom:10px}
+.scan-review-panel .scan-warning{display:grid;gap:6px;margin:0 0 16px;padding:12px 14px;border:1px solid #fecaca;border-radius:var(--radius,12px);background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318);font-weight:650}
+.scan-review-panel .scan-warning p{margin:0;font-weight:600;color:#7a271a}
+.scan-transfer-line .scan-transfer-check{display:flex;align-items:center;gap:10px;font-weight:700}
+.scan-transfer-line .scan-transfer-check input{width:auto;min-width:0;margin:0;accent-color:var(--brand)}
+.scan-details{border:1px solid var(--line-soft);border-radius:12px;background:var(--surface-soft);padding:10px 12px;min-width:0}
+.scan-details summary{cursor:pointer;font-weight:700;color:var(--ink-2)}
+.scan-details ul{margin:10px 0 2px;padding-left:18px}
+.scan-details li{overflow-wrap:anywhere}
+.scan-raw-text{margin:10px 0 2px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45;max-height:240px;overflow:auto;background:#fff;border:1px solid var(--line-soft);border-radius:10px;padding:10px}
+@media(max-width:860px){.scan-capture-grid{grid-template-columns:1fr}}

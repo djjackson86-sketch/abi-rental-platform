@@ -102,6 +102,7 @@ class DiscDecodeError(Exception):
 #: (D1/D3) — no towing capacity, no GCM.
 DISC_FIELD_KEYS: tuple[str, ...] = (
     "licence_number",
+    "disc_licence_number",
     "registering_authority",
     "control_number",
     "registration_number",
@@ -118,6 +119,7 @@ DISC_FIELD_KEYS: tuple[str, ...] = (
 
 FIELD_LABELS: Mapping[str, str] = {
     "licence_number": "Licence number (number plate)",
+    "disc_licence_number": "Disc licence number (Lisensienommer)",
     "registering_authority": "Registering authority",
     "control_number": "Control number",
     "registration_number": "Vehicle registration number (NaTIS ref)",
@@ -322,6 +324,19 @@ POSITIONAL_ENGINE_INDEX = 13
 POSITIONAL_EXPIRY_INDEX = 14
 POSITIONAL_IDENTIFIER_INDEXES = (5, 6, 7)
 
+#: Which identifier sits in which field of the modern layout — **answered by Don on 2026-09-23**
+#: (master plan decision D3): field 5 is the disc's own licence number (*Lisensienommer*,
+#: ``4024048GB8LY``), field 6 is the number plate (``KP35XKGP``) and field 7 is the NaTIS
+#: registration number (``SHS812W`` — "Natis reg is last one"). A1 parked all three as
+#: "unassigned disc identifier" because nothing was allowed to guess at them; now they are placed,
+#: so the A3 scan review form can fill the plate, the NaTIS number and the licence number instead
+#: of showing two mystery tokens. An identifier that fits no known role is still only flagged.
+POSITIONAL_IDENTIFIER_ROLES: Mapping[int, str] = {
+    5: "discLicenceNumber",
+    6: "numberPlate",
+    7: "natisRegistrationNumber",
+}
+
 
 def _first_dual_language_part(value: str) -> str:
     """``"Station wagon / Stasiewa"`` -> ``"Station wagon"`` (the disc prints EN / AF)."""
@@ -368,6 +383,11 @@ def parse_natis_positional(raw: str) -> dict[str, str] | None:
         "positionalIdentifiers": [
             fields[index].strip() for index in POSITIONAL_IDENTIFIER_INDEXES if fields[index].strip()
         ],
+        **{
+            role: fields[index].strip()
+            for index, role in POSITIONAL_IDENTIFIER_ROLES.items()
+            if index < len(fields)
+        },
     }
     return result
 
@@ -520,6 +540,7 @@ _CONTAINMENT_KEYS = (
     "vin",
     "engine_number",
     "licence_number",
+    "disc_licence_number",
     "make",
     "model",
     "colour",
@@ -636,7 +657,14 @@ def parse_disc_text(raw: str) -> dict[str, Any]:
 
     # ── Phase 3: merge — positional > label-value > percent > token ──
     vin = positional.get("vin") or labelled["vin"] or percent.get("vin") or token_vin
-    plate = labelled["licenceNumber"] or percent.get("licenceNumber") or token_plate
+    # The positional layout carries the three identifiers Don mapped in D3 (plate, NaTIS number,
+    # disc licence number) and they win over the heuristic passes, exactly like its other fields.
+    plate = (
+        positional.get("numberPlate")
+        or labelled["licenceNumber"]
+        or percent.get("licenceNumber")
+        or token_plate
+    )
     make = positional.get("make") or labelled["make"] or percent.get("make") or token_make
     model = positional.get("model") or labelled["model"] or percent.get("model") or token_model
     engine_number = (
@@ -667,9 +695,11 @@ def parse_disc_text(raw: str) -> dict[str, Any]:
 
     parsed: dict[str, Any] = {
         "licence_number": plate,
+        "disc_licence_number": positional.get("discLicenceNumber", ""),
         "registering_authority": labelled["registeringAuthority"],
         "control_number": labelled["controlNumber"],
-        "registration_number": labelled["registerNumber"],
+        "registration_number": positional.get("natisRegistrationNumber")
+        or labelled["registerNumber"],
         "make": make,
         "model": model,
         "colour": colour,
@@ -689,16 +719,40 @@ def parse_disc_text(raw: str) -> dict[str, Any]:
         for index, token in enumerate(tokens)
         if index not in explained
     }
-    for identifier in positional.get("positionalIdentifiers", []):
-        used = {plate.strip().upper(), (labelled["registerNumber"] or "").strip().upper()}
-        if identifier.strip().upper() in used:
-            continue  # this one is accounted for: it is the plate/registration we kept
-        unparsed[identifier] = (
-            "unassigned disc identifier — which of these fields is the NaTIS registration "
-            "number and which is the licence number still needs the printed disc face"
+    unparsed.update(
+        _flagged_identifiers(
+            positional.get("positionalIdentifiers", []),
+            consumed=(plate, parsed["registration_number"], parsed["disc_licence_number"]),
         )
+    )
     parsed["unparsed_fields"] = unparsed
     return parsed
+
+
+#: The reason an identifier that fits no known role is shown rather than assigned (D3).
+UNASSIGNED_IDENTIFIER_REASON = (
+    "unassigned disc identifier — this field is not one the NaTIS layout we handle places"
+)
+
+
+def _flagged_identifiers(
+    identifiers: Iterable[str], *, consumed: Iterable[str]
+) -> dict[str, str]:
+    """Identifier values that no assigned field accounts for, keyed to why they are only shown.
+
+    The three known slots are placed by :data:`POSITIONAL_IDENTIFIER_ROLES` (D3), so on a real
+    payload this returns ``{}``. It stays as the safety net for a payload whose identifier field
+    holds something we have no role for: decision D3's "never guess" rule means such a value is
+    surfaced for staff to place by hand, never assigned to a guessed column.
+    """
+    used = {str(value).strip().upper() for value in consumed if str(value or "").strip()}
+    flagged: dict[str, str] = {}
+    for identifier in identifiers:
+        value = str(identifier).strip()
+        if not value or value.upper() in used:
+            continue
+        flagged[value] = UNASSIGNED_IDENTIFIER_REASON
+    return flagged
 
 
 def is_disc_parseable(parsed: Mapping[str, Any]) -> bool:

@@ -8,6 +8,7 @@ from .routes.settings import bp as settings_bp
 from .routes.public import bp as public_bp
 from .routes.inventory import bp as inventory_bp
 from .routes.customers import bp as customers_bp
+from .routes.vehicles import bp as vehicles_bp
 from .routes.orders import bp as orders_bp
 from .routes.documents import bp as documents_bp
 from .routes.payments import bp as payments_bp
@@ -75,6 +76,7 @@ def create_app(test_config=None):
     app.register_blueprint(settings_bp)
     app.register_blueprint(inventory_bp)
     app.register_blueprint(customers_bp)
+    app.register_blueprint(vehicles_bp)
     app.register_blueprint(orders_bp)
     app.register_blueprint(documents_bp)
     app.register_blueprint(payments_bp)

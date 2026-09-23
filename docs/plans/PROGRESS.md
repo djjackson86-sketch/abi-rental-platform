@@ -14,7 +14,7 @@
 |---|---|---|---|---|
 | 1 | A1 licence-disk decode spike + engine decision | done | tick 1 | parser ported + parity-verified; engine = server-side `zxing-cpp`, decided on the REAL disc photo (22 ms); positional branch for the modern 148-char layout; 51 new tests, full suite 747 green |
 | 2 | A2 vehicle data model + service | done | tick 2 | `vehicles` table (SCHEMA + `run_migrations`) + `app/services/vehicles.py`; one owner per registration (app ValueError **and** partial unique index), blank masses stay NULL, no towing column (D3b), customer delete clears vehicles (FK + explicit); 20 new tests, full suite **767 green** |
-| 3 | A3 staff scan UI + allocate to client | pending | | |
+| 3 | A3 staff scan UI + allocate to client | done | tick 3 | `/scan-vehicle` capture + review form, allocate/transfer, JSON feed + typeahead, module `scan_vehicle`; D3 identifier mapping now placed (plate / NaTIS / disc licence no); 25 new tests, full suite **794 green**, real-browser proof 27/27 checks, 0 console errors, 0 overflow at 1440px and 390px |
 | 4 | A4 client page vehicles panel + browser proof | pending | | |
 | 5 | D1 trailer identity + return-matching service | pending | | |
 | 6 | D2 scan-to-return screen + marks returned + proof | pending | | |
@@ -251,3 +251,114 @@ and removed at the end.
 5. The status table is now the master plan's **12-phase** list (tick 2 fixed the numbering); A3 is
    row 3, feature D is rows 5–6.
 
+
+### Phase 3 — A3 staff scan screen + allocate to a client — status `done`
+**Branch:** `feature/abi-programme-2026-09-23` (nothing pushed; `master` untouched at `8ec51e8`).
+`docs/plans/.tick.lock` did not exist at the start (created and removed by this tick; no stale lock).
+
+**Files:** `app/routes/vehicles.py` (new, blueprint `vehicles`), `templates/admin/scan_vehicle.html` (new),
+`tests/test_programme_20260923_vehicle_scan_flow.py` (new, 25 tests), `app/services/vehicle_disk.py`
+(D3 identifiers placed), `app/services/vehicles.py` (`fields_from_disc`, `transfer_vehicle`,
+duplicate-plate refusal), `app/services/customers.py` (`search_customers`), `app/services/access.py`
+(module + endpoint rules), `app/__init__.py` (blueprint), `templates/admin/layout.html` (nav),
+`static/css/app.css` (scan-screen styles), `tests/test_programme_20260923_vehicle_disk.py` (the A1 test
+that parked the identifiers rewritten to the D3 outcome).
+
+**Screen.** `/scan-vehicle` = capture (photo with `capture="environment"`, or pasted barcode text, or
+"Type the details instead") → review form with every parsed field editable, the unplaced values and the
+verbatim payload in `<details>`, a name/phone typeahead that resolves to a client id, and Save. The photo
+is read in memory only (8 MB + MIME guard), never written to disk. `/scan-vehicle/save` allocates;
+`/vehicles/<id>/edit` and `/vehicles/<id>/delete` act on a recorded vehicle; `/customers/<id>/vehicles`
+is the client-page feed A4 will render; `/api/customers/search` is the typeahead (name + phone only).
+
+**D3 identifiers are now placed (tick 2's must-know item).** `POSITIONAL_IDENTIFIER_ROLES` maps field 5 →
+disc licence number, field 6 → number plate, field 7 → NaTIS registration number, so the modern layout
+yields all three instead of two mystery tokens. Measured on the REAL disc photo (still outside the repo):
+
+    licence_number = 'KP35XKGP' | disc_licence_number = '4024048GB8LY' | registration_number = 'SHS812W'
+    make = 'MITSUBISHI' model = 'ASX' colour = 'WHITE' engine_number = '4B11LC0187'
+    expiry_date = '2027-07-31' vehicle_type = 'STATION WAGON' confidence = 'high'
+    unparsed_fields = {}
+
+`fields_from_disc()` does the A1/A2 warned mapping explicitly (parser `licence_number` = plate →
+`registration`; `disc_licence_number` → `licence_number`), and the three other layouts still get **no**
+disc licence number rather than borrowing the plate. The safety net for an identifier with no known role
+is kept and unit-tested.
+
+**Two REAL bugs the work found and fixed (both now tested):**
+1. **A same-client double scan 500'd.** `_assert_registration_is_free` only refused *another* client's
+   plate, so a second save for the same client hit the partial unique index and raised
+   `sqlite3.IntegrityError` out of the route (measured, first test run: `UNIQUE constraint failed:
+   vehicles.registration`). It now refuses with "…already recorded for <client> — open that vehicle and
+   edit it instead of adding it a second time".
+2. **The transfer checkbox saved nothing.** The picker's submit handler re-derived the client id from its
+   own fetch cache; on a re-rendered page that cache is empty, so it wiped the server-rendered
+   `customer_id` and the POST arrived without one — the browser proof caught it ("Choose the client this
+   vehicle belongs to", counts stayed `[1, 0]`). Fixed with an untracked-box guard; after the fix the
+   transfer moves the row and the counts become `[0, 1]`.
+
+**Commands + real results:**
+- `.venv/bin/pytest tests/test_programme_20260923_vehicle_scan_flow.py -q` → **25 passed in 19.28s**
+  (first run 5 failed / 20 passed — the Jinja `review.values` clash below, the 500 above and one wrong
+  spelling in a test message; all three were real)
+- `.venv/bin/pytest tests/test_programme_20260923_vehicles_model.py tests/test_programme_20260923_vehicle_disk.py tests/test_app.py -q`
+  → **276 passed in 166.40s**; `.venv/bin/pytest -q` (full suite) → **794 passed in 459.49s (0:07:39)**
+- `python3 -m compileall app tests -q` → clean
+- Browser proof (venv Playwright Chromium, **temp DB** `/tmp/abi_a3.db`, app on **5058** —
+  see the blocker note below; screenshots in `/tmp/abi_a3_shots/`, report `/tmp/abi_a3_report.json`):
+  **27/27 checks passed, 0 console errors, 0 horizontal overflow** at 1440×1100 and 390×844, on all
+  three pages (capture, review, no-barcode). Signed in as a *staff* account (module `scan_vehicle`
+  only), pasted the modern 148-char payload, allocated to Charmaine Mokoena (flash
+  "Vehicle ABC123GP allocated to Charmaine Mokoena", redirect `/customers/1`, feed
+  `/customers/1/vehicles` → `count: 1`), then re-scanned it for Pieter van Wyk → refusal with the owner
+  named and the transfer tickbox unticked by default → ticking it moved the vehicle (feed counts
+  `[0, 1]`).
+- `vision_analyze` on the screenshots (what was actually seen): 1440px capture page = heading
+  "Scan a vehicle licence disk" with the sidebar entry "Scan a vehicle disk", the two-column capture
+  card ("Photograph the disk" file input + pasted-text box) and both buttons, nothing clipped. 1440px
+  review = green flash "Disc read — check every field before saving", then Number plate `ABC123GP`,
+  NaTIS registration number `ZZ1234Z`, Disk licence number `T9876543210X`, Make `MITSUBISHI`, Model
+  `ASX`, Colour `WHITE`, VIN, Engine number `2GD1234567`, Vehicle category `STATION WAGON`, expiry
+  `2027-07-31`, with Tare/GVM blank (the payload carries no masses) and the collapsed "Raw barcode text
+  (148 characters)". 1440px refusal = the red panel quoting "ABC123GP is already recorded for Charmaine
+  Mokoena (0821234567)" plus the tickbox "Transfer ABC123GP from Charmaine Mokoena to the client
+  above", unticked. 390px review = one column, every field full width and legible, warning paragraph
+  wrapping cleanly, no clipping or overlap. (Two cosmetic notes from looking: the client picker's
+  placeholder was clipped on the phone — shortened — and the `type="date"` box prints in the browser's
+  own `MM/DD/YYYY` locale although the stored value is ISO; the header's floating module icon is the
+  same shape as the existing "Scan a barcode" screen.)
+
+**Blockers / notes for Don:**
+- **Port 5057 is still held by an `app.py` from 09:16 that is not this programme's** (`pid 558440`,
+  `.venv/bin/python app.py` in the repo, no `DATABASE_PATH`) — left running on purpose, so the proof ran
+  on **5058** and 5058 was closed afterwards (`5058 free`; 5057 untouched). If that instance is stale,
+  say so and the next tick will stop it before its own smoke run.
+- `scan_vehicle` is a **new module and is deliberately NOT in the shared staff default set** (same as
+  `inventory`, `reports`, `scan_barcode`): it appears on Settings → Users/access for Don to tick per
+  account. One line in `DEFAULT_STAFF_MODULES` if he wants it on by default.
+- The phone navigation chip row stays as it is: it is pinned by a ticket test
+  (`test_ticket_341953031_phone_nav_chips`), and on a phone the scan screen is reached through
+  Customers → client → "Add vehicle" (A4) or the sidebar on desktop. A "Scan" chip is a one-line change
+  if Don prefers it — it does change that pinned list.
+- Registering authority / control number / year stay blank on the modern payload: the parser places
+  those only when the payload labels them (they are not positional fields on the disc plate we have), and
+  nothing is invented.
+
+**Must-know for tick 4 (A4, client page vehicles panel + browser proof):**
+1. **Use `review.fields`, not `review.values`** — Jinja resolves `.values` to the dict *method*
+   (`dict.values`), which silently rendered a blank review form for one test round. The same trap will
+   bite any template that reads a dict key named `values`/`items`/`keys`.
+2. The feed the panel should render is already live: `GET /customers/<id>/vehicles` → `{customer_id,
+   count, vehicles:[…]}` (gated on the **customers** module, not `scan_vehicle`, so every account that may
+   open a client page may read it). Vehicles are the `vehicles` rows from A2 — `tare_kg`/`gvm_kg` are
+   REAL NULL, so print blank, never `0`, and there is **no towing column** (D3b).
+3. `POST /vehicles/<id>/edit` and `POST /vehicles/<id>/delete` already exist and redirect back to
+   `customers.detail` with a flash — the panel's edit/remove actions can post straight to them.
+4. `_assert_registration_is_free` now refuses a **same-client duplicate** as well as another client's
+   plate; A2's service test still passes, but any new code path that re-creates a plate for its current
+   owner will now get a `ValueError` instead of a second row.
+5. The A1 fixture `natis_positional.txt` is the payload to use for browser proof (all three identifiers,
+   no masses); `labelvalue.txt` is the one that carries tare/GVM (1890/2800) if A4 wants to show figures.
+6. Screenshot/vision expectations are already wired: run on **5058** (or free 5057 first) with
+   `DATABASE_PATH=/tmp/abi_a4.db`, seed with `/tmp/abi_a3_seed.py` (it prints owner id 1 / staff id 2 /
+   clients 1 and 2), and the proof script `/tmp/abi_a3_proof.py` is a working template for the A4 pass.

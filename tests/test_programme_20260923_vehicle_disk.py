@@ -421,17 +421,36 @@ def test_positional_layout_refuses_a_payload_without_a_valid_vin():
     assert vd.parse_natis_positional(raw) is None
 
 
-def test_positional_identifiers_are_flagged_rather_than_guessed():
-    """Which of the disc's identifier fields is the NaTIS registration number and which the
-    licence number is not confirmed yet (needs a full printed disc face), so D3 says: show them
-    for the staff member to place, never guess. The one the plate regex did match is kept as the
-    licence number; the others are surfaced with the reason."""
+def test_positional_identifiers_are_assigned_the_way_don_mapped_them():
+    """A1 parked these three as "unassigned disc identifier" because nothing was allowed to guess.
+    Don settled the mapping on 2026-09-23 (decision D3): field 5 = the disc's own licence number,
+    field 6 = the number plate, field 7 = the NaTIS registration number ("Natis reg is last one").
+    So the review form gets all three instead of two mystery tokens."""
     parsed = vd.parse_disc_text(load_text("natis_positional"))
-    assert parsed["licence_number"] == "ABC123GP"
+    assert parsed["licence_number"] == "ABC123GP"          # plate (field 6)
+    assert parsed["registration_number"] == "ZZ1234Z"      # NaTIS registration (field 7)
+    assert parsed["disc_licence_number"] == "T9876543210X"  # the disc's own licence number (field 5)
     flagged = {key: value for key, value in parsed["unparsed_fields"].items() if "identifier" in value}
-    assert "T9876543210X" in flagged
-    assert "ZZ1234Z" in flagged
-    assert "ABC123GP" not in flagged  # it is the plate we kept
+    assert flagged == {}, "nothing in the modern layout is unplaced any more (D3)"
+
+
+def test_a_disc_licence_number_is_never_invented_for_other_layouts():
+    """D3 places the disc licence number only where the positional record proves the field is
+    there. The older layouts carry no such field, and the reference parser's ``licenceNumber`` is
+    the number plate — so this stays empty rather than borrowing the plate."""
+    for fixture in ("labelvalue", "percent", "pipesemi", "fixedwidth", "junk"):
+        assert vd.parse_disc_text(load_text(fixture))["disc_licence_number"] == "", fixture
+
+
+def test_an_identifier_with_no_known_role_is_still_only_flagged():
+    """The safety net behind D3: a payload whose identifier slot holds something we have no role
+    for is surfaced for staff to place by hand, never assigned to a guessed column."""
+    flagged = vd._flagged_identifiers(
+        ["T9876543210X", "ABC123GP", "ZZ1234Z", "EXTRA999"],
+        consumed=("ABC123GP", "ZZ1234Z", "T9876543210X"),
+    )
+    assert list(flagged) == ["EXTRA999"]
+    assert "identifier" in flagged["EXTRA999"]
 
 
 def test_positional_result_deliberately_differs_from_the_reference_sniffer():

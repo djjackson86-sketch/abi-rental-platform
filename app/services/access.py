@@ -57,6 +57,7 @@ MODULES = [
     ("app_store", "App store"),
     ("reports", "Reports"),
     ("scan_barcode", "Scan a barcode"),
+    ("scan_vehicle", "Scan a vehicle licence disk"),
     ("settings", "Settings"),
 ]
 
@@ -91,6 +92,11 @@ _ENDPOINT_MODULE_RULES = [
     ("admin.reports", "reports"),
     ("admin.reports_orders_csv", "reports"),
     ("admin.scan_barcode", "scan_barcode"),
+    # Programme phase 3 (feature A / A3): the licence-disc scan screen and the vehicle actions it
+    # owns. The client page's read-only vehicles feed is the exception — it shows what is already
+    # on the client's record, so the accounts that may open the client page may read it.
+    ("vehicles.customer_vehicles", "customers"),
+    ("vehicles.", "scan_vehicle"),
     # The dashboard's cash-up / end of day panel. Same module as the screen it
     # lives on, so an account that may see the dashboard may cash its drawer up.
     ("cash.", "dashboard"),

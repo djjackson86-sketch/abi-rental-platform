@@ -1,0 +1,192 @@
+{% extends "admin/layout.html" %}
+{% set title='Scan a vehicle licence disk' %}
+{% block admin_body %}
+<header class="page-header scan-vehicle-header">
+  <div class="module-title">
+    <span class="module-icon">▦</span>
+    <div>
+      <p class="eyebrow">Licence disk scanner</p>
+      <h1>Scan a vehicle licence disk</h1>
+      <p>Photograph the disk on the car, check what came off it, then allocate the vehicle to a client.</p>
+    </div>
+  </div>
+  {% if preselected_customer %}
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('customers.detail', customer_id=preselected_customer.id) }}">Back to {{ preselected_customer.name }}</a></div>
+  {% endif %}
+</header>
+
+<section class="panel scan-capture-panel">
+  <h2>1 · Read the disk</h2>
+  <form method="post" enctype="multipart/form-data" class="scan-capture-form">
+    <input type="hidden" name="customer_id" value="{{ preselected_customer.id if preselected_customer else '' }}">
+    <div class="scan-capture-grid">
+      <label>Photograph the disk
+        <input type="file" name="disk_image" accept="image/*" capture="environment">
+        <small>Flat, in focus, the whole disk face in frame — JPEG or PNG, up to 8 MB. The photo is read in memory and never stored.</small>
+      </label>
+      <label>…or paste the decoded barcode text
+        <textarea name="disc_text" rows="3" placeholder="Registering Authority GAUTENG&#10;Licence number ABC 123 GP&#10;Make TOYOTA"></textarea>
+        <small>If a scanner app on the phone shows the raw PDF417 text, copy it in here instead.</small>
+      </label>
+    </div>
+    <div class="form-actions scan-capture-actions">
+      <button class="btn primary" type="submit" name="action" value="decode">Read the disk</button>
+      <button class="btn ghost" type="submit" name="action" value="manual">Type the details instead</button>
+    </div>
+    <p class="form-help">Nothing is saved until you check the fields and pick the client on the next step.</p>
+  </form>
+</section>
+
+{% if review %}
+{% set values = review.fields %}
+{% set owner = review.owner %}
+{% set owner_is_somebody_else = owner and (not review.customer or owner.id != review.customer.id) %}
+<section class="panel scan-review-panel">
+  <h2>2 · Check the details &amp; allocate the vehicle</h2>
+
+  {% if owner_is_somebody_else %}
+  <div class="scan-warning" role="alert">
+    <strong>{{ values.registration }} is already recorded for {{ owner.name }}{% if owner.phone %} ({{ owner.phone }}){% endif %}.</strong>
+    <p>Saving it for another client is refused while it belongs to {{ owner.name }}. If it really is now this client's vehicle, tick the box below and save — that <b>moves</b> the vehicle record across, so {{ owner.name }} will no longer have it.</p>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('vehicles.save_scan_vehicle') }}" class="form-grid scan-review-form">
+    <input type="hidden" name="source" value="{{ values.source or 'scan' }}">
+
+    {% set scan_fields = [
+      ('registration', 'Number plate', 'text', ''),
+      ('registration_number', 'NaTIS registration number', 'text', 'The "Natis reg" field on the disk — not the plate.'),
+      ('licence_number', 'Disk licence number', 'text', "The disk's own licence number (Lisensienommer)."),
+      ('make', 'Make', 'text', ''),
+      ('model', 'Model / description', 'text', ''),
+      ('colour', 'Colour', 'text', ''),
+      ('year', 'Year', 'text', ''),
+      ('vin', 'VIN', 'text', ''),
+      ('engine_number', 'Engine number', 'text', ''),
+      ('vehicle_type', 'Vehicle category', 'text', ''),
+      ('registering_authority', 'Registering authority', 'text', ''),
+      ('control_number', 'Control number', 'text', ''),
+      ('licence_disk_expiry', 'Licence disk expiry', 'date', ''),
+    ] %}
+    {% for name, label, kind, hint in scan_fields %}
+    <label>{{ label }}
+      <input type="{{ kind }}" name="{{ name }}" value="{{ values[name] or '' }}"{% if name == 'registration' %} required{% endif %} autocomplete="off">
+      {% if hint %}<small>{{ hint }}</small>{% endif %}
+    </label>
+    {% endfor %}
+
+    <label>Tare (kg)
+      <input type="text" name="tare_kg" value="{{ values.tare_kg or '' }}" inputmode="decimal" autocomplete="off">
+      <small>Leave blank when the disk does not show it — blank is stored as unknown, never 0.</small>
+    </label>
+    <label>GVM (kg)
+      <input type="text" name="gvm_kg" value="{{ values.gvm_kg or '' }}" inputmode="decimal" autocomplete="off">
+      <small>Same rule: a figure nobody read off the disk is never invented.</small>
+    </label>
+
+    <label class="span-2">Allocate to client
+      <input name="customer_pick" id="scan-customer-pick" list="scan-customer-options" autocomplete="off"
+             placeholder="Client name or phone number" required
+             value="{{ (review.customer.name ~ ' · ' ~ review.customer.phone) if (review.customer and review.customer.phone) else (review.customer.name if review.customer else '') }}">
+      <input type="hidden" name="customer_id" id="scan-customer-id" value="{{ review.customer.id if review.customer else '' }}">
+      <datalist id="scan-customer-options"></datalist>
+      <small>Type two or more characters and pick the client from the list. Not on file yet? <a href="{{ url_for('customers.new') }}" target="_blank" rel="noopener">Create the client</a> in a new tab, then come back to this page.</small>
+    </label>
+
+    {% if owner_is_somebody_else %}
+    <label class="span-2 scan-transfer-line">
+      <span class="scan-transfer-check">
+        <input type="checkbox" name="transfer" value="1">
+        <b>Transfer {{ values.registration }} from {{ owner.name }} to the client above</b>
+      </span>
+      <small>Only tick this when the vehicle really has changed hands.</small>
+    </label>
+    {% endif %}
+
+    <div class="form-actions span-2">
+      <button class="btn primary" type="submit">Save vehicle &amp; allocate</button>
+      <a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle') }}">Start a new scan</a>
+    </div>
+
+    {% if review.unparsed %}
+    <details class="span-2 scan-details">
+      <summary>The disk also carried {{ review.unparsed|length }} value{{ '' if review.unparsed|length == 1 else 's' }} the scanner could not place</summary>
+      <ul>{% for value, reason in review.unparsed.items() %}<li><code>{{ value }}</code> — {{ reason }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+    {% if review.raw_text %}
+    <details class="span-2 scan-details">
+      <summary>Raw barcode text ({{ review.raw_text|length }} characters)</summary>
+      <pre class="scan-raw-text">{{ review.raw_text }}</pre>
+    </details>
+    {% endif %}
+  </form>
+</section>
+
+<script>
+(function () {
+  var pick = document.getElementById('scan-customer-pick');
+  if (!pick) { return; }
+  var list = document.getElementById('scan-customer-options');
+  var hidden = document.getElementById('scan-customer-id');
+  var results = [];
+  var timer = null;
+  // What the server rendered into the box. On a re-render after a refusal the client is already
+  // resolved (and its id already sits in the hidden field) while this page has fetched nothing, so
+  // an untouched box must never clear it. Measured in the A3 browser proof: without this guard,
+  // ticking "transfer" and saving posted no customer_id at all.
+  var initial = pick.value;
+
+  function labelFor(client) {
+    return client.name + (client.phone ? ' · ' + client.phone : '');
+  }
+
+  function match() {
+    var typed = pick.value.trim();
+    for (var i = 0; i < results.length; i++) {
+      if (labelFor(results[i]) === typed) { return results[i]; }
+    }
+    return null;
+  }
+
+  function syncId() {
+    if (pick.value === initial) { return; }
+    var found = match();
+    if (found) {
+      hidden.value = found.id;
+    } else if (/^\d+$/.test(pick.value.trim())) {
+      hidden.value = pick.value.trim();
+    } else {
+      hidden.value = '';
+    }
+  }
+
+  function load() {
+    var query = pick.value.trim();
+    if (query.length < 2) { list.innerHTML = ''; return; }
+    fetch('{{ url_for("vehicles.customer_search") }}?q=' + encodeURIComponent(query), {headers: {'Accept': 'application/json'}})
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        results = data.customers || [];
+        list.innerHTML = '';
+        results.forEach(function (client) {
+          var option = document.createElement('option');
+          option.value = labelFor(client);
+          list.appendChild(option);
+        });
+      })
+      .catch(function () { /* the picker is a convenience; a typed client id still saves */ });
+  }
+
+  pick.addEventListener('input', function () {
+    syncId();
+    if (timer) { clearTimeout(timer); }
+    timer = setTimeout(load, 200);
+  });
+  pick.addEventListener('change', syncId);
+  pick.form.addEventListener('submit', syncId);
+})();
+</script>
+{% endif %}
+{% endblock %}

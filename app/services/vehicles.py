@@ -204,6 +204,68 @@ def customer_for_vehicle_registration(registration):
     return _registration_owner(registration)
 
 
+def fields_from_disc(parsed):
+    """Map a ``parse_disc_text()`` result onto this module's form field names.
+
+    The mapping is explicit because the parser's key names and the column names disagree:
+    ``parse_disc_text()`` returns the **number plate** under ``licence_number`` (it mirrors
+    ``saDiscParser.ts``'s ``licenceNumber``), while ``vehicles.licence_number`` is the disc's own
+    licence number (``4024048GB8LY``). Copying the parser dict straight into a vehicle row would
+    put the plate in the licence-number column — the trap tick 2 flagged for A3.
+
+    Masses come back as ``float | None`` from the parser and are handed to the form as text, where
+    blank means NULL: a disc that carries no tare/GVM (every modern NaTIS payload) must never
+    become a recorded 0 kg.
+    """
+    def text(key):
+        return str(parsed.get(key) or "").strip()
+
+    fields = {
+        "registration": text("licence_number"),
+        "registration_number": text("registration_number"),
+        "licence_number": text("disc_licence_number"),
+        "make": text("make"),
+        "model": text("model"),
+        "colour": text("colour"),
+        "vin": text("vin"),
+        "engine_number": text("engine_number"),
+        "control_number": text("control_number"),
+        "registering_authority": text("registering_authority"),
+        "vehicle_type": text("vehicle_type"),
+        "licence_disk_expiry": text("expiry_date"),
+        "raw_scan_text": str(parsed.get("raw_text") or ""),
+        "source": SOURCE_SCAN,
+    }
+    for field in MASS_FIELDS:
+        value = parsed.get(field)
+        fields[field] = "" if value is None else str(value)
+    return fields
+
+
+def transfer_vehicle(vehicle_id, customer_id):
+    """Move one recorded vehicle onto another client. Explicit action only.
+
+    A3's review form offers this when a scanned plate is already recorded for somebody else, with
+    the owner named in the warning. Nothing calls it automatically — a scan can never silently
+    re-own a vehicle — and the row is *moved*, not copied, so the plate keeps exactly one owner.
+    """
+    existing = get_vehicle(vehicle_id)
+    if existing is None:
+        return False
+    target = _customer_exists(customer_id)
+    if target is None:
+        raise ValueError("Choose the client this vehicle belongs to")
+    if int(existing["customer_id"]) == target:
+        return True
+    db = get_db()
+    db.execute(
+        "UPDATE vehicles SET customer_id = ?, updated_at = ? WHERE id = ?",
+        (target, now(), int(existing["id"])),
+    )
+    db.commit()
+    return True
+
+
 def vehicle_counts():
     """Small on-file summary for the dashboard/ledger (no customer data)."""
     row = get_db().execute(
@@ -261,11 +323,21 @@ def _assert_registration_is_free(registration, customer_id, exclude_vehicle_id=N
     if not registration_key(registration):
         return
     owner = _registration_owner(registration, exclude_vehicle_id=exclude_vehicle_id)
-    if owner is not None and int(owner["id"]) != int(customer_id):
+    if owner is None:
+        return
+    if int(owner["id"]) != int(customer_id):
         raise ValueError(
             f"Registration {registration} is already recorded for {owner['name']} — "
             "transfer it explicitly if it is now this client's vehicle"
         )
+    # The same client scanning the same plate twice is not a transfer, it is a double entry: the
+    # partial unique index would refuse the row anyway (A3 measured that as an IntegrityError
+    # bubbling out of the save route), so it is refused here with something a staff member can act
+    # on instead of a 500.
+    raise ValueError(
+        f"Registration {registration} is already recorded for {owner['name']} — "
+        "open that vehicle and edit it instead of adding it a second time"
+    )
 
 
 def _create_values(form, customer_id):
