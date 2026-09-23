@@ -1283,3 +1283,46 @@ no tick, no lock, and no phase-numbered queue any more.
 2. `Rooderport` vs `Roodepoort` — one branch's data is spelled "Rooderport"; left matching the app.
 3. Merge rule unchanged: one squashed commit, delete the branch, `git gc`, then prove all five real vehicle
    identifiers are gone from `git log --all -S`.
+
+
+## C3 end-to-end proof (2026-09-23, after T4) — all three flows, on one running app
+
+One server (5057) on a seeded temp DB (`/tmp/abi_e2e.db`: 3 branches, 7 trailers across the 4 Sano
+categories + 1 ungrouped, 1 client, the app's own owner login). Screenshots at 1440px and 390px in
+`/tmp/abi_e2e_shots/`, **every one inspected with vision** - not counted. Report: this section.
+
+**Flow A - disc capture to allocation: PASS.** Staff sign-in, paste the synthetic disc payload from
+`tests/fixtures/disc/natis_positional.txt`, "Read the disk" parses every field (plate `ABC123GP`, NaTIS
+`ZZ1234Z`, licence no `T9876543210X`, MITSUBISHI ASX, WHITE, VIN `AHTFR22G10L123456`, engine `2GD1234567`,
+disk expiry 2027-07-31), the client typeahead calls `/api/customers/search?q=Pieter` (200), the reviewer
+picks the client, save redirects to the client page with "Vehicle ABC123GP allocated to Pieter van der
+Merwe" and `vehicles` holds the row against that client. Year/tare/GVM render as dashes - **nothing is
+invented** (decision D3). 0 console errors. The server-side guard was also seen refusing a save with no
+client chosen ("Choose the client this vehicle belongs to") before the pick was made.
+
+**Flow B - branch portal registration and the duplicate question: PASS.** With the placeholder-free notice
+in place the portal form appears; submitting creates the client at that branch with `client_verified` NULL
+and a `consent_records` row (channel `branch portal`, notice version **1.1**). Submitting the same phone
+again raises "Is this you?" showing only `Themba N. · ...1234` (first name + last four - the D8 no-leak
+rule, seen in the screenshot), and linking to it leaves **exactly one** row for that phone: no duplicate.
+With the real (unfinished) notice restored, the page shows "Online registration isn't open yet" with **no
+form at all** and a POST is refused - the gate proven in both directions.
+
+**Flow C - multi-trailer public booking: PASS.** Two trailers over a weekend submit as **one** order
+`ORD-10145`, `status='draft'`, `source_system='public'`, `source_id='BOOK-300B7516'`, `created_by_user_id`
+NULL, **2 line items**, and the confirmation lists both trailers. Re-run with deposit-bearing trailers
+produced `ORD-10146` (subtotal 1100 / deposit 2200 / total 3300).
+
+**The C3 run found a real bug in my own earlier work - and it is fixed** (`d7ccfe8`, see above): this app's
+`orders.total` **includes** the refundable deposit (the admin order form builds its estimate the same way),
+so T3c had "fixed" a correct label and added a "Total payable" that double-counted the deposit, while the
+booking page's estimate excluded the deposit from its total. Both corrected, with three tests pinning the
+rule, and re-verified on the case that exposed it: the page's estimate (R1100 + R0 VAT + R2200 deposit =
+**R3300.00**) equals the stored order ORD-10146 exactly. **Lesson recorded: prove a money rule with a basket
+that exercises every component of it** - the T3b proof used deposit-less trailers, so both formulas agreed
+and the fault stayed hidden.
+
+**Two of my own proof scripts failed first** and are worth remembering: one clicked the layout's "Log out"
+button instead of "Read the disk" (a `button[type=submit]` is not a safe selector in this app), and one set
+the client id directly when the real path is the typeahead's `/api/customers/search` fetch. Driving the UI
+the way a person does is the only way this proof means anything.
