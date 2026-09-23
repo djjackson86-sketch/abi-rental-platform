@@ -47,11 +47,14 @@ from app.services.vehicles import create_vehicle
 PLATE = "TRL123GP"
 NATIS = "ZZ1234Z"
 DISC_LICENCE = "T9876543210X"
-CAR_PLATE = "KP35XKGP"
-CAR_NATIS = "SHS812W"
-CAR_DISC_LICENCE = "4024048GB8LY"
-CAR_VIN = "MMBJNKB40FD123456"
-CAR_ENGINE = "4B11LC0187"
+# Synthetic identifiers in the real disc's *shape* (same character classes and lengths):
+# the real plate / NaTIS / disc licence / VIN / engine number read off Don's disc are
+# personal information and stay OUT of the repo (guardrail: repo fixtures stay synthetic).
+CAR_PLATE = "NB72XMGP"
+CAR_NATIS = "QWR419V"
+CAR_DISC_LICENCE = "5120367QP4HD"
+CAR_VIN = "JHTFR22G10L654321"
+CAR_ENGINE = "K9K7654321"
 
 
 @pytest.fixture()
@@ -299,14 +302,14 @@ def test_inventory_form_offers_the_identification_panel(app, client):
 
 def test_identity_saves_through_the_real_inventory_form_and_is_normalised(app, client):
     _login(app, client)
-    form = _product_form(name="Form Trailer", registration=" kp 35 xkgp ")
+    form = _product_form(name="Form Trailer", registration=" nb 72 xmgp ")
     form.pop("quantity")
     form["quantity"] = "2"
     response = client.post("/inventory/new", data=form, follow_redirects=True)
     assert response.status_code == 200
     with app.app_context():
         row = get_db().execute("SELECT * FROM products WHERE name = 'Form Trailer'").fetchone()
-    assert row["registration"] == "KP 35 XKGP"
+    assert row["registration"] == "NB 72 XMGP"
     assert row["registration_number"] == NATIS
     assert row["licence_number"] == DISC_LICENCE
 
@@ -342,12 +345,14 @@ def test_re_saving_a_trailer_keeps_its_own_plate(app):
 
 
 def test_a_second_trailer_cannot_claim_a_recorded_plate(app):
-    first = _product(app, registration="kp 35 xkgp")
+    # The point of this test is spacing/case normalisation colliding with a recorded
+    # plate, so the two spellings are variants of the same (synthetic) identifier.
+    first = _product(app, registration="nb 72 xmgp")
     with app.app_context():
         with pytest.raises(ValueError) as error:
-            create_product(_product_form(name="Other Trailer", registration="KP35XKGP"))
+            create_product(_product_form(name="Other Trailer", registration=CAR_PLATE))
     assert "already recorded on 6m Trailer" in str(error.value)
-    assert _product_row(app, first)["registration"] == "KP 35 XKGP"
+    assert _product_row(app, first)["registration"] == "NB 72 XMGP"
 
 
 def test_moving_a_plate_onto_another_trailer_is_refused_by_name(app):

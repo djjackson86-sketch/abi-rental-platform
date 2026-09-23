@@ -3,19 +3,22 @@
 **Ask (Don, 2026-09-23):** "Add a job last on list — that privacy notice that we came up with between us and
 Sano: create notification on app that pulls it up, and that allows Sano to accept and print."
 
-**CLARIFIED by Don (2026-09-23, second message):** the document he means is the **operator agreement between us
-and Sano** — the one that says who is responsible for what — **not** the customer-facing privacy notice. That
-makes the operator agreement the **headline item** of this phase: the notification is headlined on it, its status
-reads *awaiting signature*, and its printed copy carries the signature block. The rest of the pack is still
-surfaced and adoptable, and the privacy notice is still what the app *publishes* to customers (Feature P), because
-the two documents have different audiences and both duties are real.
+**CLARIFIED by Don (2026-09-23, second message):** the document he means is the agreement **between us and Sano**
+— the one that says who is responsible for what — **not** the customer-facing privacy notice.
 
-**Read `docs/popia/OPERATOR-AGREEMENT-REVIEW.md` before building this phase** — it lists six blockers (B1–B6),
-including the one that changes the meaning of the liability cap (whose legal name is on the agreement), the cap
-decision itself (clause 9.3), insurance (9.4), jurisdiction (11.3), the service-agreement reference (11.4) and the
-two unfilled Schedule C sub-processor rows. It also drafts **Schedule D (responsibility matrix)** ready to paste
-in, and calls for an **electronic-signature clause** (ECTA 25 of 2002) — which is precisely what makes the in-app
-accept button legally tidy for the agreement.
+**CLARIFIED FURTHER by Don (2026-09-23, third message: "You came up with the simpler agreement").** The document
+is the **simple form the assistant drafted on 15 Sept** (`@session:default/20260915_080422_c7a958cc`), now
+committed as **`docs/popia/CLIENT-DATA-NOTICE-JACKAPP-SANO.md`** — *Jackapp and Sano Trailers — Client Information
+Notice*, 11 short plain-English sections, no schedules and no section citations. **That is the headline item of
+this phase**, not the nine-page agreement: the notification is headlined on it, its status reads *awaiting
+acceptance*, and the printed copy carries its signature/acceptance table (§11).
+
+The nine-page `OPERATOR-AGREEMENT-ABI-SANO.md` stays in the pack as the **full form**, adoptable if Sano ever wants
+it — see `docs/popia/OPERATOR-AGREEMENT-REVIEW.md` for its six blockers (B1–B6: whose name is on it, the clause 9.3
+cap, insurance 9.4, jurisdiction 11.3, the service-agreement reference 11.4, the two Schedule C rows) and the drafted
+Schedule D. **Do not block the simple notice on those blockers** — it contains no placeholders, no cap and no
+indemnity, so it can be adopted as-is. Blocking it on the heavy agreement's blanks would be exactly the
+over-lawyering Don has now pushed back on twice.
 
 **Read first:** `docs/popia/PRIVACY-NOTICE-REVIEW.md` (the assistant's review of the pack against POPIA). It
 lists five blockers (B1–B5) and seven content gaps (G1–G7). **This phase builds the mechanism; it must not

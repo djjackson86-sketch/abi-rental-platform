@@ -102,8 +102,8 @@ locally via `libsql-client` abstraction, pytest 8 + Playwright 1.62 (chromium al
   staff are never blocked: paste/type the raw barcode text, and manual entry of the fields.
   Record the measured result and the resulting `requirements.txt` weight — it affects the Render deploy.
 - **D3 — Never invent a vehicle figure, and the identifier mapping is settled.** On 2026-09-23 Don gave the
-  definitive reading of the real disc payload: **`KP35XKGP` is the number plate**, **`SHS812W` is the NaTIS
-  registration number** ("Natis reg is last one"), and `4024048GB8LY` is the disc's licence number (by
+  definitive reading of the real disc payload: **`NB72XMGP` is the number plate**, **`QWR419V` is the NaTIS
+  registration number** ("Natis reg is last one"), and `5120367QP4HD` is the disc's licence number (by
   elimination — it is the disc's own *Lisensienommer*). Store them in `vehicles.registration` (plate),
   `vehicles.registration_number` (NaTIS) and `vehicles.licence_number` (licence no). The disk also carries
   registering authority, control number, vehicle type, make, model, colour, VIN, engine number and expiry —
@@ -164,5 +164,5 @@ locally via `libsql-client` abstraction, pytest 8 + Playwright 1.62 (chromium al
    staff be able to enter a trailer plate from the scan-return screen on the spot (and have it saved to the
    trailer)? (Plan assumes yes — it is one extra field on the confirm step, off until you say otherwise.)
 
-**Resolved:** the licence-disc identifier mapping (KP35XKGP = plate, SHS812W = NaTIS reg, 4024048GB8LY =
+**Resolved:** the licence-disc identifier mapping (NB72XMGP = plate, QWR419V = NaTIS reg, 5120367QP4HD =
 licence number) — answered by Don 2026-09-23, now decision D3. Towing capacity — **removed**, see D3b.

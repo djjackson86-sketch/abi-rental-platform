@@ -18,7 +18,7 @@
 | 4 | A4 client page vehicles panel + browser proof | done | tick 4 | client-page `Vehicles` panel (plate + NaTIS, make, model, year, tare, GVM, disk expiry; blank = dash, no towing column per D3b), collapsed per-vehicle edit/remove `<details>`, empty state with a scan CTA; 14 new tests (written failing-first: 11 failed with the impl stashed), full suite **808 green**, real-browser 39/39 checks, 0 console errors, 0 overflow at 1440px + 390px; feature A signed off locally |
 | 5 | D1 trailer identity + return-matching service | done | tick 5 | `products.registration`/`licence_number`/`registration_number` + partial unique index (one plate = one trailer) + inventory "Trailer identification" panel behind a marker; `orders.return_scan_*` audit; new `app/services/returns.py` (`match_open_rentals`, `returnable_order`, `mark_returned_via_scan` → existing `transition_order(...,"return")`); 37 new tests (34 failed first), full suite **845 green**, browser proof **26/26**, 0 console errors, 0 overflow at 1440px + 390px |
 | 6 | D2 scan-to-return screen + marks returned + proof | done | tick 6 | `/scan-return` capture + review + confirm (`app/routes/returns.py`, new blueprint), one candidate → one "Mark returned", two or more → an explicit choice is required, none → a message + a link to the started-orders list, a repeat scan says "already returned" (`returns.recently_returned()`, added this tick); module `scan_return` + nav entry; the audit line on the order page; evidence named for the value that actually matched; 19 new tests (16 failed first), full suite **864 green**, browser proof **45/45**, 0 console errors, 0 overflow at 1440px + 390px; feature D signed off locally |
-| 7 | P1 POPIA privacy notice + consent service | pending | | `/privacy` page + shared consent block + `consent_records` (added by Don 2026-09-23) |
+| 7 | P1 POPIA privacy notice + consent service | done | tick 7 | `/privacy` is driven by `docs/popia/PRIVACY-NOTICE.md`: the short **interim page** while any `[PLACEHOLDER]` remains (it does — Sano's five facts), the full 12-section notice the moment they land, no code change (D11). `consent_records` + `app/services/consent.py` (who/version/channel/when only — no IP/UA), one shared unticked consent block for B2/C2, admin evidence line on the client page; 32 new tests, full suite **896 green**, browser proof **31/31** on 5058 + a completed-document harness on 5059 |
 | 8 | B1 branch portal schema + link + QR | pending | | |
 | 9 | B2 public form + dedupe + "am I already a customer?" | pending | | **§P1 consent required** |
 | 10 | B3 admin QR/link page with A4 print + browser proof | pending | | |
@@ -110,7 +110,7 @@ reference-parsed-but-never-exposed fields surfaced; plus a **positional branch**
 gated on the record's own length self-check (`%0148%` == 148 chars).
 
 **Real 148-char payload, measured:** before the positional branch `engine_number` came out as the form
-identifier `MVL1CC53` (wrong) and `colour` was empty; after it `engine_number = 4B11LC0187`,
+identifier `MVL1CC53` (wrong) and `colour` was empty; after it `engine_number = K9K7654321`,
 `colour = WHITE`, with make/model/VIN/expiry/vehicle-type/plate all correct. **No tare, no GVM and no towing
 capacity in the payload at all** (D3 confirmed on real input) — both masses stay blank-by-default.
 
@@ -136,7 +136,7 @@ capacity in the payload at all** (D3 confirmed on real input) — both masses st
    mention a `gcm_kg`**: there is no GCM on a disc either, so that column should not be added.
 3. `unparsed_fields` is now a `{value: reason}` dict — tokens with no signal carry `"unrecognised"`, and the
    real layout's unused identifier fields carry the "unassigned disc identifier" reason. A3 shows both.
-4. **Open for Don:** which of the disc's three identifier fields (`4024048GB8LY` / `KP35XKGP` / `SHS812W`) is
+4. **Open for Don:** which of the disc's three identifier fields (`5120367QP4HD` / `NB72XMGP` / `QWR419V`) is
    the NaTIS registration number vs the licence number — needs a full disc face, or his word. Nothing guesses.
 5. Also corrected `~/disc-samples/disc-decode-FINDINGS.md` on two points (the plate regex does **not** match
    the inner `GB8LY`; the mass rules do **not** fire on this payload) — details in the findings doc §7.
@@ -162,8 +162,8 @@ capacity in the payload at all** (D3 confirmed on real input) — both masses st
 
 ### Don's decisions folded in + cadence → 1 minute — 2026-09-23 11:12 (main session, not a tick)
 - **The licence-disc identifier mapping is settled by Don** (this was the open question tick 1 parked):
-  `KP35XKGP` = **number plate**, `SHS812W` = **NaTIS registration number** ("Natis reg is last one"),
-  `4024048GB8LY` = the disc's licence number (by elimination — the disc's own *Lisensienommer*). Written into
+  `NB72XMGP` = **number plate**, `QWR419V` = **NaTIS registration number** ("Natis reg is last one"),
+  `5120367QP4HD` = the disc's licence number (by elimination — the disc's own *Lisensienommer*). Written into
   decision D3 and the A2 column list, so the A3 scan screen does not have to ask staff to choose.
 - **Towing capacity REMOVED** (new decision **D3b**): no `towing_capacity_kg` column, no towing field on the
   vehicle form, no towing column on the client page. `tare_kg`/`gvm_kg` stay optional REAL NULLs because the
@@ -205,7 +205,7 @@ check), `vehicle_counts`. Deliberate behaviour, all tested:
   current owner; **the database enforces it too** (partial unique index, proven by a raw INSERT
   raising `sqlite3.IntegrityError`). A blank registration may repeat, so a vehicle typed in without a
   plate is never blocked.
-- **Plates are normalised on write** (`kp 35 xkgp` → `KP 35 XKGP`) and compared on a whitespace-free
+- **Plates are normalised on write** (`nb 72 xmgp` → `NB 72 XMGP`) and compared on a whitespace-free
   upper-case key, so case/spacing cannot create a second owner.
 - **Masses: blank is NULL, never 0** (test asserts `tare_kg is None` / `gvm_kg is None`, not 0.0), and
   a non-number or negative typed mass is refused rather than coerced.
@@ -226,10 +226,10 @@ customer-delete path (SQLite FK cascade, with `PRAGMA foreign_keys` asserted = 1
 - `.venv/bin/pytest -q` (full suite) → **767 passed in 458.44s (0:07:38)** — green (747 before)
 - `python3 -m compileall app tests -q` → clean
 - `PYTHONPATH=. .venv/bin/python /tmp/abi_a2_smoke.py` (temp DB, real service calls) →
-  `created id=1 registration='KP 35 XKGP' registration_number='SHS812W' licence_number='4024048GB8LY'
-  expiry='2027-03-31' tare=None gvm=None source='scan'` · `owner of 'KP35XKGP' -> Smoke Client` ·
+  `created id=1 registration='NB 72 XMGP' registration_number='QWR419V' licence_number='5120367QP4HD'
+  expiry='2027-03-31' tare=None gvm=None source='scan'` · `owner of 'NB72XMGP' -> Smoke Client` ·
   `counts: {'total': 1, 'scan': 1, 'manual': 0, 'import': 0, 'blank_registration': 0}` ·
-  `duplicate refused: Registration KP35XKGP is already recorded for Smoke Client — transfer it
+  `duplicate refused: Registration NB72XMGP is already recorded for Smoke Client — transfer it
   explicitly if it is now this client's vehicle` · `deleted customer -> True` · `vehicles left: 0`
 
 **Commit:** `2755e84` — `feat(vehicles): vehicles table + service layer, one owner per registration (A2)`
@@ -251,8 +251,8 @@ and removed at the end.
    `vehicle_disk.py::parse_natis_positional` the three identifier fields
    (`POSITIONAL_IDENTIFIER_INDEXES = (5, 6, 7)`) are still dumped into `unparsed_fields` with the
    "unassigned disc identifier" reason. On the real 148-char payload the order is **field 5 = disc
-   licence number (`4024048GB8LY`), field 6 = plate (`KP35XKGP`), field 7 = NaTIS registration number
-   (`SHS812W` — Don's "Natis reg is last one")**; the synthetic fixture
+   licence number (`5120367QP4HD`), field 6 = plate (`NB72XMGP`), field 7 = NaTIS registration number
+   (`QWR419V` — Don's "Natis reg is last one")**; the synthetic fixture
    `tests/fixtures/disc/natis_positional.txt` has the same shape (`T9876543210X` / `ABC123GP` /
    `ZZ1234Z`). Assigning those three in the positional branch — and updating
    `test_positional_identifiers_are_flagged_rather_than_guessed`, which currently asserts they stay
@@ -290,8 +290,8 @@ is the client-page feed A4 will render; `/api/customers/search` is the typeahead
 disc licence number, field 6 → number plate, field 7 → NaTIS registration number, so the modern layout
 yields all three instead of two mystery tokens. Measured on the REAL disc photo (still outside the repo):
 
-    licence_number = 'KP35XKGP' | disc_licence_number = '4024048GB8LY' | registration_number = 'SHS812W'
-    make = 'MITSUBISHI' model = 'ASX' colour = 'WHITE' engine_number = '4B11LC0187'
+    licence_number = 'NB72XMGP' | disc_licence_number = '5120367QP4HD' | registration_number = 'QWR419V'
+    make = 'MITSUBISHI' model = 'ASX' colour = 'WHITE' engine_number = 'K9K7654321'
     expiry_date = '2027-07-31' vehicle_type = 'STATION WAGON' confidence = 'high'
     unparsed_fields = {}
 
@@ -469,7 +469,7 @@ own commit so the hash above is real.
 **Must-know for tick 5 (D1, trailer identity + return-matching service):**
 1. `vehicles.get_vehicle_by_registration()` and `customer_for_vehicle_registration()` are the hooks D1's
    "scan the towing car's disk" branch needs; both match on the whitespace-free upper-case key, so
-   `KP 35 XKGP` == `KP35XKGP` == `kp35xkgp`.
+   `NB 72 XMGP` == `NB72XMGP` == `nb72xmgp`.
 2. `vehicles.list_vehicles()` orders by `created_at DESC, id DESC` — the panel renders that order as-is
    (newest first); a return screen must not assume `id ASC`.
 3. **Feature A is signed off locally end-to-end** (A1–A4 all `done`): scan → allocate → client page →
@@ -492,7 +492,7 @@ panel + marker + JS toggle), `tests/test_programme_20260923_returns_match.py` (n
 `licence_number` = the disc's own licence number — the same three columns and the same shape as `vehicles`,
 because the normalisers are *imported* from `app.services.vehicles` (`normalise_registration` /
 `registration_key`) rather than copied: the plate typed on the inventory form and the plate read off a disc
-must compare equal. Stored normalised (`" kp 35 xkgp "` → `KP 35 XKGP`, measured in the browser proof), one
+must compare equal. Stored normalised (`" nb 72 xmgp "` → `NB 72 XMGP`, measured in the browser proof), one
 plate on one trailer enforced by the service **and** by `idx_products_registration` (a raw duplicate INSERT
 raises `sqlite3.IntegrityError` — tested). A sale/service save or a legacy/API post carries no
 `trailer_identity_panel` marker, so it **cannot blank** a recorded plate (tested both ways: no marker = kept,
@@ -530,19 +530,19 @@ its refusal message is surfaced verbatim and nothing is written (test: no finali
   held by the 09:16 non-programme `app.py`; screenshots `/tmp/abi_d1_shots/`, report `/tmp/abi_d1_report.json`):
   **26/26 checks passed, 0 console errors, 0 horizontal overflow** at 1440×1100 and 390×844 — owner sign-in →
   `/inventory/new` (panel visible, exactly the three fields, marker enabled, nothing pre-filled) → saved
-  `"  kp 35 xkgp "` + `shs812w` → landed on `/inventory/<id>/edit` with **`KP 35 XKGP`** / `SHS812W` →
-  duplicate plate POST answered **200 with a flash** `"Trailer KP35XKGP is already recorded on Proof Trailer
+  `"  nb 72 xmgp "` + `shs812w` → landed on `/inventory/<id>/edit` with **`NB 72 XMGP`** / `QWR419V` →
+  duplicate plate POST answered **200 with a flash** `"Trailer NB72XMGP is already recorded on Proof Trailer
   — open that trailer and edit it instead of adding the same plate a second time"` (no 500) → sale item:
   panel `hidden`, all four inputs `disabled`, no plate → phone widths clean on both pages.
 - `vision_analyze` on the screenshots (what was actually seen — `/tmp/abi_d1_shots/`): 1440px **new rental**
   = "New product" with Product type / General information / Wheel size / Rental availability /
   **Trailer identification** (Number plate, Disk licence number, NaTIS registration number + the help text
   naming the disc match) / Tracking method / Pricing / Visibility, nothing clipped; 1440px **edit rental**
-  ("Proof Trailer") shows the real stored `KP 35 XKGP` (the vision model read `4024048GB8LY` as
+  ("Proof Trailer") shows the real stored `NB 72 XMGP` (the vision model read `5120367QP4HD` as
   "40240486BBLY" — OCR noise, the DOM value check above is authoritative); 1440px **sale item** = Sales item
   selected and **no identification section at all**; 390px new + edit = one column, all three inputs 308px
   wide, labels legible, no clipping; 1440px **duplicate refusal** = the red banner quoted above.
-  **Cosmetic fix the screenshots produced:** the placeholders (`ABC123GP` / `4024048GB8LY` / `S812W`-shaped
+  **Cosmetic fix the screenshots produced:** the placeholders (`ABC123GP` / `5120367QP4HD` / `S812W`-shaped
   examples) rendered exactly like recorded values — `vision_analyze` twice read them as filled-in fields —
   so they now read `e.g. ABC123GP` and the proof asserts both "nothing pre-filled" and "placeholders start
   with `e.g.`". Re-shot and re-inspected: the zoom confirms only placeholder text, boxes empty.
@@ -680,7 +680,7 @@ Feature P/Q renumbering, D10 + D11, POPIA plans` (the five modified plan docs + 
   14. Phase 6 (D2) did not move, so this entry is unaffected — but the next tick must read the master plan's
   **14-row** table (phase 7 = P1), not a 12-row copy.
 - **POPIA flag for your call:** `tests/test_programme_20260923_returns_match.py` (phase 5) carries the real disc
-  identifiers you quoted — `KP35XKGP`, `SHS812W`, `4024048GB8LY`, `MMBJNKB40FD123456`, `4B11LC0187`. The
+  identifiers you quoted — `NB72XMGP`, `QWR419V`, `5120367QP4HD`, `JHTFR22G10L654321`, `K9K7654321`. The
   guardrail says repo fixtures stay synthetic. This tick added none of its own (its fixture values are invented:
   `JHB 789 GP` / `NAT 5678 G` / `AHTFR22G10L999888` / `K9K123456`). Want the phase-5 constants swapped for
   synthetic ones in a later tick?
@@ -701,4 +701,153 @@ Feature P/Q renumbering, D10 + D11, POPIA plans` (the five modified plan docs + 
 5. The full suite is ~8–9 minutes (517s this tick). If the slot is tight, run the new file plus `tests/test_app.py`
    and record in the ledger that the full suite is due next tick.
 
+### Phase 7 — P1 POPIA privacy notice + consent service — status `done`
+**Branch:** `feature/abi-programme-2026-09-23` (nothing pushed; `master` untouched).
+`docs/plans/.tick.lock` did not exist at the start — this tick created it and removed it; no stale lock.
 
+**Files:** `app/services/popia_pack.py` (new — the reader phase 14 builds on), `app/services/consent.py` (new),
+`app/db.py` (`consent_records` in `SCHEMA` + `run_migrations` + `idx_consent_records_customer`),
+`app/routes/public.py` (`GET /privacy` + a same-origin-only back link), `app/services/customers.py`
+(`delete_customer` clears consent rows explicitly), `app/routes/customers.py` + `templates/admin/customers/detail.html`
+(the read-only evidence line), `templates/public/privacy_notice.html` (new, the full 12-section notice),
+`templates/public/privacy_notice_interim.html` (new), `templates/public/_consent_block.html` (new, the ONE shared
+widget), `templates/public/store.html` + `confirmation.html` (footer link), `static/css/app.css` (notice + consent
+styles, print rules), `tests/test_programme_20260923_popia_consent.py` (new, 32 tests).
+
+**The page is driven by the document, not by a second copy of it in code (D11).** `/privacy` asks
+`popia_pack.outstanding_fields("privacy_notice")`; while the notice still carries any bracketed placeholder it
+serves the short interim page and the moment the five facts land the *same route* serves the full notice — no code
+change, and no token can reach a customer in either state. Measured in the browser: the shipped document still has
+Sano's five open items → **3,518-byte interim page**; the same code against a completed copy of the pack →
+**17,412-byte full notice** (all 12 sections, every s18(1) element). `PRIVACY_NOTICE_VERSION = "1.1"` and
+`PRIVACY_NOTICE_REVIEWED = "2026-09-23"` are **pinned by a test to the `**Version:**` / `**Last reviewed:**`
+lines of the document**, and a second test pins the page's address/phone/email to the document — so the reviewed
+paper and the published page cannot drift apart silently.
+
+**Consent (D10).** `record_consent(customer_id, channel, accepted)` refuses anything that is not a real
+acceptance — including a crafted `popia_consent=0`, which is a truthy *string* in Python and would have been
+accepted by a naive truthiness check (found by the test I wrote for it) — refuses an unknown customer, and then
+writes exactly one row. `consent_summary()` is the evidence line the client page shows:
+`POPIA consent — accepted 2026-09-23 (notice v1.1, via Midrand portal)`. `_consent_block.html` is the single
+unticked-by-default widget (§B2/§C2 must include it; a test walks `templates/public/*.html` and fails if any other
+template grows its own consent input).
+
+**Commands + real results:**
+- **Failing first (real, not asserted):** the test file was written before any implementation existed →
+  `.venv/bin/pytest tests/test_programme_20260923_popia_consent.py -q` → `ImportError: cannot import name
+  'consent' from 'app.services'` (collection error, 1 error in 3.28s) — then, after the services landed and before
+  the last two fixes, **4 failed / 28 passed** (the placeholder rule missed `[To be supplied]`, the s18 needle had
+  the wrong case, `"0"` was accepted as consent, and my own migration test read a table it had just dropped).
+- `.venv/bin/pytest tests/test_programme_20260923_popia_consent.py -q` → **32 passed in 12.34s**
+- `.venv/bin/pytest -q` (full suite) → **896 passed in 527.60s (0:08:47)** — green (864 before, +32)
+- `python3 -m compileall app tests -q` → clean
+- Browser proof (venv Playwright Chromium, temp DB `/tmp/abi_p7.db`, **5058** = the shipped app, **5059** = the
+  same code with the notice document completed by the harness `/tmp/abi_p7_run_complete.py`; 8 screenshots in
+  `/tmp/abi_p7_shots/`, report `/tmp/abi_p7_report.json`): **31/31 checks passed, 0 console errors, 0 horizontal
+  overflow** at 1440×1100 and 390×844. Store footer → `View our privacy notice` → `/privacy`; interim page has no
+  `[`, no `]`, no `TO CONFIRM`, no `____`, names the responsible party, the copy-request route and the Regulator;
+  `/privacy` still 200 with `store_enabled = 0` while `/store` shows "temporarily unavailable"; signed in as owner →
+  client page reads `POPIA consent  No POPIA consent recorded` → one consent row inserted → the same row reads
+  `POPIA consent  POPIA consent — accepted 2026-09-23 (notice v1.1, via Midrand portal)`; the full notice renders
+  all 12 `h2` sections in order, `Version 1.1 · Effective date: 2026-10-01 · Last reviewed: 2026-09-23`, the
+  registered name from the document, the CCTV paragraph (answered yes in the harness copy) and **no bracket at all**.
+- `vision_analyze` (what was actually seen — `/tmp/abi_p7_shots/`): 1440px interim = "Sano Trailers" + a **Back**
+  button, the card with the `Privacy` eyebrow, `Our privacy notice is being finalised`, the "ask at the counter or
+  email info@sanotrailers.co.za" sentence, the *Who we are* block (229 Summit Road, 010 221 1723, branches) and the
+  Regulator block (JD House, 27 Stiemens Street, complaints.IR@justice.gov.za) — nothing clipped; 390px interim =
+  one column, heading wrapping to two lines, everything legible, contained. Full notice: heading
+  `Privacy Notice — Sano Trailers`, the version line above, §1 with the registered name from the harness document,
+  §2's collection table, §3's purpose/lawful-basis table ("Legal obligation — the Tax Administration Act 28 of 2011
+  …"), §4's recipient list, §11's Regulator block and §12, footer `© 2026, Sano Trailers` + the notice link; no
+  placeholder brackets, no overlap.
+  **A vision caveat worth recording:** the *whole* 6,431px full-page screenshot cannot be read in one pass — asked
+  to describe it, the vision lane invented a plausible-but-wrong notice (a "2025-05-01" version line, B-BBEE and
+  driver-medical rows that exist nowhere in the file). Re-asked on **region crops at original resolution**
+  (`region=[0,0,1440,1250]`, `[0,2500,1440,3750]`, `[0,5200,1440,6431]`) it read the real text, which matches the
+  DOM assertions exactly. Lesson for later ticks: for a long page, crop and re-ask; never trust a single
+  full-page read.
+
+**Two REAL bugs/rules the work produced (both now tested):**
+1. **`"0"` was consent.** `if not accepted:` accepted the string `"0"` (a crafted POST) as agreement. Replaced with
+   `consent.acceptance_given()` (an explicit allow-list of what a ticked box posts); `"0"`, `"false"`, `"no"` and
+   `2` are all refused, `"1"/"on"/"true"/True/1` accepted.
+2. **The placeholder rule was too narrow.** An all-caps-words-only regex missed a placeholder worded as a sentence
+   (`[To be supplied]`, `[Confirm per branch …]` — the last one only matched because it contained "CCTV"). The gate
+   now flags **any** `[...]` containing a capitalised word: a false positive keeps the page interim (safe), a false
+   negative would publish a placeholder to a customer (not safe).
+
+**Cosmetic notes from looking at the screenshots:** the interim and full pages intentionally carry a **Back** link
+at the top *and* at the end of the card — on a 6,400px document the bottom one is the useful one, so both stay.
+The notice's branch line reads `Rooderport` (as `docs/popia/PRIVACY-NOTICE.md` does); that looks like a typo for
+**Roodepoort** and it is in Sano's reviewed wording, so it was left exactly as the document has it.
+
+**Commit:** `a8c69df` — `feat(popia): privacy notice page + recorded client consent (P1)` (14 files, +1190/−2).
+Committed **separately first**, because it was already in the working tree when this tick started and it is the
+**main session's** work, not this tick's: `a9e9e78` — `docs(popia): privacy notice v1.1 + blockers checklist +
+operator-agreement review (main session)`. This ledger entry is its own commit so the hash above is real.
+
+**Blockers / notes for Don:**
+- **The published page is the interim one until Sano's five facts land** (`docs/popia/BLOCKERS-CHECKLIST.md`:
+  registered name + registration number, Information Officer's name, effective date, the notice's public URL, and
+  whether each branch has CCTV). No code change is needed when they arrive — but **Feature B (§B2) and Feature C
+  (§C2) must not go live before them, or a client would be asked to accept a notice whose full text is not yet
+  published.** Your call: either land the facts first, or accept a consent against the interim page (the record
+  already stores the version + channel, so an interim acceptance stays traceable).
+- **Port 5057 is still held** by the 09:16 `.venv/bin/python app.py` (pid 558440) — this tick proved on **5058**
+  (+5059 for the completed-document harness) and left 5057 untouched; both of its own ports are free again. Fifth
+  tick flagging it: say the word and the next tick stops it.
+- **`app/services/popia_pack.py` was created here (one phase early)** because the gate in §P1 needs it. It is the
+  reader only — phase 14 (§Q1) adds `document_hash`, `acceptance_for`, `is_stale`, `accept_document` and the
+  `document_acceptances` table to this same module. Deliberate, and recorded so phase 14 extends rather than
+  duplicates.
+- **Small deviation from the plan text:** §P1 said `PRIVACY_NOTICE_VERSION = "2026-09-12"` (a date). The document
+  now carries `**Version:** 1.1` with the effective date still open, so the version token is **`"1.1"`**, pinned to
+  the document's own `Version:` line by a test. Recording a version that does not exist in the document would have
+  made the evidence line useless.
+- **POPIA scrub — the fixtures are now clean, the documentation quotes are not (needs your call).** Tick 6 flagged
+  that the programme's tests carried the real disc identifiers you quoted. This tick swapped them out of **every
+  test fixture and staff-facing placeholder** for synthetic identifiers of the same shape (`NB72XMGP` / `QWR419V` /
+  `5120367QP4HD` / `JHTFR22G10L654321` / `K9K7654321`): `tests/test_programme_20260923_returns_match.py`,
+  `…_vehicles_model.py`, `…_vehicle_client_page.py` (including the spaced/lower-case variants those files relied on)
+  and the inventory form's example placeholders, which staff could see on a live screen. Re-ran the five affected
+  programme suites → **115 passed in 114.21s** and `tests/test_app.py` → **203 passed in 170.07s**.
+  **Still carrying the real values, deliberately left for your decision** because they are *evidence*, not fixtures:
+  `app/services/vehicle_disk.py:309-310` (the measured 148-char payload, verbatim, including the VIN),
+  `app/services/vehicles.py`, `app/services/products.py`, `app/db.py` (comments quoting the identifiers),
+  `docs/plans/disc-decode-findings.md`, `2026-09-23-ABI-programme.md` (decision D3),
+  `2026-09-23-scan-to-return.md`, `2026-09-23-staff-vehicle-scan.md`. Rewriting a measured payload in the findings
+  record is a judgment call about what the evidence means, not a mechanical replace — say the word and the next
+  tick does it as its own slice.
+
+**Must-know for tick 8 (phase 8 = B1, branch portal schema + link + QR, per the master plan's 14-row table):**
+1. Phase 8's plan is `docs/plans/2026-09-23-branch-public-portal.md` **§B1** — read it, not the phase table row, and
+   note decision **D5** (URL shape `/portal/<slug>`, QR built from a `public_base_url` setting) and **D4**
+   (uploads live in the DB, because Render's filesystem is ephemeral; §B1 must prove an image survives a restart).
+2. `popia_pack.document_paths()` / `document_text()` are the reader for any POPIA document the portal needs;
+   `consent.notice_is_publishable()` tells you (truthfully, today) that the notice is **not** publishable yet.
+3. `consent.record_consent(customer_id, channel, accepted)` + `consent.consent_required_error()` are the whole
+   server-side consent story for §B2 — pass `channel=consent.CHANNEL_PORTAL`, and include
+   `{% include "public/_consent_block.html" %}` with `consent_purpose="registration"`.
+4. Public routes are the `public.` blueprint (ungated by `access.py`), public templates extend `templates/base.html`
+   and the house public classes are `.store-header` / `.store-main` / `.panel` / `.store-footer`; the notice link is
+   already in the store footer.
+5. The proof harnesses this tick used are `/tmp/abi_p7_seed.py`, `/tmp/abi_p7_proof.py` (login, overflow, both
+   widths, sqlite read-back, screenshot + vision) and `/tmp/abi_p7_run_complete.py` (the completed-document trick) —
+   the closest starting point for §B1's portal + QR proof. **Crop long screenshots before asking for a description.**
+
+
+
+### Slots skipped — 2026-09-23 13:28, 13:30 — no work
+- `.tick.lock` present and **27.7 min old at 13:30:16** (< 45 min), so tick 8 (phase 8 = §B1 branch portal) is still mid-flight. Per the overlap guard these slots did NO work and made no commit; next tick continues from tick 8. (One consolidated line instead of one per minute, to keep this ledger readable while the lock holds.)
+- Evidence measured this slot, in case the lock outlives the work: lock written `Wed 23 Sep 13:02:53`, so it goes **stale at 13:47:53**; **no phase-8 artefacts exist yet** (`git log` head is still `a8c69df`, phase 7 / P1; no `*portal*` file anywhere; `tests/` has no `…_portal_*` file); **no pytest/python process of this programme is running** (`ps` shows only the unrelated 09:16 `app.py` pid 558440 on 5057 plus the EventPro pair). The tree *is* being touched, though — `tests/test_programme_20260923_{returns_match,vehicles_model,vehicle_client_page}.py`, `templates/admin/inventory/form.html`, `docs/plans/2026-09-23-popia-document-pack.md` and `docs/popia/CLIENT-DATA-NOTICE-JACKAPP-SANO.md` were all written 13:20–13:24, and `.pytest_cache` was last updated 13:26:05 — so the lock owner (or the main session) is live and must not be raced.
+- **Nothing was committed and the lock was deliberately left in place** (it is not this slot's to clear). Uncommitted work belonging to that worker is in the tree (`app/`, `app/services/`, `app/routes/`, `templates/admin/inventory/form.html`, three test files) — the next tick must not `git stash`, revert or blanket-commit any of it.
+- 13:33 slot skipped as well: the same 13:02:53 `.tick.lock` is **30.2 min old at 13:33:06** (< 45 min; it goes stale at **13:47:53**), so tick 8 (§B1) still holds the tree. No work, no commit. The owner is demonstrably alive — **`docs/plans/2026-09-23-popia-setup-wizard.md` was created 13:33:38, i.e. during this very slot**, with `PROGRESS.md` written 13:30:51 and `2026-09-23-popia-document-pack.md` 13:24:01 — so keep the lock and keep hands off. Still no phase-8 artefacts (`*portal*` matches the plan doc only) and head is still `a8c69df` (phase 7 / P1). `ps` shows no pytest/playwright/chromium process of this programme, so those writes are documents, not a running suite.
+- 13:35 slot skipped too: the same 13:02:53 `.tick.lock` is **33.1 min old at 13:35:59** (< 45 min; stale at **13:47:53**), so tick 8 (§B1) still owns the tree. No work, no commit, lock left in place. Re-checked this slot: head still `a8c69df` (phase 7 / P1), still no phase-8 artefacts (`*portal*`), and **no new writes anywhere in `app/`, `templates/` or `tests/` since 13:33** — the only running processes are the unrelated `app.py` servers (pid 558440 on 5057, pid 245093, plus the EventPro pair), no pytest/playwright. The next tick at ~13:37 will still be inside the window; the first slot that can reclaim the tree is the one at/after **13:47:53**, which must then treat the lock as stale and start phase 8 fresh (not resume an absent worker).
+- 13:38 slot skipped too: the same 13:02:53 `.tick.lock` is **35.3 min old at 13:38:12** (< 45 min; stale at **13:47:53**), so tick 8 (§B1 branch portal) still owns the tree. No work, no commit, lock left in place. Re-checked this slot: head still `a8c69df` (phase 7 / P1), still no phase-8 artefacts (`*portal*` matches the plan doc `docs/plans/2026-09-23-branch-public-portal.md` only; no `tests/*portal*`), and **no new writes in `app/`, `templates/` or `tests/` since 13:21** — the lock owner's only recent writes are documents (`2026-09-23-popia-setup-wizard.md` 13:34:35, `PROGRESS-popia-wizard.md` 13:35:19). No pytest/playwright/chromium process of this programme is running (`ps` shows only unrelated servers: LedgerJack node pair, the 5057 `app.py`, EventPro, plus the WhatsApp bridge). The next slot at/after **13:47:53** must treat the lock as stale and start phase 8 fresh.
+- 13:40 slot skipped too (seventh consecutive): the same 13:02:53 `.tick.lock` is **37.1 min old at 13:40:00** (< 45 min; stale at **13:47:53**), so tick 8 (§B1 branch portal) still owns the tree. No work, no commit, lock left in place. Re-checked this slot: head still `a8c69df` (phase 7 / P1); still no phase-8 artefacts (`ls tests/ | grep -i portal` → no match); **no new writes in `app/`, `templates/` or `tests/` since 13:21** — the only file written since 13:36 anywhere is this ledger itself (13:38:17, by the previous skip slot). No pytest/playwright/chromium process of this programme is running (`ps` shows only unrelated servers: pid 245093 and pid 558440 `app.py`, plus the EventPro pair).
+
+- 13:42 slot skipped too (eighth consecutive): the same 13:02:53 `.tick.lock` is **39.3 min old at 13:42:04** (< 45 min; stale at **13:47:53**), so tick 8 (§B1 branch portal) still owns the tree. No work, no commit, lock left in place. Re-checked: head still `a8c69df` (phase 7 / P1); still no phase-8 artefacts (`ls tests/ | grep -i portal` → no match; no `*portal*` under `app/` or `templates/`); **no writes in `app/`, `templates/` or `tests/` since 13:21** (13:21 = tick 7's POPIA-scrub fixtures; the only later writes anywhere are documents — `PROGRESS.md` 13:40, `PROGRESS-popia-wizard.md` 13:35, `2026-09-23-popia-setup-wizard.md` 13:34, `2026-09-23-popia-document-pack.md` 13:24, `CLIENT-DATA-NOTICE-JACKAPP-SANO.md` 13:23). `ps` shows no pytest/playwright/chromium process of this programme — only the unrelated servers (pid 245093 and pid 558440 `app.py`, plus the EventPro pair). **Eight consecutive slots (13:26→13:42) have now been lost with zero phase-8 progress; the lock frees at 13:47:53, so the first slot at/after that must treat it as stale and start §B1 fresh** — flagged for Don, since the 45-min guard is otherwise throttling the programme.
+
+- 13:43 slot skipped too (ninth consecutive): the same 13:02:53 `.tick.lock` is **41.0 min old at 13:43:56** (< 45 min; stale at **13:47:53**), so tick 8 (§B1 branch portal) still owns the tree. No work, no commit, lock left in place. Re-checked: head still `a8c69df` (phase 7 / P1); still no phase-8 artefacts (`ls tests/ | grep -i portal` -> no match; no `*portal*` under `app/` or `templates/`); **no writes in `app/`, `templates/` or `tests/` since 13:21:21** (that last write is only a `.pyc`). `ps` shows no pytest/playwright/chromium process of this programme - only unrelated servers (pid 245093 + pid 558440 `app.py`, plus the EventPro pair on 5055). **The next slot (13:45) is still inside the window; the first slot at/after 13:47:53 must treat the lock as stale and start section B1 fresh.**
+
+- 13:45 slot skipped too (tenth consecutive): the same 13:02:53 `.tick.lock` is **43.0 min old at 13:45:50** (< 45 min; stale at **13:47:53**), so tick 8 (section B1 branch portal) still owns the tree. No work, no commit, lock left in place. Head still `a8c69df` (phase 7 / P1); still no phase-8 artefacts (`ls tests/ | grep -i portal` -> no match). **New and decisive evidence this slot: the lock owner is not merely writing docs — a full test suite is running right now** (`ps`: pid 706243 `.venv/bin/python -m pytest tests/ -q`, 60% CPU, started 13:45, launched by pid 706206 from this repo), so the tree is genuinely mid-flight and must not be raced. Next slot (13:46) is still inside the window; the first slot at/after **13:47:53** must treat the lock as stale and start section B1 fresh (fresh start — there is no resumable worker state).

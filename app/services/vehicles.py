@@ -6,7 +6,7 @@ fields; this module is where those fields become a real record, one per client.
 House rules that this module is responsible for:
 
 * **One owner per registration.** ``vehicles.registration`` holds the NUMBER PLATE
-  (decision D3: ``KP35XKGP``), and a non-blank registration belongs to exactly one
+  (decision D3: ``NB72XMGP``), and a non-blank registration belongs to exactly one
   customer. A second customer claiming it gets a ``ValueError`` — never a silent
   second row and never an automatic transfer (A3 offers the transfer explicitly).
   The column also carries a partial unique index as a database-level backstop.
@@ -64,8 +64,8 @@ def _text(value):
 def normalise_registration(value):
     """The stored shape of a number plate: upper case, inner whitespace collapsed.
 
-    Storing one shape is what makes the unique index a real constraint: ``kp 35 xkgp``
-    and ``KP35XKGP`` are the same vehicle to a traffic officer, so they must be the
+    Storing one shape is what makes the unique index a real constraint: ``nb 72 xmgp``
+    and ``NB72XMGP`` are the same vehicle to a traffic officer, so they must be the
     same row here.
     """
     return " ".join(_text(value).upper().split())
@@ -75,7 +75,7 @@ def registration_key(value):
     """A comparison key for a plate: upper case, all whitespace removed.
 
     Used wherever two plates have to be proved the same without depending on how they
-    were typed (``KP 35 XKGP`` == ``KP35XKGP`` == ``kp35xkgp``).
+    were typed (``NB 72 XMGP`` == ``NB72XMGP`` == ``nb72xmgp``).
     """
     return re.sub(r"\s+", "", _text(value).upper())
 
@@ -210,7 +210,7 @@ def fields_from_disc(parsed):
     The mapping is explicit because the parser's key names and the column names disagree:
     ``parse_disc_text()`` returns the **number plate** under ``licence_number`` (it mirrors
     ``saDiscParser.ts``'s ``licenceNumber``), while ``vehicles.licence_number`` is the disc's own
-    licence number (``4024048GB8LY``). Copying the parser dict straight into a vehicle row would
+    licence number (``5120367QP4HD``). Copying the parser dict straight into a vehicle row would
     put the plate in the licence-number column — the trap tick 2 flagged for A3.
 
     Masses come back as ``float | None`` from the parser and are handed to the form as text, where

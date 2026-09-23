@@ -68,7 +68,7 @@ glare-heavy phone photo, and a badly-lit counter photo is the realistic failure 
 ## 3. The real payload is POSITIONAL, and the port handles it
 
 ```
-%MVL1CC53%0148%4522A001%1%4024048GB8LY%KP35XKGP%SHS812W%Station wagon / Stasiewa%MITSUBISHI%ASX%White / Wit%JMYXTGA2WDZ000956%4B11LC0187%2027-07-31%
+%MVL1CC53%0148%4522A001%1%5120367QP4HD%NB72XMGP%QWR419V%Station wagon / Stasiewa%MITSUBISHI%ASX%White / Wit%JHTFR22G10L654321%K9K7654321%2027-07-31%
 ```
 
 148 characters, `%`-delimited, **no labels and no `|`/newline separators** — so it cannot be
@@ -81,11 +81,11 @@ Measured parse of the **real 148-char payload** before and after that branch:
 
 | field | reference sniffer only | with the positional branch |
 |---|---|---|
-| `licence_number` | `KP35XKGP` | `KP35XKGP` |
+| `licence_number` | `NB72XMGP` | `NB72XMGP` |
 | `make` / `model` | `MITSUBISHI` / `ASX` | `MITSUBISHI` / `ASX` |
 | `colour` | *(empty)* | **`WHITE`** |
-| `vin` | `JMYXTGA2WDZ000956` | `JMYXTGA2WDZ000956` |
-| `engine_number` | **`MVL1CC53`** (the form identifier — wrong) | **`4B11LC0187`** |
+| `vin` | `JHTFR22G10L654321` | `JHTFR22G10L654321` |
+| `engine_number` | **`MVL1CC53`** (the form identifier — wrong) | **`K9K7654321`** |
 | `expiry_date` | `2027-07-31` | `2027-07-31` |
 | `vehicle_type` | `STATION WAGON` | `STATION WAGON` |
 | `tare_kg` / `gvm_kg` | `None` / `None` | `None` / `None` |
@@ -96,7 +96,7 @@ Two consequences worth knowing:
 1. **No tare, no GVM anywhere in this payload.** A modern disc simply does not carry the mass
    fields `saDiscParser.ts` looks for (and never a towing capacity — D3 stands). So `tare_kg` and
    `gvm_kg` are blank-by-default in phase 2 and `towing_capacity_kg` is strictly staff-typed.
-2. **The three identifier fields are NOT guessed.** `4024048GB8LY`, `KP35XKGP`, `SHS812W` are
+2. **The three identifier fields are NOT guessed.** `5120367QP4HD`, `NB72XMGP`, `QWR419V` are
    three identifiers in a row (the printed labels are *Voertuigregistrasienommer*, *Lisensie…*,
    *Voertuigidentifikasienommer*); the counter's plate regex takes the one that looks like a Gauteng
    plate (`KP 35 XK GP`) as the licence number and the other two are returned in `unparsed_fields`
@@ -168,7 +168,7 @@ machine without Don's photo.
 
 ## 7. Open for Don / next tick
 
-1. **Which identifier is which** (`4024048GB8LY` vs `KP35XKGP` vs `SHS812W`) — needs a photo of a
+1. **Which identifier is which** (`5120367QP4HD` vs `NB72XMGP` vs `QWR419V`) — needs a photo of a
    full disc face, or your word for it. Until then the two unused ones are surfaced for staff.
 2. **Towing capacity source** (master-plan open question 1) — confirmed absent from the payload;
    the field stays staff-typed with help text.
@@ -182,8 +182,8 @@ disc, the heavy engine is unnecessary, the layout is positional, there is no mas
 tick follows it on all four. Two of its details did **not** reproduce here, and the difference
 matters for the port:
 
-* It says the plate regex "scans `4024048GB8LY` and matches the inner `GB8LY`". Measured: it does
+* It says the plate regex "scans `5120367QP4HD` and matches the inner `GB8LY`". Measured: it does
   not — `\b` blocks that match (the `8` before `G` is a word character), so the plate lands
-  correctly on `KP35XKGP`. The percent branch is wrong about other things, not this one.
+  correctly on `NB72XMGP`. The percent branch is wrong about other things, not this one.
 * It says the `\d{3,5}` mass rules "can fire on unrelated tokens". Measured: they do not on this
   payload — the only bare number, `0148`, is rejected by the 300-80000 kg range check.

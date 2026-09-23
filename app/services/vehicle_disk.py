@@ -306,8 +306,8 @@ def is_vin(value: str) -> bool:
 #: The 2026 sample disc decodes to a `%`-delimited record whose field ORDER carries the meaning —
 #: there are no labels and no `|`/newline separators to sniff, so the heuristic passes below
 #: cannot be trusted to place every field. Measured on the real payload:
-#:   %MVL1CC53%0148%4522A001%1%4024048GB8LY%KP35XKGP%SHS812W%Station wagon / Stasiewa%
-#:   MITSUBISHI%ASX%White / Wit%JMYXTGA2WDZ000956%4B11LC0187%2027-07-31%
+#:   %MVL1CC53%0148%4522A001%1%5120367QP4HD%NB72XMGP%QWR419V%Station wagon / Stasiewa%
+#:   MITSUBISHI%ASX%White / Wit%JHTFR22G10L654321%K9K7654321%2027-07-31%
 #: split('%') -> [ '', 'MVL1CC53', '0148', '4522A001', '1', then the fields below ]
 #: Only the unambiguous fields are taken here. The three identifier fields (5/6/7) are left to
 #: the generic pass plus review: which of them is the NaTIS registration number and which the
@@ -326,8 +326,8 @@ POSITIONAL_IDENTIFIER_INDEXES = (5, 6, 7)
 
 #: Which identifier sits in which field of the modern layout — **answered by Don on 2026-09-23**
 #: (master plan decision D3): field 5 is the disc's own licence number (*Lisensienommer*,
-#: ``4024048GB8LY``), field 6 is the number plate (``KP35XKGP``) and field 7 is the NaTIS
-#: registration number (``SHS812W`` — "Natis reg is last one"). A1 parked all three as
+#: ``5120367QP4HD``), field 6 is the number plate (``NB72XMGP``) and field 7 is the NaTIS
+#: registration number (``QWR419V`` — "Natis reg is last one"). A1 parked all three as
 #: "unassigned disc identifier" because nothing was allowed to guess at them; now they are placed,
 #: so the A3 scan review form can fill the plate, the NaTIS number and the licence number instead
 #: of showing two mystery tokens. An identifier that fits no known role is still only flagged.

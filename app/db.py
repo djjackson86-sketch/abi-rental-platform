@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS customers (
 
 -- Vehicles recorded against a client (programme phase 2 / feature A, 2026-09-23).
 -- Mostly scanned from a NaTIS licence disc (see app/services/vehicle_disk.py), and the
--- columns follow decision D3 exactly: ``registration`` is the NUMBER PLATE (e.g. KP35XKGP),
+-- columns follow decision D3 exactly: ``registration`` is the NUMBER PLATE (e.g. NB72XMGP),
 -- ``registration_number`` is the NaTIS registration number and ``licence_number`` is the
 -- disc's own licence number. ``tare_kg`` / ``gvm_kg`` are nullable REAL because the real
 -- modern disc payload carries no masses at all — a missing mass stays NULL, never 0 — and

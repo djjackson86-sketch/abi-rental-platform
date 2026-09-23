@@ -29,7 +29,7 @@ image→barcode engine by measurement against a real disc photo.
 **The reference implementation (already written, already shipping in TrailerPro)**
 `/mnt/d/Claude/trailer-rental-app/src/`:
 - `lib/saDiscParser.ts` (379 lines) — **the parser to port.** Documents the three known disc layouts
-  (`saDiscParser.ts:5-8`): (1) label-value pairs (`Make MITSUBISHI\nEngine number 4B11LC0187`),
+  (`saDiscParser.ts:5-8`): (1) label-value pairs (`Make MITSUBISHI\nEngine number K9K7654321`),
   (2) delimited fields (pipe `|`, semicolon `;`, percent `%`, newline), (3) fixed-width positional (older
   discs). Merge precedence to preserve: label-value > percent-delimited > token/fixed-width
   (`saDiscParser.ts:341-357`), plus its `confidence: 'high' | 'low'` output and the "extracted — please
@@ -92,9 +92,9 @@ choice is justified by measurement, and the parser round-trips a synthetic paylo
 - Modify `app/db.py` — add `CREATE TABLE IF NOT EXISTS vehicles (...)` to `SCHEMA` **and** the same
   `CREATE TABLE IF NOT EXISTS` to `run_migrations()`, plus `ensure_column` calls for any later-added column.
   Columns: `id`, `customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE`, `registration
-  TEXT NOT NULL DEFAULT ''` (**the number plate**, e.g. `KP35XKGP` — the primary identifier), `make`, `model`,
-  `year TEXT`, `vin`, `engine_number`, `colour`, `licence_number` (the disc's licence number, `4024048GB8LY`),
-  `registration_number` (the **NaTIS** registration number, `SHS812W`), `control_number`,
+  TEXT NOT NULL DEFAULT ''` (**the number plate**, e.g. `NB72XMGP` — the primary identifier), `make`, `model`,
+  `year TEXT`, `vin`, `engine_number`, `colour`, `licence_number` (the disc's licence number, `5120367QP4HD`),
+  `registration_number` (the **NaTIS** registration number, `QWR419V`), `control_number`,
   `registering_authority`, `vehicle_type`, `tare_kg REAL`, `gvm_kg REAL` (both optional, REAL NULL —
   **no towing capacity column at all**, master plan D3b), `licence_disk_expiry`,
   `raw_scan_text TEXT NOT NULL DEFAULT ''`,

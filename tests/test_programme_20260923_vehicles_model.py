@@ -54,14 +54,14 @@ def other_customer_id(app):
 def _plate_form(customer_id, **overrides):
     form = {
         "customer_id": str(customer_id),
-        "registration": "KP35XKGP",
+        "registration": "NB72XMGP",
         "make": "MITSUBISHI",
         "model": "PAJERO SPORT",
-        "vin": "MMBJNKB40FD123456",
-        "engine_number": "4B11LC0187",
+        "vin": "JHTFR22G10L654321",
+        "engine_number": "K9K7654321",
         "colour": "WHITE",
-        "licence_number": "4024048GB8LY",
-        "registration_number": "SHS812W",
+        "licence_number": "5120367QP4HD",
+        "registration_number": "QWR419V",
         "licence_disk_expiry": "2027-03-31",
         "source": "scan",
     }
@@ -111,14 +111,14 @@ def test_create_vehicle_stores_the_disc_fields(app, customer_id):
         vehicle_id = vehicles.create_vehicle(_plate_form(customer_id))
         row = vehicles.get_vehicle(vehicle_id)
     assert row["customer_id"] == customer_id
-    assert row["registration"] == "KP35XKGP"
+    assert row["registration"] == "NB72XMGP"
     assert row["make"] == "MITSUBISHI"
     assert row["model"] == "PAJERO SPORT"
-    assert row["vin"] == "MMBJNKB40FD123456"
-    assert row["engine_number"] == "4B11LC0187"
+    assert row["vin"] == "JHTFR22G10L654321"
+    assert row["engine_number"] == "K9K7654321"
     assert row["colour"] == "WHITE"
-    assert row["licence_number"] == "4024048GB8LY"
-    assert row["registration_number"] == "SHS812W"
+    assert row["licence_number"] == "5120367QP4HD"
+    assert row["registration_number"] == "QWR419V"
     assert row["licence_disk_expiry"] == "2027-03-31"
     assert row["source"] == "scan"
     assert row["created_at"]
@@ -137,8 +137,8 @@ def test_create_vehicle_defaults_to_manual_and_needs_a_client(app, customer_id):
 
 def test_registration_is_normalised(app, customer_id):
     with app.app_context():
-        vehicle_id = vehicles.create_vehicle(_plate_form(customer_id, registration="  kp35xkgp  "))
-        assert vehicles.get_vehicle(vehicle_id)["registration"] == "KP35XKGP"
+        vehicle_id = vehicles.create_vehicle(_plate_form(customer_id, registration="  nb72xmgp  "))
+        assert vehicles.get_vehicle(vehicle_id)["registration"] == "NB72XMGP"
 
 
 def test_list_vehicles_is_per_customer_and_newest_first(app, customer_id, other_customer_id):
@@ -157,14 +157,14 @@ def test_update_vehicle_changes_fields_and_refreshes_updated_at(app, customer_id
         before = vehicles.get_vehicle(vehicle_id)
         vehicles.update_vehicle(
             vehicle_id,
-            {"registration": "KP35XKGP", "colour": "SILVER", "year": "2019", "tare_kg": "1845"},
+            {"registration": "NB72XMGP", "colour": "SILVER", "year": "2019", "tare_kg": "1845"},
         )
         after = vehicles.get_vehicle(vehicle_id)
     assert after["colour"] == "SILVER"
     assert after["year"] == "2019"
     assert after["tare_kg"] == 1845.0
     # untouched fields are not wiped by a partial edit
-    assert after["vin"] == "MMBJNKB40FD123456"
+    assert after["vin"] == "JHTFR22G10L654321"
     assert after["updated_at"] >= before["updated_at"]
     with app.app_context():
         assert vehicles.update_vehicle(999999, {"registration": "NOPE"}) is False
@@ -184,7 +184,7 @@ def test_vehicle_writes_leave_the_customers_table_untouched(app, customer_id):
     with app.app_context():
         before = dict(get_db().execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone())
         vehicle_id = vehicles.create_vehicle(_plate_form(customer_id))
-        vehicles.update_vehicle(vehicle_id, {"registration": "KP35XKGP", "colour": "BLUE"})
+        vehicles.update_vehicle(vehicle_id, {"registration": "NB72XMGP", "colour": "BLUE"})
         vehicles.delete_vehicle(vehicle_id)
         after = dict(get_db().execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone())
     assert before == after
@@ -213,7 +213,7 @@ def test_a_duplicate_registration_is_blocked_by_the_database_too(app, customer_i
         with pytest.raises(sqlite3.IntegrityError):
             get_db().execute(
                 "INSERT INTO vehicles (customer_id, registration, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (other_customer_id, "KP35XKGP", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+                (other_customer_id, "NB72XMGP", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
             )
 
 
@@ -242,10 +242,10 @@ def test_a_second_customer_cannot_claim_an_owned_registration(app, customer_id, 
         assert "already" in str(excinfo.value).lower()
         # the same plate typed with different case/spacing is the same vehicle
         with pytest.raises(ValueError):
-            vehicles.create_vehicle(_plate_form(other_customer_id, registration=" kp 35 xkgp "))
+            vehicles.create_vehicle(_plate_form(other_customer_id, registration=" nb 72 xmgp "))
         # ... and the owner may still re-save its own vehicle
         owner_vehicle = vehicles.list_vehicles(customer_id)[0]
-        vehicles.update_vehicle(owner_vehicle["id"], {"registration": "KP35XKGP"})
+        vehicles.update_vehicle(owner_vehicle["id"], {"registration": "NB72XMGP"})
         assert len(vehicles.list_vehicles(customer_id)) == 1
 
 
@@ -271,7 +271,7 @@ def test_blank_registration_is_allowed_more_than_once(app, customer_id, other_cu
 def test_customer_for_vehicle_registration_finds_the_owner(app, customer_id, other_customer_id):
     with app.app_context():
         vehicles.create_vehicle(_plate_form(customer_id))
-        owner = vehicles.customer_for_vehicle_registration("kp35xkgp")
+        owner = vehicles.customer_for_vehicle_registration("nb72xmgp")
         nobody = vehicles.customer_for_vehicle_registration("ZZZ999")
         also_nobody = vehicles.customer_for_vehicle_registration("")
         other_owner = vehicles.customer_for_vehicle_registration("ORPH99")

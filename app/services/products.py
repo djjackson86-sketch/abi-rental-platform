@@ -3,7 +3,7 @@ from app.services.access import order_branch_clause, product_branch_clause, sess
 from app.services.settings import global_tax_profile_id
 # Trailer identity is stored exactly like a scanned customer vehicle's, so the two
 # sides of a disc scan agree on one shape: the same plate typed on the inventory
-# form and read off a disc must compare equal ("KP 35 XKGP" == "KP35XKGP"). The
+# form and read off a disc must compare equal ("NB 72 XMGP" == "NB72XMGP"). The
 # normalisers live with the vehicles model (feature A) and are reused here rather
 # than copied, because two spellings of "same plate" is how a plate ends up on two
 # trailers — which would make every scan ambiguous.

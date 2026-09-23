@@ -11,9 +11,9 @@ find the *open rental* it belongs to — plus a call into the return flow that a
 
 | Disc field (148-char payload) | Meaning | ABI column |
 |---|---|---|
-| `KP35XKGP` | **the number plate** (licence plate) | the primary identifier staff see |
-| `SHS812W` | **NaTIS registration number** (Don: "Natis reg is last one") | `registration_number` |
-| `4024048GB8LY` | the disc's licence number (by elimination — the disc's own *Lisensienommer*) | `licence_number` |
+| `NB72XMGP` | **the number plate** (licence plate) | the primary identifier staff see |
+| `QWR419V` | **NaTIS registration number** (Don: "Natis reg is last one") | `registration_number` |
+| `5120367QP4HD` | the disc's licence number (by elimination — the disc's own *Lisensienommer*) | `licence_number` |
 
 **Existing app pieces to reuse — never reimplement:**
 - `TRANSITIONS["return"] = {"from": {"started"}, "to": "returned", "message": "Order returned"}`

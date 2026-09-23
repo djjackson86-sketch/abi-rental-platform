@@ -100,8 +100,8 @@
     <input type="hidden" name="trailer_identity_panel" value="1" data-identity-marker {% if not identity_mode %}disabled{% endif %}>
     <div class="form-grid">
       <label>Number plate<input name="registration" value="{{ product.registration if product else '' }}" placeholder="e.g. ABC123GP" {% if not identity_mode %}disabled{% endif %}></label>
-      <label>Disk licence number<input name="licence_number" value="{{ product.licence_number if product else '' }}" placeholder="e.g. 4024048GB8LY" {% if not identity_mode %}disabled{% endif %}></label>
-      <label>NaTIS registration number<input name="registration_number" value="{{ product.registration_number if product else '' }}" placeholder="e.g. SHS812W" {% if not identity_mode %}disabled{% endif %}></label>
+      <label>Disk licence number<input name="licence_number" value="{{ product.licence_number if product else '' }}" placeholder="e.g. 5120367QP4HD" {% if not identity_mode %}disabled{% endif %}></label>
+      <label>NaTIS registration number<input name="registration_number" value="{{ product.registration_number if product else '' }}" placeholder="e.g. QWR419V" {% if not identity_mode %}disabled{% endif %}></label>
     </div>
     <p class="form-help">Rental trailers only. The same three identifiers a NaTIS licence disk carries: the <b>number plate</b> is the main one &mdash; staff scanning the trailer&rsquo;s disk at return time match on it &mdash; with the disk&rsquo;s own licence number and its NaTIS registration number as extra evidence. Leave blank until the trailer&rsquo;s disk is captured. One plate can only be recorded on one trailer.</p>
   </section>
