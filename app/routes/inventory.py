@@ -9,6 +9,7 @@ from app.routes.auth import login_required
 from app.services.products import (
     WHEEL_SIZES,
     archive_product,
+    assign_products_to_group,
     create_product,
     create_product_group,
     delete_product,
@@ -30,6 +31,7 @@ from app.services.products import (
     update_product,
     update_product_group,
 )
+from app.services import group_images
 from app.services.trailer_service import list_service_history, service_history_label
 from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
@@ -194,7 +196,73 @@ def edit_group(group_id):
         except ValueError as exc:
             flash(str(exc), "error")
     group = get_product_group(group_id)
-    return render_template("admin/inventory/group_form.html", settings=get_company_settings(), group=group, groups=list_product_groups())
+    q = (request.args.get("q") or "").strip()
+    return render_template(
+        "admin/inventory/group_form.html",
+        settings=get_company_settings(),
+        group=group,
+        groups=list_product_groups(),
+        group_image=group_images.group_image_info(group_id),
+        group_products=list_products(product_group_id=str(group_id)),
+        rental_products=list_products(query=q, product_type="rental"),
+        assign_q=q,
+    )
+
+
+@bp.post("/groups/<int:group_id>/image")
+@login_required
+def group_upload_image(group_id):
+    """Upload (or replace) a category photo, stored in the database (decision D4)."""
+    group = get_product_group(group_id)
+    if not group:
+        flash("Product group not found", "error")
+        return redirect(url_for("inventory.index"))
+    upload = request.files.get("group_image")
+    if upload is None or not (getattr(upload, "filename", "") or "").strip():
+        flash("Choose a photo to upload.", "error")
+        return redirect(url_for("inventory.edit_group", group_id=group_id))
+    try:
+        result = group_images.set_group_image(group_id, upload)
+    except group_images.GroupImageError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("inventory.edit_group", group_id=group_id))
+    flash(f"Category photo saved ({result['filename']}).", "success")
+    return redirect(url_for("inventory.edit_group", group_id=group_id))
+
+
+@bp.post("/groups/<int:group_id>/image/clear")
+@login_required
+def group_clear_image(group_id):
+    """Remove a category photo — the store falls back to the category name text block."""
+    group = get_product_group(group_id)
+    if not group:
+        flash("Product group not found", "error")
+        return redirect(url_for("inventory.index"))
+    if group_images.clear_group_image(group_id):
+        flash("Category photo removed — the store will show the category name.", "success")
+    else:
+        flash("That category has no photo to remove.", "info")
+    return redirect(url_for("inventory.edit_group", group_id=group_id))
+
+
+@bp.post("/groups/<int:group_id>/assign")
+@login_required
+def group_assign(group_id):
+    """Bulk link: move every ticked trailer into this category and report how many moved."""
+    group = get_product_group(group_id)
+    if not group:
+        flash("Product group not found", "error")
+        return redirect(url_for("inventory.index"))
+    try:
+        moved = assign_products_to_group(group_id, request.form.getlist("product_ids"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("inventory.edit_group", group_id=group_id))
+    if moved:
+        flash(f"{moved} trailer{'s' if moved != 1 else ''} linked to {group['name']}.", "success")
+    else:
+        flash("No products selected — tick the trailers to link.", "info")
+    return redirect(url_for("inventory.edit_group", group_id=group_id))
 
 
 @bp.route("/export.csv")

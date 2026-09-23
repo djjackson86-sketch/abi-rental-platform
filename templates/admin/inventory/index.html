@@ -110,8 +110,13 @@
               {% for group in grouped_products %}
                 <tr class="inventory-group-row">
                   <td colspan="13">
-                    <strong>▾ {{ group.name }}</strong>
-                    <small>{{ group.products|length }} item{{ '' if group.products|length == 1 else 's' }}{% if group.description %} · {{ group.description }}{% endif %}</small>
+                    <div class="inventory-group-row-head">
+                      <div>
+                        <strong>▾ {{ group.name }}</strong>
+                        <small>{{ group.products|length }} item{{ '' if group.products|length == 1 else 's' }}{% if group.description %} · {{ group.description }}{% endif %}</small>
+                      </div>
+                      {% if group.id != 'ungrouped' %}<a class="btn ghost" href="{{ url_for('inventory.edit_group', group_id=group.id) }}">Manage</a>{% endif %}
+                    </div>
                   </td>
                 </tr>
                 {% for p in group.products %}

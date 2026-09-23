@@ -18,6 +18,7 @@
         <label class="span-2">Group name<input name="name" required value="{{ group.name if group else '' }}" placeholder="Trailers"></label>
         <label>Sort order<input name="sort_order" type="number" value="{{ group.sort_order if group else 0 }}"></label>
         <label class="switch"><input type="checkbox" name="active" value="1" {% if not group or group.active %}checked{% endif %}> Active</label>
+        <label class="switch"><input type="checkbox" name="becomes_store_visible" value="1" {% if not group or group.becomes_store_visible %}checked{% endif %}> Show on the online store</label>
         <label class="span-2">Description<textarea name="description" rows="4" placeholder="Optional staff note shown under the category heading">{{ group.description if group else '' }}</textarea></label>
       </div>
     </section>
@@ -27,27 +28,87 @@
     </div>
   </form>
 
+  {% if group %}
   <section class="panel">
-    <h2>Existing groups</h2>
-    {% if groups %}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead><tr><th>Group</th><th>Status</th><th>Sort</th><th></th></tr></thead>
-          <tbody>
-            {% for row in groups %}
-              <tr>
-                <td><strong>{{ row.name }}</strong><small>{{ row.description }}</small></td>
-                <td>{{ 'Active' if row.active else 'Inactive' }}</td>
-                <td>{{ row.sort_order }}</td>
-                <td><a class="btn ghost" href="{{ url_for('inventory.edit_group', group_id=row.id) }}">Edit</a></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <p class="muted">No groups yet. Create a group such as Trailers, Camping gear, or Sales items.</p>
-    {% endif %}
+    <h2>Category photo</h2>
+    <div class="group-image-preview">
+      {% if group_image.has_image %}
+        <img src="{{ url_for('public.category_image', group_id=group.id) }}" alt="{{ group.name }}">
+      {% else %}
+        <div class="group-image-fallback">{{ group.name[:2].upper() }}</div>
+      {% endif %}
+    </div>
+    {% if group_image.source == 'default:sano' %}<p class="muted"><strong>Default photo</strong> — upload your own to replace it.</p>
+    {% else %}<p class="muted">This photo appears as the section header for this category on the online store. A Sano default can be loaded with the seed script; uploading replaces it.</p>{% endif %}
+    <div class="form-actions">
+      <form method="post" enctype="multipart/form-data" action="{{ url_for('inventory.group_upload_image', group_id=group.id) }}" class="inline-form group-image-form">
+        <input type="file" name="group_image" accept="image/png,image/jpeg,image/webp" aria-label="Choose a category photo">
+        <button class="btn primary">Upload photo</button>
+      </form>
+      {% if group_image.has_image %}
+      <form method="post" action="{{ url_for('inventory.group_clear_image', group_id=group.id) }}" class="inline-form">
+        <button class="btn danger">Remove photo</button>
+      </form>
+      {% endif %}
+    </div>
   </section>
+  {% endif %}
 </div>
+
+{% if group %}
+<div class="panel group-assign-panel">
+  <h2>Trailers in “{{ group.name }}”</h2>
+  {% if group_products %}
+    <ul class="group-current-products">
+      {% for p in group_products %}<li><span class="badge">{{ p.name }}</span></li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No products in this category yet — link trailers below.</p>
+  {% endif %}
+  <form method="get" action="{{ url_for('inventory.edit_group', group_id=group.id) }}" class="group-search">
+    <input type="search" name="q" value="{{ assign_q }}" placeholder="Search trailers to link…" aria-label="Search trailers">
+    <button class="btn ghost">Filter</button>
+  </form>
+  <form method="post" action="{{ url_for('inventory.group_assign', group_id=group.id) }}">
+    <div class="group-assign-list">
+      {% for p in rental_products %}
+        <label class="filter-check">
+          <input type="checkbox" name="product_ids" value="{{ p.id }}" {% if p.product_group_id == group.id %}checked{% endif %}>
+          <span>{{ p.name }}</span>
+          <em>{% if p.product_group_id == group.id %}in this category{% elif p.product_group_id %}in {{ p.product_group_name }}{% else %}ungrouped{% endif %}</em>
+        </label>
+      {% else %}
+        <p class="muted">No rental products to link.</p>
+      {% endfor %}
+    </div>
+    <div class="form-actions">
+      <button class="btn primary">Link ticked trailers</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<section class="panel">
+  <h2>Existing groups</h2>
+  {% if groups %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Group</th><th>Photo</th><th>Status</th><th>Sort</th><th></th></tr></thead>
+        <tbody>
+          {% for row in groups %}
+            <tr>
+              <td><strong>{{ row.name }}</strong><small>{{ row.description }}</small></td>
+              <td>{% if row.image_blob is not none %}✓{% else %}—{% endif %}</td>
+              <td>{{ 'Active' if row.active else 'Inactive' }}</td>
+              <td>{{ row.sort_order }}</td>
+              <td><a class="btn ghost" href="{{ url_for('inventory.edit_group', group_id=row.id) }}">Edit</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">No groups yet. Create a group such as Trailers, Camping gear, or Sales items.</p>
+  {% endif %}
+</section>
 {% endblock %}

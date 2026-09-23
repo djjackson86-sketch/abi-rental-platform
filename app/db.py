@@ -245,6 +245,17 @@ CREATE TABLE IF NOT EXISTS product_groups (
     description TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    -- Category photo (programme phase 11 / feature C §C1, decision D4). The image bytes live in
+    -- the database, never on disk (Render's filesystem is ephemeral). ``image_source`` records
+    -- where the bytes came from: '' = no image, 'default:sano' = a shipped Sano default (set by
+    -- ``scripts/seed_default_group_images.py``), 'upload' = a photo staff chose. ``becomes_store_visible``
+    -- is the on/off switch for the whole category section on the public store, so a category can be
+    -- hidden without deleting its photo or its products.
+    image_blob BLOB,
+    image_mime TEXT NOT NULL DEFAULT '',
+    image_filename TEXT NOT NULL DEFAULT '',
+    image_source TEXT NOT NULL DEFAULT '',
+    becomes_store_visible INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -543,9 +554,22 @@ def run_migrations(db):
         description TEXT NOT NULL DEFAULT '',
         active INTEGER NOT NULL DEFAULT 1,
         sort_order INTEGER NOT NULL DEFAULT 0,
+        image_blob BLOB,
+        image_mime TEXT NOT NULL DEFAULT '',
+        image_filename TEXT NOT NULL DEFAULT '',
+        image_source TEXT NOT NULL DEFAULT '',
+        becomes_store_visible INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )""")
+    # --- Category photos + store visibility (programme phase 11 / feature C §C1) ---
+    # Additive with defaults, so every existing group keeps behaving as it does today: no photo,
+    # and visible on the store. The image bytes stay in the database (decision D4).
+    ensure_column(db, "product_groups", "image_blob", "BLOB")
+    ensure_column(db, "product_groups", "image_mime", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "product_groups", "image_filename", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "product_groups", "image_source", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "product_groups", "becomes_store_visible", "INTEGER NOT NULL DEFAULT 1")
     db.execute("""CREATE TABLE IF NOT EXISTS branches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,

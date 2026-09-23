@@ -74,6 +74,10 @@ def _clean_group(form):
         "name": name,
         "description": form.get("description", "").strip(),
         "active": 1 if form.get("active") else 0,
+        # Programme phase 11 / §C1: a category can be kept in the back office (active) while its
+        # section is hidden from the public store. A checkbox only submits when ticked, so an
+        # absent field means "hidden" — the same convention the product form's ``active`` uses.
+        "becomes_store_visible": 1 if form.get("becomes_store_visible") else 0,
         "sort_order": sort_order,
     }
 
@@ -83,8 +87,8 @@ def create_product_group(form):
     db = get_db()
     try:
         cur = db.execute(
-            """INSERT INTO product_groups (name, description, active, sort_order, created_at, updated_at)
-            VALUES (:name, :description, :active, :sort_order, :created_at, :updated_at)""",
+            """INSERT INTO product_groups (name, description, active, becomes_store_visible, sort_order, created_at, updated_at)
+            VALUES (:name, :description, :active, :becomes_store_visible, :sort_order, :created_at, :updated_at)""",
             {**data, "created_at": now(), "updated_at": now()},
         )
         db.commit()
@@ -104,7 +108,7 @@ def update_product_group(group_id, form):
     try:
         db.execute(
             """UPDATE product_groups SET
-            name=:name, description=:description, active=:active, sort_order=:sort_order, updated_at=:updated_at
+            name=:name, description=:description, active=:active, becomes_store_visible=:becomes_store_visible, sort_order=:sort_order, updated_at=:updated_at
             WHERE id=:id""",
             data,
         )
@@ -114,6 +118,37 @@ def update_product_group(group_id, form):
         if "UNIQUE" in str(exc).upper():
             raise ValueError("A product group with that name already exists") from exc
         raise
+
+
+def assign_products_to_group(group_id, product_ids):
+    """Move the ticked products into a group and return how many rows actually moved.
+
+    Programme phase 11 / §C1's bulk "link these trailers to this category" action. Only existing
+    product ids are touched (the ``IN (...)`` update simply skips a stale id), and every other
+    product — unticked or in another group — is left exactly where it was. ``product_ids`` is a
+    list of strings from ``request.form.getlist('product_ids')``.
+    """
+    if get_product_group(group_id) is None:
+        raise ValueError("Product group not found")
+    ids = []
+    for value in (product_ids or []):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            continue
+        if value and value not in ids:
+            ids.append(value)
+    db = get_db()
+    moved = 0
+    if ids:
+        marks = ",".join("?" for _ in ids)
+        cur = db.execute(
+            f"UPDATE products SET product_group_id = ? WHERE id IN ({marks})",
+            [group_id, *ids],
+        )
+        moved = cur.rowcount
+    db.commit()
+    return moved
 
 
 def list_products(query="", product_type="", visibility="", product_group_id="", branch_id=None):
