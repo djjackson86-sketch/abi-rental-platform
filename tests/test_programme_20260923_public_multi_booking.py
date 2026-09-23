@@ -461,3 +461,36 @@ def test_the_live_estimate_carries_each_trailers_tax_rate(app, client):
     assert 'data-tax-rate="15' in body, "the taxed trailer must publish its profile rate"
     assert 'data-tax-rate="0"' in body, "a trailer with no tax profile must publish a zero rate"
     assert "TAX_MODE" in body, "the estimate must know the app's tax mode"
+
+
+# --- T3b/T3c corrected: what "total" means in this app -------------------------------------------
+# orders.total INCLUDES the refundable deposit (the admin order form builds its estimate the same way:
+# subtotal + tax + waiver + deposit). These pin the rule so the page's estimate, the stored order and the
+# confirmation cannot drift apart again - the drift that shipped a "Total payable" which double-counted it.
+
+def test_a_deposit_is_stored_inside_the_order_total(app, client):
+    profile = tax_profile(app, 15.0)
+    first = make_product(app, "Deposit Trailer A", price=200.0, deposit=500.0, quantity=3, tax_profile_id=profile)
+    second = make_product(app, "Deposit Trailer B", price=100.0, deposit=250.0, quantity=3)
+    response = client.post("/store/book", data=select(select(booking_payload(), first, 1), second, 1), follow_redirects=True)
+    assert response.status_code == 200
+    with app.app_context():
+        order = get_db().execute("SELECT * FROM orders ORDER BY id DESC LIMIT 1").fetchone()
+    assert order["subtotal"] == 600.0, order["subtotal"]          # 200*2 + 100*2
+    assert order["tax_total"] == 60.0, order["tax_total"]          # 15% on the taxed trailer only
+    assert order["deposit_total"] == 750.0, order["deposit_total"]  # 500 + 250, refundable
+    assert order["total"] == 1410.0, order["total"]                # 600 + 60 + 750: the deposit is INSIDE it
+
+
+def test_the_confirmation_describes_the_deposit_as_part_of_the_total(app, client):
+    product = make_product(app, "Deposit Trailer", price=200.0, deposit=500.0, quantity=2)
+    response = client.post("/store/book", data=select(booking_payload(), product, 1), follow_redirects=True)
+    assert b"Estimated total incl. refundable deposit" in response.data
+    assert b"of which refundable security deposit" in response.data
+
+
+def test_the_booking_page_will_label_its_total_as_deposit_inclusive(app, client):
+    make_product(app, "Deposit Trailer", price=200.0, deposit=500.0, quantity=2)
+    body = client.get("/store/book").get_data(as_text=True)
+    assert 'id="estimate-total-label"' in body
+    assert "incl. refundable deposit" in body

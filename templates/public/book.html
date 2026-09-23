@@ -130,7 +130,7 @@
           <div><dt>Rental subtotal</dt><dd id="estimate-subtotal">R0.00</dd></div>
           <div><dt>VAT{% if tax_mode == 'exclusive' %} (added){% elif tax_mode == 'inclusive' %} (included){% endif %}</dt><dd id="estimate-vat">R0.00</dd></div>
           <div><dt>Refundable deposit</dt><dd id="estimate-deposit">R0.00</dd></div>
-          <div class="booking-estimate-total"><dt>Estimated total</dt><dd id="estimate-total">R0.00</dd></div>
+          <div class="booking-estimate-total"><dt id="estimate-total-label">Estimated total</dt><dd id="estimate-total">R0.00</dd></div>
         </dl>
       </div>
 
@@ -181,6 +181,7 @@
   var vatEl = document.getElementById('estimate-vat');
   var depositEl = document.getElementById('estimate-deposit');
   var totalEl = document.getElementById('estimate-total');
+  var totalLabelEl = document.getElementById('estimate-total-label');
   // T3b: the estimate must match what the order will actually charge, so it uses each
   // trailer's own tax profile rate (data-tax-rate) and the app's tax mode, exactly like
   // calculate_line() in app/services/orders.py. The old version always added the global VAT
@@ -236,9 +237,12 @@
     subtotalEl.textContent = 'R' + subtotal.toFixed(2);
     vatEl.textContent = 'R' + tax.toFixed(2);
     depositEl.textContent = 'R' + deposit.toFixed(2);
-    // Same figure the order will store: subtotal + tax. The refundable deposit is listed on
-    // its own line and is not part of the total, which is how the order and confirmation show it.
-    totalEl.textContent = 'R' + (subtotal + tax).toFixed(2);
+    // The same figure the order will store: subtotal + tax + deposit. The deposit is refundable
+    // but it IS part of the total the customer pays, which is how the admin order form builds its
+    // estimate (subtotal + tax + waiver + deposit) and how orders.total is stored. The line above
+    // is the component, not something to add on top again.
+    totalEl.textContent = 'R' + (subtotal + tax + deposit).toFixed(2);
+    if (totalLabelEl) totalLabelEl.textContent = 'Estimated total' + (deposit > 0 ? ' incl. refundable deposit' : '');
   }
 
   [start, end, startTime, endTime].forEach(function (el) { if (el) el.addEventListener('change', recompute); });
