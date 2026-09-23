@@ -121,7 +121,14 @@ Order matters: C1 → C2 → C3 finish the public product; Q1 then W1/W2 finish 
     and looking at it, per the house standard.
   - **(d) Untracked debris to clean or keep:** `=1.18.0`, `app/__init__.py.backup`, `backups/`, `test_invoice.pdf`,
     `.hermes/`.
-- **T3b — DEFECT found by the T3 browser proof, fix before close-out.** The booking page's live estimate shows the
+- **T3b — ✅ FIXED, committed `a43628b`.** Root cause: the page's estimate added the **global** VAT rate to every
+  trailer, while the order charges each trailer's own **tax profile** (`calculate_line`) — on a mixed basket the
+  customer saw R1610 estimated against R1400 stored. The product queries now carry `COALESCE(tax_profiles.rate, 0)`
+  and the estimate mirrors `calculate_line` (exclusive adds on top, inclusive shows the tax inside, no rate means no
+  tax); its total is now subtotal + tax with the deposit on its own line, exactly as the order and confirmation show.
+  Verified in a browser: estimate R1400.00 + R135.00 = **R1535.00** against order ORD-10145 storing subtotal
+  R1400.00 / tax R135.00 / total **R1535.00** — an exact match. Two tests pin it (stored money 600/60/660; rendered
+  per-trailer rates). Original note: **DEFECT found by the T3 browser proof, fix before close-out.** The booking page's live estimate shows the
   **VAT-inclusive** figure (R1610 for a R1400 basket) while the created draft order stores `tax_total = 0` and the
   confirmation page prints `order.total` (**R1400**) as "Estimated total". A customer therefore sees two different
   totals seconds apart. Fix one way or the other: compute VAT onto the draft at creation, or label the form's number
