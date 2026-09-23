@@ -19,7 +19,7 @@
 | 5 | D1 trailer identity + return-matching service | done | tick 5 | `products.registration`/`licence_number`/`registration_number` + partial unique index (one plate = one trailer) + inventory "Trailer identification" panel behind a marker; `orders.return_scan_*` audit; new `app/services/returns.py` (`match_open_rentals`, `returnable_order`, `mark_returned_via_scan` → existing `transition_order(...,"return")`); 37 new tests (34 failed first), full suite **845 green**, browser proof **26/26**, 0 console errors, 0 overflow at 1440px + 390px |
 | 6 | D2 scan-to-return screen + marks returned + proof | done | tick 6 | `/scan-return` capture + review + confirm (`app/routes/returns.py`, new blueprint), one candidate → one "Mark returned", two or more → an explicit choice is required, none → a message + a link to the started-orders list, a repeat scan says "already returned" (`returns.recently_returned()`, added this tick); module `scan_return` + nav entry; the audit line on the order page; evidence named for the value that actually matched; 19 new tests (16 failed first), full suite **864 green**, browser proof **45/45**, 0 console errors, 0 overflow at 1440px + 390px; feature D signed off locally |
 | 7 | P1 POPIA privacy notice + consent service | done | tick 7 | `/privacy` is driven by `docs/popia/PRIVACY-NOTICE.md`: the short **interim page** while any `[PLACEHOLDER]` remains (it does — Sano's five facts), the full 12-section notice the moment they land, no code change (D11). `consent_records` + `app/services/consent.py` (who/version/channel/when only — no IP/UA), one shared unticked consent block for B2/C2, admin evidence line on the client page; 32 new tests, full suite **896 green**, browser proof **31/31** on 5058 + a completed-document harness on 5059 |
-| 8 | B1 branch portal schema + link + QR | pending | | |
+| 8 | B1 branch portal schema + link + QR | done | tick 8 | `branches.public_slug`/`portal_enabled`/`portal_intro` + `company_settings.public_base_url` (additive) with a deterministic slug backfill, `idx_branches_slug` partial unique index, new `app/services/portal.py` (`slugify`/`ensure_slug`/`portal_url`/`qr_png_bytes`/`all_portal_links`), `GET /portal/<slug>` + `GET /portal/<slug>/qr.png` (PNG rendered in-process, encodes the absolute link); 23 new tests (5 failed first), full suite **919 green**, browser proof **23/23**, 0 console errors, 0 overflow at 1440px + 390px, QR decoded back with zxing-cpp |
 | 9 | B2 public form + dedupe + "am I already a customer?" | pending | | **§P1 consent required** |
 | 10 | B3 admin QR/link page with A4 print + browser proof | pending | | |
 | 11 | C1 store categories with photos + multi-trailer linking | pending | | |
@@ -864,3 +864,82 @@ operator-agreement review (main session)`. This ledger entry is its own commit s
 - **Exposure check (good news):** `git log -S KP35XKGP origin/master` is **EMPTY** — these identifiers were never pushed. They exist only in this branch's 15 unpushed commits.
 - **RULE for the merge (POPIA):** when this branch is merged to `master`, do it as **one squashed commit** — never push the intermediate commits, because the pre-scrub commits still carry the real plate/VIN/engine in their diffs. (Rewriting this branch's history before any push is also safe, since it is unpushed.)
 - **For the next main session:** the main job sits at **12/24 fires used with 7 phases to go** (~1.71 fires per finished phase), so the budget needs raising or it stops mid-programme. And the 45-minute stale window let one dead worker burn 10 slots — a shorter window (~20 min) or a heartbeat would self-heal faster. Both are changes to a *running* job, so they wait for Don's OK (he said not to interfere with it).
+
+### Phase 8 — B1 branch portal schema + shareable link + QR — status `done` (tick 8)
+**Branch:** `feature/abi-programme-2026-09-23` · **commit:** `fb2cc24` (the work; this ledger entry is its
+own commit, as tick 7 split them) · **lock:** this slot found the
+13:02:53 lock **51 min old**, the owner's pytest exited at 13:53:47 and its scrub commit `404cc24`
+landed 13:53:58, so the slot re-stamped the lock at 13:54:10 and carried on. The main session's own
+forensic entry (committed separately first as `40ef85c`, because it was already in the tree when this
+tick started) hands §B1 to this tick — phase 8 had **never** been built.
+
+**Files:** `app/db.py` — three additive `branches` columns + `company_settings.public_base_url`, a new
+`_backfill_branch_slugs()` and the partial unique index `idx_branches_slug`; `app/services/portal.py` (new:
+`slugify`, `unique_slug`, `ensure_slug`, `branch_by_slug`, `portal_branch`, `portal_path`, `portal_url`,
+`qr_png_bytes`, `all_portal_links`); `app/services/branches.py` (`create_branch()` now slugs a new branch, so
+its link works before the next app start); `app/routes/public.py` (`GET /portal/<slug>`,
+`GET /portal/<slug>/qr.png`); `templates/public/portal_placeholder.html` (new);
+`static/css/app.css` (`.portal-actions`); `requirements.txt` (`qrcode[pil]==8.2`);
+`tests/test_programme_20260923_portal_links.py` (new).
+
+**Commands + REAL results:**
+- `.venv/bin/pip install "qrcode[pil]"` → `Successfully installed qrcode-8.2`. **Note:** `.venv/bin/pip`
+  does **not** exist in this venv (uv-built, no console script) — `python -m pip` (pip 24.0) works. First
+  tick to hit that; every earlier ledger line saying `.venv/bin/pip` was aspirational.
+- `.venv/bin/pytest tests/test_programme_20260923_portal_links.py -q`, written failing-first: run 1 →
+  `ImportError: cannot import name 'portal' from 'app.services'`; run 2 → **5 failed, 18 passed**;
+  run 3 → **23 passed in 8.37s**.
+- `python3 -m compileall app tests -q` → clean.
+- `.venv/bin/pytest -q` (full suite) → **919 passed in 532.12s (0:08:52)** (896 before + 23 new).
+- `.venv/bin/pytest -q` needed **no** `tests/test_app.py` fallback — the whole suite fits in the slot.
+- Real browser proof (`/tmp/abi_b1_seed.py` + `/tmp/abi_b1_proof.py`, temp SQLite `/tmp/abi_tick_b1.db`,
+  app on **5058**; 5057 is still held by the 09:16 dev server — **sixth tick flagging it, still untouched**)
+  → **23/23 checks, 0 console errors**: `/portal/roodepoort` 200 at 1440px **and** 390px with
+  `scrollWidth == clientWidth` (1440/1440 and 390/390 → 0 horizontal overflow); `/portal/roodepoort/qr.png`
+  200, `image/png`, `public, max-age=86400`, 410×410, PNG magic — and **decoded back with zxing-cpp to
+  `https://sano-trailers.example/portal/roodepoort`**, so the QR really carries the link; unknown slug →
+  **404** for page and QR; a branch with `portal_enabled = 0` → **404** for page and QR.
+  Screenshots `/tmp/abi_b1_shots/*.png`, report `/tmp/abi_b1_report.json`.
+
+**What the screenshots actually showed (`vision_analyze`):** the first draft rendered the link and the phone
+number in `.muted` small print, and the 390px read-back said exactly what the house rule exists to catch —
+both "read as plain, muted grey text … no visual cue that either is tappable". Fixed with a bordered
+`.portal-actions` block (brand colour, `tel:` link) and **re-proved on a restarted server**; the second
+read-back at 1440px and 390px confirms "a distinct bordered block … blue branch link and blue phone link",
+nothing overflowing or broken at either width.
+
+**Two bugs this tick had to fix, both real:**
+1. **Fresh-DB ordering.** `init_db()` creates the three starter branches *after* `run_migrations()`, so the
+   migration's slug backfill never saw them and a brand-new install had three linkless branches. `init_db()`
+   now calls the same idempotent `_backfill_branch_slugs()`. (Caught by `test_backfill_fills_every_blank_slug_on_startup`.)
+2. **Templates are cached with debug off.** After editing the template the proof still "passed" — against
+   the **previous** page, because Flask/Jinja does not auto-reload templates when `debug=False`. The server
+   has to be restarted for a template change, or the browser proof measures the old page. Worth remembering
+   for every later UI phase.
+
+**Decisions taken where the plan was silent (both pinned by tests):**
+- `/portal/<slug>` is **GET-only**: `POST` → **405**. The route sits under the ungated `public.` prefix, so
+  until §B2 builds a form (with honeypot + rate limit + consent) there must be no public write path at all.
+- The portal is **not** gated by `store_enabled`, only by the per-branch `portal_enabled`. A branch handed a
+  printed QR should not go dark because the catalogue is switched off; a disabled portal 404s both routes.
+- The QR's `Cache-Control` is `public, max-age=86400` — long enough for a counter screen, short enough that a
+  corrected `public_base_url` stops being served within a shift.
+
+**DB↔UI parity:** `public_slug` / `portal_enabled` / `portal_intro` have **no admin UI yet** — §B3 owns that
+page (`/settings/portal`). Measured, not assumed: `update_branch()` writes an explicit column list, so the
+admin branch-edit form cannot clobber them, and a test pins that (a rename also does **not** re-slug).
+
+**Must-know for tick 9 (phase 9 = §B2 public form + dedupe + "am I already a customer?"):**
+1. §B2's plan is `docs/plans/2026-09-23-branch-public-portal.md` **§B2**: `GET/POST /portal/<slug>/register`,
+   new `app/services/portal_intake.py`, `templates/public/portal_form.html` + `portal_confirm.html` +
+   `portal_exists.html`, tests `tests/test_programme_20260923_portal_intake.py`.
+2. The §B1 placeholder page and template are §B2's to replace. Reuse `portal.portal_branch(slug)` for the same
+   404 semantics and `portal.portal_url(branch, request.url_root)` when a page needs the canonical link.
+3. Consent is already built: `consent.record_consent(customer_id, channel=consent.CHANNEL_PORTAL, accepted)`,
+   `consent.consent_required_error()`, and `{% include "public/_consent_block.html" %}` with
+   `consent_purpose="registration"`.
+4. **POPIA gate still open:** `consent.notice_is_publishable()` is still `False` (Sano's five facts,
+   `docs/popia/BLOCKERS-CHECKLIST.md`). §B2/C2 must not go live before them — worth Don's call, unchanged.
+5. Restart the smoke server after **any** template edit, or the browser proof measures the previous page.
+6. The `public_base_url` used in the proof (`https://sano-trailers.example`) is a seed value for the temp DB
+   only; nothing in the repo carries it.
