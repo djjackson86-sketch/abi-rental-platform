@@ -20,7 +20,7 @@
 | 6 | D2 scan-to-return screen + marks returned + proof | done | tick 6 | `/scan-return` capture + review + confirm (`app/routes/returns.py`, new blueprint), one candidate → one "Mark returned", two or more → an explicit choice is required, none → a message + a link to the started-orders list, a repeat scan says "already returned" (`returns.recently_returned()`, added this tick); module `scan_return` + nav entry; the audit line on the order page; evidence named for the value that actually matched; 19 new tests (16 failed first), full suite **864 green**, browser proof **45/45**, 0 console errors, 0 overflow at 1440px + 390px; feature D signed off locally |
 | 7 | P1 POPIA privacy notice + consent service | done | tick 7 | `/privacy` is driven by `docs/popia/PRIVACY-NOTICE.md`: the short **interim page** while any `[PLACEHOLDER]` remains (it does — Sano's five facts), the full 12-section notice the moment they land, no code change (D11). `consent_records` + `app/services/consent.py` (who/version/channel/when only — no IP/UA), one shared unticked consent block for B2/C2, admin evidence line on the client page; 32 new tests, full suite **896 green**, browser proof **31/31** on 5058 + a completed-document harness on 5059 |
 | 8 | B1 branch portal schema + link + QR | done | tick 8 | `branches.public_slug`/`portal_enabled`/`portal_intro` + `company_settings.public_base_url` (additive) with a deterministic slug backfill, `idx_branches_slug` partial unique index, new `app/services/portal.py` (`slugify`/`ensure_slug`/`portal_url`/`qr_png_bytes`/`all_portal_links`), `GET /portal/<slug>` + `GET /portal/<slug>/qr.png` (PNG rendered in-process, encodes the absolute link); 23 new tests (5 failed first), full suite **919 green**, browser proof **23/23**, 0 console errors, 0 overflow at 1440px + 390px, QR decoded back with zxing-cpp |
-| 9 | B2 public form + dedupe + "am I already a customer?" | pending | | **§P1 consent required** |
+| 9 | B2 public form + dedupe + "am I already a customer?" | done | tick 9 | `app/services/portal_intake.py`; `/portal/<slug>` **is** the form, `/portal/<slug>/register` (GET+POST), `/portal/<slug>/check` (POST only); dedupe is the customer's decision (masked "Is this you?", never a silent merge), §P1 consent required server-side, honeypot + rate-limited masked lookup (D6/D7/D8/D10); 55 new tests, full suite **974 green**, browser proof **21/21 (closed) + 52/52 (open)**, 0 console errors, 0 overflow at 1440px + 390px; **on the shipped app the form stays SHUT until Sano's five facts land (D11)** |
 | 10 | B3 admin QR/link page with A4 print + browser proof | pending | | |
 | 11 | C1 store categories with photos + multi-trailer linking | pending | | |
 | 12 | C2 multi-trailer public booking flow | pending | | **§P1 privacy agreement required** |
@@ -943,3 +943,153 @@ admin branch-edit form cannot clobber them, and a test pins that (a rename also 
 5. Restart the smoke server after **any** template edit, or the browser proof measures the previous page.
 6. The `public_base_url` used in the proof (`https://sano-trailers.example`) is a seed value for the temp DB
    only; nothing in the repo carries it.
+
+- 14:46 slot skipped: fresh `.tick.lock` written **14:44:13** is only **1.5 min old at 14:45:57** (< 45 min) and the owner is demonstrably alive — `ps` shows pid 746529 `.venv/bin/pytest -q` **started 14:44:17 and still running (2:01 elapsed at 14:46:18)**, plus the uncommitted §B2 work in the tree (`app/routes/public.py`, `templates/public/portal_{form,confirm,exists}.html`, `app/services/portal_intake.py`, `tests/test_programme_20260923_portal_intake.py` written **14:42:04**). No work, no commit, lock left in place (it is not this slot's to clear). Head is still `065370b` (phase 8 / §B1 done, phase 9 = §B2 in flight). This is a real in-flight tick, not the stale-lock pattern of the 13:26–13:45 streak.
+
+- 14:48 slot skipped: `.tick.lock` written **14:44:13**, only **3.8 min old at 14:48:04** (< 45 min), and the owner is demonstrably alive — `ps` shows pid 746529 `.venv/bin/pytest -q` (started **14:44:17**, **3:47 elapsed** at 14:48:04) still running the full suite, with the uncommitted phase-9 (§B2) work in the tree (`app/services/portal_intake.py` 14:25:56, `templates/public/portal_form.html` 14:41:43, `tests/test_programme_20260923_portal_intake.py` 14:42:04). No work, no commit; lock left in place (not this slot's to clear). Head still `065370b` (phase 8 / §B1 done, phase 9 = §B2 in flight).
+
+- 14:50 slot skipped: `.tick.lock` written **14:44:13** is only **5.8 min old at 14:49:57** (< 45 min), and the owner is demonstrably alive — `ps` shows pid **746529** `.venv/bin/pytest -q` started **14:44:17**, **5:46 elapsed** at 14:49:58, still running the full suite. Phase-9 (§B2) work is still uncommitted in the tree (`app/services/portal_intake.py`, `templates/public/portal_{form,confirm,exists}.html`, `app/routes/public.py`, `tests/test_programme_20260923_portal_intake.py`). No work, no commit; lock left in place (not this slot's to clear). Head still `065370b` (phase 8 / §B1 done, phase 9 = §B2 in flight).
+
+- 14:52 slot skipped: `.tick.lock` written **14:44:13** is only **7.9 min old at 14:52:11** (< 45 min), and the owner is demonstrably alive — `ps` shows pid **746529** `.venv/bin/pytest -q` started **14:44:17**, **07:53 elapsed** at 14:52:11, still running the full suite. Phase-9 (§B2) work still uncommitted in the tree (`app/services/portal_intake.py` 14:25:56, `app/routes/public.py` 14:25:56, `static/css/app.css` 14:24:47, `templates/public/portal_{form,confirm,exists}.html`, `tests/test_programme_20260923_portal_intake.py` 14:42:04). No work, no commit; lock left in place (not this slot's to clear). Head still `065370b` (phase 8 / §B1 done, phase 9 = §B2 in flight).
+
+- 14:54 slot skipped: `.tick.lock` written **14:44:13** is only **9.8 min old at 14:54:03** (< 45 min), so the lock is respected and left in place. New observation for the next tick: the owner's run is **no longer alive** — pid 746529 (`.venv/bin/pytest -q`) has vanished from `ps` between 14:52:11 (07:53 elapsed) and 14:54:00, and no pytest/python process is holding the tree at all, yet nothing was committed (head still `065370b`, §B2 files unchanged since 14:42:04). So the owner either finished the suite and exited without committing, or died. Still no work and no commit from this slot. If the lock is still present and the tree still shows no new commit at the next 1-min slot, the 45-min stale threshold (14:44:13 + 45 min = **~15:29**) is when it becomes this programme's to clear — do not clear it before then.
+
+- 14:57 slot skipped: `.tick.lock` (written **14:44:13**) is only **12.6 min old at 14:56:53** (< 45 min), so the lock is respected and left in place; no work, no commit. Sharper diagnosis than 14:54: the owner's full-suite run (pid 746529, started 14:44:17) finished ~14:52 and exited, and the owner agent is now **gone** — its proof harness is an **orphan reparented to systemd** (`ps -p 745561 -o ppid` -> 372/systemd; a blocking `app.run()` bound to **127.0.0.1:5059**, last HTTP request 14:43:13, 0:01 CPU in 13:54 elapsed), with the §B2 files untouched since 14:42:04 and head still `065370b`. So phase 9 (§B2) looks crashed *after* its suite, before its ledger entry + commit, leaving the phase-9 work uncommitted in the tree. Nothing in this slot clears the lock: **stale threshold = 14:44:13 + 45 min ~= 15:29**. Must-know for the tick that owns phase 9 next: (a) kill the orphan on **5059** first or its own proof server cannot bind; (b) the full suite already ran green-in-progress, but the phase-9 changes were never committed, so re-verify before trusting them.
+
+- 14:59 slot skipped: `.tick.lock` (written **14:44:13**) is only **14.9 min old at 14:59:11** (< 45 min), so the lock is respected and left in place; no work, no commit. Liveness re-checked, same picture as 14:57 with one difference: **no** `pytest`/programme python process is alive, but the owner's proof harness survives as an orphan — `ps -p 745561` → `.venv/bin/python /tmp/abi_b2_run_complete.py`, **ppid 372 (systemd)**, **16:15 elapsed**, still `LISTEN 0.0.0.0:5057`… no: `LISTEN 127.0.0.1:5059` (5057 is the unrelated 09:16 dev server, pid 558440, 05:42:45 elapsed). §B2 files still untouched since 14:42:04 (`app/services/portal_intake.py` + `app/routes/public.py` 14:25:56, `templates/public/portal_form.html` 14:41:43, `tests/test_programme_20260923_portal_intake.py` 14:42:04); head still `065370b`; tree still carries the uncommitted phase-9 work plus other untracked scratch. **Stale threshold = 14:44:13 + 45 min = 15:29:13** — the lock is not this slot's to clear before then. Nothing cleared here.
+
+### Main session — 2026-09-23 15:01 — phase 8 landed, phase 9 crashed mid-flight, stall cut short (Don's instruction)
+
+- **Phase 8 (§B1) is DONE and committed** — `065370b` (branch portal link + QR + browser proof). Nothing outstanding on it.
+- **Phase 9 (§B2) crashed after its suite, before its ledger entry and commit.** Its work is complete on disk but **uncommitted** and must NOT be reverted or re-done from scratch. Its status row may already read `done`; the ledger entry was never written.
+- **What the main session did, in order:**
+  1. **Killed the crashed tick's orphan proof server** — pid `745561`, `.venv/bin/python /tmp/abi_b2_run_complete.py`, cwd this repo, started **14:42:55**, reparented to systemd and blocking **127.0.0.1:5059** with no requests since 14:43:13. Port 5059 is free again; the helper script is still at `/tmp/abi_b2_run_complete.py` if useful.
+  2. **Re-verified the uncommitted §B2 work rather than trusting it:** `.venv/bin/pytest tests/test_programme_20260923_portal_intake.py -q` → **55 passed in 19.07s**. So the phase's own tests are green; the full suite and the browser proof are still owed.
+  3. **Cleared the stale lock** (`docs/plans/.tick.lock`, written 14:44:13) at 15:01 instead of waiting for the old 45-minute threshold (15:29). The next slot now owns the tree immediately.
+  4. **Changed the overlap guard in the job prompt from 45 → 20 minutes** (Don approved, 2026-09-23), so a crashed slot costs ~20 minutes instead of ~45. Also added a rule to kill orphaned proof servers on the target port before binding it, and a rule that a phase whose work is already on disk is FINISHED (re-verify, commit, ledger) rather than restarted.
+- **Uncommitted §B2 files the next tick must stage (explicit paths, never `git add -A`):**
+  - modified: `app/routes/public.py`, `docs/plans/PROGRESS.md`, `static/css/app.css`, `templates/public/portal_placeholder.html`, `tests/test_programme_20260923_portal_links.py`
+  - new: `"Customer comms/"`, `app/services/portal_intake.py`, `templates/public/portal_check.html`, `templates/public/portal_confirm.html`, `templates/public/portal_exists.html`, `templates/public/portal_form.html`, `tests/test_programme_20260923_portal_intake.py`
+  - note `templates/public/portal_placeholder.html` shows as a **staged deletion** (`D `) — that is intended (the real portal page replaces the placeholder) and should be committed with the phase.
+- **NEXT TICK: finish phase 9 (§B2)** — full suite green, browser proof at 1440px + 390px with screenshots actually looked at (port 5057, temp DB via `DATABASE_PATH`), the phase-9 ledger entry + status row, then commit. After that, phase 10 (§B3 admin QR/link page with A4 print).
+
+### Phase 9 — B2 public form + dedupe + "am I already a customer?" — status `done` (tick 9 — finishing a crashed slot's work)
+**Branch:** `feature/abi-programme-2026-09-23` · **commit:** `6939107` (the §B2 work; this ledger entry is
+its own commit, so the hash above is real) · **lock:** none at the start of this slot — the main session
+cleared the crashed `14:44:13` lock at 15:01 and cut the guard to 20 min, so this tick created its own lock
+(15:01:03) and removed it at the end. Nothing stale in the tree, no orphan proof server on any port.
+
+**Provenance, stated plainly.** The code below was **built by the 14:44 slot, which crashed after its own
+full-suite run and before its ledger entry/commit**. This tick did not trust it and did not rebuild it:
+`compileall` was re-run, the phase's own tests were re-run, and — the part the dead slot never reached —
+**both browser proofs were re-run end to end by this tick, and every screenshot was actually looked at**.
+The crashed slot's reports were read first and then independently reproduced (same counts).
+
+**Files:** `app/services/portal_intake.py` (new, 430 lines), `app/routes/public.py` (`/portal/<slug>` now
+renders the form; new `GET/POST /portal/<slug>/register`, `POST /portal/<slug>/check`),
+`templates/public/portal_form.html` + `portal_confirm.html` + `portal_exists.html` + `portal_check.html`
+(new), `templates/public/portal_placeholder.html` (**deleted** — §B1's "coming next phase" page is gone, as
+§B2 planned), `static/css/app.css` (`.portal-*` styles), `tests/test_programme_20260923_portal_intake.py`
+(new, 696 lines / 55 tests), `tests/test_programme_20260923_portal_links.py` (§B1's placeholder test
+rewritten into "the QR's page *is* the form", with the intake gate opened explicitly). 10 files,
++1627/−55.
+
+**What §B2 actually does, in the order the route enforces it:** unknown/disabled branch → 404 before
+anything is read; **while the published notice still carries an open placeholder the write path is shut**
+(D11) — the page says so in plain words and a POST writes nothing; a filled honeypot gets a success page and
+no record; validation; **consent required server-side** (an unticked box *and* a crafted `popia_consent=0`
+are both 400 — D10); only then dedupe, and a possible match is **presented to the customer, never resolved
+for them** (D6: masked "Is this you?" → `This is me` links, filling **only blank** fields, or `None of these`
+creates a second record deliberately); the acceptance is recorded in the same request that writes the client,
+on the `branch portal` channel, against notice version `1.1` (D8's masked lookup is a **POST** so a name and
+number never land in browser history/proxy logs; the in-process limiter keys a **salted digest**, so no IP
+is stored anywhere).
+
+**Commands + REAL results (all re-run by this tick):**
+- `python3 -m compileall app tests -q` → clean
+- `.venv/bin/pytest tests/test_programme_20260923_portal_intake.py -q` → **55 passed in 19.00s**
+- `.venv/bin/pytest tests/test_programme_20260923_portal_links.py -q` → **23 passed in 8.25s**
+- `.venv/bin/pytest -q` (full suite) → **974 passed in 544.48s (0:09:04)** — green (919 before, +55)
+- Browser proof, **part A / shipped state** (temp DB `/tmp/abi_tick_b2b.db`, shipped app on **5058**):
+  **21/21 checks, 0 console errors, 0 horizontal overflow** (1440/1440 and 390/390) — `/portal/roodepoort`
+  200 but **no form at all**, a POST returns 200 with the counter message and **created no customer (1 → 1)**,
+  the lookup is closed too and reveals nothing, unknown slug 404.
+- Browser proof, **part B / open state** (same DB, `/tmp/abi_b2_run_complete.py` on **5059** — the notice
+  completed in a temp copy by the harness, `outstanding_fields: []`): **52/52 checks, 0 console errors** —
+  the QR's page *is* the form, consent box **unticked**, honeypot off-screen (`-9999`) and out of the tab
+  order (`-1`), full submission accepted → client created exactly once with `branch_id` = the QR's branch
+  (**5 vs 5**), `source_system='portal'`, `source_id='roodepoort:ROO-85731A'`, email lower-cased, acceptance
+  recorded (portal channel, notice v1.1); the same name+number then **does not** create a second record but
+  asks "Is this you?" masked, `This is me` links it leaving the populated street address untouched
+  (`9 Old Road`) and filling only the blank suburb, `None of these` creates a second row on purpose; a
+  `link:` to a client the submission never matched is refused (400) and writes nothing; 404s for a
+  switched-off branch and an unknown slug.
+- `fuser -k 5058/tcp` / `5059/tcp` → both freed (only the unrelated 09:16 `app.py`, pid 558440, still on 5057).
+
+**What the screenshots actually showed (`vision_analyze`, re-shot by this tick at 15:02–15:03):**
+*1440px form* — "Sano Trailers" header, the blue `Customer registration` eyebrow, heading **Roodepoort**,
+"Register your details once and the counter can pull them up next time.", "You are at the Roodepoort branch —
+14 Hendrik Potgieter Road, Roodepoort.", then Full name \*, Cellphone number, Email address, Street address,
+Suburb, Town or city, Province, Postal code, a full-width blue **Send my details**, and below it the
+"Are you already registered with us?" check — **both boxes unticked**, the POPIA line reading "…in accordance
+with POPIA. View Privacy Notice.", **no honeypot visible** (off-screen, as designed). *390px "Is this you?"* —
+the question, "We may already have your details at Roodepoort. Nothing has been saved yet…", one candidate
+**"Charmaine M. · …4567"** ("Matched on phone and email and name."), the "None of these is me — I am new here"
+option, "Please tick the privacy box again…", and **no surname/email/address/balance anywhere**. *New-client
+confirmation* — "Thank you, Pieter", "Your details are with Roodepoort…", reference **ROO-85731A**, branch
+phone; **only the first name shown**. *390px lookup* — "Yes — we have you on our system as:" → "Pieter W. ·
+…1234", masked only. *390px shipped state* — "Online registration isn't open yet", the counter sentence, the
+branch link and phone, **zero form fields and no bracketed token anywhere**. Nothing clipped or overlapping at
+either width.
+
+**Where the plan's acceptance line does not hold (honest gap, same shape as A4's finding):** §B2's acceptance
+says a created client appears on `/customers` "with the branch filter showing them under that branch".
+`/customers` **has no branch filter** — there is no such control in `app/routes/customers.py` or
+`templates/admin/customers/index.html` (the only branch reference on a client page is the read-only
+`Branch` detail row on `detail.html:62`). What is true and is now proven: the record carries
+`branch_id` = the branch whose QR/link was used (measured **5 vs 5**), staff see the client on `/customers`
+(proof screenshot `staff_customers_1440.png`), and the submission's provenance names the branch slug. Making
+clients branch-*scoped* is its own programme, not a §B2 detail — flagged for Don (second time; A4 flagged it).
+
+**Decisions taken where the plan was silent (all pinned by tests):** the lookup route is **POST-only** (a
+GET would put a client's name and number in history and logs); `/portal/<slug>` avoids the dict-method trap
+the A4 tick hit by using `form_values=`/`error=`/`candidates=` names, never a key called `values`; the
+`link:` target must be **one of this submission's own candidates**, so a crafted POST cannot write to an
+arbitrary client id; a blocked client is refused on a strong (phone/email) match and answers "not found" in
+the lookup; the honeypot returns the *success* page — a bot that is told "no" retries.
+
+**Blockers / notes for Don:**
+- **The form is SHUT on the shipped app right now, deliberately.** `docs/popia/PRIVACY-NOTICE.md` still
+  carries Sano's five open facts, so `consent.notice_is_publishable()` is `False` and every public write path
+  renders the "not open yet — please give your details to the counter staff" page (measured, 21/21). The full
+  registration flow above was proven against a **harness copy** of the notice with synthetic values in
+  `/tmp/abi_b2_popia/` — the repo's document was never touched. Your call is unchanged from tick 7: land the
+  five facts, or accept an interim-notice consent (the record stores version + channel either way).
+- **Port 5057 is still held** by the 09:16 `.venv/bin/python app.py` (pid 558440, cwd this repo, no
+  `DATABASE_PATH` → the house dev DB). **Seventh tick flagging it.** This tick proved on 5058/5059 and left
+  5057 alone; both of its own ports are free again. Say the word and a tick stops it.
+- **`"Customer comms/"` was NOT staged** even though the main session's 15:01 note listed it: it is Sept-1
+  scratch (`Telegram.txt`, `template.jpg`) and guardrail 2 names it explicitly as untracked junk that must
+  stay out of commits. Also left untracked (main-session documents, not this phase's): 
+  `docs/plans/2026-09-23-popia-setup-wizard.md`, `docs/plans/PROGRESS-popia-wizard.md`,
+  `docs/popia/CLIENT-DATA-NOTICE-JACKAPP-SANO.md`; plus the source assets in
+  `static/img/trailer-categories/` (phase 11 commits the web-sized re-encodes only).
+
+**Must-know for tick 10 (phase 10 = §B3 admin QR/link page with A4 print):**
+1. §B3's plan is `docs/plans/2026-09-23-branch-public-portal.md` **§B3**: `/settings/portal` listing every
+   branch (name, `readonly` link input, Copy link, QR preview, "Print QR sheet", enable/disable + editable
+   slug with 409 on a duplicate), `templates/admin/portal_index.html` + `portal_print.html` (standalone A4,
+   `@page { size: A4; margin: 12mm }`, print media must hide all admin chrome), a nav entry, an
+   `access.py` module mapping, and `tests/test_programme_20260923_portal_admin.py`.
+2. `portal.all_portal_links()` already returns exactly the rows that page needs
+   (`branch_id`, `name`, `slug`, `portal_url`, and the QR path is `/portal/<slug>/qr.png`).
+3. **DB↔UI parity is owed here:** §B1's three columns (`public_slug`, `portal_enabled`, `portal_intro`) have
+   **no admin UI yet** — §B3 owns that page, and this is the tick that must close the gap the phase-8 ledger
+   recorded. `update_branch()` writes an explicit column list, so the existing branch form cannot clobber
+   them (pinned by a test) — a rename must still **not** re-slug.
+4. Consent/POPIA does not gate §B3: it is a staff-only settings screen. Keep the "not publishable" state
+   visible there (a branch handed a printed QR whose form is shut should be obvious to staff, not a mystery).
+5. Restart the smoke server after **any** template edit (Jinja is cached with `debug=False`) or the browser
+   proof measures the previous page — tick 8's bug.
+6. Ports: 5057 is still the 09:16 dev server; use 5058 (and 5059 only if a second app instance is needed)
+   and `fuser -k` both afterwards.
