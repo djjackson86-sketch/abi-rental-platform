@@ -218,3 +218,15 @@ def test_the_reviewed_document_still_opens_the_side_when_it_is_complete(app, mon
     with app.app_context():
         assert consent.notice_is_publishable() is True
         assert consent.current_notice_version() == consent.PRIVACY_NOTICE_VERSION
+
+
+def test_the_published_notice_page_has_one_heading_and_no_bogus_consent_claim(app, client):
+    """Found by looking at the 390px screenshot: the generated notice's own title rendered as a
+    second h1 under the page's, and the version line claimed the notice only applies where consent
+    is the basis, which is wrong under POPIA (much of the processing is not consent-based)."""
+    make_branch(app)
+    publish_a_notice(app)
+    body = client.get("/privacy").get_data(as_text=True)
+    assert body.count("<h1") == 1, "the notice title and the page heading must not compete"
+    assert "record your consent against" not in body
+    assert "current version of our privacy notice" in body

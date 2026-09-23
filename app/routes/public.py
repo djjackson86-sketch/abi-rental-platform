@@ -375,12 +375,21 @@ def privacy_notice():
         # contain a placeholder, so a customer only ever reads wording that has been published.
         from app.routes.popia import render_markdown_html
 
+        # The generated notice carries its own title as its first line. Rendered as-is it produced
+        # two competing h1s ("Our privacy notice" and then the document's own title) - seen in the
+        # 390px proof - so the title becomes the page heading and the body starts beneath it.
+        lines = published["notice_text"].strip().splitlines()
+        title = "Our privacy notice"
+        if lines and lines[0].startswith("# "):
+            title = lines[0][2:].strip()
+            lines = lines[1:]
         return render_template(
             "public/privacy_notice_published.html",
             settings=settings,
             back_url=back_url,
             notice=published,
-            notice_html=render_markdown_html(published["notice_text"]),
+            notice_title=title,
+            notice_html=render_markdown_html("\n".join(lines).strip()),
         )
     if not popia_pack.is_complete(popia_pack.PRIVACY_NOTICE_KEY):
         return render_template(

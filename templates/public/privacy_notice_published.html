@@ -8,9 +8,9 @@
 <main class="store-main privacy-main">
   <article class="panel privacy-notice">
     <p class="eyebrow">Privacy</p>
-    <h1>Our privacy notice</h1>
-    <p class="privacy-version">Version {{ notice.notice_version }} · published {{ notice.published_at[:10] }}.
-    This is the version we record your consent against.</p>
+    <h1>{{ notice_title }}</h1>
+    <p class="privacy-version">Version {{ notice.notice_version }} · Published {{ notice.published_at[:10] }}.
+    This is the current version of our privacy notice.</p>
     <div class="privacy-notice-body">
       {{ notice_html|safe }}
     </div>
