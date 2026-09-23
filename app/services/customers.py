@@ -113,6 +113,13 @@ def delete_customer(customer_id):
     if customer_has_history(customer_id):
         raise ValueError("Customer has existing orders/history and cannot be deleted")
     db = get_db()
+    # Programme phase 2 (feature A, 2026-09-23): a client's recorded vehicles die with
+    # the client. The FK declares ON DELETE CASCADE, but a Turso connection does not
+    # guarantee `PRAGMA foreign_keys=ON`, so the child rows are cleared explicitly —
+    # the same belt-and-braces cleanup branch deletion does for its child tables
+    # (app/services/branches.py).
+    from app.services.vehicles import delete_vehicles_for_customer
+    delete_vehicles_for_customer(customer_id)
     cur = db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     db.commit()
     return cur.rowcount > 0

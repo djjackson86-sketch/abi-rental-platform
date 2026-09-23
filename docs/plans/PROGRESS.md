@@ -13,17 +13,22 @@
 | # | Phase | Status | Tick | Notes |
 |---|---|---|---|---|
 | 1 | A1 licence-disk decode spike + engine decision | done | tick 1 | parser ported + parity-verified; engine = server-side `zxing-cpp`, decided on the REAL disc photo (22 ms); positional branch for the modern 148-char layout; 51 new tests, full suite 747 green |
-| 2 | A2 vehicle data model + service | pending | | |
+| 2 | A2 vehicle data model + service | done | tick 2 | `vehicles` table (SCHEMA + `run_migrations`) + `app/services/vehicles.py`; one owner per registration (app ValueError **and** partial unique index), blank masses stay NULL, no towing column (D3b), customer delete clears vehicles (FK + explicit); 20 new tests, full suite **767 green** |
 | 3 | A3 staff scan UI + allocate to client | pending | | |
-| 4 | A4 client page panel + towing capacity + browser proof | pending | | |
-| 5 | B1 branch portal schema + link + QR | pending | | |
-| 6 | B2 public form + dedupe + safe lookup | pending | | |
-| 7 | B3 admin links + A4 print sheet + browser proof | pending | | |
-| 8 | C1 store categories with photos + bulk linking | pending | | |
-| 9 | C2 multi-trailer public booking flow | pending | | |
-| 10 | C3 full suite + end-to-end local proof + close-out | pending | | |
+| 4 | A4 client page vehicles panel + browser proof | pending | | |
+| 5 | D1 trailer identity + return-matching service | pending | | |
+| 6 | D2 scan-to-return screen + marks returned + proof | pending | | |
+| 7 | B1 branch portal schema + link + QR | pending | | |
+| 8 | B2 public form + dedupe + "am I already a customer?" | pending | | |
+| 9 | B3 admin QR/link page with A4 print + browser proof | pending | | |
+| 10 | C1 store categories with photos + multi-trailer linking | pending | | |
+| 11 | C2 multi-trailer public booking flow | pending | | |
+| 12 | C3 full-suite + end-to-end local proof + close-out | pending | | |
 
 Status values: `pending` · `in-progress` · `done` · `partial` · `blocked`.
+
+> Table renumbered to the master plan's 12 phases by tick 2 — the renumbering note (Feature D added as
+> phases 5–6, old 5–10 → 7–12) had landed in the plan and the tick log but not in this table.
 
 ## Tick log
 
@@ -163,4 +168,85 @@ capacity in the payload at all** (D3 confirmed on real input) — both masses st
   minute after the previous one finishes**, so the remaining 11 phases run back-to-back this afternoon rather
   than one per half hour. (The `*/30` fixed-slot scheme is recorded in the master plan as the alternative; the
   `.tick.lock` overlap guard stays, now just guarding against a genuinely runaway tick.)
+
+### Phase 2 — A2 vehicle data model + service — status `done`
+**Branch:** `feature/abi-programme-2026-09-23` (nothing pushed; `master` untouched).
+**Files:** `app/db.py` (SCHEMA + `run_migrations`: `vehicles` table, `idx_vehicles_customer`,
+`idx_vehicles_registration` partial unique), `app/services/vehicles.py` (new, 12.6 KB),
+`app/services/customers.py` (`delete_customer` now clears the customer's vehicles explicitly),
+`tests/test_programme_20260923_vehicles_model.py` (new, 20 tests).
+
+**Schema is D3/D3b-exact.** `registration` = number plate, `registration_number` = NaTIS number,
+`licence_number` = the disc's own licence number; `tare_kg`/`gvm_kg` REAL NULL; **no
+`towing_capacity_kg` column** — a test asserts the column is absent so D3b cannot creep back.
+Additive only: on an existing DB `run_migrations()` just adds an empty table (a test covers the
+drop-and-re-migrate case).
+
+**Service (`app/services/vehicles.py`).** `list_vehicles`, `get_vehicle`,
+`get_vehicle_by_registration`, `create_vehicle(form, customer_id=None)`, `update_vehicle`,
+`delete_vehicle`, `customer_for_vehicle_registration` (the A3 "already allocated to another client"
+check), `vehicle_counts`. Deliberate behaviour, all tested:
+- **One owner per registration.** A second client claiming a plate raises `ValueError` naming the
+  current owner; **the database enforces it too** (partial unique index, proven by a raw INSERT
+  raising `sqlite3.IntegrityError`). A blank registration may repeat, so a vehicle typed in without a
+  plate is never blocked.
+- **Plates are normalised on write** (`kp 35 xkgp` → `KP 35 XKGP`) and compared on a whitespace-free
+  upper-case key, so case/spacing cannot create a second owner.
+- **Masses: blank is NULL, never 0** (test asserts `tare_kg is None` / `gvm_kg is None`, not 0.0), and
+  a non-number or negative typed mass is refused rather than coerced.
+- **Partial edits never wipe the record**: `update_vehicle` writes only the keys the form posts, and an
+  edit that omits `source` keeps the stored one (a scanned disc cannot silently become "manual").
+- `source` ∈ {manual, scan, import}; expiry accepts ISO / `dd-mm-yyyy` / `dd/mm/yyyy` and stores ISO,
+  refusing junk.
+
+**Cascade / no orphans, both ways.** The FK declares `ON DELETE CASCADE` **and** `delete_customer`
+calls `delete_vehicles_for_customer` first, because a Turso connection does not guarantee
+`PRAGMA foreign_keys=ON`. Two tests: a counted zero-orphan check after `delete_customer`, and the raw
+customer-delete path (SQLite FK cascade, with `PRAGMA foreign_keys` asserted = 1).
+
+**Commands + real results:**
+- `.venv/bin/pytest tests/test_programme_20260923_vehicles_model.py -q` → **20 passed in 9.36s**
+  (the first run, before `_values_from_form` defaulted `source`, was 4 failed / 14 passed — the failure
+  was real; the fix is the `values["source"] = existing source or SOURCE_MANUAL` branch)
+- `.venv/bin/pytest -q` (full suite) → **767 passed in 458.44s (0:07:38)** — green (747 before)
+- `python3 -m compileall app tests -q` → clean
+- `PYTHONPATH=. .venv/bin/python /tmp/abi_a2_smoke.py` (temp DB, real service calls) →
+  `created id=1 registration='KP 35 XKGP' registration_number='SHS812W' licence_number='4024048GB8LY'
+  expiry='2027-03-31' tare=None gvm=None source='scan'` · `owner of 'KP35XKGP' -> Smoke Client` ·
+  `counts: {'total': 1, 'scan': 1, 'manual': 0, 'import': 0, 'blank_registration': 0}` ·
+  `duplicate refused: Registration KP35XKGP is already recorded for Smoke Client — transfer it
+  explicitly if it is now this client's vehicle` · `deleted customer -> True` · `vehicles left: 0`
+
+**Commit:** this entry's commit (code + tests + ledger together). The main-session doc edits found
+uncommitted in the tree were committed first, separately, as `ad6588f`.
+
+**Blockers:** none. No UI work in this phase, so no screenshots were due (that is A4).
+`docs/plans/.tick.lock` was created at the start of this tick (no lock existed, so nothing was stale)
+and removed at the end.
+
+**Must-know for tick 3 (A3, scan screen + allocate):**
+1. **The parser's key names clash with the column names — do not copy the dict straight in.**
+   `parse_disc_text()` returns the *plate* under `licence_number` (the reference TypeScript calls it
+   `licenceNumber`), while `vehicles.licence_number` is the **disc's** licence number. Map explicitly:
+   `registration ← parsed["licence_number"]`, `registration_number ← parsed["registration_number"]`,
+   `raw_scan_text ← parsed["raw_text"]`, `licence_disk_expiry ← parsed["expiry_date"]`,
+   `source = "scan"`.
+2. **D3 is answered, but the positional branch does not use the answer yet.** In
+   `vehicle_disk.py::parse_natis_positional` the three identifier fields
+   (`POSITIONAL_IDENTIFIER_INDEXES = (5, 6, 7)`) are still dumped into `unparsed_fields` with the
+   "unassigned disc identifier" reason. On the real 148-char payload the order is **field 5 = disc
+   licence number (`4024048GB8LY`), field 6 = plate (`KP35XKGP`), field 7 = NaTIS registration number
+   (`SHS812W` — Don's "Natis reg is last one")**; the synthetic fixture
+   `tests/fixtures/disc/natis_positional.txt` has the same shape (`T9876543210X` / `ABC123GP` /
+   `ZZ1234Z`). Assigning those three in the positional branch — and updating
+   `test_positional_identifiers_are_flagged_rather_than_guessed`, which currently asserts they stay
+   *unassigned* — is what lets the A3 review form fill all three identifiers instead of showing two
+   mystery tokens. Do it as part of A3, and keep the flagged-only behaviour for any **unknown** extra
+   identifier.
+3. `create_vehicle` raises `ValueError` with the owner's name inside the message — surface that string
+   directly in A3's warning panel, and use `customer_for_vehicle_registration()` to warn **before** the
+   save too. Transfer must stay an explicit action: the service has no silent re-owner.
+4. `source` values are `manual` / `scan` / `import` — A3 posts `scan`.
+5. The status table is now the master plan's **12-phase** list (tick 2 fixed the numbering); A3 is
+   row 3, feature D is rows 5–6.
 

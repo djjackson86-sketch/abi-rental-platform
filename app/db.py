@@ -173,6 +173,43 @@ CREATE TABLE IF NOT EXISTS customers (
     created_at TEXT NOT NULL
 );
 
+-- Vehicles recorded against a client (programme phase 2 / feature A, 2026-09-23).
+-- Mostly scanned from a NaTIS licence disc (see app/services/vehicle_disk.py), and the
+-- columns follow decision D3 exactly: ``registration`` is the NUMBER PLATE (e.g. KP35XKGP),
+-- ``registration_number`` is the NaTIS registration number and ``licence_number`` is the
+-- disc's own licence number. ``tare_kg`` / ``gvm_kg`` are nullable REAL because the real
+-- modern disc payload carries no masses at all — a missing mass stays NULL, never 0 — and
+-- there is deliberately no towing-capacity column (decision D3b).
+CREATE TABLE IF NOT EXISTS vehicles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    registration TEXT NOT NULL DEFAULT '',
+    make TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    year TEXT NOT NULL DEFAULT '',
+    vin TEXT NOT NULL DEFAULT '',
+    engine_number TEXT NOT NULL DEFAULT '',
+    colour TEXT NOT NULL DEFAULT '',
+    licence_number TEXT NOT NULL DEFAULT '',
+    registration_number TEXT NOT NULL DEFAULT '',
+    control_number TEXT NOT NULL DEFAULT '',
+    registering_authority TEXT NOT NULL DEFAULT '',
+    vehicle_type TEXT NOT NULL DEFAULT '',
+    tare_kg REAL,
+    gvm_kg REAL,
+    licence_disk_expiry TEXT NOT NULL DEFAULT '',
+    raw_scan_text TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id);
+-- One owner per recorded registration; a blank registration (a vehicle typed in without a
+-- plate) is allowed as often as staff need it, hence the partial index.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration ON vehicles(registration) WHERE registration <> '';
+
 CREATE TABLE IF NOT EXISTS product_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -704,6 +741,43 @@ def run_migrations(db):
         UNIQUE(branch_id, business_day, wheel_size)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_spare_wheel_counts_day ON spare_wheel_counts(business_day, branch_id)")
+
+    # --- Vehicles recorded against a client (additive, programme phase 2 / feature A) ---
+    # The NaTIS licence disc scanner's home. Column meanings are fixed by decision D3
+    # (registration = number plate, registration_number = NaTIS number, licence_number =
+    # the disc's licence number); tare_kg/gvm_kg are nullable REAL because the real modern
+    # payload carries no masses — never store 0 as a stand-in for "not on the disc" — and
+    # decision D3b removed towing capacity, so there is no column for it. On an existing
+    # database this only adds an empty table: no customer, order or product row is touched.
+    db.execute("""CREATE TABLE IF NOT EXISTS vehicles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        registration TEXT NOT NULL DEFAULT '',
+        make TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        year TEXT NOT NULL DEFAULT '',
+        vin TEXT NOT NULL DEFAULT '',
+        engine_number TEXT NOT NULL DEFAULT '',
+        colour TEXT NOT NULL DEFAULT '',
+        licence_number TEXT NOT NULL DEFAULT '',
+        registration_number TEXT NOT NULL DEFAULT '',
+        control_number TEXT NOT NULL DEFAULT '',
+        registering_authority TEXT NOT NULL DEFAULT '',
+        vehicle_type TEXT NOT NULL DEFAULT '',
+        tare_kg REAL,
+        gvm_kg REAL,
+        licence_disk_expiry TEXT NOT NULL DEFAULT '',
+        raw_scan_text TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'manual',
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id)")
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration "
+        "ON vehicles(registration) WHERE registration <> ''"
+    )
 
 
 def init_db():
