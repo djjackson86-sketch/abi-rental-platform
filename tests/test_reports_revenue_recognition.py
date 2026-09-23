@@ -151,8 +151,11 @@ def test_orders_page_metrics_report_money_received(app):
         assert counts["total"] == 12
         assert counts["revenue"] == received
         # The due card still excludes draft/Sales-Repairs quotes that have not
-        # been accepted, while keeping active reserved/started/returned balances.
-        assert counts["due"] == 800 + 900 + 1000
+        # been accepted, while keeping active started/returned balances. Ticket
+        # ABI-341953038(2): the RESERVED-UNPAID balance (800) is no longer
+        # collectable as far as the card is concerned, so the card drops by 800
+        # while every other money surface keeps it.
+        assert counts["due"] == 900 + 1000
 
         sales_repairs = order_counts(status="sales_repairs")
         assert sales_repairs["total"] == 2

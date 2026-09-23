@@ -21,6 +21,15 @@
             <button class="btn {{ style }}" type="submit" title="Main profile only — releases the stock, keeps payments and invoices">Revert to Draft</button>
           </form>
         {% endif %}
+      {% elif action == 'unarchive' %}
+        {# Ticket ABI-341953038(1): main-profile only, and only on an archived
+           order. The order goes back to the status it held before it was
+           archived; payments, quotes and invoices are left untouched. #}
+        {% if current_user_is_main %}
+          <form method="post" action="{{ url_for('orders.unarchive', order_id=order.id) }}" class="inline-form">
+            <button class="btn {{ style }}" type="submit" title="Main profile only — puts the order back to the status it held before it was archived">Unarchive order</button>
+          </form>
+        {% endif %}
       {% elif action == 'return' and not finalized_invoice_exists %}
         <button class="btn {{ style }}" type="button" disabled title="Finalize the invoice before returning this order">{{ label }}</button>
       {% else %}

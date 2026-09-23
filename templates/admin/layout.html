@@ -8,6 +8,9 @@
   .badge.blocked:before{opacity:1}
   .blocked-customer-banner{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin:0 0 14px;padding:12px 14px;border-radius:var(--radius,12px);border:1px solid #fecaca;background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318);font-weight:650}
   .blocked-customer-banner strong{font-weight:800;text-transform:none}
+  /* Maintenance badge on the inventory list (ticket 341953038). */
+  .badge.maintenance{background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318)}
+  .badge.maintenance:before{opacity:1}
 </style>
   <aside class="sidebar">
     <a class="logo" href="{{ url_for('admin.dashboard') }}"><img src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers"></a>

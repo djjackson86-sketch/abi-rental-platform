@@ -72,6 +72,21 @@
     <p class="form-help">Rental trailers only. The wheel size is what the dashboard&rsquo;s Spare Wheel Count adds up (one wheel per trailer that has not been picked up).</p>
   </section>
 
+  {# Ticket ABI-341953038(3): "Trailer under maintenance". Ticking it blocks the
+     whole product line from every order and hides the trailer from the online
+     store until it is unticked. The hidden maintenance_panel marker lets the
+     server tell a real post from a caller that never carried the field, so a
+     flag can never be released by accident; the marker is disabled together with
+     the box for anything that is not a rental trailer. #}
+  <section class="form-section" data-maintenance-field {% if not wheel_size_mode %}hidden{% endif %}>
+    <h2>Rental availability</h2>
+    <input type="hidden" name="maintenance_panel" value="1" data-maintenance-marker {% if not wheel_size_mode %}disabled{% endif %}>
+    <div class="form-grid">
+      <label class="switch"><input type="checkbox" name="under_maintenance" value="1" {% if product and product.under_maintenance %}checked{% endif %} {% if not wheel_size_mode %}disabled{% endif %}> Trailer under maintenance</label>
+    </div>
+    <p class="form-help">Rental trailers only. While this is ticked the trailer cannot be added to any order &mdash; staff see a &ldquo;Trailer under maintenance&rdquo; warning &mdash; and it is hidden from the online store. Untick it to release the trailer.</p>
+  </section>
+
   <section class="form-section">
     <h2>Tracking method</h2>
     <div class="option-grid">
@@ -121,6 +136,9 @@
   const quantityInput=quantityField?quantityField.querySelector('input[name="quantity"]'):null;
   const wheelField=document.querySelector('[data-wheel-size-field]');
   const wheelSelect=wheelField?wheelField.querySelector('select[name="wheel_size"]'):null;
+  const maintenanceField=document.querySelector('[data-maintenance-field]');
+  const maintenanceInput=maintenanceField?maintenanceField.querySelector('input[name="under_maintenance"]'):null;
+  const maintenanceMarker=maintenanceField?maintenanceField.querySelector('[data-maintenance-marker]'):null;
   const branchInputs=[...document.querySelectorAll('[data-stock-field] input[name^="qty_branch_"]')];
   const totalOut=document.querySelector('[data-stock-total]');
   const modeOut=document.querySelector('[data-stock-mode]');
@@ -157,6 +175,12 @@
     const wheelMode=(type==='rental')&&!untracked;
     if(wheelField) wheelField.hidden=!wheelMode;
     if(wheelSelect) wheelSelect.disabled=!wheelMode;
+    // "Trailer under maintenance" is a rental trailer flag too (ticket
+    // ABI-341953038(3)). The marker is disabled with the box so a non-rental post
+    // carries neither field and the stored flag is left alone.
+    if(maintenanceField) maintenanceField.hidden=!wheelMode;
+    if(maintenanceInput) maintenanceInput.disabled=!wheelMode;
+    if(maintenanceMarker) maintenanceMarker.disabled=!wheelMode;
     syncTotal();
   }
   typeInputs.forEach(input=>input.addEventListener('change',syncStockField));

@@ -200,6 +200,9 @@ CREATE TABLE IF NOT EXISTS products (
     quantity INTEGER NOT NULL DEFAULT 1,
     tracking_method TEXT NOT NULL DEFAULT 'bulk',
     wheel_size TEXT NOT NULL DEFAULT '',
+    -- Ticket ABI-341953038(3): a trailer flagged here cannot be rented and is
+    -- hidden from the online store until it is released.
+    under_maintenance INTEGER NOT NULL DEFAULT 0,
     branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
@@ -258,6 +261,10 @@ CREATE TABLE IF NOT EXISTS orders (
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     picked_up_at TEXT,
     new_order_notified_at TEXT,
+    -- Ticket ABI-341953038(1): the status an archived order held immediately
+    -- before it was archived, so the main profile can unarchive it back to where
+    -- it was. Blank on rows archived before this column existed.
+    status_before_archive TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -474,6 +481,10 @@ def run_migrations(db):
     # a blank default, so every existing product simply has no wheel size and is
     # left out of the dashboard spare wheel Expected total.
     ensure_column(db, "products", "wheel_size", "TEXT NOT NULL DEFAULT ''")
+    # Ticket ABI-341953038(3): "Trailer under maintenance" — blocks rental and
+    # hides the trailer from the online store until it is released. Additive with
+    # a default, so every existing product stays available.
+    ensure_column(db, "products", "under_maintenance", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(db, "orders", "booking_type", "TEXT NOT NULL DEFAULT 'return'")
     ensure_column(db, "orders", "collect_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "orders", "return_branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
@@ -512,6 +523,10 @@ def run_migrations(db):
         "WHERE new_order_notified_at IS NULL AND status <> 'draft'",
         (now(),),
     )
+    # Ticket ABI-341953038(1): the status an order held before it was archived.
+    # Additive with a blank default, so an order archived before this column
+    # existed simply has no remembered status (unarchive falls back to Returned).
+    ensure_column(db, "orders", "status_before_archive", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")

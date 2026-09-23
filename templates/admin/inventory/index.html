@@ -119,6 +119,9 @@
                     <td>
                       <strong>{{ p.name }}</strong>
                       <small>{{ p.sku or 'No SKU' }}</small>
+                      {# Ticket ABI-341953038(3): this trailer is off the road — it
+                         cannot be rented and is not in the online store. #}
+                      {% if p.under_maintenance %}<br><span class="badge maintenance" title="Blocked from every order and hidden from the online store until it is released">Under maintenance</span>{% endif %}
                     </td>
                     <td><span class="badge product-type-{{ p.product_type }}">{{ p.product_type }}</span></td>
                     <td>{{ tracking_label(p.tracking_method) }}</td>

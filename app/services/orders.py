@@ -178,6 +178,12 @@ def order_counts(query="", status="", payment_status="", return_status="", start
     where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date, branch_id=branch_id)
     db = get_db()
     due_expr = collectible_due_expr("o")
+    # Ticket ABI-341953038(2): the Due CARD is what is still collectable, so a
+    # reserved order — a booking held, nothing collected yet — no longer adds to
+    # it. Only the card changes: the per-row Due column on the list, the order
+    # detail's own Due figure and the Reports "Amount due" basis all still count
+    # a reserved order, so nothing on the money surfaces disagrees with itself.
+    card_due_expr = f"CASE WHEN COALESCE(o.status, '') = 'reserved' THEN 0 ELSE {due_expr} END"
     # "Unprocessed deposits" is the SAME set the rail's "Process deposit" filter and
     # badge already use (_process_deposit_clause: returned orders only, ticket
     # ABI-341953034; a fully utilised deposit leaves the set, ticket ABI-341953037),
@@ -194,7 +200,7 @@ def order_counts(query="", status="", payment_status="", return_status="", start
         f"THEN COALESCE(o.deposit_refund_amount, 0) ELSE COALESCE(o.deposit_total, 0) END "
         f"ELSE 0 END"
     )
-    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({due_expr}),0) due,
+    row = db.execute(f"""SELECT COUNT(*) total, COALESCE(SUM({card_due_expr}),0) due,
         COALESCE(SUM({deposit_amount_expr}),0) deposit_amount,
         COALESCE(SUM(CASE WHEN {deposit_clause} THEN 1 ELSE 0 END),0) deposit_count
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE {where}""", params).fetchone()
@@ -589,6 +595,34 @@ def _blocked_customer_allowance(value):
         return None
 
 
+MAINTENANCE_MESSAGE = "Trailer under maintenance"
+
+
+def product_under_maintenance(product):
+    """True when a product row is flagged "Trailer under maintenance".
+
+    Ticket ABI-341953038(3): the flag is a whole-product (whole product line)
+    block, so every unit of that row is unrentable and the row is hidden from the
+    online store until the flag is released. Missing/legacy rows with no such
+    column read as NOT under maintenance, so an un-migrated database can never
+    block every booking.
+    """
+    try:
+        return bool(product["under_maintenance"])
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def under_maintenance_error(product):
+    """The staff-facing refusal naming the trailer that is off the road."""
+    try:
+        name = (product["name"] or "").strip()
+    except (KeyError, IndexError, TypeError):
+        name = ""
+    detail = f" — {name} cannot be hired until it has been released" if name else " — this trailer cannot be hired until it has been released"
+    return f"{MAINTENANCE_MESSAGE}{detail}"
+
+
 def _build_order_payload(form, allow_blocked_customer_id=None):
     db = get_db()
     customer_id = int(form.get("customer_id") or 0) or None
@@ -659,6 +693,15 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
             ).fetchone()
             if not product:
                 raise ValueError("Selected product was not found or is archived")
+            # Ticket ABI-341953038(3): "Trailer under maintenance" blocks the
+            # WHOLE product line — the trailer cannot go on any order (a new
+            # booking, a hire, a sale or a repair) until the flag is released.
+            # Checked before the branch rule so staff always get the maintenance
+            # warning the client asked for. This is the server-side gate: the
+            # order picker still lists the trailer, so ticking the box never
+            # silently hides what happened.
+            if product_under_maintenance(product):
+                raise ValueError(under_maintenance_error(product))
             if collect_branch_id and product["branch_id"] and product["branch_id"] != collect_branch_id:
                 raise ValueError("Selected product is not assigned to the collection branch")
             line = calculate_line(product, quantity, days, settings["tax_mode"])
@@ -1089,6 +1132,18 @@ TRANSITIONS = {
     "draft": {"from": {SALES_REPAIRS_STATUS}, "to": "draft", "message": "Order saved as draft"},
     "return": {"from": {"started"}, "to": "returned", "message": "Order returned"},
     "archive": {"from": {"returned", SALES_REPAIRS_STATUS}, "to": "archived", "message": "Order archived"},
+    # Ticket ABI-341953038(1): the main profile can put an archived order back on
+    # the books. The status it returns to is the one it held before it was
+    # archived (the client's clarification), so ``to`` is resolved at runtime in
+    # transition_order() rather than stored here — archive is only reachable from
+    # returned and Sales/Repairs, so those are the only two statuses that can be
+    # restored. Nothing financial moves: payments, quotes and invoices stay put,
+    # exactly like revert_draft.
+    "unarchive": {
+        "from": {"archived"},
+        "to": None,
+        "message": "Order unarchived",
+    },
     "cancel": {"from": {"draft", "reserved"}, "to": "canceled", "message": "Order canceled"},
     # Ticket ABI-341952993: the main profile can pull a live order back to draft.
     # Only orders that hold stock or are active are offered (reserved, picked up,
@@ -1113,9 +1168,16 @@ def availability_errors(order_id):
     for item in order_items(order_id):
         if not item["product_id"]:
             continue
-        product = db.execute("SELECT name, quantity, branch_id, product_type, tracking_method FROM products WHERE id = ?", (item["product_id"],)).fetchone()
+        product = db.execute("SELECT name, quantity, branch_id, product_type, tracking_method, under_maintenance FROM products WHERE id = ?", (item["product_id"],)).fetchone()
         if not product:
             errors.append("One of the products on this order is no longer available")
+            continue
+        # Ticket ABI-341953038(3): a trailer flagged under maintenance blocks the
+        # whole product line, so an order already holding it can never be
+        # reserved or picked up until the flag is released. Checked before the
+        # service/untracked exemption: the block is about the trailer, not stock.
+        if product_under_maintenance(product):
+            errors.append(under_maintenance_error(product))
             continue
         # Services and untracked products keep no stock count, so they are always
         # bookable and must never be blocked by the availability check.
@@ -1207,6 +1269,26 @@ def availability_errors(order_id):
     return errors
 
 
+def unarchive_target_status(order):
+    """The status an archived order is restored to (ticket ABI-341953038(1)).
+
+    The client's clarification: an unarchived order goes back to the status it
+    held before it was archived. ``archive`` is only offered from ``returned``
+    and Sales/Repairs, so those are the only two statuses that can legitimately
+    be restored; anything else (including the blank value on a row archived
+    before this column existed) falls back to ``returned`` — the most common
+    pre-archive status, and the one a legacy archived hire order would have had.
+    """
+    stored = ""
+    try:
+        stored = (order["status_before_archive"] or "").strip()
+    except (KeyError, IndexError, TypeError):
+        stored = ""
+    if stored in {"returned", SALES_REPAIRS_STATUS}:
+        return stored
+    return "returned"
+
+
 def transition_order(order_id, action):
     if action not in TRANSITIONS:
         raise ValueError("Unknown order action")
@@ -1230,7 +1312,12 @@ def transition_order(order_id, action):
                 f"Cannot revert an order with status {current} — Revert to Draft is available "
                 "for reserved, picked up, returned and Sales/Repairs orders"
             )
+        if action == "unarchive":
+            raise ValueError("Only an archived order can be unarchived")
         raise ValueError(f"Cannot {action} an order with status {STATUS_LABELS.get(order['status'], order['status'])}")
+    # Ticket ABI-341953038(1): an unarchive has no fixed target — it restores the
+    # status the order held before it was archived.
+    target_status = unarchive_target_status(order) if action == "unarchive" else transition["to"]
     if action == "return":
         validate_return_ready(order_id)
     if action == "sales_repairs" and order_has_rental_items(order_items(order_id)):
@@ -1249,9 +1336,17 @@ def transition_order(order_id, action):
         # Record the real collection moment: "reservation pick ups for the day"
         # is a day figure, and the scheduled pickup is only a proxy for it.
         db.execute("UPDATE orders SET status = ?, picked_up_at = ? WHERE id = ?",
-                   (transition["to"], now(), order_id))
+                   (target_status, now(), order_id))
+    elif action == "archive":
+        # Ticket ABI-341953038(1): remember where the order was so the main
+        # profile can unarchive it back to exactly that status.
+        db.execute("UPDATE orders SET status = ?, status_before_archive = ? WHERE id = ?",
+                   (target_status, previous_status, order_id))
+    elif action == "unarchive":
+        db.execute("UPDATE orders SET status = ?, status_before_archive = '' WHERE id = ?",
+                   (target_status, order_id))
     else:
-        db.execute("UPDATE orders SET status = ? WHERE id = ?", (transition["to"], order_id))
+        db.execute("UPDATE orders SET status = ? WHERE id = ?", (target_status, order_id))
     if action == "return" and order["booking_type"] == "oneway" and order["return_branch_id"]:
         for item in order_items(order_id):
             if item["product_id"]:
@@ -1274,7 +1369,7 @@ def transition_order(order_id, action):
     db.commit()
     if (
         previous_status == "draft"
-        and transition["to"] not in {"draft", "canceled"}
+        and target_status not in {"draft", "canceled"}
         and order["created_by_user_id"]
         and not order["new_order_notified_at"]
     ):
@@ -1309,6 +1404,11 @@ def status_actions(status, has_rental_items=False):
     the endpoint itself is main-gated, so a staff account is never offered it and
     cannot post it either. Cancelled and archived orders get nothing: a cancelled
     or archived order is not resurrected.
+
+    Ticket ABI-341953038(1) adds the one exception that *is* about an archived
+    order: ``unarchive`` ("Unarchive order"), offered only on an archived order
+    and only to the main profile, sending it back to the status it held before it
+    was archived.
     """
     actions = []
     if status == "draft":
@@ -1331,6 +1431,13 @@ def status_actions(status, has_rental_items=False):
     elif status == "returned":
         actions.append(("archive", "Archive order", "ghost"))
         actions.append(("revert_draft", "Revert to Draft", "ghost"))
+    elif status == "archived":
+        # Ticket ABI-341953038(1): putting an archived order back on the books is
+        # main-profile only, like Revert to Draft — the button is only RENDERED
+        # for the main profile and the endpoint is main-gated too. The order
+        # returns to the status it held before it was archived (see
+        # unarchive_target_status).
+        actions.append(("unarchive", "Unarchive order", "ghost"))
     return actions
 
 

@@ -401,7 +401,7 @@ def set_product_branch_stock(product_id, counts, restrict_branch_id=None):
     return dict(cleaned)
 
 
-def _clean(form, existing_quantity=None, existing_wheel_size=None):
+def _clean(form, existing_quantity=None, existing_wheel_size=None, existing_under_maintenance=None):
     name = form.get("name", "").strip()
     if not name:
         raise ValueError("Product name is required")
@@ -429,6 +429,17 @@ def _clean(form, existing_quantity=None, existing_wheel_size=None):
     else:
         wheel_size = clean_wheel_size(existing_wheel_size)
 
+    # "Trailer under maintenance" (ticket ABI-341953038(3)). A checkbox only
+    # submits when it is TICKED, so the panel carries a hidden `maintenance_panel`
+    # marker (the same trick the customer-blocking panel uses) to tell a real
+    # post from a caller that never carried the field — a sale/service product, or
+    # a legacy/API caller. Without the marker the stored flag is kept, so nothing
+    # can silently release a flagged trailer.
+    if "maintenance_panel" in form_keys or "under_maintenance" in form_keys:
+        under_maintenance = 1 if form.get("under_maintenance") else 0
+    else:
+        under_maintenance = 1 if existing_under_maintenance else 0
+
     # Services and untracked products keep no stock count at all.
     untracked = product_type == "service" or tracking_method == "none"
     branch_counts, branch_form_present = _branch_counts_from_form(form)
@@ -451,6 +462,7 @@ def _clean(form, existing_quantity=None, existing_wheel_size=None):
         "product_type": product_type,
         "tracking_method": tracking_method,
         "wheel_size": wheel_size,
+        "under_maintenance": under_maintenance,
         "description": form.get("description", "").strip(),
         "sku": form.get("sku", "").strip(),
         "active": 1 if form.get("active") else 0,
@@ -478,8 +490,8 @@ def create_product(form):
     db = get_db()
     cur = db.execute(
         """INSERT INTO products
-        (name, product_type, tracking_method, wheel_size, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
-        VALUES (:name, :product_type, :tracking_method, :wheel_size, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
+        (name, product_type, tracking_method, wheel_size, under_maintenance, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
+        VALUES (:name, :product_type, :tracking_method, :wheel_size, :under_maintenance, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -507,6 +519,7 @@ def update_product(product_id, form):
         form,
         existing_quantity=(existing["quantity"] if existing else None),
         existing_wheel_size=(existing["wheel_size"] if existing else None),
+        existing_under_maintenance=(existing["under_maintenance"] if existing else None),
     )
     branch_counts = data.pop("branch_counts")
     branch_form_present = data.pop("branch_form_present")
@@ -552,7 +565,7 @@ def update_product(product_id, form):
     data["id"] = product_id
     get_db().execute(
         """UPDATE products SET
-        name=:name, product_type=:product_type, tracking_method=:tracking_method, wheel_size=:wheel_size, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
+        name=:name, product_type=:product_type, tracking_method=:tracking_method, wheel_size=:wheel_size, under_maintenance=:under_maintenance, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
         price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, hourly_extra_rate=:hourly_extra_rate, tax_profile_id=:tax_profile_id, product_group_id=:product_group_id, quantity=:quantity, branch_id=:branch_id
         WHERE id=:id""",
         data,
@@ -604,6 +617,11 @@ def duplicate_product(product_id):
     * ``source_system`` / ``source_id`` are left empty, so the copy is never
       mistaken for an imported Booqable record (and cannot collide with the
       partial unique index on those columns).
+
+    ``under_maintenance`` is also deliberately NOT copied (ticket
+    ABI-341953038(3)): the flag means one physical trailer is off the road, and
+    the copy is a different row. A duplicate therefore starts available; only the
+    trailer the client actually ticked stays blocked.
 
     Per-branch counts are written through ``set_product_branch_stock`` with the
     session's branch scope, so branch-limited staff cannot create another depot's

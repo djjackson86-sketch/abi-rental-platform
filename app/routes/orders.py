@@ -648,14 +648,39 @@ def revert_draft(order_id):
     return redirect(url_for("orders.detail", order_id=order_id))
 
 
+@bp.post("/<int:order_id>/unarchive")
+@login_required
+@main_required
+def unarchive(order_id):
+    """Put an archived order back on the books (ticket ABI-341953038, item 1).
+
+    Main profile only — the gate is on the endpoint, never on the button. The
+    order returns to the status it held before it was archived (the client's
+    clarification), so an archived hire order comes back as Returned and an
+    archived sale or repair comes back as Sales/Repairs. Payments, quotes and
+    invoices are deliberately left intact: nothing financial is rewritten, added
+    or removed, exactly like Revert to Draft.
+    """
+    order = _ensure_order_access(order_id)
+    if not order:
+        flash("Order not found", "error")
+        return redirect(url_for("orders.index"))
+    try:
+        message = transition_order(order_id, "unarchive")
+        flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))
+
+
 @bp.post("/<int:order_id>/<action>")
 @login_required
 def change_status(order_id, action):
     _ensure_order_access(order_id)
-    if action == "revert_draft" and not is_main_session(session):
-        # Belt and braces: the dedicated /revert-draft route above carries the
-        # gate, and this refuses the same action through the generic catch-all
-        # (a crafted URL must not be able to sidestep the main-profile rule).
+    if action in {"revert_draft", "unarchive"} and not is_main_session(session):
+        # Belt and braces: the dedicated routes above carry the gate, and this
+        # refuses the same actions through the generic catch-all (a crafted URL
+        # must not be able to sidestep the main-profile rule).
         abort(403)
     try:
         message = transition_order(order_id, action)

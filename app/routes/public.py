@@ -9,11 +9,21 @@ bp = Blueprint("public", __name__)
 
 
 def _public_products():
-    return get_db().execute("SELECT * FROM products WHERE active = 1 AND public_visible = 1 ORDER BY name").fetchall()
+    # Ticket ABI-341953038(3): a trailer flagged "Trailer under maintenance" is
+    # not offered in the online store until the flag is released. It stays fully
+    # visible in the back office inventory.
+    return get_db().execute(
+        "SELECT * FROM products WHERE active = 1 AND public_visible = 1 "
+        "AND COALESCE(under_maintenance, 0) = 0 ORDER BY name"
+    ).fetchall()
 
 
 def _public_product(product_id):
-    return get_db().execute("SELECT * FROM products WHERE id = ? AND active = 1 AND public_visible = 1", (product_id,)).fetchone()
+    return get_db().execute(
+        "SELECT * FROM products WHERE id = ? AND active = 1 AND public_visible = 1 "
+        "AND COALESCE(under_maintenance, 0) = 0",
+        (product_id,),
+    ).fetchone()
 
 
 @bp.route("/store")
