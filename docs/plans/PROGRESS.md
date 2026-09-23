@@ -16,7 +16,7 @@
 | 2 | A2 vehicle data model + service | done | tick 2 | `vehicles` table (SCHEMA + `run_migrations`) + `app/services/vehicles.py`; one owner per registration (app ValueError **and** partial unique index), blank masses stay NULL, no towing column (D3b), customer delete clears vehicles (FK + explicit); 20 new tests, full suite **767 green** |
 | 3 | A3 staff scan UI + allocate to client | done | tick 3 | `/scan-vehicle` capture + review form, allocate/transfer, JSON feed + typeahead, module `scan_vehicle`; D3 identifier mapping now placed (plate / NaTIS / disc licence no); 25 new tests, full suite **794 green**, real-browser proof 27/27 checks, 0 console errors, 0 overflow at 1440px and 390px |
 | 4 | A4 client page vehicles panel + browser proof | done | tick 4 | client-page `Vehicles` panel (plate + NaTIS, make, model, year, tare, GVM, disk expiry; blank = dash, no towing column per D3b), collapsed per-vehicle edit/remove `<details>`, empty state with a scan CTA; 14 new tests (written failing-first: 11 failed with the impl stashed), full suite **808 green**, real-browser 39/39 checks, 0 console errors, 0 overflow at 1440px + 390px; feature A signed off locally |
-| 5 | D1 trailer identity + return-matching service | pending | | |
+| 5 | D1 trailer identity + return-matching service | done | tick 5 | `products.registration`/`licence_number`/`registration_number` + partial unique index (one plate = one trailer) + inventory "Trailer identification" panel behind a marker; `orders.return_scan_*` audit; new `app/services/returns.py` (`match_open_rentals`, `returnable_order`, `mark_returned_via_scan` → existing `transition_order(...,"return")`); 37 new tests (34 failed first), full suite **845 green**, browser proof **26/26**, 0 console errors, 0 overflow at 1440px + 390px |
 | 6 | D2 scan-to-return screen + marks returned + proof | pending | | |
 | 7 | B1 branch portal schema + link + QR | pending | | |
 | 8 | B2 public form + dedupe + "am I already a customer?" | pending | | |
@@ -461,3 +461,130 @@ own commit so the hash above is real.
    edit/remove, proven in a real browser. Nothing pushed, nothing deployed.
 4. Any new panel that puts a `.data-table` into a two-column profile grid needs `min-width:0` on the grid
    item, or the page itself scrolls sideways at 390px (see the measurement above).
+
+### Phase 5 — D1 trailer identity + the return-matching service — status `done`
+**Branch:** `feature/abi-programme-2026-09-23` (nothing pushed; `master` untouched at `8ec51e8`).
+`docs/plans/.tick.lock` did not exist at the start — this tick created it and removed it; no stale lock.
+
+**Files:** `app/db.py` (SCHEMA + `run_migrations`: `products.registration` / `licence_number` /
+`registration_number` with `idx_products_registration` partial unique, `orders.return_scan_at` /
+`_registration` / `_source` / `_user_id`), `app/services/products.py` (`trailer_identity_from_form`,
+`trailer_registration_owner`, `_assert_trailer_registration_is_free`, `_clean` + create/update SQL),
+`app/services/returns.py` (new, 14.8 KB), `templates/admin/inventory/form.html` ("Trailer identification"
+panel + marker + JS toggle), `tests/test_programme_20260923_returns_match.py` (new, 37 tests).
+
+**Trailer identity (D3, exactly).** `registration` = number plate, `registration_number` = NaTIS number,
+`licence_number` = the disc's own licence number — the same three columns and the same shape as `vehicles`,
+because the normalisers are *imported* from `app.services.vehicles` (`normalise_registration` /
+`registration_key`) rather than copied: the plate typed on the inventory form and the plate read off a disc
+must compare equal. Stored normalised (`" kp 35 xkgp "` → `KP 35 XKGP`, measured in the browser proof), one
+plate on one trailer enforced by the service **and** by `idx_products_registration` (a raw duplicate INSERT
+raises `sqlite3.IntegrityError` — tested). A sale/service save or a legacy/API post carries no
+`trailer_identity_panel` marker, so it **cannot blank** a recorded plate (tested both ways: no marker = kept,
+marker + blank boxes = cleared). `duplicate_product` deliberately does not copy the identity (a copy is a
+different trailer), which is also what keeps the unique index from exploding.
+
+**`app/services/returns.py`.** `match_open_rentals(parsed, session_scope=None)` resolves in D9's documented
+order — **trailer plate** (any of the product's three identifiers, evidence recorded) → **customer vehicle
+plate** → **vehicle NaTIS number** → **VIN** → **engine number** — returning candidates that carry
+`order_id / order_number / customer_name / status / returnable / matched_on / evidence / source / reason` and
+`also_matched_on` when one order matched several ways (the strongest match wins: trailer beats car). Only
+`started` orders are `returnable`; `draft`/`reserved` matches are still listed with a reason ("it must be
+picked up before it can be returned"). Scope comes from `session_branch_scope_ids()` (an explicit
+`session_scope` may be passed) so a branch-limited account only ever matches its own depots. An unknown or
+blank disc returns an **empty list** — never a guess. `returnable_order()` is the pre-post guard (not found /
+already returned, naming the scan date / not picked up / another depot). `mark_returned_via_scan()` writes
+the four audit columns and calls `transition_order(order_id, "return")` — **no transition logic duplicated**;
+its refusal message is surfaced verbatim and nothing is written (test: no finalized invoice →
+`"Finalize the invoice before returning this order"`, status stays `started`, audit columns stay blank).
+
+**Commands + real results:**
+- **Failing first (real, not asserted):** `git stash push -- app/db.py app/services/products.py
+  templates/admin/inventory/form.html` → `.venv/bin/pytest tests/test_programme_20260923_returns_match.py -q`
+  → **34 failed, 3 passed in 19.20s** (e.g. `assert {'registration','licence_number','registration_number'}
+  <= {…}` / `assert {'return_scan_user_id','return_scan_source','return_scan_at'} <= {…}`); `git stash pop`
+- `.venv/bin/pytest tests/test_programme_20260923_returns_match.py -q` → **37 passed in 16.40s**
+  (the first green attempt was 4 failed / 33 passed — see the three real findings below)
+- `.venv/bin/pytest -q` (full suite) → **845 passed in 497.91s (0:08:17)** — green (808 before)
+- `.venv/bin/pytest tests/test_programme_20260923_returns_match.py
+  tests/test_ticket_341953038_maintenance.py tests/test_product_duplicate.py
+  tests/test_ticket_341953033_wheel_size_spare_count.py -q` → **96 passed in 52.64s** (re-run after the
+  placeholder wording change below, so the shipped template state is covered)
+- `python3 -m compileall app tests -q` → clean
+- Browser proof (venv Playwright Chromium, temp DB `/tmp/abi_d1.db`, app on **5058** because 5057 is still
+  held by the 09:16 non-programme `app.py`; screenshots `/tmp/abi_d1_shots/`, report `/tmp/abi_d1_report.json`):
+  **26/26 checks passed, 0 console errors, 0 horizontal overflow** at 1440×1100 and 390×844 — owner sign-in →
+  `/inventory/new` (panel visible, exactly the three fields, marker enabled, nothing pre-filled) → saved
+  `"  kp 35 xkgp "` + `shs812w` → landed on `/inventory/<id>/edit` with **`KP 35 XKGP`** / `SHS812W` →
+  duplicate plate POST answered **200 with a flash** `"Trailer KP35XKGP is already recorded on Proof Trailer
+  — open that trailer and edit it instead of adding the same plate a second time"` (no 500) → sale item:
+  panel `hidden`, all four inputs `disabled`, no plate → phone widths clean on both pages.
+- `vision_analyze` on the screenshots (what was actually seen — `/tmp/abi_d1_shots/`): 1440px **new rental**
+  = "New product" with Product type / General information / Wheel size / Rental availability /
+  **Trailer identification** (Number plate, Disk licence number, NaTIS registration number + the help text
+  naming the disc match) / Tracking method / Pricing / Visibility, nothing clipped; 1440px **edit rental**
+  ("Proof Trailer") shows the real stored `KP 35 XKGP` (the vision model read `4024048GB8LY` as
+  "40240486BBLY" — OCR noise, the DOM value check above is authoritative); 1440px **sale item** = Sales item
+  selected and **no identification section at all**; 390px new + edit = one column, all three inputs 308px
+  wide, labels legible, no clipping; 1440px **duplicate refusal** = the red banner quoted above.
+  **Cosmetic fix the screenshots produced:** the placeholders (`ABC123GP` / `4024048GB8LY` / `S812W`-shaped
+  examples) rendered exactly like recorded values — `vision_analyze` twice read them as filled-in fields —
+  so they now read `e.g. ABC123GP` and the proof asserts both "nothing pre-filled" and "placeholders start
+  with `e.g.`". Re-shot and re-inspected: the zoom confirms only placeholder text, boxes empty.
+
+**Three REAL findings from the first green attempt (all fixed, all now tested):**
+1. `run_migrations()` is **not** a standalone bootstrap — it `ensure_column`s tables that `SCHEMA` creates,
+   so calling it against a hand-built legacy DB raises `sqlite3.OperationalError: no such table:
+   company_settings`. The additive-migration test now emulates the pre-phase-5 shape honestly instead:
+   build the real DB, `ALTER TABLE … DROP COLUMN` the seven new columns (dropping the index first), then
+   `run_migrations()` and assert the columns come back empty with the rows intact.
+2. `orders.return_scan_user_id` is a real FK — passing a user id that does not exist raises
+   `sqlite3.IntegrityError: FOREIGN KEY constraint failed` (found by the test, which used a made-up id 7).
+   The audit write now uses a genuinely existing account in the test; the screen will pass the session's
+   user id, which always exists.
+3. **A test I wrote was wrong, not the code:** I asserted `mark_returned_via_scan` would refuse an
+   out-of-depot order in a test context, but there is no request context there, so
+   `session_branch_scope_ids()` is legitimately `None` (unrestricted). `mark_returned_via_scan` gained an
+   optional `session_scope=` so the scope guard is testable and provable through the same path the screen
+   uses; the test now exercises it explicitly.
+
+**Commit:** `dde0d26` — `feat(returns): trailer identity on inventory + scan-to-return matching service (D1)`
+(5 files: `app/db.py`, `app/services/products.py`, `app/services/returns.py`, `templates/admin/inventory/form.html`,
+`tests/test_programme_20260923_returns_match.py`). This ledger entry is its own commit so the hash is real.
+
+**Blockers / notes for Don:**
+- **Port 5057 is still held** by the 09:16 `app.py` that is not this programme's (pid 558440) — this tick
+  again proved on 5058 and left 5057 untouched; 5058 is free again. Third tick in a row flagging it: say the
+  word and the next tick stops it (or it stays as-is).
+- **Two small deviations from the D1 plan text, both deliberate and additive:** (1) `orders.return_scan_user_id`
+  was added on top of the three audit columns the plan listed, because the plan's own signature passes
+  `user_id` and knowing *who* scanned is the point of an audit line; (2) `returns.py` reports the vehicle's
+  NaTIS-number match as its own `matched_on` value (`customer_vehicle_registration_number`) rather than
+  folding it into `customer_vehicle_plate` — the plan listed four `matched_on` values and this is a fifth, so
+  D2's screen can show precise evidence. Neither changes any existing behaviour.
+- **A trailer with no plate recorded can still only be returned by scanning the car's disc** (the plan's open
+  question 3, still unanswered). D2 should keep the "type the plate" fallback so staff are never blocked by a
+  trailer whose plate was never captured — and, if you say yes, let that typed-in plate be saved onto the
+  trailer from the confirm step.
+
+**Must-know for tick 6 (D2, the scan-to-return screen + browser proof):**
+1. Use `returns.match_open_rentals(parsed, session_scope=None)` — the candidate dicts already carry
+   `returnable`, `matched_on`, `evidence`, `source`, `reason` and `also_matched_on`, so the screen does not
+   need to re-derive anything. **One candidate → offer it; two or more → require an explicit choice; none →
+   list nothing and link to the started-orders list.** Never auto-pick.
+2. `returns.returnable_order(order_id, session_scope=None)` is the pre-post guard and
+   `returns.mark_returned_via_scan(order_id, user_id=<session user>, parsed=<the same parsed dict>)` is the
+   action; it flashes nothing itself, so the route composes the message from its return value
+   (`registration`, `source`, `message`) and redirects to `/orders/<id>` so the existing checklist/deposit
+   flow continues. It **only** works once the invoice is finalized and the checklist is ticked — an order
+   that is `started` but not return-ready surfaces the existing message verbatim, which is correct.
+3. `scan_return` is a **new module**: add it to `MODULES` in `app/services/access.py` and add the
+   `returns.` endpoint rule; like `scan_vehicle` it should stay **out** of the shared staff default set
+   (Don ticks it per account), and its routes must 403 without it.
+4. The parsed dict is the **parser's** shape (`licence_number` = plate, `disc_licence_number` = the disc's
+   licence number, `registration_number` = NaTIS); `returns.scanned_identifiers()` already maps it, so a
+   typed-in plate should be handed over in the same shape (`{"licence_number": "<plate>"}`) — do not invent a
+   second mapping.
+5. Proof DB note: the previous proof scripts are `/tmp/abi_a3_proof.py` (scan screen) and `/tmp/abi_d1_proof.py`
+   (this tick's inventory-form proof) — reuse the login + overflow + screenshot harness from them.
+
