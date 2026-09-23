@@ -328,6 +328,9 @@ is kept and unit-tested.
   own `MM/DD/YYYY` locale although the stored value is ISO; the header's floating module icon is the
   same shape as the existing "Scan a barcode" screen.)
 
+**Commit:** `00b7c88` — `feat(scan): staff licence-disc scan screen with allocate + explicit transfer (A3)`
+(12 files, code + tests + templates + CSS + this ledger together). Nothing pushed; `master` untouched.
+
 **Blockers / notes for Don:**
 - **Port 5057 is still held by an `app.py` from 09:16 that is not this programme's** (`pid 558440`,
   `.venv/bin/python app.py` in the repo, no `DATABASE_PATH`) — left running on purpose, so the proof ran
