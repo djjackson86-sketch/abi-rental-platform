@@ -480,3 +480,27 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .vehicle-remove-form .form-help{margin:0;flex:1 1 240px}
 @media(max-width:1050px){.customer-vehicles-card{grid-column:auto}}
 @media(max-width:520px){.vehicle-remove-form button{width:100%}}
+
+/* --- POPIA privacy notice + consent (programme phase 7, feature P / §P1) ----
+   The notice is a customer-facing document: a comfortable reading measure, print
+   friendly (Sano keeps a printed copy at the counter), and the consent block is
+   one unticked checkbox that both public capture points share. ---------------- */
+.privacy-main{max-width:820px}
+.privacy-notice{line-height:1.65}
+.privacy-notice h1{margin-top:4px}
+.privacy-notice h2{margin-top:26px}
+.privacy-notice p,.privacy-notice li{overflow-wrap:anywhere}
+.privacy-version{margin:0 0 16px;color:var(--muted);font-weight:650}
+.privacy-table{min-width:520px}
+.privacy-table td:last-child{min-width:200px}
+.privacy-back{margin-top:28px}
+.consent-block{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line-soft);border-radius:12px;background:var(--surface-soft);cursor:pointer}
+.consent-block input[type="checkbox"]{width:18px;height:18px;margin:2px 0 0;flex:0 0 auto}
+.consent-block-text{font-size:13px;line-height:1.55;color:var(--ink-2)}
+.consent-block-text a{color:var(--brand);font-weight:750}
+.consent-recorded{color:var(--ink);font-weight:650}
+@media print{
+  .store-header,.store-footer,.privacy-back{display:none}
+  .privacy-notice{border:none;box-shadow:none;padding:0}
+  .privacy-main{max-width:none}
+}

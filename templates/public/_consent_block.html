@@ -1,0 +1,11 @@
+{# POPIA consent block — feature P (§P1). ONE widget, shared by every client-facing
+   capture point: the per-branch portal form (feature B, §B2) and the public booking
+   form (feature C, §C2) must each `{% include "public/_consent_block.html" %}` and must
+   refuse the submission server-side when `popia_consent` is absent — the `required`
+   attribute here is only the browser's hint, never the control (decision D10).
+   Unticked by default is the point: consent that is pre-ticked is not consent.
+   The wording mirrors the TrailerPro booking page the brief points at. #}
+<label class="consent-block" for="popia-consent">
+  <input type="checkbox" name="popia_consent" id="popia-consent" value="1" required>
+  <span class="consent-block-text">I agree that my personal information (name, contact details and address) may be used to process this {{ consent_purpose|default('booking') }} and generate an invoice, in accordance with POPIA. <a href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View Privacy Notice</a>.</span>
+</label>

@@ -145,6 +145,11 @@ def delete_customer(customer_id):
     # (app/services/branches.py).
     from app.services.vehicles import delete_vehicles_for_customer
     delete_vehicles_for_customer(customer_id)
+    # Programme phase 7 (feature P §P1): the same for the client's POPIA consent rows —
+    # the FK cascades, but this clears them explicitly so no orphan can survive a Turso
+    # connection that is not enforcing foreign keys.
+    from app.services.consent import delete_consents_for_customer
+    delete_consents_for_customer(customer_id)
     cur = db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     db.commit()
     return cur.rowcount > 0

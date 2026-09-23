@@ -60,6 +60,7 @@
       <div class="detail-row"><span>Created</span><b>{{ customer.created_at[:10] }}</b></div>
       <div class="detail-row"><span>Created by</span><b>{{ customer.created_by_name or '—' }}</b></div>
       <div class="detail-row"><span>Branch</span><b>{{ customer.branch_name or 'No branch recorded' }}</b></div>
+      <div class="detail-row"><span>POPIA consent</span>{% if consent_summary %}<b class="consent-recorded">{{ consent_summary }}</b>{% else %}<b class="muted">No POPIA consent recorded</b>{% endif %}</div>
       <div class="detail-row"><span>Balance due</span><b>R{{ '%.2f'|format(customer.balance_due) }}</b></div>
       {% if customer.customer_type == 'company' and (custom_fields.get('vat_number') or custom_fields.get('company_reg_no')) %}
         <div class="detail-row"><span>VAT No</span><b>{{ custom_fields.get('vat_number') or '—' }}</b></div>

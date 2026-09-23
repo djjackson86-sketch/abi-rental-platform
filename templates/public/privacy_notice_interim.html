@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Privacy | {{ settings.company_name }}{% endblock %}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+  <a class="btn ghost" href="{{ back_url }}">Back</a>
+</header>
+<main class="store-main privacy-main">
+  <article class="panel privacy-notice">
+    <p class="eyebrow">Privacy</p>
+    <h1>Our privacy notice is being finalised</h1>
+    <p>We are in the middle of having our full privacy notice reviewed for publication. Until it is
+    published here, please <strong>ask at the counter</strong> or email
+    <a href="mailto:info@sanotrailers.co.za?subject=Privacy%20Request">info@sanotrailers.co.za</a>
+    (subject line <em>Privacy Request</em>) and we will send you a copy straight away.</p>
+
+    <h2>Who we are</h2>
+    <p><strong>Sano Trailers</strong> — the responsible party for the personal information described below.<br>
+    229 Summit Road, Midrand, Gauteng, South Africa<br>
+    Telephone: 010 221 1723 · Email: <a href="mailto:info@sanotrailers.co.za">info@sanotrailers.co.za</a></p>
+    <p>Branches: Midrand · Wonderboom (Pretoria) · Rooderport</p>
+
+    <h2>What we do with the information you give us</h2>
+    <p>We collect only what we need to quote, hire out, return and service trailers: your name, contact
+    details, address and — for a rental — the details of the vehicle that will tow the trailer. We keep
+    transaction records (orders, invoices, deposits, payments) and we keep them only as long as the law and
+    our own retention policy require. We do not sell your personal information.</p>
+
+    <h2>Your rights, and how to complain</h2>
+    <p>You may ask us what we hold about you, ask us to correct or delete it, object to our processing of it,
+    opt out of marketing at any time, and complain to the Information Regulator. Until the full notice is
+    published, send any such request to
+    <a href="mailto:info@sanotrailers.co.za?subject=Privacy%20Request">info@sanotrailers.co.za</a> with the
+    subject <em>Privacy Request</em>, or deliver it in writing to 229 Summit Road, Midrand.</p>
+    <p>You can complain to the Regulator without going to us first:</p>
+    <p><strong>The Information Regulator (South Africa)</strong><br>
+    JD House, 27 Stiemens Street, Braamfontein, Johannesburg, 2001<br>
+    Complaints email: <a href="mailto:complaints.IR@justice.gov.za">complaints.IR@justice.gov.za</a><br>
+    General email: <a href="mailto:inforeg@justice.gov.za">inforeg@justice.gov.za</a><br>
+    Website: <a href="https://inforegulator.org.za" target="_blank" rel="noopener noreferrer">inforegulator.org.za</a></p>
+
+    <p class="privacy-back"><a class="btn primary" href="{{ back_url }}">Back</a></p>
+  </article>
+</main>
+<footer class="store-footer">© 2026, {{ settings.company_name }}<span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span></footer>
+{% endblock %}

@@ -210,6 +210,24 @@ CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id);
 -- plate) is allowed as often as staff need it, hence the partial index.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration ON vehicles(registration) WHERE registration <> '';
 
+-- POPIA consent records (programme phase 7 / feature P, §P1). Decision D10: every
+-- client-facing capture point (the branch portal and the public booking form) shows a
+-- required, unticked-by-default acceptance, and the acceptance is *recorded* so Sano can
+-- evidence it — the reference app keeps it in component state only, which evidences
+-- nothing. The columns are deliberately the minimum: who, which notice version, which
+-- channel, when. There is **no IP address, no user agent and no device fingerprint** —
+-- POPIA data minimisation, and a test asserts this column set so it cannot creep back.
+CREATE TABLE IF NOT EXISTS consent_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    consent_type TEXT NOT NULL DEFAULT 'popia_privacy',
+    notice_version TEXT NOT NULL DEFAULT '',
+    channel TEXT NOT NULL DEFAULT '',
+    accepted_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_consent_records_customer ON consent_records(customer_id);
+
 CREATE TABLE IF NOT EXISTS product_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -822,6 +840,26 @@ def run_migrations(db):
     ensure_column(db, "orders", "return_scan_registration", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "return_scan_source", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "orders", "return_scan_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
+
+    # --- POPIA consent records (additive, programme phase 7 / feature P §P1) ---
+    # A new, empty table on an existing database: every client simply has no consent
+    # recorded yet, which is what the admin customer page reports ("No POPIA consent
+    # recorded"). Nothing existing changes. The column set is deliberately minimal —
+    # who / which notice version / which channel / when, and no IP or user agent
+    # (see the note on the same table in SCHEMA).
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS consent_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+            consent_type TEXT NOT NULL DEFAULT 'popia_privacy',
+            notice_version TEXT NOT NULL DEFAULT '',
+            channel TEXT NOT NULL DEFAULT '',
+            accepted_at TEXT NOT NULL
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_consent_records_customer ON consent_records(customer_id)"
+    )
 
 
 def init_db():

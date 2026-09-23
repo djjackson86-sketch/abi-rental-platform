@@ -75,6 +75,10 @@ def detail(customer_id):
         flash("Customer not found", "error")
         return redirect(url_for("customers.index"))
     orders = customer_orders(customer_id)
+    # Programme phase 7 (feature P §P1): the POPIA evidence line. Read-only, no extra
+    # permission — it is one line of the client's own contact card, and a client with no
+    # acceptance recorded says so rather than showing nothing.
+    from app.services.consent import consent_summary
     # Programme phase 4 (feature A / A4): the client page owns the Vehicles panel, so the rows are
     # read here (same service A2/A3 use, same order) rather than fetched by the panel over JSON —
     # the page renders exactly what the database holds, with no second round trip to drift out of
@@ -86,6 +90,7 @@ def detail(customer_id):
         custom_fields=custom_fields_for(customer),
         orders=orders,
         vehicles=list_vehicles(customer_id),
+        consent_summary=consent_summary(customer_id),
         customer_has_history=bool(orders) or customer_has_history(customer_id),
         custom_field_label=custom_field_label,
         client_verified_label=client_verified_label,

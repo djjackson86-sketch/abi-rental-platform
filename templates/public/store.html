@@ -30,5 +30,5 @@
   <section class="empty-state"><h1>No products</h1><p>Unfortunately, we couldn’t find any products in this collection.</p><a class="btn ghost" href="#">Browse all products</a></section>
   {% endif %}
 </main>
-<footer class="store-footer">© 2026, {{ settings.company_name }}{% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}</footer>
+<footer class="store-footer">© 2026, {{ settings.company_name }}{% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}<span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span></footer>
 {% endblock %}
