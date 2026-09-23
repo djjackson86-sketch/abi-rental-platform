@@ -368,11 +368,25 @@ def privacy_notice():
     chance of a bracketed token reaching a customer in either state.
     """
     settings = get_company_settings()
+    back_url = _privacy_back_url()
+    published = consent.published_notice()
+    if published:
+        # The wizard's notice is the live one. It is generated from Sano's own answers and cannot
+        # contain a placeholder, so a customer only ever reads wording that has been published.
+        from app.routes.popia import render_markdown_html
+
+        return render_template(
+            "public/privacy_notice_published.html",
+            settings=settings,
+            back_url=back_url,
+            notice=published,
+            notice_html=render_markdown_html(published["notice_text"]),
+        )
     if not popia_pack.is_complete(popia_pack.PRIVACY_NOTICE_KEY):
         return render_template(
             "public/privacy_notice_interim.html",
             settings=settings,
-            back_url=_privacy_back_url(),
+            back_url=back_url,
         )
     return render_template(
         "public/privacy_notice.html",

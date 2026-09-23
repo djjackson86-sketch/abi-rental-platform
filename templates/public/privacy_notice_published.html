@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Privacy | {{ settings.company_name }}{% endblock %}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+  <a class="btn ghost" href="{{ back_url }}">Back</a>
+</header>
+<main class="store-main privacy-main">
+  <article class="panel privacy-notice">
+    <p class="eyebrow">Privacy</p>
+    <h1>Our privacy notice</h1>
+    <p class="privacy-version">Version {{ notice.notice_version }} · published {{ notice.published_at[:10] }}.
+    This is the version we record your consent against.</p>
+    <div class="privacy-notice-body">
+      {{ notice_html|safe }}
+    </div>
+    <p class="privacy-back"><a class="btn primary" href="{{ back_url }}">Back</a></p>
+  </article>
+</main>
+<footer class="store-footer">© 2026, {{ settings.company_name }}<span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span></footer>
+{% endblock %}

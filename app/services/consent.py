@@ -45,9 +45,55 @@ CHANNEL_PUBLIC_BOOKING = "public booking page"
 CHANNEL_COUNTER = "counter"
 
 
+def published_notice():
+    """The notice the main profile published from the wizard, or ``None`` if none is published.
+
+    Imported inside the function because the wizard pulls in the DB layer and this module is
+    imported very early (the same reason ``popia_pack`` reaches for the connection lazily).
+    """
+    from app.services import popia_wizard
+
+    return popia_wizard.published_notice()
+
+
 def notice_is_publishable():
-    """False while the notice still carries an open placeholder (decision D11)."""
-    return popia_pack.is_complete(popia_pack.PRIVACY_NOTICE_KEY)
+    """True when a placeholder-free notice is in force (decision D11).
+
+    Two ways that happens, and they are the same promise to the customer:
+
+    * Sano filled the reviewed document in ``docs/popia/`` in by hand (the original route), or
+    * the wizard published a generated notice — which cannot contain a placeholder at all, because
+      the renderer refuses to produce one and ``publish()`` refuses to store it (T6, verified).
+
+    So the public side opens the day the wizard publishes, with no code change, and stays shut
+    until then. Deliberately NOT a separate switch: whatever opens the booking form also opens
+    registration, and both are traceable to one notice.
+    """
+    if popia_pack.is_complete(popia_pack.PRIVACY_NOTICE_KEY):
+        return True
+    try:
+        published = published_notice()
+    except RuntimeError:
+        # Called outside an application context (a script, a test, a CLI). There is no database to
+        # read, so a published notice cannot be shown to exist - and for a gate that decides whether
+        # a stranger may be asked to accept a notice, the only safe answer is no.
+        published = None
+    return published is not None
+
+
+def current_notice_version():
+    """The version a consent is recorded against: the published one when there is one.
+
+    A consent row that names the wrong version is worse than useless — it points at wording the
+    customer never saw — so the published version wins over the reviewed document's constant.
+    """
+    try:
+        notice = published_notice()
+    except RuntimeError:
+        notice = None
+    if notice:
+        return notice["notice_version"]
+    return PRIVACY_NOTICE_VERSION
 
 
 def consent_required_error():
@@ -96,7 +142,7 @@ def record_consent(customer_id, channel, accepted, notice_version=None, consent_
         (
             customer_id,
             consent_type or CONSENT_TYPE_POPIA_PRIVACY,
-            (notice_version or PRIVACY_NOTICE_VERSION),
+            (notice_version or current_notice_version()),
             (channel or "").strip(),
             local_now_iso(),
         ),
