@@ -1,0 +1,235 @@
+{% extends "admin/layout.html" %}
+{% set title='POPIA setup' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Settings · POPIA</p><h1>Privacy notice setup</h1><p>Five steps turn what we already know into a published privacy notice. Every step saves as you go, so you can close this page and come back any time.</p></div></header>
+{% include "admin/settings/nav.html" %}
+
+<style>
+  .popia-wizard{display:grid;grid-template-columns:230px minmax(0,1fr);gap:22px;align-items:start}
+  .popia-rail{display:grid;gap:12px}
+  .popia-progress{margin:0;padding:12px 14px;border:1px solid var(--line-soft);border-radius:12px;background:#fff;color:var(--ink-2);font-weight:700}
+  .popia-progress strong{color:var(--brand);font-size:22px}
+  .popia-rail ol{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+  .popia-rail li a{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--muted);font-weight:720}
+  .popia-rail li a:hover{color:var(--brand);border-color:#bcd2ff;background:var(--brand-soft)}
+  .popia-rail li.active a{border-color:var(--brand);color:var(--brand);background:var(--brand-soft)}
+  .popia-rail .popia-step-num{display:inline-grid;place-items:center;min-width:22px;height:22px;border-radius:999px;background:var(--surface-soft);border:1px solid var(--line);font-size:12px;font-weight:800}
+  .popia-rail li.active .popia-step-num{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .popia-rail .form-help{margin:0;padding:0 2px}
+  .popia-content{min-width:0;display:grid;gap:16px}
+  .popia-content .settings-form{margin:0}
+  .popia-question{border:1px solid var(--line-soft);border-radius:14px;background:#fff;padding:14px 16px;min-width:0}
+  .popia-question-label{margin:0 0 10px;font-weight:700;color:var(--ink)}
+  .popia-radios{display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:4px}
+  .popia-cctv-extra{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);display:grid;gap:10px}
+  .popia-branch-ticks{display:flex;flex-wrap:wrap;gap:8px 14px}
+  .popia-preview{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6;background:#fff;border:1px solid var(--line-soft);border-radius:12px;padding:18px;max-height:600px;overflow:auto;margin:0}
+  .popia-left-out{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+  .popia-left-out li{padding:10px 12px;border:1px solid var(--line-soft);border-radius:10px;background:#fff;color:var(--ink-2)}
+  .popia-error{border:1px solid #fecaca;background:var(--danger-soft);color:var(--danger);border-radius:12px;padding:14px 16px}
+  .popia-error p{margin:6px 0 0;color:#7a271a}
+  .popia-error ul{margin:8px 0 0;padding-left:18px}
+  .popia-success{border:1px solid #bbf7d0;background:var(--success-soft);color:#047857;border-radius:12px;padding:14px 16px}
+  .popia-success p{margin:6px 0 0}
+  .popia-cta{margin-top:14px;padding:14px 16px;border:1px solid #fde68a;background:#fffbeb;border-radius:12px}
+  .popia-cta p{margin:0 0 8px;color:#92400e}
+  .popia-cta p:last-child{margin:0}
+  .popia-cta a{color:var(--brand);font-weight:750;overflow-wrap:anywhere}
+  @media(max-width:860px){.popia-wizard{grid-template-columns:1fr}.popia-rail ol{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}.popia-rail li a{font-size:13px}}
+</style>
+
+<div class="popia-wizard">
+  <nav class="popia-rail" aria-label="POPIA setup steps">
+    <p class="popia-progress"><strong>{{ progress.completed }}</strong> of {{ progress.total }} steps done</p>
+    <ol>
+      {% for n in [1, 2, 3, 4, 5] %}
+      <li class="{{ 'active' if step == n }}">
+        <a href="{{ url_for('settings.popia_wizard_step', step=n) }}"><span class="popia-step-num">{{ n }}</span><span>{{ step_titles[n] }}</span></a>
+      </li>
+      {% endfor %}
+    </ol>
+    <p class="form-help">Nothing is published until step 5. Every step you save is kept, so you can leave and come back later.</p>
+  </nav>
+
+  <div class="popia-content">
+    {% if step == 1 %}
+    <form method="post" action="{{ url_for('settings.popia_wizard_save_step1') }}" class="settings-form panel">
+      <h2>1 · Who you are</h2>
+      <p class="form-help">These details name the business as the responsible party in the notice. They are pre-filled from what the app already holds — check each one and correct anything out of date. A blank box means we do not know it yet: type it in rather than leaving it blank.</p>
+      <div class="form-grid">
+        <label>Registered business name
+          <input name="business_name" value="{{ step1_values.business_name }}" required>
+          <small>Why we need this: it names the business that is the responsible party.</small>
+        </label>
+        <label>Registration number
+          <input name="registration_number" value="{{ step1_values.registration_number }}" required>
+          <small>Why we need this: it identifies the exact company behind the name.</small>
+        </label>
+        <label>VAT number
+          <input name="vat_number" value="{{ step1_values.vat_number }}" required>
+          <small>Why we need this: it completes the responsible party's details in the notice.</small>
+        </label>
+        <label>Trading name (if different)
+          <input name="trading_name" value="{{ step1_values.trading_name }}" placeholder="Leave blank if you trade under your registered name">
+          <small>Why we need this: shown only if the business trades under another name.</small>
+        </label>
+        <label class="span-2">Registered / business address
+          <input name="address" value="{{ step1_values.address }}" required>
+          <small>Why we need this: it is where a customer can write to the responsible party.</small>
+        </label>
+        <label>Telephone
+          <input name="telephone" value="{{ step1_values.telephone }}" required>
+          <small>Why we need this: it is how a customer can reach the responsible party.</small>
+        </label>
+        <label>Contact email
+          <input name="contact_email" type="email" value="{{ step1_values.contact_email }}" required>
+          <small>Why we need this: it is where a customer emails the responsible party.</small>
+        </label>
+      </div>
+      <div class="form-actions"><button class="btn primary" type="submit">Save and continue</button></div>
+    </form>
+
+    {% elif step == 2 %}
+    <form method="post" action="{{ url_for('settings.popia_wizard_save_step2') }}" class="settings-form panel">
+      <h2>2 · Your Information Officer</h2>
+      <p class="form-help">The Information Officer is the person who answers POPIA questions from customers and from the Regulator. This is usually the owner or a manager.</p>
+      <div class="form-grid">
+        <label>Full name
+          <input name="officer_name" value="{{ st.officer_name }}" required>
+          <small>Why we need this: the notice names who customers contact about their information.</small>
+        </label>
+        <label>Position
+          <input name="officer_position" value="{{ st.officer_position }}" required>
+          <small>Why we need this: it says what role this person holds.</small>
+        </label>
+        <label>Email
+          <input name="officer_email" type="email" value="{{ st.officer_email }}" required>
+          <small>Why we need this: it is how customers reach the officer in writing.</small>
+        </label>
+        <label>Telephone
+          <input name="officer_telephone" value="{{ st.officer_telephone }}" required>
+          <small>Why we need this: it is how customers reach the officer by phone.</small>
+        </label>
+      </div>
+
+      <fieldset class="popia-question" style="border-style:solid">
+        <legend class="popia-question-label">Have you registered your Information Officer with the Information Regulator?</legend>
+        <div class="popia-radios">
+          <label class="switch"><input type="radio" name="officer_registered" value="yes" {% if st.officer_registered == 'yes' %}checked{% endif %}> Yes</label>
+          <label class="switch"><input type="radio" name="officer_registered" value="not_yet" {% if st.officer_registered == 'not_yet' %}checked{% endif %}> Not yet</label>
+        </div>
+        <div class="form-grid" style="margin-top:10px">
+          <label>Registration date
+            <input type="date" name="officer_registration_date" value="{{ st.officer_registration_date }}">
+            <small>Required once you have answered Yes — the notice states when the officer was registered.</small>
+          </label>
+          <label>Registration reference (if you have one)
+            <input name="officer_registration_ref" value="{{ st.officer_registration_ref }}">
+            <small>Optional — kept for your records.</small>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="popia-cta">
+        <p><strong>Not registered yet?</strong> Registration is free. Go to <a href="https://eservices.inforegulator.org.za" target="_blank" rel="noopener">https://eservices.inforegulator.org.za</a>. You will need your ID number and your business details. Save this step, register, then come back and tick “Yes”.</p>
+        <p><strong>Why it matters:</strong> under s55(2), an Information Officer may only take up their duties once registered. Until yours is registered, the head of the business carries the POPIA duties personally — and the notice cannot be published while this reads “Not yet”.</p>
+      </div>
+
+      <div class="form-actions"><button class="btn primary" type="submit">Save and continue</button></div>
+    </form>
+
+    {% elif step == 3 %}
+    <form method="post" action="{{ url_for('settings.popia_wizard_save_step3') }}" class="settings-form panel">
+      <h2>3 · How you work</h2>
+      <p class="form-help">Each “yes” adds one plain-English paragraph to the notice; each “no” keeps it out — the notice gets shorter when the answer is no. “Not sure” keeps the paragraph out until you answer. Your answers are never guessed.</p>
+      {% for q in questions %}
+      <div class="popia-question">
+        <p class="popia-question-label">{{ loop.index }}. {{ q.label }}</p>
+        <div class="popia-radios" role="radiogroup" aria-label="{{ q.label }}">
+          <label class="switch"><input type="radio" name="{{ q.key }}" value="yes" {% if st[q.key] == 'yes' %}checked{% endif %}> Yes</label>
+          <label class="switch"><input type="radio" name="{{ q.key }}" value="no" {% if st[q.key] == 'no' %}checked{% endif %}> No</label>
+          <label class="switch"><input type="radio" name="{{ q.key }}" value="" {% if st[q.key] not in ('yes', 'no') %}checked{% endif %}> Not sure</label>
+        </div>
+        {% if q.key == 'cctv' %}
+        <div class="popia-cctv-extra">
+          <p class="form-help">If you answered Yes, tick the branches covered by CCTV and say whether there is signage.</p>
+          <div class="popia-branch-ticks">
+            {% for branch in branches %}
+            <label class="switch"><input type="checkbox" name="cctv_branches" value="{{ branch.name }}" {% if branch.name in cctv_branches %}checked{% endif %}> {{ branch.name }}</label>
+            {% else %}
+            <p class="form-help">No branches are recorded yet — add them under Branches first, or leave this blank.</p>
+            {% endfor %}
+          </div>
+          <p class="popia-question-label" style="margin-bottom:6px">Is there signage at the branch telling people recording is happening?</p>
+          <div class="popia-radios" role="radiogroup" aria-label="CCTV signage">
+            <label class="switch"><input type="radio" name="cctv_signage" value="yes" {% if st.cctv_signage == 'yes' %}checked{% endif %}> Yes</label>
+            <label class="switch"><input type="radio" name="cctv_signage" value="no" {% if st.cctv_signage == 'no' %}checked{% endif %}> No</label>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+      <div class="form-actions"><button class="btn primary" type="submit">Save and continue</button></div>
+    </form>
+
+    {% elif step == 4 %}
+    <section class="panel">
+      <h2>4 · Check it</h2>
+      <p class="form-help">This is the notice your customers will see, built live from what you have entered. The eight things the law requires (what is collected and why, who you are, whether supply is voluntary, the law, transfers, recipients and rights) are always present; your answers only add or drop the optional paragraphs.</p>
+      {% if notice_error %}
+      <div class="popia-error" role="alert"><strong>The notice cannot be shown yet.</strong><p>{{ notice_error }}</p></div>
+      {% else %}
+      <pre class="popia-preview">{{ notice_text }}</pre>
+      {% endif %}
+      <div class="form-actions" style="margin-top:14px">
+        <a class="btn ghost" href="{{ url_for('settings.popia_wizard_draft_pdf') }}">Download a draft PDF</a>
+        <a class="btn ghost" href="{{ url_for('settings.popia_wizard_step', step=3) }}">Back to your answers</a>
+        <a class="btn primary" href="{{ url_for('settings.popia_wizard_step', step=5) }}">Continue to publish</a>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>What we left out and why</h2>
+      {% if left_out %}
+      <ul class="popia-left-out">
+        {% for entry in left_out %}
+        <li><strong>{{ entry.paragraph }}</strong> — left out because you answered {% if entry.answer == 'no' %}“no”{% else %}“not sure”{% endif %} to “{{ entry.label }}”.</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="form-help">Nothing was left out — every optional paragraph is included.</p>
+      {% endif %}
+    </section>
+
+    {% else %}
+    <section class="panel">
+      <h2>5 · Publish</h2>
+      {% if published %}
+      <div class="popia-success" role="status">
+        <p><strong>The notice is live.</strong></p>
+        <p>Version <code>{{ published.notice_version }}</code> · content hash <code>{{ published.notice_content_hash }}</code>.</p>
+        <p>Customer consent from now on is recorded against this exact version and wording.</p>
+      </div>
+      {% else %}
+        {% if publish_errors %}
+        <div class="popia-error" role="alert">
+          <strong>The notice cannot be published yet.</strong>
+          <p>These still need to be completed:</p>
+          <ul>{% for field in publish_errors %}<li>{{ field_labels[field] }}</li>{% endfor %}</ul>
+          <p>Fill them in and come back — nothing has been published.</p>
+        </div>
+        {% else %}
+        <p>Everything is ready. Publishing writes this version, records its content hash, and makes the notice live.</p>
+        <form method="post" action="{{ url_for('settings.popia_wizard_publish') }}"><button class="btn primary" type="submit">Publish the notice</button></form>
+        {% endif %}
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <h2>Download the operator notice</h2>
+      <p class="form-help">“How we store and protect your data” — a more detailed notice about the technical side: where data is hosted, who can see it, backups and what happens in an incident. This is coming in the next phase.</p>
+      <span class="badge blocked">Coming soon</span>
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

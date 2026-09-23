@@ -1,5 +1,6 @@
+import json
 from functools import wraps
-from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, session, url_for
 from app.routes.auth import login_required
 from app.services.access import (
     ADDITIONAL_USER_LIMIT,
@@ -25,7 +26,8 @@ from app.services.settings import (
 )
 from app.services.branches import branch_options
 from app.services.branches import get_branch
-from app.services import popia_pack, portal, portal_intake
+from app.services import popia_pack, popia_wizard, portal, portal_intake
+from app.services.pdf_documents import report_pdf_bytes
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
@@ -343,3 +345,171 @@ def portal_print(branch_id):
         registration_open=context["registration_open"],
         outstanding_count=context["outstanding_count"],
     )
+
+
+# --- POPIA setup wizard (feature P / phase W1) ---
+#
+# The engine lives in app/services/popia_wizard.py (prefill, state, save_step,
+# progress, build_notice, left_out, publish_errors, publish, published_notice).
+# These routes are only the surface: a left-hand step rail over five steps, each
+# step saved through POST -> redirect -> one-shot flash so a closed tab loses
+# nothing, main profile only (staff get 403 and no Settings entry). Nothing here
+# re-implements the engine's pre-fill, notice generation, publish gate, version
+# or hash — it calls them.
+
+POPIA_STEP_TITLES = {
+    1: "Who you are",
+    2: "Information Officer",
+    3: "How you work",
+    4: "Check it",
+    5: "Publish",
+}
+
+#: Human labels for the fields the publish gate names, so a refusal reads like a
+#: to-do list rather than a column dump. The nine Step-3 keys map to their own
+#: question wording.
+POPIA_FIELD_LABELS = {
+    "business_name": "Registered business name",
+    "registration_number": "Registration number",
+    "vat_number": "VAT number",
+    "trading_name": "Trading name",
+    "address": "Business address",
+    "telephone": "Telephone",
+    "contact_email": "Contact email",
+    "officer_name": "Information Officer's full name",
+    "officer_position": "Information Officer's position",
+    "officer_email": "Information Officer's email",
+    "officer_telephone": "Information Officer's telephone",
+    "officer_registered": "Information Officer registration (answer Yes)",
+    "officer_registration_date": "Information Officer registration date",
+    "officer_registration_ref": "Information Officer registration reference",
+}
+for _question in popia_wizard.QUESTIONS:
+    POPIA_FIELD_LABELS[_question["key"]] = _question["label"]
+
+
+def _popia_cctv_branches(st):
+    """The saved CCTV branch names as a list of strings (``[]`` when none)."""
+    try:
+        selected = json.loads(st.get("cctv_branches_json") or "[]")
+    except (TypeError, ValueError):
+        selected = []
+    if not isinstance(selected, list):
+        selected = []
+    return [str(branch).strip() for branch in selected if str(branch).strip()]
+
+
+def _popia_render(step):
+    """Everything the wizard page needs, from the engine — never a second copy."""
+    st = popia_wizard.state()
+    pre = popia_wizard.prefill()
+    # Step 1 shows what the app already knows until the owner confirms (saves)
+    # their own value; anything the app does not hold stays blank, never invented.
+    step1_values = {}
+    for field in popia_wizard.STEP1_REQUIRED_FIELDS + ["trading_name"]:
+        saved = (st.get(field) or "").strip()
+        step1_values[field] = saved or (pre.get(field) or "")
+    try:
+        notice_text = popia_wizard.build_notice(st=st)
+        notice_error = None
+    except ValueError as exc:
+        # A fact the owner typed as "[...]" makes the renderer refuse — surface
+        # the reason in the preview instead of a 500.
+        notice_text = ""
+        notice_error = str(exc)
+    return render_template(
+        "admin/settings/popia.html",
+        step=int(step),
+        step_titles=POPIA_STEP_TITLES,
+        st=st,
+        step1_values=step1_values,
+        progress=popia_wizard.progress(st),
+        questions=popia_wizard.QUESTIONS,
+        branches=pre["branches"],
+        cctv_branches=_popia_cctv_branches(st),
+        notice_text=notice_text,
+        notice_error=notice_error,
+        left_out=popia_wizard.left_out(st=st),
+        publish_errors=popia_wizard.publish_errors(st=st),
+        field_labels=POPIA_FIELD_LABELS,
+        published=popia_wizard.published_notice(),
+    )
+
+
+@bp.route("/popia")
+@login_required
+@main_required
+def popia_wizard_index():
+    return _popia_render(1)
+
+
+@bp.route("/popia/<int:step>")
+@login_required
+@main_required
+def popia_wizard_step(step):
+    if step not in POPIA_STEP_TITLES:
+        abort(404)
+    return _popia_render(step)
+
+
+@bp.post("/popia/step/1")
+@login_required
+@main_required
+def popia_wizard_save_step1():
+    popia_wizard.save_step("1", request.form)
+    flash("Step 1 saved — your business details are confirmed.", "success")
+    return redirect(url_for("settings.popia_wizard_step", step=2))
+
+
+@bp.post("/popia/step/2")
+@login_required
+@main_required
+def popia_wizard_save_step2():
+    popia_wizard.save_step("2", request.form)
+    flash("Step 2 saved — your Information Officer is recorded.", "success")
+    return redirect(url_for("settings.popia_wizard_step", step=3))
+
+
+@bp.post("/popia/step/3")
+@login_required
+@main_required
+def popia_wizard_save_step3():
+    data = {question["key"]: request.form.get(question["key"], "") for question in popia_wizard.QUESTIONS}
+    data["cctv_signage"] = request.form.get("cctv_signage", "")
+    data["cctv_branches_json"] = request.form.getlist("cctv_branches")
+    popia_wizard.save_step("3", data)
+    flash("Step 3 saved — your answers are recorded.", "success")
+    return redirect(url_for("settings.popia_wizard_step", step=4))
+
+
+@bp.get("/popia/draft.pdf")
+@login_required
+@main_required
+def popia_wizard_draft_pdf():
+    """The DRAFT notice as a PDF — the generated text through the in-house
+    ``report_pdf_bytes`` primitive, not the published version and no new
+    dependency."""
+    text = popia_wizard.build_notice()
+    pdf = report_pdf_bytes(text.splitlines())
+    return Response(
+        pdf,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=privacy-notice-draft.pdf"},
+    )
+
+
+@bp.post("/popia/publish")
+@login_required
+@main_required
+def popia_wizard_publish():
+    try:
+        user_id = int(session.get("user_id") or 0) or None
+    except (TypeError, ValueError):
+        user_id = None
+    try:
+        result = popia_wizard.publish(user_id=user_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.popia_wizard_step", step=5))
+    flash(f"Notice published as version {result['version']}.", "success")
+    return redirect(url_for("settings.popia_wizard_step", step=5))
