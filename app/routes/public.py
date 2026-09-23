@@ -1,11 +1,20 @@
 from flask import Blueprint, abort, flash, make_response, redirect, render_template, request, url_for
 from urllib.parse import urlparse
 
+import secrets
+
 from app.db import get_db
+from app.services import branches as branches_service
 from app.services import consent, group_images, popia_pack, portal, portal_intake
-from app.services.customers import create_customer
-from app.services.orders import _build_order_payload, create_order, get_order, order_items
-from app.services.settings import get_company_settings
+from app.services.orders import (
+    PUBLIC_BOOKING_NOTE,
+    PUBLIC_SOURCE_SYSTEM,
+    build_multi_item_order_payload,
+    create_order,
+    get_order,
+    order_items,
+)
+from app.services.settings import get_company_settings, global_vat_rate
 
 bp = Blueprint("public", __name__)
 
@@ -113,8 +122,182 @@ def product_detail(product_id):
     return render_template("public/product.html", settings=settings, product=product)
 
 
+def _booking_branch_id(form):
+    """The collection branch for a booking: the chosen one when it is a real active branch, else
+    the default active branch (the same rule ``_build_order_payload`` applies)."""
+    raw = str(form.get("collect_branch_id") or "").strip()
+    if raw:
+        try:
+            branch_id = int(raw)
+        except ValueError:
+            raise ValueError("Please choose one of the collection branches listed.")
+        row = get_db().execute("SELECT id FROM branches WHERE id = ? AND active = 1", (branch_id,)).fetchone()
+        if row:
+            return branch_id
+        raise ValueError("Please choose one of the collection branches listed.")
+    return branches_service.default_branch_id()
+
+
+def _booking_reference():
+    """A short, unique reference for one booking, stored as the order's ``source_id``."""
+    return f"BOOK-{secrets.token_hex(4).upper()}"
+
+
+def _booking_scalar_keys():
+    return (
+        "name", "phone", "email", "address_line1", "suburb", "city", "province",
+        "postal_code", "marketing_opt_in", "collect_branch_id", "start_date", "start_time",
+        "end_date", "end_time", "notes",
+    )
+
+
+def _booking_posted(form):
+    """Echo back the scalar values and the de-duplicated trailer selection for a re-render."""
+    scalars = {}
+    for key in _booking_scalar_keys():
+        value = form.get(key)
+        if value not in (None, ""):
+            scalars[key] = value
+    product_ids = form.getlist("product_id") if hasattr(form, "getlist") else []
+    quantities = form.getlist("quantity") if hasattr(form, "getlist") else []
+    selected = {}
+    for index, raw_id in enumerate(product_ids):
+        raw_id = str(raw_id).strip()
+        if not raw_id:
+            continue
+        raw_qty = str(quantities[index]).strip() if index < len(quantities) else ""
+        try:
+            qty = int(raw_qty) if raw_qty else 1
+        except (TypeError, ValueError):
+            qty = 1
+        if qty <= 0:
+            continue
+        selected[raw_id] = selected.get(raw_id, 0) + qty
+    return scalars, selected
+
+
+def _prefill_from_args(args):
+    """Values the booking page should start with, read from a redirect's query string."""
+    scalars = {}
+    for key in _booking_scalar_keys():
+        value = args.get(key)
+        if value:
+            scalars[key] = value
+    selected = {}
+    for pid in args.getlist("product_id"):
+        pid = str(pid).strip()
+        if pid:
+            selected[pid] = selected.get(pid, 0) + 1
+    return scalars, selected
+
+
+def _booking_context(settings, status=200, error=None, scalars=None, selected=None, candidates=None, intake_closed=None):
+    context = {
+        "settings": settings,
+        "sections": _store_sections(),
+        "branches": branches_service.branch_options(),
+        "vat_rate": global_vat_rate(),
+        "tax_mode": settings["tax_mode"],
+        "error": error,
+        "candidates": candidates or [],
+        "intake_closed": (not portal_intake.registration_is_open()) if intake_closed is None else intake_closed,
+        "intake_closed_message": portal_intake.INTAKE_CLOSED_MESSAGE,
+    }
+    html = render_template(
+        "public/book.html",
+        **context,
+        form_values=scalars or {},
+        selected=selected or {},
+    )
+    return (html, status) if status != 200 else html
+
+
+@bp.route("/store/book", methods=["GET", "POST"])
+def book():
+    """The public multi-trailer booking page (phase 12, §C2).
+
+    GET renders the form: branch chooser, pickup/return period, the trailer list grouped by
+    category (with the category photo), a per-trailer quantity control, a live estimate and a
+    single customer block. POST validates the selection and per-item availability **first**, then
+    reuses §B2's dedupe and §P1's consent to create/link the customer and write **one** order with
+    one line per selected trailer. The D11 gate shuts the whole path while the notice is
+    unfinished, exactly like the portal form.
+    """
+    settings = get_company_settings()
+    if not settings["store_enabled"]:
+        return render_template("public/store_unavailable.html", settings=settings)
+    if request.method == "GET":
+        scalars, selected = _prefill_from_args(request.args)
+        return _booking_context(settings, scalars=scalars, selected=selected)
+
+    form = request.form
+    if not portal_intake.registration_is_open():
+        scalars, selected = _booking_posted(form)
+        return _booking_context(settings, intake_closed=True, scalars=scalars, selected=selected)
+    # A filled honeypot is a bot: it gets the store back and leaves no record.
+    if portal_intake.honeypot_triggered(form):
+        return redirect(url_for("public.store"))
+    scalars, selected = _booking_posted(form)
+    # D10: consent is required server-side and must precede any write.
+    if not consent.acceptance_given(form.get("popia_consent")):
+        return _booking_context(settings, status=400, error=consent.consent_required_error(), scalars=scalars, selected=selected)
+    try:
+        values = portal_intake.submission_values(form)
+    except ValueError as exc:
+        return _booking_context(settings, status=400, error=str(exc), scalars=scalars, selected=selected)
+    # D6: a possible duplicate is a question for the customer, never a silent merge.
+    decision = str(form.get("decision") or "").strip()
+    if not decision:
+        candidates = portal_intake.find_possible_matches(values["name"], values["phone"], values["email"])
+        if candidates:
+            return _booking_context(settings, candidates=candidates, scalars=scalars, selected=selected)
+    # Resolve the branch, then validate the trailer selection + availability BEFORE any customer is
+    # created, so a refused booking leaves no stray client behind.
+    try:
+        branch_id = _booking_branch_id(form)
+    except ValueError as exc:
+        return _booking_context(settings, status=400, error=str(exc), scalars=scalars, selected=selected)
+    try:
+        _payload, order_form = build_multi_item_order_payload(form)
+    except ValueError as exc:
+        return _booking_context(settings, status=400, error=str(exc), scalars=scalars, selected=selected)
+    # §B2 dedupe: create or link the client (a blocked client is refused here).
+    try:
+        result = portal_intake.create_or_link_customer(form, branch_id, decision, slug="store")
+    except ValueError as exc:
+        return _booking_context(settings, status=400, error=str(exc), scalars=scalars, selected=selected)
+    # §P1: record the acceptance on the customer it belongs to, on the public-booking channel.
+    consent.record_consent(result["customer_id"], consent.CHANNEL_PUBLIC_BOOKING, form.get("popia_consent"))
+    note = PUBLIC_BOOKING_NOTE
+    customer_note = str(form.get("notes") or "").strip()
+    if customer_note:
+        note = f"{note}. {customer_note}"
+    order_form.set("customer_id", str(result["customer_id"]))
+    order_form.set("booking_type", "return")
+    order_form.set("collect_branch_id", str(branch_id) if branch_id else "")
+    order_form.set("return_branch_id", str(branch_id) if branch_id else "")
+    order_form.set("notes", note)
+    order_id = create_order(order_form)
+    # Public-source marker so staff can tell a web request apart from a counter or import order.
+    reference = _booking_reference()
+    db = get_db()
+    db.execute(
+        "UPDATE orders SET source_system = ?, source_id = ? WHERE id = ?",
+        (PUBLIC_SOURCE_SYSTEM, reference, order_id),
+    )
+    db.commit()
+    return redirect(url_for("public.booking_confirmation", order_id=order_id))
+
+
 @bp.post("/store/products/<int:product_id>/book")
 def book_product(product_id):
+    """One-click booking from a product page: fold into the multi-trailer page pre-filled (§C2).
+
+    The old single-item implementation created its own order with no consent and no POPIA gate; the
+    spec replaces it with a redirect into :func:`book` carrying the chosen trailer, so every public
+    booking goes through the one gated, consent-carrying, de-duplicating flow instead of a second
+    implementation.
+    """
     settings = get_company_settings()
     if not settings["store_enabled"]:
         return render_template("public/store_unavailable.html", settings=settings), 403
@@ -122,38 +305,19 @@ def book_product(product_id):
     if not product:
         flash("Product not found", "error")
         return redirect(url_for("public.store"))
-    customer_name = request.form.get("customer_name", "").strip()
-    customer_email = request.form.get("customer_email", "").strip().lower()
-    if not customer_name or not customer_email:
-        flash("Name and email are required", "error")
-        return render_template("public/product.html", settings=get_company_settings(), product=product), 400
-    order_form = {
-        "product_id": str(product_id),
+    params = {
+        "product_id": product_id,
         "quantity": request.form.get("quantity", "1"),
+        "name": request.form.get("customer_name", "").strip(),
+        "email": request.form.get("customer_email", "").strip(),
+        "phone": request.form.get("customer_phone", "").strip(),
         "start_date": request.form.get("start_date", ""),
         "start_time": request.form.get("start_time", ""),
         "end_date": request.form.get("end_date", ""),
         "end_time": request.form.get("end_time", ""),
-        "notes": f"Public booking request. {request.form.get('notes', '').strip()}".strip(),
+        "notes": request.form.get("notes", "").strip(),
     }
-    try:
-        # Validate the booking before the customer row is created, so a refused
-        # request (e.g. a pickup outside the branch's trading hours) leaves no
-        # stray customer behind.
-        _build_order_payload(order_form)
-        customer_id = create_customer({
-            "customer_type": "individual",
-            "name": customer_name,
-            "email": customer_email,
-            "phone": request.form.get("customer_phone", ""),
-            "marketing_opt_in": request.form.get("marketing_opt_in", ""),
-        })
-        order_form["customer_id"] = str(customer_id)
-        order_id = create_order(order_form)
-    except ValueError as exc:
-        flash(str(exc), "error")
-        return render_template("public/product.html", settings=get_company_settings(), product=product), 400
-    return redirect(url_for("public.booking_confirmation", order_id=order_id))
+    return redirect(url_for("public.book", **params))
 
 
 @bp.route("/store/booking/<int:order_id>")

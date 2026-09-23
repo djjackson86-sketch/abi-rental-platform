@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Book online | {{ settings.company_name }}{% endblock %}
+{# The public multi-trailer booking page — feature C (§C2).
+
+   One booking, many trailers: the visitor picks a branch and a rental period, then a quantity on
+   each trailer they want (grouped by category, with the category photo), and the page posts it as
+   one order with one line per trailer. House rules it obeys:
+
+   * the customer block is the same name/email/phone shape the §B2 portal uses, and a possible
+     duplicate is presented to the customer (D6) — never merged silently;
+   * the privacy acceptance is the ONE shared widget (§P1, decision D10), unticked by default and
+     refused server-side when unticked;
+   * while the published notice still carries an open placeholder (D11) the page says so and shows
+     no form — nothing is collected before the notice is finished;
+   * ``form_values`` is read with ``.get(...)`` throughout, because a bare ``.name``/``.values``
+     on a mapping resolves to a dict method in Jinja rather than to the field. #}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+  <a class="btn ghost" href="{{ url_for('public.store') }}">Back to store</a>
+</header>
+<main class="store-main checkout-main">
+  <section class="panel booking-panel">
+    <p class="eyebrow">Online booking</p>
+    <h1>Book one or more trailers</h1>
+    {% if settings.checkout_instructions %}<p class="muted">{{ settings.checkout_instructions }}</p>{% endif %}
+
+    {% if intake_closed %}
+    <div class="portal-closed">
+      <h2>Online booking isn&rsquo;t open yet</h2>
+      <p>{{ intake_closed_message }}</p>
+    </div>
+
+    {% elif candidates %}
+    <div class="flash" role="status">We may already have your details on file — please confirm who you are before we book anything. Nothing has been saved yet.</div>
+    <form method="post" action="{{ url_for('public.book') }}" class="booking-form">
+      {% for key, value in form_values.items() %}
+      {% if key not in ['decision', 'popia_consent', 'marketing_opt_in'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}
+      {% endfor %}
+      {% if form_values.get('marketing_opt_in') %}<input type="hidden" name="marketing_opt_in" value="1">{% endif %}
+      {% for pid, qty in selected.items() %}
+      <input type="hidden" name="product_id" value="{{ pid }}">
+      <input type="hidden" name="quantity" value="{{ qty }}">
+      {% endfor %}
+
+      <ul class="portal-candidates">
+        {% for candidate in candidates %}
+        <li class="portal-candidate">
+          <label for="candidate-{{ candidate.customer_id }}">
+            <input id="candidate-{{ candidate.customer_id }}" type="radio" name="decision" value="link:{{ candidate.customer_id }}">
+            <span class="portal-candidate-name">{{ candidate.masked_display }}</span>
+          </label>
+          <p class="muted">Matched on {{ candidate.matched_on|join(' and ') }}.</p>
+        </li>
+        {% endfor %}
+        <li class="portal-candidate">
+          <label for="candidate-none">
+            <input id="candidate-none" type="radio" name="decision" value="create">
+            <span class="portal-candidate-name">None of these is me &mdash; I am new here</span>
+          </label>
+        </li>
+      </ul>
+
+      <p class="muted">Please tick the privacy box again — your acceptance is only recorded with the booking that saves your details.</p>
+      {% set consent_purpose = "booking" %}
+      {% include "public/_consent_block.html" %}
+      <button class="btn primary" type="submit">Continue booking</button>
+    </form>
+
+    {% else %}
+    {% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+
+    <form method="post" action="{{ url_for('public.book') }}" class="booking-form" id="booking-form">
+      <div class="booking-section">
+        <h2>1. When and where</h2>
+        <div class="form-grid">
+          <label for="booking-branch">Collect from
+            <select id="booking-branch" name="collect_branch_id">
+              {% for branch in branches %}
+              <option value="{{ branch.id }}" {% if form_values.get('collect_branch_id')|string == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label for="booking-start">Pickup date<input id="booking-start" type="date" name="start_date" required value="{{ form_values.get('start_date', '') }}"></label>
+          <label for="booking-start-time">Pickup time<input id="booking-start-time" type="time" name="start_time" value="{{ form_values.get('start_time', '') or settings.default_pickup_time }}"></label>
+          <label for="booking-end">Return date<input id="booking-end" type="date" name="end_date" required value="{{ form_values.get('end_date', '') }}"></label>
+          <label for="booking-end-time">Return time<input id="booking-end-time" type="time" name="end_time" value="{{ form_values.get('end_time', '') or settings.default_return_time }}"></label>
+        </div>
+        <p class="muted" id="booking-days">Rental days will show here once you pick both dates.</p>
+      </div>
+
+      <div class="booking-section">
+        <h2>2. Choose your trailers</h2>
+        {% for section in sections %}
+        <section class="booking-category">
+          <div class="store-category-head">
+            {% if section.has_image %}
+            <img class="store-category-image" src="{{ url_for('public.category_image', group_id=section.id) }}" alt="{{ section.name }}" loading="lazy">
+            {% else %}
+            <div class="store-category-image store-category-fallback">{{ section.name[:2].upper() }}</div>
+            {% endif %}
+            <div class="store-category-copy">
+              <h3>{{ section.name }}</h3>
+              {% if section.description %}<p>{{ section.description }}</p>{% endif %}
+            </div>
+          </div>
+          <div class="booking-trailer-list">
+            {% for p in section.products %}
+            {% set pid = p.id|string %}
+            <label class="booking-trailer" for="qty-{{ p.id }}">
+              <input type="hidden" name="product_id" value="{{ p.id }}">
+              <span class="booking-trailer-copy">
+                <strong>{{ p.name }}</strong>
+                {% if settings.show_prices %}<span class="muted">R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}{% if p.security_deposit %} · R{{ '%.2f'|format(p.security_deposit) }} deposit{% endif %}</span>{% endif %}
+              </span>
+              <input id="qty-{{ p.id }}" class="booking-qty" type="number" name="quantity" min="0" step="1" value="{{ selected.get(pid, 0) }}"
+                     data-price="{{ p.price_amount }}" data-price-unit="{{ p.price_unit }}" data-deposit="{{ p.security_deposit or 0 }}" inputmode="numeric">
+            </label>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+
+      <div class="booking-section booking-estimate" id="booking-estimate">
+        <h2>Estimate</h2>
+        <p class="muted" id="estimate-empty">Add trailers and dates to see an estimate.</p>
+        <dl id="estimate-breakdown" class="booking-estimate-rows" hidden>
+          <div><dt>Rental subtotal</dt><dd id="estimate-subtotal">R0.00</dd></div>
+          <div><dt>VAT ({{ '%.1f'|format(vat_rate) }}%)</dt><dd id="estimate-vat">R0.00</dd></div>
+          <div><dt>Refundable deposit</dt><dd id="estimate-deposit">R0.00</dd></div>
+          <div class="booking-estimate-total"><dt>Estimated total</dt><dd id="estimate-total">R0.00</dd></div>
+        </dl>
+      </div>
+
+      <div class="booking-section">
+        <h2>3. Your details</h2>
+        <div class="form-grid">
+          <label for="booking-name">Full name <b aria-hidden="true">*</b><input id="booking-name" name="name" type="text" autocomplete="name" required value="{{ form_values.get('name', '') }}"></label>
+          <label for="booking-phone">Cellphone number<input id="booking-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="e.g. 082 123 4567" value="{{ form_values.get('phone', '') }}"></label>
+          <label for="booking-email">Email address<input id="booking-email" name="email" type="email" autocomplete="email" value="{{ form_values.get('email', '') }}"></label>
+          <label for="booking-address">Street address<input id="booking-address" name="address_line1" type="text" autocomplete="street-address" value="{{ form_values.get('address_line1', '') }}"></label>
+          <label for="booking-suburb">Suburb<input id="booking-suburb" name="suburb" type="text" value="{{ form_values.get('suburb', '') }}"></label>
+          <label for="booking-city">Town or city<input id="booking-city" name="city" type="text" autocomplete="address-level2" value="{{ form_values.get('city', '') }}"></label>
+        </div>
+        <label for="booking-notes">Anything we should know?<textarea id="booking-notes" name="notes" rows="2" placeholder="e.g. I will collect early on the day">{{ form_values.get('notes', '') }}</textarea></label>
+        <label class="checkline" for="booking-marketing"><input id="booking-marketing" name="marketing_opt_in" type="checkbox" value="1" {% if form_values.get('marketing_opt_in') %}checked{% endif %}> Keep me updated about offers</label>
+
+        <div class="honeypot" aria-hidden="true">
+          <label for="booking-website">Website</label>
+          <input id="booking-website" name="company_website" type="text" tabindex="-1" autocomplete="off">
+        </div>
+
+        {% set consent_purpose = "booking" %}
+        {% include "public/_consent_block.html" %}
+
+        <button class="btn primary" type="submit">Send booking request</button>
+      </div>
+    </form>
+    {% endif %}
+  </section>
+</main>
+<footer class="store-footer">
+  © 2026, {{ settings.company_name }}
+  {% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}
+  <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+</footer>
+<script>
+(function () {
+  var form = document.getElementById('booking-form');
+  if (!form) return;
+  var start = document.getElementById('booking-start');
+  var end = document.getElementById('booking-end');
+  var startTime = document.getElementById('booking-start-time');
+  var endTime = document.getElementById('booking-end-time');
+  var daysLabel = document.getElementById('booking-days');
+  var empty = document.getElementById('estimate-empty');
+  var breakdown = document.getElementById('estimate-breakdown');
+  var subtotalEl = document.getElementById('estimate-subtotal');
+  var vatEl = document.getElementById('estimate-vat');
+  var depositEl = document.getElementById('estimate-deposit');
+  var totalEl = document.getElementById('estimate-total');
+  var VAT_RATE = {{ vat_rate }};
+
+  function rentalDays() {
+    if (!start.value || !end.value) return null;
+    var startAt = new Date(start.value + 'T' + (startTime.value || '09:00'));
+    var endAt = new Date(end.value + 'T' + (endTime.value || '15:00'));
+    if (isNaN(startAt) || isNaN(endAt) || endAt <= startAt) return null;
+    return Math.max(1, Math.ceil((endAt - startAt) / (1000 * 60 * 60 * 24)));
+  }
+
+  function recompute() {
+    var days = rentalDays();
+    if (days === null) {
+      if (daysLabel) daysLabel.textContent = 'Rental days will show here once you pick both dates.';
+      return;
+    }
+    if (daysLabel) daysLabel.textContent = days + ' rental day' + (days === 1 ? '' : 's') + ' (estimated).';
+    var subtotal = 0, deposit = 0, picked = false;
+    form.querySelectorAll('input[name="quantity"]').forEach(function (q) {
+      var qty = parseInt(q.value || '0', 10);
+      if (!qty || qty <= 0) return;
+      picked = true;
+      var price = parseFloat(q.getAttribute('data-price') || '0');
+      var unit = q.getAttribute('data-price-unit') || 'day';
+      var multiplier = (unit === 'day') ? days : 1;
+      subtotal += price * qty * multiplier;
+      deposit += parseFloat(q.getAttribute('data-deposit') || '0') * qty;
+    });
+    if (!picked) {
+      empty.hidden = false;
+      breakdown.hidden = true;
+      return;
+    }
+    empty.hidden = true;
+    breakdown.hidden = false;
+    var vat = subtotal * VAT_RATE / 100;
+    subtotalEl.textContent = 'R' + subtotal.toFixed(2);
+    vatEl.textContent = 'R' + vat.toFixed(2);
+    depositEl.textContent = 'R' + deposit.toFixed(2);
+    totalEl.textContent = 'R' + (subtotal + vat + deposit).toFixed(2);
+  }
+
+  [start, end, startTime, endTime].forEach(function (el) { if (el) el.addEventListener('change', recompute); });
+  form.querySelectorAll('input[name="quantity"]').forEach(function (q) { q.addEventListener('input', recompute); });
+  recompute();
+})();
+</script>
+{% endblock %}

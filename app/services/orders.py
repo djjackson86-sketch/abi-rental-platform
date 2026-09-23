@@ -767,6 +767,225 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
     }
 
 
+# --- Public multi-trailer booking (phase 12 / §C2) -----------------------------------------------
+
+#: The ``orders.source_system`` value every public booking carries, so staff can tell a web request
+#: apart from a counter, sales or import order.
+PUBLIC_SOURCE_SYSTEM = "public"
+
+#: The order note that marks a public booking, so staff can tell it apart at a glance.
+PUBLIC_BOOKING_NOTE = "Public online booking"
+
+#: Public-facing refusals for a trailer that is hidden from or no longer on the storefront. Kept
+#: deliberately vague: a public page must not leak whether a product was archived, hidden or
+#: removed, only that it cannot be booked.
+HIDDEN_PRODUCT_MESSAGE = "One of the trailers you chose is not available for online booking."
+UNKNOWN_PRODUCT_MESSAGE = "One of the trailers you chose is no longer available."
+
+#: The scalar fields ``_build_order_payload`` reads off a form. ``PublicBookingForm`` copies exactly
+#: these from the submitted form (customer identity fields stay on the raw form for the §B2 dedupe),
+#: so nothing the order builder consumes is silently dropped.
+_PUBLIC_BOOKING_FIELD_KEYS = (
+    "customer_id",
+    "booking_type",
+    "collect_branch_id",
+    "return_branch_id",
+    "start_date",
+    "start_time",
+    "end_date",
+    "end_time",
+    "deposit_option",
+    "damage_waiver_amount",
+    "notes",
+)
+
+
+class PublicBookingForm:
+    """A small mutable form for the public multi-trailer booking.
+
+    Scalar order fields are copied from the submitted form via ``get``; the trailer selection is a
+    pair of parallel, de-duplicated ``product_id`` / ``quantity`` lists. This is the shape
+    :func:`_build_order_payload` and :func:`create_order` already consume, so the public path reuses
+    the one order builder instead of growing a second, divergent implementation.
+    """
+
+    def __init__(self, fields=None, product_ids=None, quantities=None):
+        self._fields = {}
+        if fields is not None and hasattr(fields, "get"):
+            for key in _PUBLIC_BOOKING_FIELD_KEYS:
+                value = fields.get(key)
+                if value is not None:
+                    self._fields[key] = value
+        self._lists = {
+            "product_id": list(product_ids or []),
+            "quantity": list(quantities or []),
+        }
+
+    def get(self, name, default=None):
+        return self._fields.get(name, default)
+
+    def getlist(self, name):
+        return list(self._lists.get(name, []))
+
+    def set(self, name, value):
+        self._fields[name] = value
+
+
+def _still_out_units(product_id, collect_branch_id, branch_scoped, start_at, end_at):
+    """Units still physically out on ``started`` orders that have overrun their return time.
+
+    Mirrors the overdue-started rule in :func:`availability_errors` (ticket ABI-341952987(2)): a
+    trailer picked up and never returned holds its units even for a later, non-overlapping hire.
+    Units on a started order that *does* overlap the requested window are already counted by the
+    overlap query, so they are subtracted here and never double-counted.
+    """
+    db = get_db()
+    params = [product_id]
+    branch_clause = ""
+    if branch_scoped:
+        branch_clause = "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)"
+        params.append(collect_branch_id)
+    overdue_units = 0
+    overdue_overlap_units = 0
+    for out_row in db.execute(
+        f"""SELECT o.start_at AS start_at, o.end_at AS end_at, COALESCE(SUM(oi.quantity), 0) AS quantity
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE oi.product_id = ?
+          AND o.status = 'started'
+          {branch_clause}
+        GROUP BY o.id, o.start_at, o.end_at
+        ORDER BY o.id""",
+        params,
+    ).fetchall():
+        out_quantity = int(out_row["quantity"] or 0)
+        out_end = out_row["end_at"] or ""
+        if out_end and out_end >= now():
+            continue  # still inside its hire period: the overlap check covers it
+        if out_row["start_at"] and out_end and out_row["start_at"] < end_at and out_end > start_at:
+            overdue_overlap_units += out_quantity
+        overdue_units += out_quantity
+    return max(0, overdue_units - overdue_overlap_units)
+
+
+def _overbooking_error(product_id, quantity, start_at, end_at, collect_branch_id):
+    """``None`` when the requested units are free for the window, else a public refusal message.
+
+    The same stock/overlap numbers :func:`availability_errors` uses to refuse a reservation — booked
+    ``reserved``/``started`` units that overlap the window, plus units still out on an overrun — so
+    a public booking is refused by exactly the arithmetic that would later refuse its pickup, but
+    here before anything is written. Public wording only: no internal order numbers leak.
+    """
+    db = get_db()
+    product = db.execute(
+        "SELECT name, quantity, branch_id, product_type, tracking_method FROM products WHERE id = ?",
+        (product_id,),
+    ).fetchone()
+    if not product:
+        return UNKNOWN_PRODUCT_MESSAGE
+    # Services and untracked products keep no stock count, so they are always bookable.
+    if (product["product_type"] or "") == "service" or (product["tracking_method"] or "") == "none":
+        return None
+    branch_stock = product_branch_stock(product_id)
+    branch_scoped = product["branch_id"] is not None or bool(branch_stock)
+    branch_clause = "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)" if branch_scoped else ""
+    params = [product_id]
+    if branch_scoped:
+        params.append(collect_branch_id)
+    params.extend([end_at, start_at])
+    booked = db.execute(
+        f"""SELECT COALESCE(SUM(oi.quantity), 0) AS booked
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+        WHERE oi.product_id = ?
+          AND o.status IN ('reserved', 'started')
+          {branch_clause}
+          AND o.start_at < ?
+          AND o.end_at > ?""",
+        params,
+    ).fetchone()["booked"] or 0
+    busy = int(booked) + _still_out_units(product_id, collect_branch_id, branch_scoped, start_at, end_at)
+    if branch_stock:
+        stock_total = int(branch_stock.get(int(collect_branch_id or 0), 0))
+    else:
+        stock_total = int(product["quantity"] or 0)
+    available = stock_total - busy
+    if int(quantity) > available:
+        name = product["name"] or "This trailer"
+        if branch_scoped:
+            return f"Only {max(available, 0)} of {name} is available at this collection branch for those dates"
+        return f"Only {max(available, 0)} of {name} is available for those dates"
+    return None
+
+
+def build_multi_item_order_payload(form, allow_blocked_customer_id=None):
+    """Build one order payload from a public multi-trailer booking (phase 12, §C2).
+
+    The submitted ``product_id[]`` / ``quantity[]`` parallel lists are de-duplicated by product (a
+    repeated product adds its quantity; a zero/negative quantity means "not selected"), and each
+    selection is refused when it is unknown/archived, maintenance-flagged, hidden from the
+    storefront (``public_visible = 0``) or would overbook the rental window. The customer-blocking,
+    branch-default, trading-hours and money logic is :func:`_build_order_payload`'s, called with a
+    :class:`PublicBookingForm` so the single-item and public paths can never price or block
+    differently.
+
+    Returns ``(payload, normalized_form)``: the normalized form is what :func:`create_order` should
+    be handed, so the written lines match the validated ones exactly.
+    """
+    db = get_db()
+    product_ids = _form_list(form, "product_id")
+    quantities = _form_list(form, "quantity")
+    merged = {}
+    ordered = []
+    for index, raw_id in enumerate(product_ids):
+        try:
+            product_id = int(str(raw_id).strip())
+        except (TypeError, ValueError):
+            continue
+        raw_qty = str(quantities[index]).strip() if index < len(quantities) else ""
+        try:
+            quantity = int(raw_qty) if raw_qty else 1
+        except (TypeError, ValueError):
+            raise ValueError("Please enter a whole number for each trailer.")
+        if quantity <= 0:
+            continue
+        if product_id in merged:
+            merged[product_id] += quantity
+        else:
+            merged[product_id] = quantity
+            ordered.append(product_id)
+    if not merged:
+        raise ValueError("Please choose at least one trailer to book.")
+    for product_id in ordered:
+        product = db.execute(
+            "SELECT id, name, active, public_visible, under_maintenance FROM products WHERE id = ?",
+            (product_id,),
+        ).fetchone()
+        if not product or not product["active"]:
+            raise ValueError(UNKNOWN_PRODUCT_MESSAGE)
+        if product_under_maintenance(product):
+            raise ValueError(under_maintenance_error(product))
+        if not product["public_visible"]:
+            raise ValueError(HIDDEN_PRODUCT_MESSAGE)
+    normalized = PublicBookingForm(
+        form,
+        product_ids=[str(pid) for pid in ordered],
+        quantities=[str(merged[pid]) for pid in ordered],
+    )
+    payload = _build_order_payload(normalized, allow_blocked_customer_id=allow_blocked_customer_id)
+    for entry in payload["lines"]:
+        if entry["product"] is None:
+            continue  # a public booking never carries a custom line; guard only
+        error = _overbooking_error(
+            entry["product"]["id"],
+            entry["line"]["quantity"],
+            payload["start_at"],
+            payload["end_at"],
+            payload["collect_branch_id"],
+        )
+        if error:
+            raise ValueError(error)
+    return payload, normalized
+
+
 def _insert_order_items(order_id, lines):
     db = get_db()
     for entry in lines:

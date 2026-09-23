@@ -593,3 +593,33 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
   .store-category-head{display:grid;gap:10px}
   .store-category-image{width:100%;height:auto;aspect-ratio:16/9}
 }
+
+/* --- Public multi-trailer booking (phase 12 / §C2) ---------------------------------- */
+.booking-panel{padding:28px}
+.booking-form{display:grid;gap:22px}
+.booking-section{border-top:1px solid var(--line-soft);padding-top:20px;min-width:0}
+.booking-section:first-of-type{border-top:0;padding-top:0}
+.booking-section>h2{margin:0 0 12px;font-size:16px;letter-spacing:-.02em}
+.booking-category{margin-bottom:22px}
+.booking-category .store-category-head{margin-bottom:10px}
+.booking-category h3{margin:0 0 4px;font-size:15px;letter-spacing:-.02em;color:var(--ink)}
+.booking-trailer-list{display:grid;gap:10px;min-width:0}
+.booking-trailer{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft);cursor:pointer;min-width:0}
+.booking-trailer-copy{display:grid;gap:2px;min-width:0;flex:1}
+.booking-trailer-copy strong{overflow-wrap:anywhere;color:var(--ink);font-size:15px}
+.booking-qty{width:76px;flex:0 0 auto;padding:10px 8px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;text-align:center;background:#fff;color:var(--ink);margin:0!important}
+.booking-qty:focus{outline:2px solid var(--brand);outline-offset:1px}
+.booking-estimate{background:var(--surface-soft);border:1px solid var(--line-soft);border-radius:16px;padding:16px 18px}
+.booking-estimate-rows{margin:0;display:grid;gap:8px;min-width:0}
+.booking-estimate-rows>div{display:flex;justify-content:space-between;gap:12px;min-width:0}
+.booking-estimate-rows dt{color:var(--muted)}
+.booking-estimate-rows dd{margin:0;font-weight:750;font-variant-numeric:tabular-nums}
+.booking-estimate-total{border-top:1px solid var(--line);padding-top:10px;font-size:17px}
+.booking-estimate-total dd{color:var(--brand)}
+.booking-form .consent-block{margin-top:14px}
+.booking-form>.booking-section .checkline{font-size:14px;color:var(--ink)}
+@media(max-width:520px){
+  .booking-panel{padding:18px}
+  .booking-trailer{flex-direction:column;align-items:stretch;gap:8px}
+  .booking-qty{width:100%}
+}

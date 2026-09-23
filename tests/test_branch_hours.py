@@ -10,6 +10,8 @@ and no booking is ever blocked. The calendar and availability remain untouched -
 only the pickup time is validated.
 """
 import os
+
+from app.services import portal_intake
 import tempfile
 
 import pytest
@@ -405,7 +407,7 @@ def test_a_branch_without_saved_hours_still_books(client, app):
     assert order_count(app) == 1
 
 
-def test_the_public_store_booking_respects_the_collection_branch_hours(client, app):
+def test_the_public_store_booking_respects_the_collection_branch_hours(client, app, monkeypatch):
     """The storefront funnel goes through the same payload check."""
     login(client)
     branch_id = branch_id_by_name(app, 'Branch 1')
@@ -414,16 +416,20 @@ def test_the_public_store_booking_respects_the_collection_branch_hours(client, a
     payload['closed_3'] = '1'
     client.post(f'/branches/{branch_id}/hours', data=payload, follow_redirects=True)
     client.post('/logout')
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
 
     # The store's default collection branch is the first active branch.
-    closed_day = client.post(f'/store/products/{product_id}/book', data={
-        'customer_name': 'Store Client',
-        'customer_email': 'store.client@example.test',
-        'quantity': '1',
+    closed_day =     client.post('/store/book', data={
+        'name': 'Store Client',
+        'email': 'store.client@example.test',
+        'phone': '+27000000003',
+        'popia_consent': '1',
         'start_date': '2026-08-05',
         'start_time': '10:00',
         'end_date': '2026-08-06',
         'end_time': '10:00',
+        'product_id': [str(product_id)],
+        'quantity': ['1'],
     }, follow_redirects=True)
     assert closed_day.status_code == 400
     assert b'is closed on Wednesday' in closed_day.data
@@ -431,14 +437,17 @@ def test_the_public_store_booking_respects_the_collection_branch_hours(client, a
     # The refused store booking creates no customer either.
     assert customer_count(app) == 0
 
-    open_day = client.post(f'/store/products/{product_id}/book', data={
-        'customer_name': 'Store Client',
-        'customer_email': 'store.client@example.test',
-        'quantity': '1',
+    open_day =     client.post('/store/book', data={
+        'name': 'Store Client',
+        'email': 'store.client@example.test',
+        'phone': '+27000000003',
+        'popia_consent': '1',
         'start_date': '2026-08-06',
         'start_time': '10:00',
         'end_date': '2026-08-07',
         'end_time': '10:00',
+        'product_id': [str(product_id)],
+        'quantity': ['1'],
     }, follow_redirects=True)
     assert order_count(app) == 1
 

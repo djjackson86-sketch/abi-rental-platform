@@ -10,6 +10,8 @@ a crafted POST for a blocked customer must be refused with the reason, and the
 customer form's block state must survive every other way a customer is edited.
 """
 import os
+
+from app.services import portal_intake
 import re
 import sqlite3
 import tempfile
@@ -360,7 +362,7 @@ def test_the_order_form_customer_card_cannot_unblock_a_blocked_customer(client, 
     assert order_count(app) == 0
 
 
-def test_the_public_storefront_still_takes_booking_requests(client, app):
+def test_the_public_storefront_still_takes_booking_requests(client, app, monkeypatch):
     with app.app_context():
         db = get_db()
         db.execute(
@@ -370,15 +372,18 @@ def test_the_public_storefront_still_takes_booking_requests(client, app):
         db.commit()
         product_id = db.execute("SELECT id FROM products ORDER BY id DESC LIMIT 1").fetchone()['id']
 
-    response = client.post(f'/store/products/{product_id}/book', data={
-        'customer_name': 'Walk In Client',
-        'customer_email': 'walkin@example.test',
-        'customer_phone': '+27123456789',
-        'quantity': '1',
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
+    response =     client.post('/store/book', data={
+        'name': 'Walk In Client',
+        'email': 'walkin@example.test',
+        'phone': '+27000000003',
+        'popia_consent': '1',
         'start_date': '2026-07-01',
         'start_time': '09:00',
         'end_date': '2026-07-03',
         'end_time': '15:00',
+        'product_id': [str(product_id)],
+        'quantity': ['1'],
     }, follow_redirects=False)
     assert response.status_code == 302, response.status_code
     assert response.headers['Location'].endswith('/store/booking/1') or '/store/booking/' in response.headers['Location']

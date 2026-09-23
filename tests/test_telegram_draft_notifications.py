@@ -24,6 +24,7 @@ import pytest
 from app import create_app
 from app.db import get_db
 from app.services import telegram
+from app.services import portal_intake
 
 START_DATE = '2026-07-01'
 START_TIME = '09:00'
@@ -243,7 +244,7 @@ def test_marking_sales_repairs_back_to_draft_stays_silent(client, app, sent):
     assert len(order_messages(sent)) == 1
 
 
-def test_an_admin_draft_is_not_treated_as_a_public_booking(client, app, sent):
+def test_an_admin_draft_is_not_treated_as_a_public_booking(client, app, sent, monkeypatch):
     """The discriminator is the creator, not the status: a draft an admin typed
     and a draft a visitor requested are both stored as 'draft'."""
     login(client)
@@ -252,15 +253,18 @@ def test_an_admin_draft_is_not_treated_as_a_public_booking(client, app, sent):
     assert stored_order(app, admin_order_id)['created_by_user_id'] is not None
 
     visitor = public_client(app)
-    visitor.post('/store/products/1/book', data={
-        'customer_name': 'Public Booker',
-        'customer_email': 'public@example.test',
-        'customer_phone': '+270****0003',
-        'quantity': '1',
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
+    visitor.post('/store/book', data={
+        'name': 'Public Booker',
+        'email': 'public@example.test',
+        'phone': '+27000000003',
+        'popia_consent': '1',
         'start_date': '2026-10-01',
         'start_time': START_TIME,
         'end_date': '2026-10-03',
         'end_time': END_TIME,
+        'product_id': ['1'],
+        'quantity': ['1'],
     }, follow_redirects=True)
     public_order = latest_order(app)
     assert public_order['status'] == 'draft'
@@ -269,21 +273,23 @@ def test_an_admin_draft_is_not_treated_as_a_public_booking(client, app, sent):
 
 # --- public store bookings keep notifying immediately -----------------------
 
-def test_a_public_booking_request_is_announced_immediately(client, app, sent):
+def test_a_public_booking_request_is_announced_immediately(client, app, sent, monkeypatch):
     login(client)
     seed_customer_and_product(client)
 
     visitor = public_client(app)
-    response = visitor.post('/store/products/1/book', data={
-        'customer_name': 'Public Booker',
-        'customer_email': 'public@example.test',
-        'customer_phone': '+270****0003',
-        'quantity': '1',
+    monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
+    response = visitor.post('/store/book', data={
+        'name': 'Public Booker',
+        'email': 'public@example.test',
+        'phone': '+27000000003',
+        'popia_consent': '1',
         'start_date': '2026-10-01',
         'start_time': START_TIME,
         'end_date': '2026-10-03',
         'end_time': END_TIME,
-        'notes': 'Public booking request',
+        'product_id': ['1'],
+        'quantity': ['1'],
     }, follow_redirects=True)
     assert b'Booking request received' in response.data
 
