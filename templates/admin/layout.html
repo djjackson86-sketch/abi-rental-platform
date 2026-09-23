@@ -29,6 +29,7 @@
     {% if user_can('scan_barcode') %}<a href="{{ url_for('admin.scan_barcode') }}"><span>▥</span><span>Scan a barcode</span></a>{% endif %}
     {% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}"><span>▦</span><span>Scan a vehicle disk</span></a>{% endif %}
     {% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}"><span>▩</span><span>Scan to return</span></a>{% endif %}
+    {% if user_can('settings') %}<a href="{{ url_for('settings.portal_index') }}"><span>▨</span><span>Customer portal</span></a>{% endif %}
     {% if user_can('settings') %}<a href="{{ url_for('settings.general') }}"><span>⚙</span><span>Settings</span></a>{% endif %}
     {% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}"><span>⌂</span><span>Branch: {{ active_branch['name'] }} · Change</span></a>{% endif %}
     <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button type="submit"><span>↩</span><span>Log out</span></button></form>

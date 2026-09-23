@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ branch.name }} — registration QR sheet | Sano Trailers{% endblock %}
+{% block body_class %}sheet-page{% endblock %}
+{% block body %}
+<style>
+  /* The A4 sheet a branch prints and stands at the counter (feature B §B3).
+     Standalone on purpose: this template extends base.html, NOT admin/layout.html, so there is no
+     app navigation and no flash bar that could ever print. `.no-print` carries the screen-only
+     controls (the toolbar and the Print button). */
+  @page { size: A4; margin: 12mm; }
+  body.sheet-page{margin:0;padding:24px 16px 40px;background:#eef1f5;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:#10233f}
+  .sheet-toolbar{max-width:210mm;margin:0 auto 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .sheet-toolbar .grow{flex:1 1 auto}
+  .sheet{max-width:210mm;margin:0 auto;background:#fff;border:1px solid #d7dde6;border-radius:10px;box-shadow:0 8px 26px rgba(16,35,63,.10);padding:22mm 18mm;text-align:center}
+  .sheet-logo{height:52px;width:auto;margin:0 auto 14px;display:block}
+  .sheet h1{margin:0 0 6px;font-size:30px;line-height:1.2}
+  .sheet-address{margin:0 0 2px;color:#4a5a72;font-size:15px}
+  .sheet-phone{margin:0 0 20px;color:#4a5a72;font-size:15px}
+  .sheet-instruction{margin:0 0 18px;font-size:20px;font-weight:600}
+  .sheet-qr{width:80mm;max-width:100%;height:auto;display:block;margin:0 auto}
+  .sheet-url{margin:16px auto 0;font-size:15px;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .sheet-note{margin:18px auto 0;max-width:150mm;padding:10px 14px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#8a4b0f;font-size:14px;text-align:left}
+  .sheet-foot{margin:22px 0 0;padding-top:14px;border-top:1px solid #e3e8ef;color:#6b7a90;font-size:13px}
+  @media print {
+    .no-print{display:none !important}
+    body.sheet-page{background:#fff;padding:0}
+    .sheet{box-shadow:none;border:0;border-radius:0;max-width:none;margin:0;padding:0}
+  }
+</style>
+
+<div class="sheet-toolbar no-print">
+  <a class="btn ghost" href="{{ url_for('settings.portal_index') }}">Back to portal links</a>
+  <span class="grow"></span>
+  <button class="btn primary" type="button" onclick="window.print()">Print this sheet</button>
+</div>
+
+<article class="sheet">
+  <img class="sheet-logo" src="{{ url_for('static', filename='img/sano-trailers-email-logo.jpg') }}" alt="Sano Trailers">
+  <h1>{{ branch.name }}</h1>
+  {% if address %}<p class="sheet-address">{{ address }}</p>{% endif %}
+  {% if branch.phone %}<p class="sheet-phone">{{ branch.phone }}</p>{% endif %}
+  <p class="sheet-instruction">Scan to register your details before you hire.</p>
+  <img class="sheet-qr" src="{{ url_for('public.branch_portal_qr', slug=branch.public_slug, box=qr_box) }}" alt="QR code that opens the {{ branch.name }} registration page" width="492" height="492">
+  <p class="sheet-url">{{ portal_url }}</p>
+  {% if not registration_open %}
+  <p class="sheet-note"><strong>Online registration is not open yet.</strong> The code works, but the form asks customers to give their details to the counter staff until our privacy notice is published.{% if outstanding_count %} {{ outstanding_count }} facts on the notice are still open.{% endif %}</p>
+  {% endif %}
+  <p class="sheet-foot">Sano Trailers · Customer registration</p>
+</article>
+{% endblock %}

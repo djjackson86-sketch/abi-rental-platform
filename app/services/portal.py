@@ -20,12 +20,13 @@ Three decisions shape this module:
 """
 
 import io
+import sqlite3
 import unicodedata
 
 import qrcode
 from qrcode.constants import ERROR_CORRECT_M
 
-from app.db import get_db
+from app.db import get_db, now
 from app.services.settings import get_company_settings
 
 #: The public URL shape (decision D5). One place, so the route, the QR and the admin page (B3)
@@ -36,6 +37,29 @@ PORTAL_PATH_TEMPLATE = "/portal/{slug}"
 #: standard for a printed sheet is at least 4.
 QR_BORDER_MODULES = 4
 QR_BOX_SIZE_PX = 10
+
+#: The print sheet (B3) asks for a heavier code than a screen preview: a 410 px PNG spread over
+#: 80 mm of paper is barely 130 dpi, which is thin for a tired office printer. 12 modules at 4 px
+#: of quiet zone gives 492 px for the real links, ~156 dpi on the sheet.
+QR_PRINT_BOX_SIZE_PX = 12
+
+#: The range the ``?box=`` knob is clamped to. A printed code staff rely on must never 500 because
+#: of a query string, and an unbounded box size is a memory hole on a public route.
+QR_BOX_SIZE_MIN = 4
+QR_BOX_SIZE_MAX = 20
+
+#: How much room a branch gets for its welcome line on the customer's form. Long enough for a
+#: useful sentence, short enough that the form does not turn into a wall of text.
+MAX_PORTAL_INTRO_CHARS = 300
+
+
+class DuplicateSlugError(ValueError):
+    """That link already belongs to another branch.
+
+    A ``ValueError`` on purpose, so existing callers that catch ``ValueError`` keep working; the
+    admin route catches this one *first* and answers **409**, because "someone else owns that URL"
+    is a conflict rather than a typo. ``idx_branches_slug`` is the database-level backstop.
+    """
 
 
 def _ascii_fold(value):
@@ -88,6 +112,18 @@ def _slug_is_taken(candidate, exclude_branch_id=None):
         (candidate, exclude_branch_id if exclude_branch_id is not None else -1),
     ).fetchone()
     return row is not None
+
+
+def slug_owner(slug, exclude_branch_id=None):
+    """The branch that already holds ``slug``, or ``None`` — so a refusal can name it."""
+    candidate = slugify(slug)
+    if not candidate:
+        return None
+    row = get_db().execute(
+        "SELECT * FROM branches WHERE public_slug = ? AND id <> ?",
+        (candidate, exclude_branch_id if exclude_branch_id is not None else -1),
+    ).fetchone()
+    return row
 
 
 def unique_slug(base, exclude_branch_id=None):
@@ -157,8 +193,42 @@ def qr_png_bytes(url, box_size=QR_BOX_SIZE_PX):
     return buffer.getvalue()
 
 
+def clamp_box_size(value, default=QR_BOX_SIZE_PX):
+    """Whatever the query string carried, turned into a box size inside the safe range.
+
+    Junk (``box=abc``, ``box=2.5``, a list from a repeated parameter) falls back to the house
+    default rather than failing: the QR is a printed artefact and a 500 there is a dead sheet.
+    """
+    try:
+        size = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(QR_BOX_SIZE_MIN, min(QR_BOX_SIZE_MAX, size))
+
+
+def branch_address(branch, separator=", "):
+    """The branch's postal address as one line — what a printed sheet has to show.
+
+    Blank parts are dropped rather than leaving a stray comma, and a branch with no address at all
+    returns ``''`` so the sheet can leave the line out entirely.
+    """
+    parts = []
+    for key in ("address_line1", "address_line2", "city", "province", "postal_code"):
+        try:
+            value = (branch[key] or "").strip()
+        except (KeyError, IndexError, TypeError):
+            continue
+        if value:
+            parts.append(value)
+    return separator.join(parts)
+
+
 def all_portal_links(base_url=None):
-    """Every branch with its slug, path and link — the list the admin page (B3) will render."""
+    """Every branch with its slug, path, link and the details the admin page (B3) renders.
+
+    One query and one shape for the links page *and* the print sheet, so the page cannot show a
+    link the sheet would print differently.
+    """
     rows = get_db().execute("SELECT * FROM branches ORDER BY active DESC, name").fetchall()
     links = []
     for branch in rows:
@@ -170,7 +240,85 @@ def all_portal_links(base_url=None):
                 "slug": slug,
                 "portal_path": portal_path(slug) if slug else "",
                 "portal_url": portal_url(branch, base_url) if slug else "",
+                # ``enabled`` keeps its §B1 meaning (the portal is live *and* the branch is
+                # active); the two raw flags travel beside it so the admin page can say which
+                # of the two is actually off instead of showing one vague "off".
                 "enabled": bool(branch["portal_enabled"]) and bool(branch["active"]),
+                "portal_enabled": bool(branch["portal_enabled"]),
+                "active": bool(branch["active"]),
+                "address": branch_address(branch),
+                "phone": (branch["phone"] or "").strip(),
+                "intro": (branch["portal_intro"] or "").strip(),
+                "qr_path": f"{portal_path(slug)}/qr.png" if slug else "",
             }
         )
     return links
+
+
+def update_portal_settings(branch_id, form):
+    """Save the portal half of a branch: slug, on/off and the welcome line. (**B3**)
+
+    This is the write the DB↔UI gap needed: §B1 added ``public_slug`` / ``portal_enabled`` /
+    ``portal_intro`` with no admin screen at all, so a slug could only be changed with a database
+    client. It writes **exactly those three columns** (plus ``updated_at``) and nothing else, which
+    is what lets the ordinary branch form and this one coexist without clobbering each other.
+
+    A slug is normalised with the same :func:`slugify` the backfill uses, so what staff type and
+    what the URL is cannot drift. Raises:
+
+    * ``ValueError`` — no such branch, a slug that would leave the link empty, an over-long
+      welcome line;
+    * :class:`DuplicateSlugError` — the link belongs to another branch (the route answers 409);
+      the partial unique index is re-checked on the write, so a save that loses a race is refused
+      with the same message instead of a 500.
+    """
+    db = get_db()
+    branch = db.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
+    if branch is None:
+        raise ValueError(f"No branch with id {branch_id}")
+
+    typed_slug = (form.get("public_slug") or "").strip()
+    slug = slugify(typed_slug)
+    if not slug:
+        raise ValueError(
+            "A portal link needs a slug — use letters, numbers and dashes, e.g. roodepoort-west."
+        )
+    owner = slug_owner(slug, exclude_branch_id=branch_id)
+    if owner is not None:
+        raise DuplicateSlugError(
+            f"/portal/{slug} is already {owner['name']}'s link — pick a different word for "
+            f"{branch['name']}."
+        )
+
+    intro = (form.get("portal_intro") or "").strip()
+    if len(intro) > MAX_PORTAL_INTRO_CHARS:
+        raise ValueError(
+            f"The welcome line is too long — {len(intro)} characters, the limit is "
+            f"{MAX_PORTAL_INTRO_CHARS}."
+        )
+    enabled = 1 if form.get("portal_enabled") else 0
+
+    try:
+        db.execute(
+            "UPDATE branches SET public_slug = ?, portal_enabled = ?, portal_intro = ?, "
+            "updated_at = ? WHERE id = ?",
+            (slug, enabled, intro, now(), branch_id),
+        )
+        db.commit()
+    except sqlite3.IntegrityError as exc:  # the partial unique index winning a race
+        raise DuplicateSlugError(
+            f"/portal/{slug} was taken while you were saving — pick another link for "
+            f"{branch['name']}."
+        ) from exc
+
+    return {
+        "branch_id": branch_id,
+        "name": branch["name"],
+        "slug": slug,
+        "typed_slug": typed_slug,
+        "slug_normalised": slug != typed_slug,
+        "slug_changed": slug != (branch["public_slug"] or "").strip(),
+        "enabled": bool(enabled),
+        "enabled_changed": bool(enabled) != bool(branch["portal_enabled"]),
+        "intro_changed": intro != (branch["portal_intro"] or "").strip(),
+    }

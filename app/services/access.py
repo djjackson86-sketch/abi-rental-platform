@@ -109,6 +109,13 @@ _ENDPOINT_MODULE_RULES = [
     ("inventory.", "inventory"),
     ("branches.", "branches"),
     ("payments.", "payments"),
+    # Programme phase 10 (feature B / §B3): the customer-portal admin pages — the per-branch link
+    # list, the QR sheet and the slug/on-off save. They live under /settings/..., so the
+    # ("settings.", "settings") prefix below would already gate them; listed here so the gate is
+    # explicit rather than implied (same reason the dashboard's spare-wheel panel is listed).
+    ("settings.portal_index", "settings"),
+    ("settings.portal_save", "settings"),
+    ("settings.portal_print", "settings"),
     ("settings.", "settings"),
 ]
 

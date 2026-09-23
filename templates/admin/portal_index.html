@@ -1,0 +1,95 @@
+{% extends "admin/layout.html" %}
+{% set title='Customer portal' %}
+{% block admin_body %}
+<header class="page-header"><div><p class="eyebrow">Settings</p><h1>Customer portal</h1><p>One link and one QR code per branch. A customer scans the branch's code, registers their own details, and the record lands on the Customers page with that branch on it.</p></div></header>
+{% include "admin/settings/nav.html" %}
+
+{% if not registration_open %}
+<section class="panel portal-warning">
+  <h2>Registration is not open yet</h2>
+  <p>Our privacy notice is still being finalised, so <strong>every branch portal shows the counter message instead of the form</strong> and refuses a submission. The links and the QR codes work, but nobody can complete a registration until the notice is published.</p>
+  {% if outstanding_count %}
+  <p class="form-help">{{ outstanding_count }} facts on the notice are still open. They are listed in the privacy-notice review, and filling them in is the main profile's job — nothing here needs changing for them.</p>
+  {% endif %}
+  <p class="form-help">Nothing here needs changing for that — the day the notice is finished the forms open by themselves. Check with the main profile before printing sheets for customers.</p>
+</section>
+{% endif %}
+
+<section class="portal-grid">
+{% for link in links %}
+  <article class="panel portal-card">
+    <header class="portal-card-head">
+      <h2>{{ link.name }}</h2>
+      {% if link.enabled %}<span class="badge">Live</span>{% else %}<span class="badge blocked">Portal off</span>{% endif %}
+    </header>
+    <p class="form-help">{% if link.address %}{{ link.address }}{% endif %}{% if link.address and link.phone %} · {% endif %}{% if link.phone %}{{ link.phone }}{% endif %}{% if not link.address and not link.phone %}No address recorded on this branch yet.{% endif %}</p>
+    {% if not link.active %}<p class="form-help">This branch is inactive, so its portal is off — switch the branch on under Branches first.</p>{% endif %}
+
+    {% if link.slug %}
+    <label class="portal-link-label" for="portal-link-{{ link.branch_id }}">Link to share</label>
+    <div class="portal-link-row">
+      <input class="portal-link-input" id="portal-link-{{ link.branch_id }}" type="text" readonly value="{{ link.portal_url }}" title="{{ link.portal_url }}" aria-label="{{ link.name }} portal link">
+      <button type="button" class="btn ghost portal-copy" data-copy-target="portal-link-{{ link.branch_id }}" data-copy-status="portal-copy-status-{{ link.branch_id }}">Copy link</button>
+    </div>
+    <p class="portal-copy-status" id="portal-copy-status-{{ link.branch_id }}" aria-live="polite"></p>
+
+    {% if link.enabled %}
+    <div class="portal-qr-wrap">
+      <img class="portal-qr" src="{{ url_for('public.branch_portal_qr', slug=link.slug) }}" alt="QR code that opens the {{ link.name }} registration page" width="200" height="200">
+      <div class="portal-qr-side">
+        <p class="form-help">Scan this to reach the form on any phone. Print it for the counter when the notice is published.</p>
+        <a class="btn ghost" href="{{ url_for('settings.portal_print', branch_id=link.branch_id) }}">Print QR sheet</a>
+      </div>
+    </div>
+    {% else %}
+    <p class="portal-off-note">This branch's portal is switched off, so its link and QR code return &ldquo;page not found&rdquo;. Turn it on below to hand out a code that works.</p>
+    {% endif %}
+    {% else %}
+    <p class="portal-off-note">This branch has no link yet. Save a slug below and its link and QR code will be created.</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('settings.portal_save', branch_id=link.branch_id) }}" class="settings-form portal-settings-form">
+      <div class="form-grid">
+        <label>Link slug<input name="public_slug" value="{{ link.slug }}" placeholder="e.g. roodepoort-west" required></label>
+        <label class="switch"><input type="checkbox" name="portal_enabled" value="1" {% if link.portal_enabled %}checked{% endif %}> Portal switched on</label>
+        <label class="span-2">Welcome line (optional)<input name="portal_intro" value="{{ link.intro }}" maxlength="{{ intro_limit }}" placeholder="e.g. Bring your ID and driver's licence."></label>
+      </div>
+      <p class="form-help">Lower case letters, numbers and dashes only — the link is saved as <code>/portal/&lt;slug&gt;</code>. Changing the slug moves the link and its QR code, so reprint any sheet already on the counter.</p>
+      <div class="form-actions"><button class="btn primary" type="submit">Save portal settings</button></div>
+    </form>
+  </article>
+{% endfor %}
+</section>
+
+<script>
+  // "Copy link" is the one action staff take repeatedly, so it writes to the real clipboard and
+  // says so on the page. navigator.clipboard needs a secure context (https or localhost); the
+  // fallback selects the text and uses the old execCommand path, so a plain-http LAN address
+  // still copies rather than silently doing nothing.
+  document.querySelectorAll('.portal-copy').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var input = document.getElementById(button.getAttribute('data-copy-target'));
+      var status = document.getElementById(button.getAttribute('data-copy-status'));
+      var report = function (ok) {
+        button.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+        if (status) { status.textContent = ok ? 'Link copied to your clipboard.' : 'Select the link and copy it manually.'; }
+        window.setTimeout(function () { button.textContent = 'Copy link'; }, 2500);
+      };
+      if (!input) { report(false); return; }
+      var legacy = function () {
+        input.focus();
+        input.select();
+        input.setSelectionRange(0, input.value.length);
+        var copied = false;
+        try { copied = document.execCommand('copy'); } catch (error) { copied = false; }
+        report(copied);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(function () { report(true); }, legacy);
+      } else {
+        legacy();
+      }
+    });
+  });
+</script>
+{% endblock %}

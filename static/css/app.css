@@ -545,3 +545,25 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .portal-result-name{font-size:19px;font-weight:800;color:var(--ink);overflow-wrap:anywhere}
 .portal-reference{font-size:15px}
 .portal-reference strong{font-size:17px;letter-spacing:.02em}
+
+/* Customer-portal admin page (feature B §B3): one card per branch with its link, its QR preview
+   and the three portal settings. Every grid child carries min-width:0 — the sideways-scroll trap
+   phase 4 measured (a grid item's automatic minimum size is its content's min-content), so the
+   QR image and the readonly link input can never push the page wider than the viewport. */
+.portal-warning{border-color:#fed7aa;background:#fff7ed}
+.portal-warning h2{color:#8a4b0f}
+.portal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin:18px 0}
+.portal-card{min-width:0;display:grid;gap:10px;align-content:start}
+.portal-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.portal-card-head h2{margin:0}
+.portal-link-label{font-size:13px}
+.portal-link-row{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:0}
+.portal-link-input{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;font-size:13px;background:var(--surface-soft);color:var(--ink);text-overflow:ellipsis}
+.portal-copy{align-self:flex-start}
+.portal-copy-status{margin:0;min-height:18px;font-size:13px;color:var(--ok,#0f7b3f);font-weight:650}
+.portal-qr-wrap{display:flex;gap:16px;align-items:center;flex-wrap:wrap;min-width:0;margin-top:4px}
+.portal-qr{width:150px;height:150px;flex:0 0 auto;border:1px solid var(--line-soft);border-radius:12px;background:#fff;padding:6px}
+.portal-qr-side{flex:1 1 200px;min-width:0;display:grid;gap:10px}
+.portal-qr-side p{margin:0}
+.portal-off-note{margin:0;padding:12px 14px;border:1px solid var(--line-soft);border-radius:12px;background:var(--surface-soft);color:var(--ink-2);font-size:13px}
+.portal-settings-form{border-top:1px solid var(--line-soft);padding-top:14px}

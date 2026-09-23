@@ -339,11 +339,17 @@ def branch_portal_qr(slug):
     The same gate as the page: an unknown slug or a disabled portal 404s, so a QR that was printed
     before a branch was switched off stops resolving rather than opening a dead form. Nothing is
     written to disk, and the link is never handed to a third-party QR service.
+
+    ``?box=`` is the one knob the admin print sheet (**B3**) needs: the same code path, rendered
+    heavier for paper than for a screen preview. It is clamped (:func:`portal.clamp_box_size`) and
+    junk falls back to the house default, so a query string can neither 500 nor hand the app a
+    memory hole. The default is unchanged, so every §B1 caller gets the same bytes as before.
     """
     branch = portal.portal_branch(slug)
     if branch is None:
         abort(404)
-    png = portal.qr_png_bytes(portal.portal_url(branch, request.url_root))
+    box_size = portal.clamp_box_size(request.args.get("box"))
+    png = portal.qr_png_bytes(portal.portal_url(branch, request.url_root), box_size=box_size)
     response = make_response(png)
     response.headers["Content-Type"] = "image/png"
     response.headers["Cache-Control"] = f"public, max-age={PORTAL_QR_MAX_AGE_SECONDS}"

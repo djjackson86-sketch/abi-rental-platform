@@ -24,6 +24,8 @@ from app.services.settings import (
     list_operating_hours, global_vat_rate, update_vat_settings,
 )
 from app.services.branches import branch_options
+from app.services.branches import get_branch
+from app.services import popia_pack, portal, portal_intake
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
@@ -222,3 +224,122 @@ def rental_period():
         flash("Rental period settings saved", "success")
         return redirect(url_for("settings.rental_period"))
     return render_template("admin/settings/rental_period.html", settings=get_company_settings(), hours=list_operating_hours())
+
+
+# --- Customer portal: the per-branch link, the QR sheet and the on/off switch (feature B §B3) ---
+#
+# §B1 added `public_slug` / `portal_enabled` / `portal_intro` to `branches` and §B2 built the form
+# those settings point at, but neither shipped a screen for them — a slug could only be changed
+# with a database client. These three routes are that screen: the list (one card per branch), the
+# printable A4 sheet, and the save. Gated on the `settings` module (see `access.py`) so the main
+# profile ticks it per account like every other settings area.
+
+
+def _portal_page_context():
+    """Everything the portal pages need, so the three routes cannot disagree about the state.
+
+    The POPIA half is read from the *document* (decision D11), not from a second copy of the truth:
+    while the reviewed notice still carries Sano's open facts the public form refuses every
+    submission, and the branch staff who hand out a QR must be able to see that here.
+
+    The page shows **how many** facts are still open, not which ones: a token quoted onto a page is
+    the very thing the D11 gate exists to stop, and the first draft of this tick proved the point —
+    stripping the brackets off still printed ``our branches at ____ are covered by CCTV`` and
+    ``TO CONFIRM — the public web address`` on the counter sheet. The list itself lives in the
+    privacy-notice review, which is the main profile's to work through, not a branch's.
+    """
+    registration_open = portal_intake.registration_is_open()
+    return {
+        "links": portal.all_portal_links(request.url_root),
+        "registration_open": registration_open,
+        "outstanding_count": (
+            0
+            if registration_open
+            else len(popia_pack.outstanding_fields(popia_pack.PRIVACY_NOTICE_KEY))
+        ),
+        "intro_limit": portal.MAX_PORTAL_INTRO_CHARS,
+    }
+
+
+@bp.route("/portal")
+@login_required
+def portal_index():
+    """Every branch's customer link, QR preview and portal switch on one page."""
+    return render_template("admin/portal_index.html", **_portal_page_context())
+
+
+def _render_portal_index(status):
+    """Re-render the list after a refused save, with that HTTP status rather than a redirect.
+
+    Returning 409/400 keeps the refusal honest (the client skipped a redirect *and* a 200) while
+    the flash carries the reason and the form keeps what was typed, which is what a person behind
+    the counter needs.
+    """
+    return render_template("admin/portal_index.html", **_portal_page_context()), status
+
+
+@bp.post("/portal/<int:branch_id>")
+@login_required
+def portal_save(branch_id):
+    """Save one branch's portal settings: the slug, the on/off switch and the welcome line."""
+    if get_branch(branch_id) is None:
+        abort(404)
+    try:
+        result = portal.update_portal_settings(branch_id, request.form)
+    except portal.DuplicateSlugError as exc:
+        flash(str(exc), "error")
+        return _render_portal_index(409)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return _render_portal_index(400)
+
+    name = result["name"]
+    messages = []
+    if result["slug_changed"]:
+        suffix = " (saved in lower case with dashes)" if result["slug_normalised"] else ""
+        messages.append(f"Link updated to /portal/{result['slug']}{suffix}.")
+    if result["enabled_changed"]:
+        if result["enabled"]:
+            messages.append(f"{name}'s portal is live again — its link and QR work as printed.")
+        else:
+            messages.append(
+                f"{name}'s portal is switched off, so its link and QR now return \"page not found\"."
+            )
+    if result["intro_changed"]:
+        messages.append("Welcome line updated.")
+    if not messages:
+        messages.append(f"{name}'s portal settings are unchanged.")
+    flash(" ".join(messages), "success" if result["enabled"] else "error")
+    return redirect(url_for("settings.portal_index"))
+
+
+@bp.route("/portal/<int:branch_id>/print")
+@login_required
+def portal_print(branch_id):
+    """The A4 sheet a branch prints and puts at the counter.
+
+    A branch whose portal is switched off is refused rather than served: its QR returns 404 to the
+    customer (decision D7's shape — one switch decides both), so printing it would put a dead code
+    in someone's hand. The refusal is a flash plus the list page, so staff see the switch that
+    needs flipping instead of a bare error.
+    """
+    branch = get_branch(branch_id)
+    if branch is None:
+        abort(404)
+    if not (branch["portal_enabled"] and branch["active"]):
+        flash(
+            f"{branch['name']}'s portal is switched off, so its QR does not work yet — "
+            "turn it on before printing a sheet.",
+            "error",
+        )
+        return redirect(url_for("settings.portal_index"))
+    context = _portal_page_context()
+    return render_template(
+        "admin/portal_print.html",
+        branch=branch,
+        address=portal.branch_address(branch),
+        portal_url=portal.portal_url(branch, request.url_root),
+        qr_box=portal.QR_PRINT_BOX_SIZE_PX,
+        registration_open=context["registration_open"],
+        outstanding_count=context["outstanding_count"],
+    )
