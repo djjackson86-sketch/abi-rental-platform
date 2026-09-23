@@ -15,7 +15,7 @@
 | 1 | A1 licence-disk decode spike + engine decision | done | tick 1 | parser ported + parity-verified; engine = server-side `zxing-cpp`, decided on the REAL disc photo (22 ms); positional branch for the modern 148-char layout; 51 new tests, full suite 747 green |
 | 2 | A2 vehicle data model + service | done | tick 2 | `vehicles` table (SCHEMA + `run_migrations`) + `app/services/vehicles.py`; one owner per registration (app ValueError **and** partial unique index), blank masses stay NULL, no towing column (D3b), customer delete clears vehicles (FK + explicit); 20 new tests, full suite **767 green** |
 | 3 | A3 staff scan UI + allocate to client | done | tick 3 | `/scan-vehicle` capture + review form, allocate/transfer, JSON feed + typeahead, module `scan_vehicle`; D3 identifier mapping now placed (plate / NaTIS / disc licence no); 25 new tests, full suite **794 green**, real-browser proof 27/27 checks, 0 console errors, 0 overflow at 1440px and 390px |
-| 4 | A4 client page vehicles panel + browser proof | pending | | |
+| 4 | A4 client page vehicles panel + browser proof | done | tick 4 | client-page `Vehicles` panel (plate + NaTIS, make, model, year, tare, GVM, disk expiry; blank = dash, no towing column per D3b), collapsed per-vehicle edit/remove `<details>`, empty state with a scan CTA; 14 new tests (written failing-first: 11 failed with the impl stashed), full suite **808 green**, real-browser 39/39 checks, 0 console errors, 0 overflow at 1440px + 390px; feature A signed off locally |
 | 5 | D1 trailer identity + return-matching service | pending | | |
 | 6 | D2 scan-to-return screen + marks returned + proof | pending | | |
 | 7 | B1 branch portal schema + link + QR | pending | | |
@@ -365,3 +365,99 @@ is kept and unit-tested.
 6. Screenshot/vision expectations are already wired: run on **5058** (or free 5057 first) with
    `DATABASE_PATH=/tmp/abi_a4.db`, seed with `/tmp/abi_a3_seed.py` (it prints owner id 1 / staff id 2 /
    clients 1 and 2), and the proof script `/tmp/abi_a3_proof.py` is a working template for the A4 pass.
+
+### Phase 4 — A4 client page vehicles panel + browser proof — status `done`
+**Branch:** `feature/abi-programme-2026-09-23` (nothing pushed; `master` untouched at `8ec51e8`).
+`docs/plans/.tick.lock` did not exist at the start — this tick created it and removed it; no stale lock.
+
+**Files:** `templates/admin/customers/detail.html` (the `Vehicles` panel),
+`app/routes/customers.py` (`detail` now passes `vehicles=list_vehicles(customer_id)`),
+`static/css/app.css` (panel styles), `tests/test_programme_20260923_vehicle_client_page.py` (new, 14 tests),
+`docs/plans/2026-09-23-staff-vehicle-scan.md` (§A4's two stale "towing capacity" mentions corrected to D3b).
+
+**The panel.** Right-hand column of the client page, under the order history: a `.data-table` inside the
+house `.table-wrap` with **number plate (+ the NaTIS number as a sub-line) · make · model · year · tare ·
+GVM · disk expiry**, an "Add vehicle" link (only for accounts holding the `scan_vehicle` module) and, per
+vehicle, a collapsed `<details>` carrying the full 15-field edit form plus the remove button. Empty state
+("No vehicles recorded" + a "Scan a vehicle disk" CTA) when the client has none. Every control links to
+`/scan-vehicle?customer_id=<id>`, which the scan screen's capture form already carries forward (hidden
+`customer_id` + a "Back to <client>" header), so the board-to-scan-to-client round trip has no dead ends.
+
+**Real bug the browser proof found — the 390px page scrolled sideways.** First 390px measurement:
+`{scrollWidth: 706, clientWidth: 390}`. The 640px table's min-content propagated through the grid item
+(`.customer-vehicles-card` is a child of `.customer-profile-grid`, whose automatic minimum size is its
+content's min-content), so the panel rendered 688px wide inside a 354px column — which in turn made the
+"Edit" `<summary>` un-clickable (Playwright: a `.detail-row` from the contact card intercepting pointer
+events). Fixed with `min-width:0` on `.customer-vehicles-card` (and `.table-wrap`, `.vehicle-manage`,
+`.vehicle-edit-form`); the table now scrolls inside `.table-wrap` exactly like every other table in the
+app — **390/390 measured afterwards**, edit form clickable at 390px. Same trap for any future panel that
+puts a `.data-table` into one of these two-column profile grids.
+
+**The plan's "branch/scope" acceptance line does not hold, and a test now pins that.**
+`list_customers`/`get_customer` carry **no branch filter** (only `customers.branch_id` on write, plus a
+display-only join to `branches` for the name) — unlike `list_products`/`list_orders`, which do scope. So
+"a depot account sees its own client's vehicles only" cannot be true today; what the panel does own is the
+*per-client* scope and the module gate on its controls, and both are tested. Flagged for Don: if customers
+are meant to be branch-scoped, that is its own programme, not an A4 detail.
+
+**Commands + real results:**
+- **Failing first (real, not asserted):** `git stash push -- app/routes/customers.py
+  templates/admin/customers/detail.html static/css/app.css` then
+  `.venv/bin/pytest tests/test_programme_20260923_vehicle_client_page.py -q` → **11 failed, 3 passed**;
+  `git stash pop` → **14 passed in 10.80s**
+- `.venv/bin/pytest -q` (full suite) → **808 passed in 472.34s (0:07:52)** — green (794 before)
+- `python3 -m compileall app tests -q` → clean
+- Browser proof (venv Playwright Chromium, temp DB `/tmp/abi_a4.db`, app on **5058** because 5057 is still
+  held by the 09:16 non-programme `app.py`; screenshots `/tmp/abi_a4_shots/`, report
+  `/tmp/abi_a4_report.json`): **39/39 checks passed, 0 console errors, 0 horizontal overflow** at
+  1440×1100 and 390×844. Signed in as a *staff* account (modules `dashboard`, `customers`, `scan_vehicle`):
+  client page empty state → panel CTA → `GET /scan-vehicle?customer_id=1` (200; hidden `customer_id=1`;
+  "Back to Charmaine Mokoena") → pasted the modern 148-char fixture → review already had the plate and the
+  client chosen → saved (flash "Vehicle ABC123GP allocated to Charmaine Mokoena", redirect `/customers/1`)
+  → panel row `['ABC123GP NaTIS ZZ1234Z','MITSUBISHI','ASX','—','—','—','2027-07-31']` → edited model +
+  tare from the panel ("Vehicle saved."; row `…'ASX 1.6','—','1900','—','2027-07-31'`) → removed at 390px
+  (flash "Vehicle removed — the client record is untouched.", panel back to the empty state, 0 rows left,
+  "Charmaine Mokoena" still on the page).
+- `vision_analyze` on the panel screenshots (what was actually seen — `/tmp/abi_a4_vision/`):
+  **1440px empty**: heading "Vehicles" + blue "Add vehicle" link, the dashed empty-state box with "No
+  vehicles recorded", the explanatory sentence and the blue "Scan a vehicle disk" button, nothing clipped.
+  **1440px with a vehicle**: 7 columns NUMBER PLATE / MAKE / MODEL / YEAR / TARE (KG) / GVM (KG) / DISK
+  EXPIRY; the single row `ABC123GP` with `NaTIS ZZ1234Z` stacked below it, `MITSUBISHI`, `ASX`, dashes in
+  YEAR, TARE and GVM and `2027-07-31` last — **no towing column anywhere**.
+  **1440px edit open**: summary "▾ Edit or remove ABC123GP", a two-column form with all 15 fields (plate,
+  NaTIS, disk licence number, make, model, colour, year, VIN, engine, category, authority, control number,
+  expiry, Tare, GVM — the fields the disk did not carry are *empty inputs*, not zeros), the "stored as
+  unknown, never 0" help lines, then "Save vehicle" and the red "Remove vehicle" with "Removing deletes
+  only this vehicle — the client and their orders stay exactly as they are."
+  **390px panel**: one column, the table's first columns (NUMBER PLATE / MAKE / MODEL) legible, "NUMBER
+  PLATE" wrapping to two lines, the disclosure line "▶ Edit or remove ABC123GP" below — nothing clipped.
+  **390px edit open**: all 15 fields single-column and readable, both buttons full width.
+  (Cosmetic note: on a phone the year/tare/GVM/expiry columns are inside the table's own horizontal
+  scroll — house behaviour for every `.data-table` today, but a card-per-vehicle mobile layout is the
+  obvious next polish if Don wants it.)
+
+**Commit:** `bc4a18d` — `feat(customers): client page Vehicles panel with in-place edit/remove (A4)`
+(5 files, code + template + CSS + tests + the plan-doc correction together), with this ledger update as its
+own commit so the hash above is real.
+
+**Blockers / notes for Don:**
+- Port **5057 is still held** by the 09:16 `app.py` that is not this programme's (pid 558440) — this tick
+  again proved on 5058 and left 5057 untouched; 5058 is free again. Say the word and the next tick stops it.
+- `scan_vehicle` is still **not** in the shared staff default set (A3's note stands): an account without it
+  gets the client's vehicles **read-only** — no "Add vehicle", no edit/remove — and the vehicle routes 403
+  for it (tested both ways).
+- Harness note for future proofs: the sidebar nav entry and the panel link carry the *same* label ("Scan a
+  vehicle disk"), so a page-level `a:has-text(...)` click silently follows the **nav** link and loses
+  `?customer_id=`. Scope panel clicks to `.customer-vehicles-card` (the first proof run failed on exactly
+  that, and the failure was in the harness, not the page).
+
+**Must-know for tick 5 (D1, trailer identity + return-matching service):**
+1. `vehicles.get_vehicle_by_registration()` and `customer_for_vehicle_registration()` are the hooks D1's
+   "scan the towing car's disk" branch needs; both match on the whitespace-free upper-case key, so
+   `KP 35 XKGP` == `KP35XKGP` == `kp35xkgp`.
+2. `vehicles.list_vehicles()` orders by `created_at DESC, id DESC` — the panel renders that order as-is
+   (newest first); a return screen must not assume `id ASC`.
+3. **Feature A is signed off locally end-to-end** (A1–A4 all `done`): scan → allocate → client page →
+   edit/remove, proven in a real browser. Nothing pushed, nothing deployed.
+4. Any new panel that puts a `.data-table` into a two-column profile grid needs `min-width:0` on the grid
+   item, or the page itself scrolls sideways at 390px (see the measurement above).
