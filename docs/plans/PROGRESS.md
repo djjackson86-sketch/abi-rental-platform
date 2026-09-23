@@ -662,8 +662,9 @@ existed → `.venv/bin/pytest tests/test_programme_20260923_scan_return_flow.py 
 Also added: `returns.recently_returned()` — a returned order is (correctly) no longer a live match, so a repeat
 scan would otherwise only say "nothing found"; staff now get "this disk already came back: <order> … on <date>".
 
-**Commit:** `6f144ce` — `feat(returns): scan-to-return screen — scan a disc, mark the rental returned (D2)`
-(9 files). Committed **separately**, because they were already in the working tree uncommitted when this tick
+**Commit:** `66f9826` — `feat(returns): scan-to-return screen — scan a disc, mark the rental returned (D2)`
+(9 files, +1102/−8; the hash was amended once from `6f144ce` to correct the test count written in its message —
+"19 new tests", verified with `grep -c "^def test_"` = 19; the committed slice is unchanged). Committed **separately**, because they were already in the working tree uncommitted when this tick
 started and they are the **main session's** work, not this tick's: `f0e3cf6` — `docs(programme): main-session
 Feature P/Q renumbering, D10 + D11, POPIA plans` (the five modified plan docs + the two new POPIA feature plans +
 `docs/popia/PRIVACY-NOTICE-REVIEW.md`). This ledger entry is its own commit so the hash is real.
