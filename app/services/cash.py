@@ -652,24 +652,70 @@ def delete_bank_drop(entry_id, branch_id=None):
     return owner
 
 
+def previous_day_notes(day, branch_id):
+    """The most recent earlier day that has notes recorded, for one depot.
+
+    Ticket ABI-341953042 ask 2: on a new day the staff still need the last day's
+    notes in front of them instead of an empty box.  This returns the latest
+    business day BEFORE ``day`` that carries end of day notes or new-client
+    interaction notes, scoped to the depot being looked at, so nothing from
+    another drawer is ever shown.  ``None`` when this depot has nothing earlier.
+
+    Read-only: no write path, no permission change.
+    """
+    if not branch_id:
+        return None
+    row = get_db().execute(
+        """SELECT business_day, notes, interaction_notes FROM cash_ups
+        WHERE branch_id = ? AND business_day < ?
+          AND (TRIM(COALESCE(notes, '')) <> '' OR TRIM(COALESCE(interaction_notes, '')) <> '')
+        ORDER BY business_day DESC LIMIT 1""",
+        (int(branch_id), str(day)),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        'branch_id': int(branch_id),
+        'day': str(_value(row, 'business_day') or ''),
+        'notes': str(_value(row, 'notes') or '').strip(),
+        'interaction_notes': str(_value(row, 'interaction_notes') or '').strip(),
+    }
+
+
 def day_report(day=None, branch_id=None):
     """The day's dashboard figures plus its cash reconciliation.
 
     The dashboard metrics keep the dashboard's own branch scope (the session),
     while the cash half follows the cashing-up depot — which for a scoped
     account is the same depot, so the two halves agree.
+
+    Ticket ABI-341953042: the report also carries the day's **spare wheel count**
+    and any **trailer service and maintenance** logged for that day, so the
+    download matches the dashboard panels for the same business day.
     """
     from app.services.reports import dashboard_day_metrics
     from app.services.settings import get_company_settings
+    from app.services import spare_wheels
+    from app.services import trailer_service
 
     summary = day_summary(day=day, branch_id=branch_id)
     settings = get_company_settings() or {}
-    return {
+    report = {
         'company': str(_value(settings, 'company_name') or ''),
         'generated_at': now(),
         'cash': summary,
         'metrics': dashboard_day_metrics(summary['day']),
     }
+    # One depot = that depot's own counted wheels; no depot resolved = the
+    # read-only sum across the depots this sign-in may already see, exactly like
+    # the dashboard panel (``spare_wheels.spare_wheel_rows``).
+    report['spare_wheels'] = spare_wheels.spare_wheel_rows(
+        summary['day'], branch_id=summary['branch_id'], editable=bool(summary['branch_id']),
+    )
+    report['trailer_service'] = trailer_service.services_for_day(
+        summary['day'], branch_id=summary['branch_id'],
+    )
+    return report
 
 
 def day_report_rows(report):
@@ -719,6 +765,14 @@ def day_report_rows(report):
         ('New client interactions', 'Notes', interactions.get('notes') or 'No interaction notes recorded'),
     ]
     rows = money_rows + cash_rows + interaction_rows
+    # Ticket ABI-341953042 ask 1/3: the spare wheel count and the day's trailer
+    # service lines are part of the same day report, read from the same figures
+    # the dashboard panels show for that business day.
+    for entry in report.get('trailer_service') or []:
+        item = str(entry.get('product_name') or 'Trailer')
+        if entry.get('product_sku'):
+            item = f"{item} · {entry['product_sku']}"
+        rows.append(('Trailer service and maintenance', item, str(entry.get('label') or '')))
     for line in cash['used_lines']:
         rows.append(('Cash used', line['description'] or 'No description', f"R{line['amount']:.2f}"))
     if not cash['used_lines']:
@@ -734,9 +788,29 @@ def day_report_rows(report):
         rows.append(('Cash drop off (to bank)', item, f"R{line['amount']:.2f}"))
     if not cash['drop_lines']:
         rows.append(('Cash drop off (to bank)', 'No cash dropped at the bank', 'R0.00'))
+    for row in report.get('spare_wheels') or []:
+        rows.append(('Spare wheel count', str(row.get('wheel_size') or ''), _spare_wheel_report_value(row)))
     notes = cash['notes'] or 'No end of day notes recorded'
     rows.append(('End of day notes', 'Notes', notes))
     return rows
+
+
+def _spare_wheel_report_value(row):
+    """One wheel size's report line: expected, counted and the difference.
+
+    Reads ``spare_wheels.spare_wheel_rows()``' finished values, so the PDF, the
+    CSV and the dashboard panel can never disagree about a count.
+    """
+    expected = int(row.get('expected') or 0)
+    if not row.get('counted'):
+        return f'Expected {expected} · Not counted yet'
+    counted = int(row.get('actual') or 0)
+    kind = str(row.get('kind') or 'none')
+    if kind == 'ok':
+        return f'Expected {expected} · Counted {counted} · matches'
+    if kind == 'short':
+        return f'Expected {expected} · Counted {counted} · {abs(int(row.get("variance") or 0))} short'
+    return f'Expected {expected} · Counted {counted} · +{int(row.get("variance") or 0)} over'
 
 
 def day_report_pdf_cards(report, user_name='', user_role=''):
@@ -806,6 +880,18 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
                      ([line.strip() for line in interaction_notes.splitlines()] or [''])],
             'overflow': '... more notes in the CSV export',
         })
+    # Ticket ABI-341953042: the day's trailer service / maintenance lines print
+    # with the block they were captured in. Emitted only when the day has a line
+    # - an empty panel is not a report section.
+    service_rows = _pdf_list_rows(grouped.get('Trailer service and maintenance', []),
+                                  'No trailer service or maintenance recorded')
+    if grouped.get('Trailer service and maintenance'):
+        sections.append({
+            'kind': 'list',
+            'title': 'Trailer service and maintenance',
+            'rows': service_rows,
+            'overflow': '... and {remaining} more service line(s) - see the CSV export',
+        })
     sections.extend([
         {
             'kind': 'list',
@@ -819,13 +905,24 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
             'rows': _pdf_list_rows(grouped.get('Cash drop off (to bank)', []), 'No cash dropped at the bank'),
             'overflow': '... and {remaining} more bank drop off line(s) - see the CSV export',
         },
-        {
-            'kind': 'list',
-            'title': 'End of day notes',
-            'rows': note_rows,
-            'overflow': '... more notes in the CSV export',
-        },
     ])
+    # Spare wheel count (ticket ABI-341953042 ask 1). Same five wheel sizes, same
+    # figures and same order as the dashboard panel, printed between the cash
+    # panels and the end of day notes - the panel order the client asked for in
+    # ABI-341953036.
+    spare_rows = grouped.get('Spare wheel count') or []
+    sections.append({
+        'kind': 'list',
+        'title': 'Spare wheel count',
+        'rows': _pdf_list_rows(spare_rows, 'No spare wheel sizes are set on the rental trailers'),
+        'overflow': '... and {remaining} more wheel size(s) - see the CSV export',
+    })
+    sections.append({
+        'kind': 'list',
+        'title': 'End of day notes',
+        'rows': note_rows,
+        'overflow': '... more notes in the CSV export',
+    })
     return {
         'meta': {
             'company': report['company'],

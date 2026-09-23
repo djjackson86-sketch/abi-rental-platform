@@ -12,6 +12,22 @@
   <div class="dashboard-hero-side">
     <form class="dashboard-branch-filter" id="dashboard-branch-filter" method="get" action="{{ url_for('admin.dashboard') }}">
       {% if current_user_is_main and filters.range %}<input type="hidden" name="range" value="{{ filters.range }}">{% endif %}
+      {% if current_user_is_main %}
+      {# Ticket ABI-341953042 ask 3: the main profile picks the business day the
+         day-scoped panels (cash up, cash used, bank drops, notes, client
+         interactions, wheel counts, trailer service) are read for, and the day
+         the report download is named after. A non-main sign-in stays on today. #}
+      <div class="filter-group dashboard-day-filter">
+        <div class="filter-group-head"><strong>Business day</strong></div>
+        <input type="date" name="day" value="{{ selected_day }}" max="{{ today }}" onchange="this.form.submit()" aria-label="Business day">
+      </div>
+      <style>
+        /* Scoped to the dashboard hero filter: the Business day picker sits
+           beside the Branch picker with the same 12px uppercase label. */
+        .dashboard-branch-filter .dashboard-day-filter{display:grid;gap:8px}
+        .dashboard-branch-filter .dashboard-day-filter input[type=date]{min-width:160px;max-width:210px}
+      </style>
+      {% endif %}
       <div class="filter-group">
         <div class="filter-group-head"><strong>Branch</strong></div>
         {% if branch_scope %}
@@ -23,7 +39,8 @@
         </select>
         {% endif %}
       </div>
-      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('admin.dashboard', range=filters.range or None) }}">Clear branch</a>{% endif %}
+      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('admin.dashboard', range=filters.range or None, day=filters.day) }}">Clear branch</a>{% endif %}
+      {% if current_user_is_main and not day_is_today %}<a class="filter-clear" href="{{ url_for('admin.dashboard', branch=filters.branch or None, day=today) }}">Back to today</a>{% endif %}
     </form>
     <div class="dashboard-hero-actions">
       {% if user_can('new_order') %}<a class="btn primary" href="{{ url_for('orders.new') }}">Create order</a>{% endif %}
@@ -36,10 +53,11 @@
 <div class="dashboard-ranges">
   <div class="filter-group-head"><strong>Quick ranges</strong><span class="dashboard-ranges-note">applies to the four cards below</span></div>
   <div class="report-presets">
-    {% for preset in range_presets %}<a class="report-preset{{ ' is-active' if filters.range == preset.key }}" href="{{ url_for('admin.dashboard', branch=filters.branch or None, range=preset.key) }}">{{ preset.label }}</a>{% endfor %}
+    {% for preset in range_presets %}<a class="report-preset{{ ' is-active' if filters.range == preset.key }}" href="{{ url_for('admin.dashboard', branch=filters.branch or None, range=preset.key, day=filters.day) }}">{{ preset.label }}</a>{% endfor %}
   </div>
   <form class="dashboard-custom-range" method="get" action="{{ url_for('admin.dashboard') }}">
     {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
+    {% if not day_is_today %}<input type="hidden" name="day" value="{{ selected_day }}">{% endif %}
     <div class="filter-group">
       <div class="filter-group-head"><strong>Custom dates</strong><span class="dashboard-ranges-note">pick your own range</span></div>
       <label class="dashboard-range-field">Start<input type="date" name="start_date" value="{{ filters.start_date or '' }}" aria-label="Custom range start date"></label>
@@ -58,7 +76,10 @@
 {% endif %}
 
 <section class="dashboard-day dashboard-card-section">
-  <div class="section-head"><h2 class="section-heading">Today</h2></div>
+  {# The heading names the business day the cards below are read for, so a past
+     day is never mistaken for today (ticket ABI-341953042 ask 3). #}
+  {% set day_heading = 'Today' if day_is_today else 'Business day ' ~ selected_day %}
+  <div class="section-head"><h2 class="section-heading">{{ day_heading }}</h2></div>
   {% include "admin/_dashboard_day_metrics.html" %}
 </section>
 

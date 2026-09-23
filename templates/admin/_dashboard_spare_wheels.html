@@ -6,7 +6,7 @@
 <section class="panel spare-wheel-panel">
   <div class="panel-title">
     <h2>Spare wheel count</h2>
-    <span class="pill">{% if spare_wheel_editable %}{{ cash_day.branch_name }}{% else %}All branches{% endif %} · {{ spare_wheel_day }}</span>
+    <span class="pill">{% if spare_wheel_branch_id %}{{ cash_day.branch_name }}{% else %}All branches{% endif %} · {{ spare_wheel_day }}</span>
   </div>
   <style>
     /* min-width:0 lets the panel shrink to its grid track. Without it the
@@ -61,6 +61,6 @@
     <div class="form-actions"><button class="btn primary" type="submit">Save spare wheel count</button></div>
   </form>
   {% else %}
-  <p class="cash-note">Expected counts one wheel for every trailer that has not been picked up. Select a branch in the top Branch filter to type in the actual counts.</p>
+  <p class="cash-note">Expected counts one wheel for every trailer that has not been picked up. {% if day_is_today %}Select a branch in the top Branch filter to type in the actual counts.{% else %}This business day is in the past, so it is a read-only view. Choose today in the top Business day filter to type in the actual counts.{% endif %}</p>
   {% endif %}
 </section>

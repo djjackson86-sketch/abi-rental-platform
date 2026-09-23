@@ -177,9 +177,15 @@ def spare_wheel_rows(day, branch_id=None, editable=False):
     when that size has not been counted), the ``variance`` and how it should read
     (``ok`` / ``short`` / ``over`` / ``none``), plus a ready-made ``variance_text``
     so the template stays free of arithmetic.
+
+    ``branch_id`` decides the **scope**: a selected depot shows that depot's own
+    yard and its own counted wheels, no depot shows the read-only sum across the
+    depots the session may already see. ``editable`` only says whether those
+    counts may be typed in, so a past business day is read-only yet still reads
+    its own depot's figures (ticket ABI-341953042).
     """
-    expected = expected_spare_wheels(branch_id=branch_id if editable else None)
-    if editable:
+    expected = expected_spare_wheels(branch_id=branch_id)
+    if branch_id:
         counted = actual_counts(day, branch_id)
     else:
         counted = aggregated_actual_counts(day)

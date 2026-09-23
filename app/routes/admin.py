@@ -8,7 +8,7 @@ from app.services.settings import get_company_settings, update_online_store_sett
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
-from app.services.access import resolve_branch_filter, session_branch_scope_ids
+from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 from app.services import spare_wheels
 from app.services.cash import (
@@ -18,9 +18,14 @@ from app.services.cash import (
     day_summary as cash_day_summary,
     panel_state as cash_panel_state,
     parse_business_day as cash_parse_business_day,
+    previous_day_notes as cash_previous_day_notes,
     today_iso as cash_today_iso,
 )
-from app.services.trailer_service import TRAILER_SERVICE_TYPES, eligible_trailer_products
+from app.services.trailer_service import (
+    TRAILER_SERVICE_TYPES,
+    eligible_trailer_products,
+    services_for_day as trailer_service_services_for_day,
+)
 
 bp = Blueprint("admin", __name__)
 
@@ -57,6 +62,16 @@ def dashboard():
     # The dashboard's own branch filter, resolved by the shared resolver so the
     # session scope always wins and ?branch= can only ever NARROW the view.
     selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    # Ticket ABI-341953042 ask 3: the main profile can look at any business day.
+    # ``?day=`` goes through ``cash.parse_business_day`` (junk falls back to
+    # today) and every day-scoped panel follows it - cash up, cash used, bank
+    # drops, notes, client interactions, spare wheels and trailer service. Any
+    # day other than today renders read-only, and a non-main sign-in is pinned to
+    # today, so this can never widen what a staff account already sees.
+    selected_day = cash_today_iso()
+    if is_main_session(session) and request.args.get("day"):
+        selected_day = cash_parse_business_day(request.args.get("day"))
+    day_is_today = selected_day == cash_today_iso()
     # Quick ranges for the four headline cards, defaulting to This month.
     range_presets, range_key, range_start, range_end, range_label = _dashboard_range()
     metrics = dashboard_period_metrics(
@@ -69,42 +84,55 @@ def dashboard():
     cash_branch_id = branch_id or (branch_scope if isinstance(branch_scope, int) else None)
     if cash_branch_id:
         cash_panel = cash_panel_state(str(cash_branch_id))
-        cash_day = cash_day_summary(branch_id=cash_panel['branch_id'])
+        cash_day = cash_day_summary(day=selected_day, branch_id=cash_panel['branch_id'])
         trailer_products = eligible_trailer_products(branch_id=cash_panel['branch_id'])
+        trailer_service_day = trailer_service_services_for_day(
+            selected_day, branch_id=cash_panel['branch_id']
+        )
+        previous_day = cash_previous_day_notes(selected_day, cash_panel['branch_id'])
     else:
         cash_panel = {'branches': cash_branches(), 'branch_id': None, 'branch_name': 'All branches'}
-        cash_day = cash_aggregate_day_summary()
+        cash_day = cash_aggregate_day_summary(day=selected_day)
         trailer_products = []
+        trailer_service_day = trailer_service_services_for_day(selected_day)
+        previous_day = None
     # Spare wheel count (ticket ABI-341953033): one wheel per trailer still in
     # the yard, per wheel size. It follows the same depot as the cash panel, so a
     # selected branch is editable and "All branches" is a read-only sum across the
-    # depots this sign-in may already see.
-    spare_wheel_day = cash_today_iso()
+    # depots this sign-in may already see. A day other than today is a read-only
+    # view of that day's counts (ticket ABI-341953042).
+    spare_wheel_day = selected_day
     spare_wheel_branch_id = cash_branch_id
+    spare_wheel_editable = bool(spare_wheel_branch_id) and day_is_today
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
         metrics=metrics,
-        day_metrics=dashboard_day_metrics(branch_id=branch_id),
+        day_metrics=dashboard_day_metrics(day=selected_day, branch_id=branch_id),
         cash_panel=cash_panel,
         cash_day=cash_day,
+        previous_day_notes=previous_day,
         trailer_service_products=trailer_products,
+        trailer_service_day=trailer_service_day,
         trailer_service_types=TRAILER_SERVICE_TYPES,
         spare_wheel_rows=spare_wheels.spare_wheel_rows(
             spare_wheel_day,
             branch_id=spare_wheel_branch_id,
-            editable=bool(spare_wheel_branch_id),
+            editable=spare_wheel_editable,
         ),
         spare_wheel_day=spare_wheel_day,
         spare_wheel_branch_id=spare_wheel_branch_id,
-        spare_wheel_editable=bool(spare_wheel_branch_id),
+        spare_wheel_editable=spare_wheel_editable,
+        selected_day=selected_day,
+        day_is_today=day_is_today,
+        today=cash_today_iso(),
         schedule=dashboard_schedule(branch_id=branch_id),
         branches=branches,
         branch_label=branch_label,
         branch_scope=branch_scope,
         range_presets=range_presets,
         range_label=range_label,
-        filters={"branch": selected_branch, "range": range_key, "start_date": range_start, "end_date": range_end},
+        filters={"branch": selected_branch, "range": range_key, "start_date": range_start, "end_date": range_end, "day": selected_day},
     )
 
 
@@ -137,8 +165,8 @@ def dashboard_spare_wheels():
     else:
         flash(f"Spare wheel count saved for {day}", "success")
     if branch_id:
-        return redirect(url_for("admin.dashboard", branch=branch_id))
-    return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.dashboard", branch=branch_id, day=day))
+    return redirect(url_for("admin.dashboard", day=day))
 
 @bp.route("/coupons", methods=["GET", "POST"])
 @bp.route("/coupons/<int:coupon_id>/edit", methods=["GET", "POST"])

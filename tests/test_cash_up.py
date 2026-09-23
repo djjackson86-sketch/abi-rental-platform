@@ -469,8 +469,14 @@ def test_a_notes_only_interaction_day_still_renders_its_panel(client, app):
     assert [cards.get(key) for key in ('Calls', 'WhatsApp', 'Emails', 'Walk-in')] == ['0', '0', '0', '0']
 
 
-def test_a_short_interaction_note_keeps_the_report_on_one_page(client, app):
-    """A short note gains a one-row panel and costs no extra page."""
+def test_a_short_interaction_note_renders_its_panel_in_full(client, app):
+    """A short note gains a one-row panel; nothing about it is cut or dropped.
+
+    Ticket ABI-341953042 added the spare wheel count section to the day report,
+    so a day that used to fill exactly one page now runs onto a second one - the
+    report flows rather than clipping (ABI-341953024), and the interaction panel
+    is still drawn whole, in position, with its counts card untouched.
+    """
     login(client)
     client.post('/cash-up/interactions', data={
         'day': '', 'branch': '1',
@@ -480,11 +486,11 @@ def test_a_short_interaction_note_keeps_the_report_on_one_page(client, app):
     }, follow_redirects=True)
     blob = client.get('/cash-up/report.pdf').data
     drawn = _drawn_text(blob)
-    assert blob.decode('latin-1').count('/Type /Page ') == 1
+    assert blob.decode('latin-1').count('/Type /Page ') == 2
     assert _panel_lines(blob, 'NEW CLIENT INTERACTION NOTES') == ['Two quote follow-ups needed.']
     # The panel sits inside the interaction block, above every later panel.
     assert drawn.index('NEW CLIENT INTERACTIONS') < drawn.index('NEW CLIENT INTERACTION NOTES')
-    for expected in ['CASH USED', 'CASH DROP OFF (TO BANK)', 'END OF DAY NOTES']:
+    for expected in ['CASH USED', 'CASH DROP OFF (TO BANK)', 'SPARE WHEEL COUNT', 'END OF DAY NOTES']:
         assert expected in drawn, expected
         assert drawn.index('NEW CLIENT INTERACTION NOTES') < drawn.index(expected)
 
@@ -506,7 +512,9 @@ def test_a_day_without_interaction_notes_keeps_the_counts_only_report(client, ap
     cards = _card_values(blob)
     assert 'Notes' not in cards
     assert [cards.get(key) for key in ('Calls', 'WhatsApp', 'Emails', 'Walk-in')] == ['4', '3', '2', '1']
-    assert blob.decode('latin-1').count('/Type /Page ') == 1
+    # Two pages since ABI-341953042 added the spare wheel count section; the
+    # counts-only interaction cards themselves are unchanged and uncut.
+    assert blob.decode('latin-1').count('/Type /Page ') == 2
 
 
 def test_new_client_interactions_reject_junk_and_negative_counts(client, app):
@@ -710,17 +718,23 @@ def test_a_depot_can_only_bank_its_own_drawer(client, app):
     assert [(row['branch_id'], row['amount']) for row in rows] == [(2, 50.0), (2, 10.0)]
 
 
-def test_the_pdf_stays_on_one_page_with_bank_drop_offs_too(client, app):
-    """A dozen drop offs still fit the one-page report without losing a line."""
+def test_a_dozen_bank_drop_offs_keep_every_line(client, app):
+    """A dozen drop offs are drawn in full - now over two pages, never cut.
+
+    The day report gained the spare wheel count section in ABI-341953042, so a
+    day that filled page 1 exactly continues on page 2 instead of losing a line.
+    """
     login(client)
     for index in range(12):
         client.post('/cash-up/bank', data={'day': '', 'amount': '10'}, follow_redirects=True)
     blob = client.get('/cash-up/report.pdf').data
     text = blob.decode('latin-1')
+    drawn = _drawn_text(blob)
     assert 'CASH DROP OFF \\(TO BANK\\)' in text
-    assert text.count('/Type /Page ') == 1, 'the report renders exactly one page'
-    # The card layout has room for far more than the old 42-line page: every one
-    # of the twelve fits, so nothing needs to be declared as left out.
+    assert text.count('/Type /Page ') == 2, 'the report continues onto page 2'
+    assert 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn
+    # The card layout still has room for far more than the old 42-line page:
+    # every one of the twelve fits, so nothing is declared as left out.
     assert text.count('Dropped at the bank') == 12, text.count('Dropped at the bank')
     assert 'see the CSV export' not in text
     # Nothing is drawn outside the printable band (the page footer is the only
@@ -851,10 +865,11 @@ def test_a_long_cash_used_list_continues_instead_of_being_cut_off(client, app):
     drawn = _drawn_text(blob)
     for index in range(1, 17):
         assert f'Line {index}' in drawn, f'Line {index}'
-    # The whole list still fits page 1, and it now uses that space instead of
-    # stopping at a fixed line cap. Nothing had to stand in for a dropped line.
-    assert text.count('/Type /Page ') == 1
-    assert 'Page 1 of 1' in drawn
+    # The whole list is still drawn in full - it now continues onto page 2
+    # because the day report carries one more section since ABI-341953042 (the
+    # spare wheel count), not because a line was dropped.
+    assert text.count('/Type /Page ') == 2
+    assert 'Page 1 of 2' in drawn and 'Page 2 of 2' in drawn
     assert 'more cash used line' not in text
     # The CSV export is uncapped, so nothing is actually lost.
     csv_body = client.get('/cash-up/export.csv').get_data(as_text=True)

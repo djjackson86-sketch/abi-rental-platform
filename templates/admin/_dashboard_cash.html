@@ -1,4 +1,9 @@
 {% if cash_day and (cash_day.branch_id or cash_day.aggregate) %}
+{# Ticket ABI-341953042: a day other than today is a read-only view of what was
+   captured then, so every write form below is hidden; the figures and the
+   downloads stay. "All branches" keeps its own wording. #}
+{% set cash_readonly = cash_day.aggregate or not day_is_today %}
+{% set cash_past_note = 'This business day is in the past, so it is a read-only view. Choose today in the top Business day filter to capture data.' %}
 <section class="metrics dashboard-metrics dashboard-day-metrics">
   <div class="metric-card">
     <small>Opening cash</small>
@@ -24,6 +29,15 @@
     </div>
     {% if cash_day.interactions.notes %}<p class="cash-note">{{ cash_day.interactions.notes }}</p>{% endif %}
     <p class="cash-note">Select a branch in the top Branch filter to edit client interactions.</p>
+    {% elif not day_is_today %}
+    <div class="metrics dashboard-metrics dashboard-day-metrics">
+      <div class="metric-card"><small>Calls</small><b>{{ cash_day.interactions.calls }}</b><span>{{ cash_day.day }}</span></div>
+      <div class="metric-card"><small>WhatsApp</small><b>{{ cash_day.interactions.whatsapp }}</b><span>{{ cash_day.day }}</span></div>
+      <div class="metric-card"><small>Emails</small><b>{{ cash_day.interactions.emails }}</b><span>{{ cash_day.day }}</span></div>
+      <div class="metric-card"><small>Walk-in</small><b>{{ cash_day.interactions.walk_in }}</b><span>{{ cash_day.day }}</span></div>
+    </div>
+    {% if cash_day.interactions.notes %}<p class="cash-note">{{ cash_day.interactions.notes }}</p>{% endif %}
+    <p class="cash-note">{{ cash_past_note }}</p>
     {% else %}
     <form method="post" action="{{ url_for('cash.save_interactions') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
@@ -41,10 +55,25 @@
   </section>
 
   <section class="panel">
-    <div class="panel-title"><h2>Trailer service and maintenance</h2></div>
+    <div class="panel-title"><h2>Trailer service and maintenance</h2><span class="pill">{{ trailer_service_day|length }} line{% if trailer_service_day|length != 1 %}s{% endif %}</span></div>
     <p class="cash-note">Record service or maintenance done on a rental trailer. The history also appears on the product itself.</p>
+    {# Ticket ABI-341953042 ask 3: the panel shows what was captured for the day
+       being looked at, so the list changes with the selected business day. #}
+    {% if trailer_service_day %}
+    <div class="cash-used-lines">
+      {% for entry in trailer_service_day %}
+      <div class="cash-used-line">
+        <span>{{ entry.product_name }}{% if entry.product_sku %} · {{ entry.product_sku }}{% endif %}<small>{{ entry.label }}{% if entry.branch_name %} · {{ entry.branch_name }}{% endif %}</small></span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-results"><strong>No results</strong><span>No trailer service or maintenance recorded for {{ cash_day.day }}.</span></div>
+    {% endif %}
     {% if cash_day.aggregate %}
     <p class="cash-note">Select a branch in the top Branch filter to add trailer service or maintenance.</p>
+    {% elif not day_is_today %}
+    <p class="cash-note">{{ cash_past_note }}</p>
     {% else %}
     <form method="post" action="{{ url_for('cash.add_trailer_service') }}" class="settings-form trailer-service-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
@@ -82,7 +111,7 @@
       {% for line in cash_day.used_lines %}
       <div class="cash-used-line">
         <span>{{ line.description }}<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ display_local_datetime(line.created_at) }}{% endif %}</small></span>
-        {% if not cash_day.aggregate %}<form method="post" action="{{ url_for('cash.delete_used', entry_id=line.id) }}">
+        {% if not cash_readonly %}<form method="post" action="{{ url_for('cash.delete_used', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
           <button class="btn ghost" type="submit">Delete</button>
@@ -96,6 +125,8 @@
     {% endif %}
     {% if cash_day.aggregate %}
     <p class="cash-note">Select a branch in the top Branch filter to add cash used.</p>
+    {% elif not day_is_today %}
+    <p class="cash-note">{{ cash_past_note }}</p>
     {% else %}
     <form method="post" action="{{ url_for('cash.add_used') }}" class="payment-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
@@ -117,7 +148,7 @@
       {% for line in cash_day.drop_lines %}
       <div class="cash-used-line">
         <span>{% if line.branch_name %}{{ line.branch_name }}: {% endif %}Dropped off at the bank<small>R{{ '%.2f'|format(line.amount) }}{% if line.created_at %} · {{ display_local_datetime(line.created_at) }}{% endif %}</small></span>
-        {% if not cash_day.aggregate %}<form method="post" action="{{ url_for('cash.delete_bank_drop', entry_id=line.id) }}">
+        {% if not cash_readonly %}<form method="post" action="{{ url_for('cash.delete_bank_drop', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
           <button class="btn ghost" type="submit">Delete</button>
@@ -131,6 +162,8 @@
     {% endif %}
     {% if cash_day.aggregate %}
     <p class="cash-note">Select a branch in the top Branch filter to add a bank drop off.</p>
+    {% elif not day_is_today %}
+    <p class="cash-note">{{ cash_past_note }}</p>
     {% else %}
     <form method="post" action="{{ url_for('cash.add_bank_drop') }}" class="payment-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
@@ -150,6 +183,9 @@
     </div>
     {% if cash_day.aggregate %}
     <p class="cash-note">All branch cash-up figures are read-only totals. Select a branch in the top Branch filter to enter counted cash.</p>
+    {% elif not day_is_today %}
+    <p class="cash-note">Depot: {{ cash_day.branch_name }} · {{ cash_day.day }} — {{ cash_day.variance_label }}.</p>
+    <p class="cash-note">{{ cash_past_note }}</p>
     {% else %}
     <p class="cash-note">Depot: {{ cash_day.branch_name }}</p>
     <form method="post" action="{{ url_for('cash.save') }}" class="settings-form">
@@ -176,6 +212,9 @@
     {% if cash_day.aggregate %}
     {% if cash_day.notes %}<p class="cash-note">{{ cash_day.notes }}</p>{% else %}<div class="empty-results"><strong>No results</strong><span>No end of day notes recorded for {{ cash_day.day }}.</span></div>{% endif %}
     <p class="cash-note">Select a branch in the top Branch filter to edit end of day notes.</p>
+    {% elif not day_is_today %}
+    {% if cash_day.notes %}<p class="cash-note">{{ cash_day.notes }}</p>{% else %}<div class="empty-results"><strong>No results</strong><span>No end of day notes recorded for {{ cash_day.day }}.</span></div>{% endif %}
+    <p class="cash-note">{{ cash_past_note }}</p>
     {% else %}
     <form method="post" action="{{ url_for('cash.save_notes') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
@@ -185,17 +224,44 @@
     </form>
     {% endif %}
   </section>
+
+  {# Ticket ABI-341953042 ask 2: on a new day the depot still needs to see the
+     last recorded notes (nothing written for the day being viewed), so staff do
+     not start the day blind. Read-only - there is no way to edit or overwrite
+     the earlier day from here. #}
+  {% if previous_day_notes and not cash_day.aggregate and not cash_day.notes %}
+  <section class="panel previous-day-notes-panel">
+    <div class="panel-title"><h2>Previous day’s notes ({{ previous_day_notes.day }})</h2></div>
+    <p class="cash-note">Read-only. Nothing has been recorded for {{ cash_day.day }} yet.</p>
+    {% if previous_day_notes.notes %}
+    <div class="cash-used-lines">
+      <div class="cash-used-line"><span>End of day notes<small>{{ previous_day_notes.notes }}</small></span></div>
+    </div>
+    {% endif %}
+    {% if previous_day_notes.interaction_notes %}
+    <div class="cash-used-lines">
+      <div class="cash-used-line"><span>New client interaction notes<small>{{ previous_day_notes.interaction_notes }}</small></span></div>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
 </div>
 
 {% if not cash_day.aggregate %}
 <section class="panel dashboard-report-actions">
   <div class="panel-title"><h2>Day report actions</h2></div>
   <div class="form-actions">
+    {# A past business day can be downloaded (ticket ABI-341953042 ask 3); only
+       today is submitted to the group, so a filed day is never re-sent. #}
+    {% if day_is_today %}
     <form id="submit-day-report-form" method="post" action="{{ url_for('cash.submit_report_telegram') }}">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
       <button class="btn warning dashboard-report-action" type="submit">Submit day report</button>
     </form>
+    {% else %}
+    <p class="cash-note">Day report for {{ cash_day.day }} ({{ cash_day.branch_name }}).</p>
+    {% endif %}
     {% if current_user_is_main %}
     <a class="btn ghost dashboard-report-action" href="{{ url_for('cash.report_pdf', day=cash_day.day, branch=cash_day.branch_id) }}">Download day report (PDF)</a>
     <a class="btn ghost dashboard-report-action" href="{{ url_for('cash.export_csv', day=cash_day.day, branch=cash_day.branch_id) }}">Download CSV</a>

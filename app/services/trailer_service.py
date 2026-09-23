@@ -95,3 +95,58 @@ def service_history_label(row):
     if row["service_type"] == "Custom" and row["custom_description"]:
         return f"Custom — {row['custom_description']}"
     return row["service_type"]
+
+
+def _value(row, key, default=None):
+    """Read one column off any of the three row shapes this app sees."""
+    if row is None:
+        return default
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return default
+
+
+def services_for_day(day, branch_id=None):
+    """What was serviced or maintained on one business day, as plain dicts.
+
+    Ticket ABI-341953042 ask 3: the dashboard's trailer service panel has to show
+    the day it is looking at, not just offer a form.  Rows come from
+    ``trailer_service_history.service_date`` (which ``create_service_history``
+    writes from the resolved business day), so a report for a past day reads the
+    work logged against that day.
+
+    The depot filter is the **same** ``product_branch_clause`` the panel's
+    trailer picker already uses (``eligible_trailer_products``), where the
+    session scope always wins - so a crafted ``?branch=`` can narrow this list
+    but never widen it.
+
+    Plain dicts only: production rows are libsql tuples, where ``row[key]``
+    works but ``row.count`` is a method (see ``app/services/cash.py``).
+    """
+    clause, clause_params = product_branch_clause("p", include_unassigned=True, branch_id=branch_id)
+    sql = f"""SELECT h.id AS id, h.service_type AS service_type,
+        h.custom_description AS custom_description, h.service_date AS service_date,
+        p.name AS product_name, p.sku AS product_sku, b.name AS branch_name
+        FROM trailer_service_history h
+        JOIN products p ON p.id = h.product_id
+        LEFT JOIN branches b ON b.id = h.branch_id
+        WHERE h.service_date = ?{clause}
+        ORDER BY p.name, h.id"""
+    entries = []
+    for row in get_db().execute(sql, [str(day or "")[:10], *clause_params]).fetchall():
+        service_type = str(_value(row, "service_type") or "")
+        custom = str(_value(row, "custom_description") or "")
+        if service_type == "Custom" and custom:
+            label = f"Custom — {custom}"
+        else:
+            label = service_type
+        entries.append({
+            "id": int(_value(row, "id") or 0),
+            "product_name": str(_value(row, "product_name") or ""),
+            "product_sku": str(_value(row, "product_sku") or ""),
+            "branch_name": str(_value(row, "branch_name") or ""),
+            "service_date": str(_value(row, "service_date") or ""),
+            "label": label,
+        })
+    return entries
