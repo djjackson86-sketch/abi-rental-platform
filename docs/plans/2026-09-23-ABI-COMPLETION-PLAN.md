@@ -62,7 +62,13 @@ Order matters: C1 → C2 → C3 finish the public product; Q1 then W1/W2 finish 
 
 - **T1 — Hygiene (done, 16:05):** killed the stale 09:16 `app.py` (pid 558440) that had held port 5057 all day and
   was flagged by eight separate ticks. 5057 is free for smoke runs again.
-- **T2 — Phase 11 (§C1) store categories with photos + multi-trailer linking.** Plan:
+- **T2 — Phase 11 (§C1) store categories with photos + multi-trailer linking. ✅ DONE — `7fc4f1f`**
+  Verified by me after the builder ran out of iterations: 20 new tests, **full suite 1022 passed in 590s**,
+  compile clean; rendered HTML shows **4 store sections** (2 photo headers, 2 name fallbacks) with the ungrouped
+  and hidden-category trailers folded into a trailing "Other" section; `/store/category-image/<id>` serves 200 with
+  real JFIF bytes and **404** when the category has no photo; Playwright at 1440px + 390px over the store, groups
+  list and both group-form variants: **0 console errors, 0 horizontal overflow**; full-page screenshot inspected.
+  Only the web re-encodes (12 JPEGs, 644 KB) were committed — the 11 MB of originals stay untracked. Original detail: plan:
   `docs/plans/2026-09-23-public-booking-and-store-categories.md` §C1. Trailer categories already exist as
   `product_groups` with `products.product_group_id` populated, so this is **extend, not rebuild**. Deliverable:
   a photo per category, stored **in the DB** (D4 — Render's filesystem is ephemeral), a bulk "link these trailers to
@@ -124,8 +130,24 @@ Order matters: C1 → C2 → C3 finish the public product; Q1 then W1/W2 finish 
 
 ## 5. Next action
 
-Start at **T2 (phase 11, §C1)** and work down the list, verifying each before moving on. The /customers branch-scope
-question (T8b) and the five POPIA facts (T8a) are decisions for Don and do not block T2–T7.
+**T2 is done. Start at T3 (phase 12, §C2 — multi-trailer public booking flow)** and work down the list, verifying
+each before moving on. T8a (the five POPIA facts) is answered — the wizard collects them — and T8b/T8c/T8e are
+decided, so nothing blocks T3–T7.
+
+**Lessons from T2, to apply to every remaining item:**
+1. A single builder can hit its iteration cap mid-phase. Recovered fine here because the work was on disk; from now
+   on the brief says **commit the implementation as soon as the new tests pass**, then run the full suite and the
+   browser proof, then commit the ledger — so an interrupted builder still leaves committed work.
+2. **Verify with structure as well as eyes.** The first store screenshot was a cropped viewport and read as "no
+   category sections at all" — wrong. Fetching the rendered HTML and counting sections settled it, and the
+   full-page screenshot confirmed it. Do both.
+3. **The whole suite is the gate, and it takes ~10 minutes on this filesystem** (1022 tests). Start it in the
+   background early and do the browser proof while it runs.
+4. **Port hygiene:** Chromium refuses some ports (`ERR_UNSAFE_PORT` — 5061 is blocked); 5057 works. Kill any
+   leftover server on your port first, and kill the one you started when you are done (`kill -9 <pid>`, not pkill,
+   which can match its own command line).
+5. **POPIA check before every commit:** `grep` the staged files for the five real disc identifiers. My own plan
+   document and the ledger both carried the real plate in a command example and had to be fixed.
 
 ## 6. Audit result (recorded when the suite finished)
 
