@@ -35,7 +35,12 @@
   .popia-cta p{margin:0 0 8px;color:#92400e}
   .popia-cta p:last-child{margin:0}
   .popia-cta a{color:var(--brand);font-weight:750;overflow-wrap:anywhere}
-  @media(max-width:860px){.popia-wizard{grid-template-columns:1fr}.popia-rail ol{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}.popia-rail li a{font-size:13px}}
+  /* minmax(0,1fr), not 1fr: a grid track sized 1fr has an automatic minimum, so one long
+     unbreakable string (the 64-character content hash shown after publishing) stretched the whole
+     column and pushed the page sideways on a phone - measured at 251px of horizontal overflow on
+     step 5 at 390px. The code rule below then lets the hash itself wrap. */
+  .popia-wizard code{overflow-wrap:anywhere;word-break:break-all}
+  @media(max-width:860px){.popia-wizard{grid-template-columns:minmax(0,1fr)}.popia-rail ol{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}.popia-rail li a{font-size:13px}}
 </style>
 
 <div class="popia-wizard">
