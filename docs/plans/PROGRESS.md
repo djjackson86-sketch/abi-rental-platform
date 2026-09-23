@@ -1235,3 +1235,51 @@ print-media screenshot is the proof it is printable; say the word if you want a 
 6. Ports: 5058 is this phase's proven-good pair with 5059; 5057 is still the 09:16 dev server. Seed a **fresh**
    temp DB per proof run — reusing one makes state-dependent checks fail and looks like a regression (this
    tick's run 1).
+
+
+---
+
+# CLOSING SECTION — direct execution (2026-09-23, after the cron programme was cancelled)
+
+Everything below was executed directly by the assistant from `docs/plans/2026-09-23-ABI-COMPLETION-PLAN.md`,
+verifying each milestone itself before calling it done. The tick-era handoff notes above are superseded: there is
+no tick, no lock, and no phase-numbered queue any more.
+
+## Verified milestones
+
+| # | Milestone | Commit(s) | Verification actually run |
+| --- | --- | --- | --- |
+| T2 | §C1 store categories with replaceable photos + bulk trailer linking | `7fc4f1f`, `9c4e49c` | 4 sections render with photo *and* text-fallback paths; `/store/category-image/1,2` → 200 JFIF; photo-less → 404; Playwright 1440px + 390px, 0 console errors, 0 overflow |
+| T3 | §C2 multi-trailer public booking — one order, many trailers | `7b9aca1`, `891f595` | Real browser bookings at 1440px + 390px produced `ORD-10145`/`ORD-10146` with **2 line items each**, `source_system='public'`, `created_by_user_id` NULL and a consent row; dedupe question answered rather than silently merged; the D11 gate proven shut again afterwards |
+| T3b | Estimate now matches what the order charges | `a43628b` | Root cause: the page added the **global** VAT rate while the order charges each trailer's **tax profile**. Browser: estimate R1400.00 + R135.00 = **R1535.00** against the stored order R1400.00 / R135.00 / **R1535.00** |
+| T3c | Confirmation no longer claims its total includes the refundable deposit | `ffc79f5` | Heading, deposit line and total payable now agree with `order.total`; maths untouched |
+| T4 | A real A4 PDF for the branch QR sheet | `47abc17` | Served PDF is true A4 (595×842 pt); the code scanned off the **rendered page** (zxing-cpp) decodes to exactly the address printed under it; the structural test compares the PDF's dark modules cell-for-cell with `portal.qr_matrix()`. Same commit closed a DB↔UI gap: `portal_branch()` ignored `active`, so an inactive branch served a live form while the admin page promised a 404 |
+| — | Deploy proposal (no push, no deploy) | `docs/plans/2026-09-23-DEPLOY-PROPOSAL.md` | 35 commits listed, the three new requirements, every migration, and the one deploy-time decision (are branch portals visible before the wizard finishes?) |
+
+## Test state
+
+- **Full suite: 1045 passed in 623.72s (0:10:23)** on the tree as committed after T4. `compileall` clean.
+- Two earlier full-suite runs were discarded rather than quoted, because the tree was edited while they ran (one
+  predated the test fixes, one had edits land mid-run). **A full-suite number is only worth quoting from a tree
+  nobody touched while it ran** — that is now the rule here.
+- Legacy tests re-pointed to the new entry point, keeping every guarantee: the public-booking notification, the
+  blocked-customer refusal, the closed-day refusal, admin-draft-vs-public, required-field refusal (plus a new case:
+  a name with no phone and no email), and the unverified-client rule. Deleted nothing, weakened nothing.
+
+## Still open on the plan
+
+- **T5** §Q1 POPIA pack **in the app** (notification, Sano's adoption recorded, printable pack with acceptance
+  certificate) — service half in flight as this entry is written; routes/templates/PDF next.
+- **T6** the Settings POPIA **wizard** (collects Sano's five missing facts, generates the light notice). **This is
+  the critical path** — it is what opens the public side.
+- **T7** the operator notice ("how Jackapp stores your data").
+- The public side stays shut until T6 completes: `/privacy` interim, `/store/book` refusing, portal registration
+  refused. Proven in both directions by swapping in the placeholder-free client notice and restoring it.
+
+## Open questions for Don
+
+1. Branch portals are `portal_enabled = 1` by default, so deploying exposes `/portal/<slug>` pages (forms still
+   shut). Recommendation: switch them off at deploy and on per branch as the wizard completes.
+2. `Rooderport` vs `Roodepoort` — one branch's data is spelled "Rooderport"; left matching the app.
+3. Merge rule unchanged: one squashed commit, delete the branch, `git gc`, then prove all five real vehicle
+   identifiers are gone from `git log --all -S`.
