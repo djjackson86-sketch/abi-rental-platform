@@ -1,0 +1,13 @@
+Registering Authority GAUTENG
+Control Number 12345678
+Licence number ABC 123 GP
+Vehicle Registration Number T9876543210
+Make TOYOTA
+Model HILUX 2.4 GD-6
+Colour WHITE
+Vehicle identification number (VIN) AHTFR22G10L123456
+Engine number 2GD1234567
+Licence expiry 2027/03/31
+Tare 1890
+GVM 2800
+Vehicle category LDV

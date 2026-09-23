@@ -2,3 +2,17 @@ Flask==3.0.3
 pytest==8.3.3
 gunicorn==22.0.0
 libsql-client==0.3.1
+
+# Licence-disc scanning (programme phase 1/A1) — see docs/plans/disc-decode-findings.md for the
+# measured engine comparison behind this list.
+#  * Pillow: image loading + the decode variant ladder (grayscale/contrast/upscale/crop/rotate).
+#  * zxing-cpp: the measured engine. Reads the real disc photograph on the ORIGINAL variant in
+#    22 ms, and its wheel is ~2 MB with no extra system libraries.
+Pillow==12.3.0
+zxing-cpp==3.1.1
+
+# Deliberately NOT a dependency: pdf417decoder. It also reads the real disc (251 ms) but pulls
+# numpy + opencv-python (~115 MB installed, a 74 MB wheel) for the privilege, and its only extra
+# wins over zxing-cpp were two driver's-licence-card samples — not the licence disc ABI scans.
+# app/services/vehicle_disk.py still supports it as a second engine if it is installed in a dev
+# venv (`pip install pdf417decoder`); it skips a missing engine instead of failing.
