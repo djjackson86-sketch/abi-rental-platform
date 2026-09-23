@@ -232,7 +232,7 @@
   {% if previous_day_notes and not cash_day.aggregate and not cash_day.notes %}
   <section class="panel previous-day-notes-panel">
     <div class="panel-title"><h2>Previous day’s notes ({{ previous_day_notes.day }})</h2></div>
-    <p class="cash-note">Read-only. Nothing has been recorded for {{ cash_day.day }} yet.</p>
+    <p class="cash-note">Read-only. Nothing has been recorded for {{ cash_day.day }} yet, so these are the last notes saved for this depot.</p>
     {% if previous_day_notes.notes %}
     <div class="cash-used-lines">
       <div class="cash-used-line"><span>End of day notes<small>{{ previous_day_notes.notes }}</small></span></div>

@@ -305,6 +305,8 @@ def test_the_dashboard_shows_the_previous_days_notes_to_staff(client, app):
     assert INTERACTION_NOTE in block
     # Read-only: the earlier day cannot be edited from here.
     assert '<form' not in block
+    # The panel says why it is there: the day being viewed is still empty.
+    assert f'Nothing has been recorded for {TODAY} yet' in block
     assert 'End of day notes' in html
     # Today is an open day: the notes panel offers its own save form.
     assert 'action="/cash-up/notes"' in html
