@@ -114,7 +114,8 @@
                 {% if settings.show_prices %}<span class="muted">R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}{% if p.security_deposit %} · R{{ '%.2f'|format(p.security_deposit) }} deposit{% endif %}</span>{% endif %}
               </span>
               <input id="qty-{{ p.id }}" class="booking-qty" type="number" name="quantity" min="0" step="1" value="{{ selected.get(pid, 0) }}"
-                     data-price="{{ p.price_amount }}" data-price-unit="{{ p.price_unit }}" data-deposit="{{ p.security_deposit or 0 }}" inputmode="numeric">
+                     data-price="{{ p.price_amount }}" data-price-unit="{{ p.price_unit }}" data-deposit="{{ p.security_deposit or 0 }}"
+                     data-tax-rate="{{ p.tax_rate or 0 }}" inputmode="numeric">
             </label>
             {% endfor %}
           </div>
@@ -127,7 +128,7 @@
         <p class="muted" id="estimate-empty">Add trailers and dates to see an estimate.</p>
         <dl id="estimate-breakdown" class="booking-estimate-rows" hidden>
           <div><dt>Rental subtotal</dt><dd id="estimate-subtotal">R0.00</dd></div>
-          <div><dt>VAT ({{ '%.1f'|format(vat_rate) }}%)</dt><dd id="estimate-vat">R0.00</dd></div>
+          <div><dt>VAT{% if tax_mode == 'exclusive' %} (added){% elif tax_mode == 'inclusive' %} (included){% endif %}</dt><dd id="estimate-vat">R0.00</dd></div>
           <div><dt>Refundable deposit</dt><dd id="estimate-deposit">R0.00</dd></div>
           <div class="booking-estimate-total"><dt>Estimated total</dt><dd id="estimate-total">R0.00</dd></div>
         </dl>
@@ -180,7 +181,11 @@
   var vatEl = document.getElementById('estimate-vat');
   var depositEl = document.getElementById('estimate-deposit');
   var totalEl = document.getElementById('estimate-total');
-  var VAT_RATE = {{ vat_rate }};
+  // T3b: the estimate must match what the order will actually charge, so it uses each
+  // trailer's own tax profile rate (data-tax-rate) and the app's tax mode, exactly like
+  // calculate_line() in app/services/orders.py. The old version always added the global VAT
+  // rate, so a trailer with no tax profile showed VAT that the order never charged.
+  var TAX_MODE = "{{ settings.tax_mode }}";
 
   function rentalDays() {
     if (!start.value || !end.value) return null;
@@ -197,7 +202,7 @@
       return;
     }
     if (daysLabel) daysLabel.textContent = days + ' rental day' + (days === 1 ? '' : 's') + ' (estimated).';
-    var subtotal = 0, deposit = 0, picked = false;
+    var subtotal = 0, tax = 0, deposit = 0, picked = false;
     form.querySelectorAll('input[name="quantity"]').forEach(function (q) {
       var qty = parseInt(q.value || '0', 10);
       if (!qty || qty <= 0) return;
@@ -205,7 +210,20 @@
       var price = parseFloat(q.getAttribute('data-price') || '0');
       var unit = q.getAttribute('data-price-unit') || 'day';
       var multiplier = (unit === 'day') ? days : 1;
-      subtotal += price * qty * multiplier;
+      var rate = parseFloat(q.getAttribute('data-tax-rate') || '0') / 100;
+      var base = price * qty * multiplier;
+      // calculate_line(): inclusive keeps the price as the total and shows the tax inside it;
+      // exclusive adds it on top; no rate at all means no tax.
+      if (rate && TAX_MODE === 'inclusive') {
+        var insideTax = base - (base / (1 + rate));
+        subtotal += base - insideTax;
+        tax += insideTax;
+      } else if (rate && TAX_MODE === 'exclusive') {
+        subtotal += base;
+        tax += base * rate;
+      } else {
+        subtotal += base;
+      }
       deposit += parseFloat(q.getAttribute('data-deposit') || '0') * qty;
     });
     if (!picked) {
@@ -215,11 +233,12 @@
     }
     empty.hidden = true;
     breakdown.hidden = false;
-    var vat = subtotal * VAT_RATE / 100;
     subtotalEl.textContent = 'R' + subtotal.toFixed(2);
-    vatEl.textContent = 'R' + vat.toFixed(2);
+    vatEl.textContent = 'R' + tax.toFixed(2);
     depositEl.textContent = 'R' + deposit.toFixed(2);
-    totalEl.textContent = 'R' + (subtotal + vat + deposit).toFixed(2);
+    // Same figure the order will store: subtotal + tax. The refundable deposit is listed on
+    // its own line and is not part of the total, which is how the order and confirmation show it.
+    totalEl.textContent = 'R' + (subtotal + tax).toFixed(2);
   }
 
   [start, end, startTime, endTime].forEach(function (el) { if (el) el.addEventListener('change', recompute); });

@@ -433,3 +433,31 @@ def test_the_booking_path_is_closed_while_the_notice_is_unfinished(app):
     assert response.status_code == 200
     assert order_count(app) == 0
     assert customer_count(app) == 0
+
+
+# --- T3b: the live estimate must agree with what the order actually charges ----------------------
+
+def test_a_taxed_trailer_charges_its_own_profile_rate(app, client):
+    """The order side of T3b: per-trailer tax profiles, not one global VAT rate."""
+    profile = tax_profile(app, 15.0)
+    taxed = make_product(app, "Taxed Trailer", price=200.0, tax_profile_id=profile)
+    untaxed = make_product(app, "Untaxed Trailer", price=100.0)
+    payload = select(select(booking_payload(), taxed, 1), untaxed, 1)   # 2 days each
+    response = client.post("/store/book", data=payload, follow_redirects=True)
+    assert response.status_code == 200
+    with app.app_context():
+        order = get_db().execute("SELECT * FROM orders ORDER BY id DESC LIMIT 1").fetchone()
+    assert order["subtotal"] == 600.0, order["subtotal"]      # 200*2 + 100*2
+    assert order["tax_total"] == 60.0, order["tax_total"]      # only the 15% trailer
+    assert order["total"] == 660.0, order["total"]
+
+
+def test_the_live_estimate_carries_each_trailers_tax_rate(app, client):
+    """The page side of T3b: without the rate on the input the script falls back to guessing."""
+    profile = tax_profile(app, 15.0)
+    make_product(app, "Taxed Trailer", price=200.0, tax_profile_id=profile)
+    make_product(app, "Untaxed Trailer", price=100.0)
+    body = client.get("/store/book").get_data(as_text=True)
+    assert 'data-tax-rate="15' in body, "the taxed trailer must publish its profile rate"
+    assert 'data-tax-rate="0"' in body, "a trailer with no tax profile must publish a zero rate"
+    assert "TAX_MODE" in body, "the estimate must know the app's tax mode"

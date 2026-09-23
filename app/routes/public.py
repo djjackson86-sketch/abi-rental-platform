@@ -33,16 +33,22 @@ def _public_products():
     # Ticket ABI-341953038(3): a trailer flagged "Trailer under maintenance" is
     # not offered in the online store until the flag is released. It stays fully
     # visible in the back office inventory.
+    # The effective tax rate travels with the product so the booking page's live estimate can
+    # mirror calculate_line() exactly instead of guessing with the global VAT rate (T3b).
     return get_db().execute(
-        "SELECT * FROM products WHERE active = 1 AND public_visible = 1 "
-        "AND COALESCE(under_maintenance, 0) = 0 ORDER BY name"
+        "SELECT p.*, COALESCE(t.rate, 0) AS tax_rate FROM products p "
+        "LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id "
+        "WHERE p.active = 1 AND p.public_visible = 1 "
+        "AND COALESCE(p.under_maintenance, 0) = 0 ORDER BY p.name"
     ).fetchall()
 
 
 def _public_product(product_id):
     return get_db().execute(
-        "SELECT * FROM products WHERE id = ? AND active = 1 AND public_visible = 1 "
-        "AND COALESCE(under_maintenance, 0) = 0",
+        "SELECT p.*, COALESCE(t.rate, 0) AS tax_rate FROM products p "
+        "LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id "
+        "WHERE p.id = ? AND p.active = 1 AND p.public_visible = 1 "
+        "AND COALESCE(p.under_maintenance, 0) = 0",
         (product_id,),
     ).fetchone()
 
