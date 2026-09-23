@@ -91,5 +91,102 @@
       </div>
     {% endif %}
   </article>
+
+  <article class="panel customer-vehicles-card">
+    <div class="panel-title">
+      <h2>Vehicles</h2>
+      {% if user_can('scan_vehicle') %}
+        <a href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id) }}">Add vehicle</a>
+      {% endif %}
+    </div>
+    {% if vehicles %}
+      <p class="form-help">Read off a NaTIS licence disk or typed in by staff. A number plate belongs to one client, and a blank figure is shown as a dash — nothing is guessed.</p>
+      <div class="table-wrap vehicles-table-wrap">
+        <table class="data-table vehicles-table">
+          <thead>
+            <tr>
+              <th>Number plate</th>
+              <th>Make</th>
+              <th>Model</th>
+              <th>Year</th>
+              <th>Tare (kg)</th>
+              <th>GVM (kg)</th>
+              <th>Disk expiry</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for vehicle in vehicles %}
+              <tr>
+                <td>
+                  <strong>{{ vehicle.registration or 'No plate recorded' }}</strong>
+                  {% if vehicle.registration_number %}<small class="vehicle-sub">NaTIS {{ vehicle.registration_number }}</small>{% endif %}
+                </td>
+                <td>{{ vehicle.make or '—' }}</td>
+                <td>{{ vehicle.model or '—' }}</td>
+                <td>{{ vehicle.year or '—' }}</td>
+                <td>{% if vehicle.tare_kg is not none %}{{ '%.0f'|format(vehicle.tare_kg) }}{% else %}—{% endif %}</td>
+                <td>{% if vehicle.gvm_kg is not none %}{{ '%.0f'|format(vehicle.gvm_kg) }}{% else %}—{% endif %}</td>
+                <td>{{ vehicle.licence_disk_expiry or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if user_can('scan_vehicle') %}
+        <div class="vehicle-manage">
+          {% set vehicle_edit_fields = [
+            ('registration', 'Number plate'),
+            ('registration_number', 'NaTIS registration number'),
+            ('licence_number', 'Disk licence number'),
+            ('make', 'Make'),
+            ('model', 'Model / description'),
+            ('colour', 'Colour'),
+            ('year', 'Year'),
+            ('vin', 'VIN'),
+            ('engine_number', 'Engine number'),
+            ('vehicle_type', 'Vehicle category'),
+            ('registering_authority', 'Registering authority'),
+            ('control_number', 'Control number'),
+            ('licence_disk_expiry', 'Licence disk expiry'),
+          ] %}
+          {% for vehicle in vehicles %}
+            <details class="vehicle-manage-item">
+              <summary>Edit or remove {{ vehicle.registration or ('vehicle #' ~ vehicle.id) }}</summary>
+              <form method="post" action="{{ url_for('vehicles.edit_vehicle', vehicle_id=vehicle.id) }}" class="form-grid vehicle-edit-form">
+                {% for name, label in vehicle_edit_fields %}
+                  <label>{{ label }}
+                    <input type="text" name="{{ name }}" value="{{ vehicle[name] or '' }}" autocomplete="off">
+                  </label>
+                {% endfor %}
+                <label>Tare (kg)
+                  <input type="text" name="tare_kg" inputmode="decimal" autocomplete="off" value="{% if vehicle.tare_kg is not none %}{{ '%.0f'|format(vehicle.tare_kg) }}{% endif %}">
+                  <small>Blank means the disk did not show it — stored as unknown, never 0.</small>
+                </label>
+                <label>GVM (kg)
+                  <input type="text" name="gvm_kg" inputmode="decimal" autocomplete="off" value="{% if vehicle.gvm_kg is not none %}{{ '%.0f'|format(vehicle.gvm_kg) }}{% endif %}">
+                  <small>Same rule: a figure nobody read off the disk is never invented.</small>
+                </label>
+                <div class="form-actions span-2">
+                  <button class="btn primary" type="submit">Save vehicle</button>
+                </div>
+              </form>
+              <form method="post" action="{{ url_for('vehicles.delete_vehicle', vehicle_id=vehicle.id) }}" class="vehicle-remove-form" onsubmit="return confirm('Remove {{ vehicle.registration or 'this vehicle' }} from this client?');">
+                <button class="btn danger" type="submit">Remove vehicle</button>
+                <span class="form-help">Removing deletes only this vehicle — the client and their orders stay exactly as they are.</span>
+              </form>
+            </details>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="soft-empty">
+        <h3>No vehicles recorded</h3>
+        <p>Scan the client's licence disk to capture the number plate, VIN, engine number and disk expiry on their record.</p>
+        {% if user_can('scan_vehicle') %}
+          <a class="btn primary" href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id) }}">Scan a vehicle disk</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </article>
 </section>
 {% endblock %}

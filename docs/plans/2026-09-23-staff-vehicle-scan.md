@@ -153,10 +153,11 @@ another client is refused with the transfer option; customer delete still leaves
 
 ---
 
-## A4 (phase 4) — Client page panel, towing capacity, real-browser proof
+## A4 (phase 4) — Client page panel + real-browser proof
 
-**Objective:** the client page shows "Vehicles" (with the disk figures and towing capacity), staff can edit or
-release a vehicle there, and the whole feature is proven in a real browser at 390px and 1440px.
+**Objective:** the client page shows "Vehicles" (with the figures the disc actually carries — **no towing
+capacity**, removed by decision D3b), staff can edit or release a vehicle there, and the whole feature is
+proven in a real browser at 390px and 1440px.
 
 **Files**
 - Modify `templates/admin/customers/detail.html` (or the partial it includes) — a `Vehicles` panel: table of
@@ -173,9 +174,9 @@ master plan's D3b (towing capacity was removed by Don on 2026-09-23).
 - Use `.venv/bin/playwright`'s Chromium (already installed in `~/.cache/ms-playwright`) against a **temp
   SQLite DB** (`DATABASE_PATH=/tmp/abi_a4.db`, seeded with 1 branch, 1 client, 1 staff account) on port 5057.
 - Sign in as staff, run the full path: open `/scan-vehicle` → paste a decoded-text fixture (the real photo if
-  one exists, else the fixture) → pick the client → save → open the client page → see the vehicle → edit
-  towing capacity → save → see it. Capture screenshots at 1440px and 390px, click through, assert
-  **0 console errors** and **0 horizontal page overflow** at both widths.
+  one exists, else the fixture) → pick the client → save → open the client page → see the vehicle → edit the
+  model and a mass → save → see the new figures. Capture screenshots at 1440px and 390px, click through,
+  assert **0 console errors** and **0 horizontal page overflow** at both widths.
 - `vision_analyze` the screenshots and say in the ledger what you actually saw (this is a hard requirement —
   do not describe a page you did not look at).
 - `fuser -k 5057/tcp` afterwards; confirm the port is free.

@@ -424,3 +424,32 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .scan-details li{overflow-wrap:anywhere}
 .scan-raw-text{margin:10px 0 2px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45;max-height:240px;overflow:auto;background:#fff;border:1px solid var(--line-soft);border-radius:10px;padding:10px}
 @media(max-width:860px){.scan-capture-grid{grid-template-columns:1fr}}
+
+/* --- Client page Vehicles panel (programme phase 4, feature A / A4) -------
+   The panel sits in the same right-hand column as the contact/orders cards.
+   The read table is the house .data-table inside .table-wrap (which scrolls
+   itself on a narrow screen instead of pushing the page sideways), and each
+   vehicle's edit/remove controls live in a collapsed <details> below it so a
+   phone never has to hold a 15-field form inside a table cell. ------------- */
+.customer-vehicles-card{grid-column:2;min-width:0}
+/* The read table is wider than a phone on purpose (.data-table min-width), so the grid item has to be
+   allowed to shrink (min-width:0) and let .table-wrap scroll itself — without this the 390px page
+   itself scrolls sideways (measured: profile grid 688px inside a 354px column). */
+.customer-vehicles-card .table-wrap{margin:12px 0 0;min-width:0}
+.vehicles-table{min-width:640px}
+.vehicles-table td:first-child strong{white-space:nowrap;letter-spacing:.01em}
+.vehicles-table td:first-child small.vehicle-sub{display:block;color:var(--muted);font-weight:650;margin-top:3px}
+.vehicle-manage{display:grid;gap:10px;margin-top:16px;min-width:0}
+.vehicle-manage-item{border:1px solid var(--line-soft);border-radius:14px;background:#fff;min-width:0}
+.vehicle-manage-item summary{padding:13px 15px;cursor:pointer;font-weight:750;color:var(--brand);list-style:none}
+.vehicle-manage-item summary::-webkit-details-marker{display:none}
+.vehicle-manage-item summary:before{content:"▸";display:inline-block;margin-right:8px;transition:transform .12s ease}
+.vehicle-manage-item[open] summary:before{transform:rotate(90deg)}
+.vehicle-manage-item[open] summary{border-bottom:1px solid var(--line-soft)}
+.vehicle-edit-form{padding:15px;min-width:0}
+.vehicle-edit-form label{min-width:0}
+.vehicle-remove-form{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 15px 15px;border-top:1px solid var(--line-soft);padding-top:14px;margin-top:4px}
+.vehicle-remove-form button{width:auto}
+.vehicle-remove-form .form-help{margin:0;flex:1 1 240px}
+@media(max-width:1050px){.customer-vehicles-card{grid-column:auto}}
+@media(max-width:520px){.vehicle-remove-form button{width:100%}}
