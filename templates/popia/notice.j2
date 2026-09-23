@@ -1,0 +1,84 @@
+# Privacy Notice — {{ business_name }}
+
+This notice explains what personal information {{ business_name }} collects about you, why we collect it, who we share it with, and what you can do about it. It takes effect on {{ effective_date }}.
+
+## Who we are
+
+{{ business_name }} — registration number {{ registration_number }}{% if trading_name %} · trading as {{ trading_name }}{% endif %}{% if vat_number %} · VAT {{ vat_number }}{% endif %} — is the responsible party for your personal information.
+
+**Address:** {{ address }}
+**Telephone:** {{ telephone }}
+**Email:** {{ contact_email }}
+
+Our Information Officer is **{{ officer_name }}** ({{ officer_position }}){% if officer_registration_date %}, registered with the Information Regulator on {{ officer_registration_date }}{% endif %}. You can contact the Information Officer at {{ officer_email }} or {{ officer_telephone }}.
+
+## What personal information we collect, and where it comes from
+
+Most of the personal information we hold is given to us by you — when you book or hire a trailer, on a form at the branch, over the phone, by email or WhatsApp, or through our website. We collect only what we need to hire out, sell, service and recover trailers.
+
+The personal information we collect includes your name, telephone number, email address and address, the details of your hire (dates, trailer, deposits and payments), and the registration number of the vehicle that will tow the trailer, which we read from its licence disc or licence document.
+
+{% if answers.vehicle_registration %}We keep the registration number of the vehicle you use to tow the trailer. We use it to record which vehicle is towing which trailer, and to trace a trailer that is not returned.{% endif %}
+
+{% if answers.id_documents %}If you give us a copy of your identity document or driver's licence for verification, we keep it only until the verification is done and the hire is closed and settled.{% endif %}
+
+{% if answers.cctv %}Some of our branches are covered by closed-circuit television (CCTV){% if cctv_branches %}: {{ cctv_branches|join(', ') }}{% endif %}. Where cameras are used, we record images of the yard and entrance for the security of our property and of people on our premises{% if cctv_signage %}, and signage at the branch tells you that recording is taking place{% endif %}. Footage is kept for a short rolling period, and kept longer only where an incident makes a specific recording evidence.{% endif %}
+
+{% if answers.under_18 %}We do not knowingly collect the personal information of children (under 18) without the consent of a competent person, and our rentals are not aimed at children.{% endif %}
+
+{% if answers.credit_checks %}Where we need to, we may obtain a credit check or reference check about you from a credit bureau or from a reference you give us. We will tell you what we received and who gave it to us if you ask.{% endif %}
+
+## Why we collect it
+
+We collect your personal information to quote, book, hire out, return and service trailers; to record which vehicle is towing which trailer; to invoice you and take payment; to contact you about your hire; and to keep the records the law requires us to keep.
+
+Giving us your information is **voluntary**. But if you do not give us the details we need, we may not be able to hire a trailer to you, invoice you, or refund a deposit. Where the law requires us to collect something, we will say so at the time.
+
+We are required by law to keep certain records, including tax, VAT and accounting records (the **Tax Administration Act**) and company records (the **Companies Act**), for the periods those laws set.
+
+## Who we share your information with
+
+We share your personal information only with the following categories of recipients, and only as far as needed:
+
+- our service providers who run the system for us (hosting, database, email and messaging providers), who may see your information only to provide that service;
+{% if answers.card_payments %}- payment and banking providers, to process card and electronic payments and refunds;{% endif %}
+{% if answers.service_providers %}- our accountant, IT support and other providers, who may see your information while doing their work for us;{% endif %}
+{% if answers.share_info %}- debt collectors, tracing agents, insurers, assessors and attorneys, if money is owed to us, a claim arises, or our property is not returned;{% endif %}
+- law enforcement, the Information Regulator, SARS and other authorities, where the law requires or permits it;
+- your alternative contact, if we cannot reach you about a trailer that is due back.
+
+We do not sell your personal information.
+
+## Sending your information outside South Africa
+
+Our booking system and database are hosted on cloud infrastructure outside South Africa: the database in the **European Union (Ireland)** and the application in the **United States (Oregon)**. We only use providers who are bound to protect your information to a standard equivalent to the protection the law gives you in South Africa, under binding agreements with us. Your information is not transferred to any country that does not protect it to this standard.
+
+## How long we keep it
+
+We keep your personal information only as long as we need it for the purpose we collected it, and as long as the law requires. Tax, VAT and accounting records are kept for at least the period the **Tax Administration Act** requires, and rental and company records for the period the **Companies Act** requires. When we no longer need your information, we delete or destroy it in a way that prevents it being linked back to you, or we de-identify it.
+
+## Your rights
+
+You have the right to:
+
+- be told that we hold your information and what we do with it;
+- ask to see (access) the personal information we hold about you;
+- ask us to correct or delete information that is inaccurate, out of date, or that we are no longer allowed to keep;
+- object to our use of your information, on reasonable grounds;
+{% if answers.marketing %}- opt out of marketing at any time;{% endif %}
+- complain to the Information Regulator.
+
+To use any of these rights, email {{ contact_email }} or write to us at {{ address }}. We will ask you to prove who you are first, and will respond within a reasonable time.
+
+{% if answers.marketing %}## Marketing
+
+We will only send you marketing by email, SMS or WhatsApp if you have agreed to it (opted in), or if you are an existing customer and we are telling you about our own similar products and services. Every marketing message we send includes a way to opt out, and we honour opt-outs.{% endif %}
+
+## Contact the Information Regulator
+
+If you are unhappy with how we have handled your personal information, you can complain to:
+
+**The Information Regulator (South Africa)**
+JD House, 27 Stiemens Street, Braamfontein, Johannesburg, 2001
+Email: **complaints.IR@justice.gov.za**
+Website: **https://inforegulator.org.za**

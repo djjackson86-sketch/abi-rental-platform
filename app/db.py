@@ -256,6 +256,60 @@ CREATE TABLE IF NOT EXISTS document_acceptances (
 
 CREATE INDEX IF NOT EXISTS idx_document_acceptances_key ON document_acceptances(document_key);
 
+-- POPIA setup wizard (programme phase W1 / feature P, 2026-09-23). A single-row
+-- state table (id = 1) holding the wizard's confirmed facts, the Information
+-- Officer, and the nine Step-3 answers, plus the publish flag. Each Step-3
+-- answer is tri-state: 'yes', 'no', or '' (not answered / not sure) — a blank
+-- keeps that paragraph out of the generated notice and blocks publication for a
+-- required question. There is **no IP address and no user agent** (POPIA data
+-- minimisation, the same rule as consent_records).
+CREATE TABLE IF NOT EXISTS popia_wizard_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    business_name TEXT NOT NULL DEFAULT '',
+    registration_number TEXT NOT NULL DEFAULT '',
+    vat_number TEXT NOT NULL DEFAULT '',
+    trading_name TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    telephone TEXT NOT NULL DEFAULT '',
+    contact_email TEXT NOT NULL DEFAULT '',
+    officer_name TEXT NOT NULL DEFAULT '',
+    officer_position TEXT NOT NULL DEFAULT '',
+    officer_email TEXT NOT NULL DEFAULT '',
+    officer_telephone TEXT NOT NULL DEFAULT '',
+    officer_registered TEXT NOT NULL DEFAULT '',
+    officer_registration_date TEXT NOT NULL DEFAULT '',
+    officer_registration_ref TEXT NOT NULL DEFAULT '',
+    cctv TEXT NOT NULL DEFAULT '',
+    cctv_branches_json TEXT NOT NULL DEFAULT '[]',
+    cctv_signage TEXT NOT NULL DEFAULT '',
+    marketing TEXT NOT NULL DEFAULT '',
+    id_documents TEXT NOT NULL DEFAULT '',
+    share_info TEXT NOT NULL DEFAULT '',
+    service_providers TEXT NOT NULL DEFAULT '',
+    card_payments TEXT NOT NULL DEFAULT '',
+    under_18 TEXT NOT NULL DEFAULT '',
+    vehicle_registration TEXT NOT NULL DEFAULT 'yes',
+    credit_checks TEXT NOT NULL DEFAULT '',
+    published INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+-- Published notices (programme phase W1). The generated text lives in the
+-- database, never on disk (decision D4 — Render's filesystem is ephemeral). One
+-- row per publish; the version is date-stamped (YYYY-MM-DD.N) and the content
+-- hash ties a customer's consent back to the exact wording they saw.
+-- Re-publishing bumps N; old consent rows keep their old version.
+CREATE TABLE IF NOT EXISTS popia_notice_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notice_version TEXT NOT NULL UNIQUE,
+    notice_content_hash TEXT NOT NULL DEFAULT '',
+    notice_text TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL,
+    published_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_popia_notice_versions_version ON popia_notice_versions(notice_version);
+
 CREATE TABLE IF NOT EXISTS product_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -960,6 +1014,58 @@ def run_migrations(db):
     )
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_document_acceptances_key ON document_acceptances(document_key)"
+    )
+
+    # --- POPIA setup wizard + published notices (additive, programme phase W1) ---
+    # Two new, empty tables on an existing database: the single-row wizard state
+    # (nothing confirmed yet, so the wizard starts at prefill) and the published
+    # notice history (nothing published yet, so /privacy stays interim). The
+    # generated notice text lives in the database, never on disk (decision D4).
+    # No IP address and no user agent (see the note on the same tables in SCHEMA).
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS popia_wizard_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            business_name TEXT NOT NULL DEFAULT '',
+            registration_number TEXT NOT NULL DEFAULT '',
+            vat_number TEXT NOT NULL DEFAULT '',
+            trading_name TEXT NOT NULL DEFAULT '',
+            address TEXT NOT NULL DEFAULT '',
+            telephone TEXT NOT NULL DEFAULT '',
+            contact_email TEXT NOT NULL DEFAULT '',
+            officer_name TEXT NOT NULL DEFAULT '',
+            officer_position TEXT NOT NULL DEFAULT '',
+            officer_email TEXT NOT NULL DEFAULT '',
+            officer_telephone TEXT NOT NULL DEFAULT '',
+            officer_registered TEXT NOT NULL DEFAULT '',
+            officer_registration_date TEXT NOT NULL DEFAULT '',
+            officer_registration_ref TEXT NOT NULL DEFAULT '',
+            cctv TEXT NOT NULL DEFAULT '',
+            cctv_branches_json TEXT NOT NULL DEFAULT '[]',
+            cctv_signage TEXT NOT NULL DEFAULT '',
+            marketing TEXT NOT NULL DEFAULT '',
+            id_documents TEXT NOT NULL DEFAULT '',
+            share_info TEXT NOT NULL DEFAULT '',
+            service_providers TEXT NOT NULL DEFAULT '',
+            card_payments TEXT NOT NULL DEFAULT '',
+            under_18 TEXT NOT NULL DEFAULT '',
+            vehicle_registration TEXT NOT NULL DEFAULT 'yes',
+            credit_checks TEXT NOT NULL DEFAULT '',
+            published INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS popia_notice_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            notice_version TEXT NOT NULL UNIQUE,
+            notice_content_hash TEXT NOT NULL DEFAULT '',
+            notice_text TEXT NOT NULL DEFAULT '',
+            published_at TEXT NOT NULL,
+            published_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_popia_notice_versions_version ON popia_notice_versions(notice_version)"
     )
 
     # --- Per-branch public portal (additive, programme phase 8 / feature B §B1) ---
