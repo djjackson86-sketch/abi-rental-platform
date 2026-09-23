@@ -448,3 +448,18 @@ def test_run_migrations_creates_the_wizard_tables_on_an_existing_database(app):
         assert "notice_content_hash" in version_cols and "notice_text" in version_cols
         indexes = {row["name"] for row in db.execute("PRAGMA index_list(popia_notice_versions)").fetchall()}
         assert "idx_popia_notice_versions_version" in indexes
+
+
+def test_the_notice_names_popia_itself(app):
+    """A POPIA notice that never names POPIA reads oddly to a customer and to the Regulator.
+
+    s18(1)(e) is the law that requires or authorises the collection/retention; the notice already
+    named the Tax Administration Act and the Companies Act, so the governing Act is now named in
+    the body of the notice too - and it must survive every combination of answers.
+    """
+    save_full_state(app)
+    with app.app_context():
+        assert "Protection of Personal Information Act, 2013 (POPIA)" in popia_wizard.build_notice()
+    save_full_state(app, cctv="no", id_documents="no", share_info="no", card_payments="no", vehicle_registration="no")
+    with app.app_context():
+        assert "Protection of Personal Information Act, 2013 (POPIA)" in popia_wizard.build_notice()
