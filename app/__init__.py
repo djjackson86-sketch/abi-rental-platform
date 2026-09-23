@@ -16,7 +16,9 @@ from .routes.payments import bp as payments_bp
 from .routes.branches import bp as branches_bp
 from .routes.cash import bp as cash_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
+from .routes.popia import bp as popia_bp
 from .services.access import is_main_session, module_for_endpoint, session_active_branch, user_can_module
+from .services.popia_pack import pack_notification
 from .services.timezone import display_local_date, display_local_datetime
 
 
@@ -85,6 +87,7 @@ def create_app(test_config=None):
     app.register_blueprint(branches_bp)
     app.register_blueprint(cash_bp)
     app.register_blueprint(internal_telegram_bp)
+    app.register_blueprint(popia_bp)
     app.register_blueprint(public_bp)
 
     # Human-visible date-times always render through this helper so the ISO "T"
@@ -108,6 +111,11 @@ def create_app(test_config=None):
 
     @app.context_processor
     def inject_access_helpers():
+        # The POPIA compliance nag is computed only for the main profile, and only
+        # the summary (a count) is read here — the full per-document status stays on
+        # /popia. pack_notification() runs one acceptance query and, at most, one
+        # hash per already-adopted document, so the bar stays cheap on every page.
+        popia_notification = pack_notification() if is_main_session(session) else None
         return {
             "current_user_is_main": is_main_session(session),
             "user_can": lambda module: user_can_module(session, module),
@@ -118,6 +126,8 @@ def create_app(test_config=None):
             # The depot this sign-in is managing, for the "Branch: X · Change"
             # control. None (and no query) unless a choice was actually made.
             "active_branch": session_active_branch(),
+            # The POPIA pack nag bar, only ever non-None for the main profile.
+            "popia_notification": popia_notification,
         }
 
     return app

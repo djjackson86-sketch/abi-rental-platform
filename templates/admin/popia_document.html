@@ -1,0 +1,58 @@
+{% extends "admin/layout.html" %}
+{% set title=doc.title %}
+{% block admin_body %}
+<style>
+  .popia-banner{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin:0 0 18px;padding:14px 16px;border-radius:var(--radius,12px);border:1px solid;font-weight:650}
+  .popia-banner.pending{border-color:#fde68a;background:#fffbeb;color:#92400e}
+  .popia-banner.adopted{border-color:#bbf7d0;background:var(--success-soft,#ecfdf5);color:#047857}
+  .popia-banner.needs{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8}
+  .popia-banner.stale{border-color:#fecaca;background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318)}
+  .popia-fields{margin:0 0 18px;padding:0 0 0 18px;color:var(--muted);font-size:14px}
+  .popia-fields li{margin:3px 0}
+  .document-body{background:var(--surface,#fff);border:1px solid var(--line-soft);border-radius:var(--radius-lg);padding:30px 34px;box-shadow:var(--shadow-sm)}
+  .document-body h1,.document-body h2,.document-body h3{line-height:1.22;letter-spacing:-.02em}
+  .document-body h1{font-size:24px;margin:0 0 12px}
+  .document-body h2{font-size:19px;margin:26px 0 10px}
+  .document-body h3{font-size:16px;margin:20px 0 8px}
+  .document-body p,.document-body li{font-size:15px;line-height:1.65;color:var(--ink-2)}
+  .document-body table{border-collapse:collapse;width:100%;margin:16px 0;font-size:13px}
+  .document-body th,.document-body td{border:1px solid var(--line-soft);padding:8px 10px;text-align:left;vertical-align:top}
+  .document-body th{background:var(--surface-soft);font-weight:700}
+  .document-body blockquote{border-left:3px solid var(--brand);margin:14px 0;padding:2px 0 2px 16px;color:var(--muted)}
+  .document-body hr{border:0;border-top:1px solid var(--line-soft);margin:22px 0}
+  .document-body code{background:var(--surface-soft);padding:2px 5px;border-radius:6px;font-size:13px}
+  .document-body a{color:var(--brand)}
+  @media(max-width:860px){.document-body{padding:20px 18px}}
+</style>
+<header class="page-header">
+  <div>
+    <p class="eyebrow">POPIA pack</p>
+    <h1>{{ doc.title }}</h1>
+    {% if doc.version or doc.hash_prefix %}<p>Version {{ doc.version or '—' }}{% if doc.hash_prefix %} &middot; {{ doc.hash_prefix }}{% endif %}</p>{% endif %}
+  </div>
+  <div class="header-actions">
+    <a class="btn ghost" href="{{ url_for('popia.index') }}">Back to pack</a>
+    <a class="btn ghost" href="{{ url_for('popia.document_pdf', key=doc.key) }}">Print</a>
+    {% if doc.status.can_accept %}
+    <form class="inline-form" method="post" action="{{ url_for('popia.accept', key=doc.key) }}">
+      <button class="btn primary" type="submit">Accept</button>
+    </form>
+    {% endif %}
+  </div>
+</header>
+
+<div class="popia-banner {{ doc.status.kind }}">
+  <span><strong>{{ doc.status.label }}</strong></span>
+  {% if doc.status.detail %}<span>{{ doc.status.detail }}</span>{% endif %}
+</div>
+
+{% if doc.status.kind == 'pending' %}
+<ul class="popia-fields">
+  {% for field in doc.outstanding_fields %}<li>{{ field }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+<article class="document-body">
+  {{ doc.text_html|safe }}
+</article>
+{% endblock %}

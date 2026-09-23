@@ -8,7 +8,7 @@ from flask import current_app
 from app.services.documents import display_document_label, display_document_number, document_accepted_stamp, document_date, document_datetime, document_has_rental_items, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
-from app.services.timezone import display_local_datetime
+from app.services.timezone import display_local_date, display_local_datetime, local_now_iso
 
 
 DOCUMENT_LOGO_STATIC_PATH = 'img/sano-trailers-logo.jpg'
@@ -1213,3 +1213,302 @@ def qr_sheet_pdf_bytes(branch_name, url, matrix, company_name=None, address=None
     commands.extend(text)
     commands.append('ET')
     return _pdf_objects('\n'.join(commands).encode('latin-1', 'replace'))
+
+
+# --- POPIA document pack (A4, feature Q / phase 14, §Q1) ----------------------
+#
+# The printable pack: a cover page (Sano Trailers logo, "POPIA compliance pack",
+# the generated date and an acceptance certificate table) followed by each
+# document's full text, every page footed with document name + version + page
+# number. A single-document sheet carries the same certificate for just that
+# document and, for the operator agreement, a signature block.
+#
+# Built with the same in-house primitives as the day report and QR sheet
+# (_pdf_rect / _pdf_text_command / _pdf_centre_text / _pdf_wrap / _pdf_objects),
+# so no new dependency is introduced.
+
+import re as _re
+
+PACK_LEFT = 48
+PACK_RIGHT = A4_PORTRAIT_WIDTH - 48
+PACK_WIDTH = PACK_RIGHT - PACK_LEFT
+PACK_TOP = 800
+PACK_BOTTOM = 58
+PACK_FOOTER_Y = 40
+PACK_INK = '0.10 0.13 0.18'
+PACK_MUTED = '0.36 0.42 0.51'
+PACK_ACCENT = '0.08 0.39 1'
+PACK_HEADER_FILL = '0.13 0.17 0.24'
+PACK_ROW_FILL = '0.965 0.976 0.992'
+PACK_RULE = '0.855 0.886 0.925'
+
+
+def _pack_logo_centred(width=120, top_y=790):
+    """The Sano logo centred at the top of the cover page, or (None, []) without one."""
+    logo_bytes = _document_logo_bytes()
+    if not logo_bytes:
+        return None, []
+    logo_width, logo_height = _jpeg_dimensions(logo_bytes)
+    display_height = width * logo_height / logo_width
+    left = (A4_PORTRAIT_WIDTH - width) / 2
+    draw = [f'q {width:.2f} 0 0 {display_height:.2f} {left:.2f} {top_y - display_height:.2f} cm /Im1 Do Q']
+    image_object = (
+        f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
+        f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
+    ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
+    return image_object, draw
+
+
+def _pack_strip_inline(text):
+    """Markdown inline syntax -> plain text for the single-byte PDF font."""
+    text = _re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = _re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+    text = _re.sub(r"`([^`]*)`", r"\1", text)
+    text = text.replace("**", "").replace("__", "")
+    return text.strip()
+
+
+def _pack_md_items(text):
+    """Markdown -> a list of (text, size, bold, indent, gap_before) items for the PDF."""
+    items = []
+    for raw in (text or "").split("\n"):
+        line = raw.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+        heading = _re.match(r"^#{1,6}\s+(.*)$", stripped)
+        if heading:
+            level = len(heading.group(0).split()[0])
+            size = {1: 13.5, 2: 12, 3: 11}.get(level, 10.5)
+            items.append((_pack_strip_inline(heading.group(1)), size, True, 0, 10))
+            continue
+        if _re.fullmatch(r"([-*_])\1{2,}", stripped):
+            items.append(("", 0, False, 0, 6))
+            continue
+        if stripped.startswith(">"):
+            items.append((_pack_strip_inline(stripped.lstrip(">").strip()), 9.5, False, 12, 2))
+            continue
+        if stripped.startswith("|"):
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if all(_re.fullmatch(r"[-: ]+", c or "-") for c in cells):
+                continue
+            items.append(("  |  ".join(cells), 8.5, False, 0, 2))
+            continue
+        item = _re.match(r"^([-*+]|\d+[.)])\s+(.*)$", stripped)
+        if item:
+            items.append(("• " + _pack_strip_inline(item.group(2)), 9.5, False, 14, 2))
+            continue
+        items.append((_pack_strip_inline(stripped), 9.5, False, 0, 2))
+    return items
+
+
+def _pack_signature_block():
+    """The operator-agreement signature block (the document is a contract)."""
+    return [
+        ("Signature block", 12, True, 0, 20),
+        ("Adopted electronically in the app, which records the document identity, version and "
+         "hash, and the person accepting, as evidence of the parties' agreement (ECTA 25 of "
+         "2002; POPIA s21(1)).", 9, False, 0, 6),
+        ("Signed for Sano Trailers (responsible party):", 9.5, True, 0, 14),
+        ("Name: ________________________________", 9.5, False, 0, 4),
+        ("Date: ________________________________", 9.5, False, 0, 4),
+        ("Signed for the Operator:", 9.5, True, 0, 14),
+        ("Name: ________________________________", 9.5, False, 0, 4),
+        ("Date: ________________________________", 9.5, False, 0, 4),
+    ]
+
+
+def _pack_layout(items):
+    """Word-wrap ``items`` and lay them onto pages; one page = a list of
+    ``(text, size, bold, indent, y)`` lines. No footers here."""
+    physical = []  # (text, size, bold, indent, gap_before)
+    for (text, size, bold, indent, gap) in items:
+        if not text:
+            physical.append(("", size, bold, indent, gap))
+            continue
+        wrapped = _pdf_wrap(text, size, PACK_WIDTH - indent, bold=bold, max_lines=None)
+        for j, wline in enumerate(wrapped):
+            physical.append((wline, size, bold, indent, gap if j == 0 else 0))
+    pages = []
+    page_lines = []
+    y = PACK_TOP
+    for (text, size, bold, indent, gap) in physical:
+        leading = (size + 4) if text else 0
+        if text and y - gap - leading < PACK_BOTTOM and page_lines:
+            pages.append(page_lines)
+            page_lines = []
+            y = PACK_TOP
+        y -= gap
+        if text:
+            page_lines.append((text, size, bold, indent, y))
+            y -= leading
+    if page_lines:
+        pages.append(page_lines)
+    return pages
+
+
+def _pack_render_page(lines, footer_text):
+    """Render one laid-out page to a latin-1 content stream with a footer."""
+    text_cmds = ["BT"]
+    for (text, size, bold, indent, y) in lines:
+        text_cmds.append(
+            _pdf_text_command(PACK_LEFT + indent, y, text, size=size, font="F2" if bold else "F1")
+        )
+    text_cmds.append(f"{PACK_MUTED} rg")
+    text_cmds.append(_pdf_text_command(PACK_LEFT, PACK_FOOTER_Y, footer_text, size=8))
+    text_cmds.append(f"{PACK_INK} rg")
+    text_cmds.append("ET")
+    return "\n".join(text_cmds).encode("latin-1", "replace")
+
+
+def _pack_render_pages(pages, footer_fn):
+    """Render laid-out pages; ``footer_fn(page_number, total)`` writes each footer."""
+    total = len(pages)
+    return [_pack_render_page(page, footer_fn(index, total)) for index, page in enumerate(pages, start=1)]
+
+
+def _pack_certificate(commands, entries, top_y):
+    """Draw the "Acceptance certificate" table and return the y below it.
+
+    ``entries`` is a list of dicts with ``title``, ``version``, ``hash_prefix``,
+    ``accepted_by`` and ``accepted_at``.
+    """
+    commands.append(f"{PACK_ACCENT} rg")
+    commands.append(_pdf_text_command(PACK_LEFT, top_y, "Acceptance certificate", size=13, font="F2"))
+    commands.append(f"{PACK_INK} rg")
+    columns = [
+        ("Document", PACK_LEFT, 205),
+        ("Version", PACK_LEFT + 205, 55),
+        ("Hash", PACK_LEFT + 260, 90),
+        ("Accepted by", PACK_LEFT + 350, 105),
+        ("Date", PACK_LEFT + 455, 92),
+    ]
+    row_height = 18
+    header_y = top_y - 22
+    commands.append(_pdf_rect(PACK_LEFT, header_y - row_height + 3, PACK_WIDTH, row_height, fill=PACK_HEADER_FILL))
+    commands.append("1 1 1 rg")
+    for label, x, _width in columns:
+        commands.append(_pdf_text_command(x + 4, header_y - 3, label, size=8, font="F2"))
+    commands.append(f"{PACK_INK} rg")
+    y = header_y - row_height - 2
+    for index, entry in enumerate(entries):
+        if index % 2 == 1:
+            commands.append(_pdf_rect(PACK_LEFT, y - row_height + 2, PACK_WIDTH, row_height - 1, fill=PACK_ROW_FILL))
+        date_text = display_local_date(entry.get("accepted_at")) if entry.get("accepted_at") else "—"
+        values = [
+            _pdf_fit(entry.get("title") or "—", 8.5, columns[0][2] - 8),
+            entry.get("version") or "—",
+            entry.get("hash_prefix") or "—",
+            _pdf_fit(entry.get("accepted_by") or "—", 8.5, columns[3][2] - 8),
+            date_text,
+        ]
+        for (_label, x, _width), value in zip(columns, values):
+            commands.append(_pdf_text_command(x + 4, y, value, size=8.5))
+        commands.append(_pdf_rect(PACK_LEFT, y - row_height + 2, PACK_WIDTH, 0.6, fill=PACK_RULE))
+        y -= row_height
+    return y - 8
+
+
+def _pack_cover_page(entries, logo_draw):
+    """One page: logo, title, generated date and the acceptance certificate table."""
+    commands = list(logo_draw or [])
+    commands.append("BT")
+    title_y = 706 if logo_draw else 782
+    commands.append(_pdf_centre_text(title_y, "POPIA compliance pack", size=22, font="F2"))
+    commands.append(_pdf_centre_text(title_y - 26, "Sano Trailers", size=13))
+    commands.append(f"{PACK_MUTED} rg")
+    commands.append(_pdf_centre_text(title_y - 44, f"Generated {display_local_date(local_now_iso())}", size=10))
+    commands.append(f"{PACK_INK} rg")
+    _pack_certificate(commands, entries, title_y - 72)
+    commands.append(f"{PACK_MUTED} rg")
+    commands.append(_pdf_centre_text(PACK_FOOTER_Y + 10, "POPIA compliance pack", size=8))
+    commands.append(f"{PACK_INK} rg")
+    commands.append("ET")
+    return "\n".join(commands).encode("latin-1", "replace")
+
+
+def _pack_footer_label(entry, version):
+    """The footer label: document name (and version) trimmed to the page width."""
+    label = f"{entry['title']} · v{version}" if version else entry["title"]
+    return _pdf_fit(label, 9, PACK_WIDTH)
+
+
+def popia_pack_pdf_bytes():
+    """The full printable pack: cover + certificate table + every document, footered."""
+    from app.services import popia_pack
+
+    statuses = {entry["key"]: entry for entry in popia_pack.pack_status()}
+    image_object, logo_draw = _pack_logo_centred()
+    cover_entries = []
+    for entry in popia_pack.PACK:
+        key = entry["key"]
+        status = statuses[key]
+        cover_entries.append({
+            "title": entry["title"],
+            "version": popia_pack.document_version(key),
+            "hash_prefix": popia_pack.document_hash(key)[:12],
+            "accepted_by": status.get("accepted_by"),
+            "accepted_at": status.get("accepted_at"),
+        })
+    streams = [_pack_cover_page(cover_entries, logo_draw)]
+    for entry in popia_pack.PACK:
+        key = entry["key"]
+        version = popia_pack.document_version(key)
+        label = _pack_footer_label(entry, version)
+        items = [(entry["title"], 14, True, 0, 0)]
+        items.append((f"Version {version}" if version else "Version —", 10, False, 0, 2))
+        items.append(("", 0, False, 0, 6))
+        items.extend(_pack_md_items(popia_pack.document_text(key)))
+        pages = _pack_layout(items)
+
+        def footer(n, total, label=label):
+            return f"{label} · Page {n} of {total}"
+
+        streams.extend(_pack_render_pages(pages, footer))
+    return _pdf_objects(streams, image_object=image_object)
+
+
+def popia_document_pdf_bytes(key):
+    """One document's A4 sheet: title, its acceptance certificate, the text, and
+    the signature block when the manifest says the document requires one."""
+    from app.services import popia_pack
+
+    entry = popia_pack.MANIFEST[key]
+    statuses = {item["key"]: item for item in popia_pack.pack_status()}
+    status = statuses[key]
+    version = popia_pack.document_version(key)
+    hash_prefix = popia_pack.document_hash(key)[:12]
+    label = _pack_footer_label(entry, version)
+    certificate = [{
+        "title": entry["title"],
+        "version": version,
+        "hash_prefix": hash_prefix,
+        "accepted_by": status.get("accepted_by"),
+        "accepted_at": status.get("accepted_at"),
+    }]
+
+    items = _pack_md_items(popia_pack.document_text(key))
+    if entry["signature_required"]:
+        items.extend(_pack_signature_block())
+    body_pages = _pack_layout(items)
+    total = 1 + len(body_pages)
+
+    commands = ["BT"]
+    top_y = 786
+    commands.append(_pdf_centre_text(top_y, "POPIA compliance pack", size=11, font="F2"))
+    commands.append(f"{PACK_MUTED} rg")
+    commands.append(_pdf_centre_text(top_y - 16, _pdf_fit(entry["title"], 10, A4_PORTRAIT_WIDTH - 96), size=10))
+    commands.append(f"{PACK_INK} rg")
+    _pack_certificate(commands, certificate, top_y - 34)
+    commands.append(f"{PACK_MUTED} rg")
+    commands.append(_pdf_text_command(PACK_LEFT, PACK_FOOTER_Y, f"{label} · Page 1 of {total}", size=8))
+    commands.append(f"{PACK_INK} rg")
+    commands.append("ET")
+    streams = ["\n".join(commands).encode("latin-1", "replace")]
+
+    def footer(n, _body_total, label=label):
+        # ``n`` is 1-based within the body; page 1 is the certificate page.
+        return f"{label} · Page {n + 1} of {total}"
+
+    streams.extend(_pack_render_pages(body_pages, footer))
+    return _pdf_objects(streams)

@@ -1,0 +1,51 @@
+{% extends "admin/layout.html" %}
+{% set title='POPIA pack' %}
+{% block admin_body %}
+<style>
+  .badge.pending{background:#fef3c7;color:#b45309}
+  .badge.needs{background:var(--brand-soft,#eaf1ff);color:#0b4ccc}
+  .badge.adopted{background:var(--success-soft,#ecfdf5);color:#047857}
+  .badge.stale{background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318)}
+  .badge.pending:before,.badge.needs:before,.badge.adopted:before,.badge.stale:before{opacity:1}
+  .popia-meta{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin:0}
+  .popia-fields{margin:2px 0 0;padding:0 0 0 18px;color:var(--muted);font-size:13px}
+  .popia-fields li{margin:2px 0}
+</style>
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Compliance</p>
+    <h1>POPIA document pack</h1>
+    <p>The documents Sano Trailers adopts to evidence POPIA compliance. A document cannot be adopted while it still carries open details — those are listed on each card, and printing always works.</p>
+  </div>
+  <div class="header-actions">
+    <a class="btn ghost" href="{{ url_for('popia.pack_pdf') }}">Print pack</a>
+  </div>
+</header>
+
+<section class="portal-grid">
+{% for doc in pack %}
+  <article class="panel portal-card">
+    <header class="portal-card-head">
+      <h2>{{ doc.title }}</h2>
+      <span class="badge {{ doc.status.kind }}">{{ doc.status.label }}</span>
+    </header>
+    <p class="form-help">Version {{ doc.version or '—' }}{% if doc.hash_prefix %} &middot; {{ doc.hash_prefix }}{% endif %}</p>
+    {% if doc.status.detail %}<p class="popia-meta">{{ doc.status.detail }}</p>{% endif %}
+    {% if doc.status.kind == 'pending' %}
+      <ul class="popia-fields">
+        {% for field in doc.outstanding_fields %}<li>{{ field }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    <div class="form-actions">
+      <a class="btn ghost" href="{{ url_for('popia.document', key=doc.key) }}">Open</a>
+      <a class="btn ghost" href="{{ url_for('popia.document_pdf', key=doc.key) }}">Print</a>
+      {% if doc.status.can_accept %}
+      <form class="inline-form" method="post" action="{{ url_for('popia.accept', key=doc.key) }}">
+        <button class="btn primary" type="submit">Accept</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+{% endfor %}
+</section>
+{% endblock %}

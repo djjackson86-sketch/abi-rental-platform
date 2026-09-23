@@ -308,3 +308,30 @@ def pack_status():
             }
         )
     return result
+
+
+def pack_notification():
+    """A one-line summary for the main profile's compliance nag, or ``None``.
+
+    A document needs attention when it has never been adopted or its latest
+    acceptance is stale (the file changed after it was adopted). One acceptance
+    query, then at most one hash per already-adopted document, so the bar stays
+    cheap on every page render while nothing has been adopted yet.
+    """
+    rows = get_db().execute(
+        "SELECT document_key, document_hash FROM document_acceptances "
+        "ORDER BY accepted_at DESC, id DESC"
+    ).fetchall()
+    latest = {}
+    for row in rows:
+        latest.setdefault(row["document_key"], row["document_hash"])
+    needs = []
+    for entry in PACK:
+        key = entry["key"]
+        if key not in latest:
+            needs.append(key)
+        elif (latest[key] or "") != document_hash(key):
+            needs.append(key)
+    if not needs:
+        return None
+    return {"count": len(needs), "documents": needs}
