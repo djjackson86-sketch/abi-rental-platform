@@ -17,13 +17,19 @@ fully visible through the All / Status filters.
 The staff half needs no permission change at all: the Orders route already passes
 ``counts`` to both profiles, so this is markup plus one CSS column rule.
 
+Ticket ABI-341953037 narrowed the same predicate once more: a deposit that has been
+**fully utilised** (``applied > 0`` with ``refund = 0``) is no longer available, so
+there is nothing left to process and it leaves the folder too; a deposit with a
+refund remainder still outstanding (``applied > 0 AND refund > 0``) stays, because
+that money is still owed to the customer.
+
 These tests pin the exact numbers on a seeded mix (returned / started / canceled /
-settled / method-stored / no-deposit / reserved / other branch), that started and
-canceled deposits leave the count, the money and the badge, that they re-enter the
-set the moment the order is returned, that the started order is still listed
-normally, that the card equals the badge equals the folder rows, that staff get the
-three cards branch-scoped with a working badge and folder of their own, and that the
-staff bar's CSS is genuinely responsive.
+settled / method-stored / no-deposit / reserved / other branch / applied-no-refund),
+that started, canceled and fully-utilised deposits leave the count, the money and the
+badge, that they re-enter the set the moment they become actionable again, that the
+started order is still listed normally, that the card equals the badge equals the
+folder rows, that staff get the three cards branch-scoped with a working badge and
+folder of their own, and that the staff bar's CSS is genuinely responsive.
 """
 import os
 import re
@@ -100,8 +106,9 @@ def _insert_order(db, number, status, *, deposit=0, applied=0, refund=0, method=
 def seed_orders(app):
     """A mix that exercises every branch of the narrowed predicate.
 
-    IN  (returned)  : ORD-40001 spent 700 · ORD-40004 applied 400 refund 0 (remainder 0)
-                      · ORD-40009 branch 2, 120
+    IN  (returned)  : ORD-40001 spent 700 · ORD-40009 branch 2, 120
+    OUT (utilised)  : ORD-40004 returned applied 400 refund 0 - fully used, nothing
+                      left to process (ticket ABI-341953037)
     OUT (status)    : ORD-40002 started 250 · ORD-40003 canceled 300
     OUT (settled)   : ORD-40005 refunded 600 + method + timestamp
     OUT (method)    : ORD-40006 returned 500 with a payout method already stored
@@ -216,18 +223,18 @@ def test_only_returned_orders_are_counted_and_valued(app):
     seed_orders(app)
     counts = counters_with_filters(app)
 
-    # returned 700 + returned applied-400/refund-0 remainder 0 (branch 1) + returned
-    # 120 (branch 2). The started 250, the canceled 300, the settled 600 and the
-    # method-stored 500 are all out.
-    assert counts['deposits_unprocessed_total'] == 3
+    # returned 700 (branch 1) + returned 120 (branch 2). The applied-400/refund-0
+    # row is fully utilised, the started 250, the canceled 300, the settled 600 and
+    # the method-stored 500 are all out.
+    assert counts['deposits_unprocessed_total'] == 2
     assert counts['deposits_unprocessed_amount'] == 820.0
 
 
 def test_the_badge_and_the_folder_predicate_agree_with_the_count(app):
     seed_orders(app)
-    assert badge_with_filters(app) == 3
+    assert badge_with_filters(app) == 2
     folder = counters_with_filters(app, payment_status='process_deposit')
-    assert folder['deposits_unprocessed_total'] == 3
+    assert folder['deposits_unprocessed_total'] == 2
     assert folder['deposits_unprocessed_amount'] == 820.0
 
 
@@ -235,7 +242,7 @@ def test_started_and_canceled_deposits_rejoin_the_set_once_returned(app):
     """The narrowing is the STATUS, not the deposit - nothing else is filtered out."""
     seed_orders(app)
     before = counters_with_filters(app)
-    assert (before['deposits_unprocessed_total'], badge_with_filters(app)) == (3, 3)
+    assert (before['deposits_unprocessed_total'], badge_with_filters(app)) == (2, 2)
 
     ctx = _session_context(app)
     try:
@@ -245,7 +252,7 @@ def test_started_and_canceled_deposits_rejoin_the_set_once_returned(app):
         with_started = order_counts()
     finally:
         ctx.pop()
-    assert with_started['deposits_unprocessed_total'] == 4
+    assert with_started['deposits_unprocessed_total'] == 3
     assert with_started['deposits_unprocessed_amount'] == 1070.0  # + the started 250
 
     ctx = _session_context(app)
@@ -257,9 +264,9 @@ def test_started_and_canceled_deposits_rejoin_the_set_once_returned(app):
         badge = order_filter_counts()['payment_status']['process_deposit']
     finally:
         ctx.pop()
-    assert with_canceled['deposits_unprocessed_total'] == 5
+    assert with_canceled['deposits_unprocessed_total'] == 4
     assert with_canceled['deposits_unprocessed_amount'] == 1370.0  # + the canceled 300
-    assert badge == 5
+    assert badge == 4
 
 
 def test_the_cards_follow_the_page_filters(app):
@@ -271,7 +278,7 @@ def test_the_cards_follow_the_page_filters(app):
     canceled = counters_with_filters(app, status='canceled')
     assert canceled['deposits_unprocessed_total'] == 0
     returned = counters_with_filters(app, status='returned')
-    assert returned['deposits_unprocessed_total'] == 3
+    assert returned['deposits_unprocessed_total'] == 2
     assert returned['deposits_unprocessed_amount'] == 820.0
 
 
@@ -281,13 +288,13 @@ def test_the_cards_and_the_badge_stay_branch_scoped(app):
     branch_two = counters_with_filters(app, branch_id=2)
     everything = counters_with_filters(app)
 
-    assert branch_one['deposits_unprocessed_total'] == 2
+    assert branch_one['deposits_unprocessed_total'] == 1
     assert branch_one['deposits_unprocessed_amount'] == 700.0
     assert branch_two['deposits_unprocessed_total'] == 1
     assert branch_two['deposits_unprocessed_amount'] == 120.0
     assert everything['deposits_unprocessed_amount'] == 820.0
     assert badge_with_filters(app, branch_id=2) == 1
-    assert badge_with_filters(app) == 3
+    assert badge_with_filters(app) == 2
 
 
 # ------------------------------------------------------- the folder itself (HTML)
@@ -301,8 +308,9 @@ def test_the_process_deposit_folder_lists_returned_rows_only(client, app):
 
     assert {status for _, status, _, _ in rows} == {'returned'}
     listed = {number for number, _, _, _ in rows}
-    assert listed == {'ORD-40001', 'ORD-40004', 'ORD-40009'}
-    for gone in ('ORD-40002', 'ORD-40003'):
+    assert listed == {'ORD-40001', 'ORD-40009'}
+    # ORD-40004 is fully utilised - nothing left to hand back (ABI-341953037).
+    for gone in ('ORD-40002', 'ORD-40003', 'ORD-40004'):
         assert gone not in listed, f'{gone} is not an actionable deposit'
 
 
@@ -316,17 +324,16 @@ def test_the_card_the_badge_and_the_folder_all_agree(client, app):
     cards = _cards(listing)
     rows = _rows(folder)
 
-    assert _badge(listing) == 3
-    assert cards['Unprocessed deposits'][0] == str(len(rows)) == '3'
-    # The per-row "Deposit to process" column sums to the money card exactly - the
-    # applied-400/refund-0 row sits in the count and contributes R0.00 to the value
-    # on BOTH surfaces (it shows "Done" in the column).
+    assert _badge(listing) == 2
+    assert cards['Unprocessed deposits'][0] == str(len(rows)) == '2'
+    # The per-row "Deposit to process" column sums to the money card exactly. The
+    # fully-utilised applied-400/refund-0 row is no longer in the folder at all, so
+    # the count and the column agree without it (ABI-341953037).
     by_number = {number: deposit for number, _, _, deposit in rows}
     assert round(sum(_money(row[3]) for row in rows), 2) == \
         float(cards['Unprocessed deposit value'][0].lstrip('R'))
     assert cards['Unprocessed deposit value'][0] == 'R820.00'
-    assert by_number['ORD-40004'] == '<small>Done</small>'
-    assert _money(by_number['ORD-40004']) == 0.0
+    assert 'ORD-40004' not in by_number
 
 
 def test_the_started_and_canceled_orders_are_still_reachable_in_the_plain_list(client, app):
@@ -353,7 +360,7 @@ def test_the_main_totals_row_still_shows_six_cards_with_two_red(client, app):
         'Unprocessed deposits', 'Unprocessed deposit value',
     ]
     values = {label: value for label, value, _ in cards}
-    assert values['Unprocessed deposits'] == '3'
+    assert values['Unprocessed deposits'] == '2'
     assert values['Unprocessed deposit value'] == 'R820.00'
     assert [label for label, _, cls in cards if 'is-alert' in cls] == \
         ['Due', 'Unprocessed deposit value']

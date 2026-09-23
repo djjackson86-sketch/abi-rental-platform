@@ -56,6 +56,19 @@ def _process_deposit_clause(alias="o"):
     order that is merely picked up (``started``) is not actionable yet — the
     deposit is only refunded or used once the trailer is back — and a
     ``canceled``/``cancelled`` record is a dead one that will never be refunded.
+
+    Ticket ABI-341953037: a deposit that has been **fully utilised** is no longer
+    available, so there is nothing left to process and it must leave this set.
+    ``use_return_deposit()`` records the applied/refunded split but deliberately
+    leaves ``deposit_process_method``/``deposit_processed_at`` empty, so the
+    method/timestamp pair alone cannot tell a settled-by-utilisation deposit apart
+    from an untouched one. The refund-remainder rule therefore reads: still in the
+    set when nothing has been applied or refunded yet (``applied = refund = 0``),
+    or when a refund remainder is still owed to the customer
+    (``applied > 0 AND refund > 0``). ``applied > 0`` with ``refund = 0`` means the
+    whole deposit went onto the order — fully used, nothing to hand back, so it
+    drops out (its per-row "Deposit to process" column already reads "Done").
+
     This stays the single definition shared by the rail's "Process deposit" folder
     and badge, the Orders metric cards, the CSV export and ``order_counts`` money
     total, so the card, the badge and the folder can never disagree.
@@ -66,7 +79,10 @@ def _process_deposit_clause(alias="o"):
         f"AND COALESCE({prefix}deposit_total, 0) > 0 "
         f"AND COALESCE({prefix}deposit_processed_at, '') = '' "
         f"AND COALESCE({prefix}deposit_process_method, '') = '' "
-        f"AND (COALESCE({prefix}deposit_refund_amount, 0) = 0 OR COALESCE({prefix}deposit_applied_amount, 0) > 0)"
+        f"AND ((COALESCE({prefix}deposit_applied_amount, 0) = 0 "
+        f"AND COALESCE({prefix}deposit_refund_amount, 0) = 0) "
+        f"OR (COALESCE({prefix}deposit_applied_amount, 0) > 0 "
+        f"AND COALESCE({prefix}deposit_refund_amount, 0) > 0))"
     )
 
 
@@ -164,10 +180,13 @@ def order_counts(query="", status="", payment_status="", return_status="", start
     due_expr = collectible_due_expr("o")
     # "Unprocessed deposits" is the SAME set the rail's "Process deposit" filter and
     # badge already use (_process_deposit_clause: returned orders only, ticket
-    # ABI-341953034), so the two cards here can never disagree with the folder
-    # sitting next to them. The value mirrors deposit_to_process_amount() per order:
-    # once any part of a deposit has been refunded or applied, only the refunded
-    # remainder is still outstanding, otherwise the whole deposit is.
+    # ABI-341953034; a fully utilised deposit leaves the set, ticket ABI-341953037),
+    # so the two cards here can never disagree with the folder sitting next to them.
+    # The value mirrors deposit_to_process_amount() per order: once a refund
+    # remainder is still owed only that remainder is outstanding, otherwise the
+    # whole untouched deposit is. An applied/refund=0 (fully used) row is not in the
+    # clause at all, so it contributes 0 to the money total - matching the "Done"
+    # its own row shows.
     deposit_clause = _process_deposit_clause("o")
     deposit_amount_expr = (
         f"CASE WHEN {deposit_clause} THEN CASE "
