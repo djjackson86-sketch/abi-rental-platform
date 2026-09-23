@@ -1,0 +1,131 @@
+{% extends "admin/layout.html" %}
+{% set title='Scan to return a trailer' %}
+{% block admin_body %}
+<header class="page-header scan-vehicle-header">
+  <div class="module-title">
+    <span class="module-icon">▩</span>
+    <div>
+      <p class="eyebrow">Licence disk scanner</p>
+      <h1>Scan to return a trailer</h1>
+      <p>Scan the trailer's disk or the towing car's disk. The open rental comes back on the admin side — the return checklist and the deposit stay on the order page where they already are.</p>
+    </div>
+  </div>
+  <div class="header-actions">
+    <a class="btn ghost" href="{{ url_for('orders.index', status='started') }}">Orders out on hire</a>
+  </div>
+</header>
+
+<section class="panel scan-capture-panel">
+  <h2>1 · Read the disk</h2>
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('returns.scan_return') }}" class="scan-capture-form">
+    <div class="scan-capture-grid">
+      <label>Photograph the disk
+        <input type="file" name="disk_image" accept="image/*" capture="environment">
+        <small>Either disk works — the trailer's or the car's. Flat, in focus, the whole disk face in frame; JPEG or PNG up to 8 MB. The photo is read in memory and never stored.</small>
+      </label>
+      <label>…or paste the decoded barcode text
+        <textarea name="disc_text" rows="3" placeholder="Registering Authority GAUTENG&#10;Licence number ABC 123 GP&#10;Vehicle Registration Number T9876543210"></textarea>
+        <small>If a scanner app on the phone shows the raw PDF417 text, copy it in here instead.</small>
+      </label>
+    </div>
+    <label class="scan-return-plate">…or type the plate on the disk
+      <input name="plate" autocomplete="off" placeholder="e.g. ABC 123 GP">
+      <small>A wet, scratched or missing disk is no reason to keep a trailer out on hire. Type the plate (or the NaTIS registration number) and press the button.</small>
+    </label>
+    <div class="form-actions scan-capture-actions">
+      <button class="btn primary" type="submit">Find the open rental</button>
+    </div>
+    <p class="form-help">Reading a disk changes nothing. The rental only comes back when you press the button on the rental you pick below.</p>
+  </form>
+</section>
+
+{% if review %}
+<section class="panel scan-review-panel">
+  <h2>2 · Which rental is coming back?</h2>
+
+  {% if review.summary %}
+  <div class="scan-identifiers">
+    <small class="scan-identifiers-label">Read off the disk</small>
+    {% for item in review.summary %}
+    <span class="scan-chip"><small>{{ item.label }}</small><b>{{ item.value }}</b></span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if review.returnable|length > 1 %}
+  <div class="scan-warning" role="alert">
+    <strong>{{ review.returnable|length }} rentals match this disk.</strong>
+    <p>Check the order number and the customer — nothing is returned until you choose one of them.</p>
+  </div>
+  {% endif %}
+
+  {% if review.candidates %}
+  <div class="scan-candidates">
+    {% for candidate in review.candidates %}
+    <article class="scan-candidate" data-order-id="{{ candidate.order_id }}" data-returnable="{{ '1' if candidate.returnable else '0' }}">
+      <header class="scan-candidate-head">
+        <h3>{{ candidate.order_number }}{% if candidate.customer_name %} · {{ candidate.customer_name }}{% endif %}</h3>
+        <span class="badge status-{{ candidate.status }}">{{ candidate.status_label }}</span>
+      </header>
+      <p class="scan-candidate-evidence">Matched on {{ candidate.match_label }}{% if candidate.evidence %} — <code>{{ candidate.evidence }}</code>{% endif %}{% if candidate.product_name %} · {{ candidate.product_name }}{% endif %}</p>
+      {% if candidate.also_labels %}
+      <p class="form-help">Also matched:
+        {% for other in candidate.also_labels %}{{ other.label }} <code>{{ other.evidence }}</code>{{ ', ' if not loop.last }}{% endfor %}
+      </p>
+      {% endif %}
+      {% if candidate.returnable %}
+      <form method="post" action="{{ url_for('returns.confirm_return') }}" class="scan-candidate-action">
+        <input type="hidden" name="order_id" value="{{ candidate.order_id }}">
+        <input type="hidden" name="scan_plate" value="{{ review.identifiers.scan_plate }}">
+        <input type="hidden" name="scan_natis" value="{{ review.identifiers.scan_natis }}">
+        <input type="hidden" name="scan_disc_licence" value="{{ review.identifiers.scan_disc_licence }}">
+        <input type="hidden" name="scan_vin" value="{{ review.identifiers.scan_vin }}">
+        <input type="hidden" name="scan_engine" value="{{ review.identifiers.scan_engine }}">
+        <button class="btn primary" type="submit">Mark returned</button>
+        <a class="btn ghost" href="{{ url_for('orders.detail', order_id=candidate.order_id) }}">Open the order first</a>
+      </form>
+      {% else %}
+      <p class="scan-candidate-blocked">{{ candidate.reason }}</p>
+      <div class="form-actions">
+        <a class="btn ghost" href="{{ url_for('orders.detail', order_id=candidate.order_id) }}">Open the order</a>
+      </div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="scan-nothing">
+    <p class="empty">No open rental matches that disk{% if review.summary %} — read off it: {% for item in review.summary %}{{ item.label|lower }} <b>{{ item.value }}</b>{{ ', ' if not loop.last }}{% endfor %}{% endif %}. Nothing has been changed.</p>
+    {% if review.returned %}
+    <div class="scan-returned-hint">
+      <strong>This disk already came back:</strong>
+      <ul>
+        {% for hint in review.returned %}
+        <li>
+          <a href="{{ url_for('orders.detail', order_id=hint.order_id) }}">{{ hint.order_number }}</a>
+          {% if hint.customer_name %}· {{ hint.customer_name }}{% endif %}
+          — {% if hint.scanned %}already returned via disc scan{% if hint.returned_at %} on {{ display_local_datetime(hint.returned_at) }}{% endif %}{% else %}already returned{% endif %}{% if hint.registration %} ({{ hint.registration }}){% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="form-help">If a second rental of the same trailer is still out, its own order has to be the one on the disk — check the order number on the paperwork.</p>
+    </div>
+    {% else %}
+    <p class="form-help">Nothing on file matches what was read. Check the plate was typed as it appears on the disk, or see every order that is still out on hire: <a href="{{ url_for('orders.index', status='started') }}">orders out on hire</a>.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if review.raw_text %}
+  <details class="scan-details">
+    <summary>Raw barcode text ({{ review.raw_text|length }} characters)</summary>
+    <pre class="scan-raw-text">{{ review.raw_text }}</pre>
+  </details>
+  {% endif %}
+
+  <div class="form-actions">
+    <a class="btn ghost" href="{{ url_for('returns.scan_return') }}">Start a new scan</a>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

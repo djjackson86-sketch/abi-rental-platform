@@ -72,6 +72,7 @@
   <article class="panel">
     <h2>Status and payment</h2>
     <div class="list-row"><span>Status</span><b>{{ status_label(order.status) }}</b></div>
+    {% if order.return_scan_at %}<div class="list-row"><span>Returned via disc scan</span><b>{{ display_local_datetime(order.return_scan_at) }}{% if order.return_scan_registration %} · {{ order.return_scan_registration }}{% endif %}{% if order.return_scan_source == 'trailer_disc' %} · trailer disk{% elif order.return_scan_source == 'vehicle_disc' %} · towing car's disk{% endif %}</b></div>{% endif %}
     <div class="list-row"><span>Created by</span><b>{{ order.created_by_name or '—' }}</b></div>
     <div class="list-row"><span>Created</span><b>{{ display_local_datetime(order.created_at) }}</b></div>
     <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>

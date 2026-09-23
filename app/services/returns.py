@@ -30,7 +30,7 @@ from app.db import get_db
 from app.services.access import session_branch_scope_ids
 from app.services.orders import STATUS_LABELS, get_order, transition_order
 from app.services.timezone import local_now_iso
-from app.services.vehicles import fields_from_disc, registration_key
+from app.services.vehicles import fields_from_disc, normalise_registration, registration_key
 
 #: Why an order matched. Order matters: the first is the strongest evidence, and
 #: when the same order matches more than one way the strongest is the one kept.
@@ -267,6 +267,78 @@ def match_open_rentals(parsed, session_scope=None):
     )
 
 
+def recently_returned(parsed, session_scope=None, limit=3):
+    """Returned rentals the scanned identifiers still point at — the "already returned" hint.
+
+    Once an order is ``returned`` it is no longer a live order, so
+    :func:`match_open_rentals` correctly stops offering it. Staff scanning the same
+    disc a second time then need to be told *why* nothing is on offer, so the
+    screen adds this read-only lookup: the same trailer / customer-vehicle identity
+    as the matcher uses, but for orders that have already come back. Nothing is
+    written and nothing is offered as returnable.
+
+    A returned rental that was **itself** closed by a disc scan is listed first
+    (``scanned`` is True and ``returned_at`` carries the scan time), so the
+    sentence staff read is "it already came back this way".
+    """
+    ident = scanned_identifiers(parsed)
+    keys = _key_index(
+        ident, ("registration", "licence_number", "registration_number", "vin", "engine_number")
+    )
+    if not keys:
+        return []
+    scope_ids = _scope_ids(session_scope)
+    found = {}
+
+    def remember(row, registration, source):
+        if not _in_scope(row, scope_ids):
+            return
+        hint = {
+            "order_id": int(row["id"]),
+            "order_number": row["order_number"],
+            "customer_name": (row["customer_name"] or "").strip(),
+            "registration": (registration or "").strip(),
+            "returned_at": str(row["return_scan_at"] or "").strip(),
+            "scanned": bool(str(row["return_scan_at"] or "").strip()),
+            "scan_registration": str(row["return_scan_registration"] or "").strip(),
+            "source": str(row["return_scan_source"] or "").strip(),
+        }
+        previous = found.get(hint["order_id"])
+        if previous is None or (not previous["scanned"] and hint["scanned"]):
+            found[hint["order_id"]] = hint
+
+    orders_sql = """
+        SELECT o.id, o.order_number, o.status, o.return_scan_at, o.return_scan_registration,
+               o.return_scan_source, o.collect_branch_id, o.return_branch_id,
+               c.name AS customer_name
+        FROM orders o %s
+        LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE %s AND o.status = 'returned'
+        ORDER BY o.id DESC"""
+    for product, field, value in _trailers_matching(keys):
+        if not str(ident.get(field) or "").strip():
+            continue
+        rows = get_db().execute(
+            orders_sql % ("JOIN order_items oi ON oi.order_id = o.id", "oi.product_id = ?"),
+            (int(product["id"]),),
+        ).fetchall()
+        for row in rows:
+            remember(row, row["return_scan_registration"] or value, SOURCE_TRAILER_DISC)
+    for vehicle, field, matched_on, value in _vehicles_matching(keys):
+        if not str(ident.get(field) or "").strip():
+            continue
+        rows = get_db().execute(
+            orders_sql % ("", "o.customer_id = ?"), (int(vehicle["customer_id"]),)
+        ).fetchall()
+        for row in rows:
+            remember(row, row["return_scan_registration"] or value, SOURCE_VEHICLE_DISC)
+    return sorted(
+        found.values(),
+        key=lambda item: (item["scanned"], item["returned_at"], item["order_id"]),
+        reverse=True,
+    )[:limit]
+
+
 def returnable_order(order_id, session_scope=None):
     """The order behind a scan, or a plain ``ValueError`` saying why it cannot come back.
 
@@ -298,13 +370,19 @@ def returnable_order(order_id, session_scope=None):
 
 
 def _scan_identity_for_order(order_id, ident):
-    """``(registration, source)`` to record: was this disc the trailer or the car?"""
+    """``(registration, source)`` to record: was this disc the trailer or the car?
+
+    The registration is stored **normalised** (upper case, single spaces — the same
+    ``normalise_registration`` every product and vehicle plate goes through), so the
+    audit line on the order page reads like every other plate in the app even when
+    the disc payload arrived in loose lower case.
+    """
     plates = _key_index(ident, _PRODUCT_IDENTITY_FIELDS)
-    registration = (
-        str(ident.get("registration") or "").strip()
-        or str(ident.get("registration_number") or "").strip()
-        or str(ident.get("licence_number") or "").strip()
-        or str(ident.get("vin") or "").strip()
+    registration = normalise_registration(
+        str(ident.get("registration") or "")
+        or str(ident.get("registration_number") or "")
+        or str(ident.get("licence_number") or "")
+        or str(ident.get("vin") or "")
     )
     if plates:
         rows = get_db().execute(
@@ -318,7 +396,7 @@ def _scan_identity_for_order(order_id, ident):
                 value = str(row[field] or "").strip()
                 key = registration_key(value)
                 if key and key in plates:
-                    return registration or value, SOURCE_TRAILER_DISC
+                    return registration or normalise_registration(value), SOURCE_TRAILER_DISC
     return registration, SOURCE_VEHICLE_DISC
 
 

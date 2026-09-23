@@ -425,6 +425,33 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .scan-raw-text{margin:10px 0 2px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45;max-height:240px;overflow:auto;background:#fff;border:1px solid var(--line-soft);border-radius:10px;padding:10px}
 @media(max-width:860px){.scan-capture-grid{grid-template-columns:1fr}}
 
+/* --- Scan-to-return screen (programme phase 6, feature D / D2) ------------
+   Same phone-first shape as the A3 scan screen above: the capture step is one
+   column, and the review step is a stack of candidate cards. A candidate card is
+   min-width:0 with overflow-wrap:anywhere so a long VIN, an order number or a
+   390px viewport can never push the page sideways. The "read off the disk" chips
+   wrap instead of scrolling, and the plate box is full width because it is the
+   fallback staff reach for when the camera will not read a damaged disk. ------ */
+.scan-return-plate{margin:0 0 14px}
+.scan-identifiers{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px}
+.scan-identifiers-label{flex-basis:100%;font-weight:700;color:var(--ink-2);text-transform:uppercase;letter-spacing:.04em;font-size:11px}
+.scan-chip{display:inline-flex;flex-direction:column;gap:2px;min-width:0;max-width:100%;padding:6px 10px;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface-soft)}
+.scan-chip small{font-size:11px;color:var(--ink-2)}
+.scan-chip b{font-size:13px;overflow-wrap:anywhere}
+.scan-candidates{display:grid;gap:12px}
+.scan-candidate{display:grid;gap:8px;min-width:0;padding:14px;border:1px solid var(--line-soft);border-radius:var(--radius,12px);background:#fff}
+.scan-candidate-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;justify-content:space-between}
+.scan-candidate-head h3{margin:0;font-size:15px;overflow-wrap:anywhere}
+.scan-candidate-evidence{margin:0;overflow-wrap:anywhere;color:var(--ink-2)}
+.scan-candidate-evidence code,.scan-identifiers code{overflow-wrap:anywhere}
+.scan-candidate-action{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.scan-candidate-blocked{margin:0;padding:10px 12px;border:1px solid #fde68a;border-radius:10px;background:#fffbeb;color:#92400e;font-weight:600;overflow-wrap:anywhere}
+.scan-nothing{display:grid;gap:10px}
+.scan-returned-hint{display:grid;gap:6px;padding:12px 14px;border:1px solid var(--line-soft);border-radius:var(--radius,12px);background:var(--surface-soft)}
+.scan-returned-hint ul{margin:0;padding-left:18px}
+.scan-returned-hint li{overflow-wrap:anywhere}
+.scan-returned-hint p{margin:0}
+
 /* --- Client page Vehicles panel (programme phase 4, feature A / A4) -------
    The panel sits in the same right-hand column as the contact/orders cards.
    The read table is the house .data-table inside .table-wrap (which scrolls

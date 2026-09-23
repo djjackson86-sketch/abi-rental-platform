@@ -58,6 +58,7 @@ MODULES = [
     ("reports", "Reports"),
     ("scan_barcode", "Scan a barcode"),
     ("scan_vehicle", "Scan a vehicle licence disk"),
+    ("scan_return", "Scan to return a trailer"),
     ("settings", "Settings"),
 ]
 
@@ -97,6 +98,10 @@ _ENDPOINT_MODULE_RULES = [
     # on the client's record, so the accounts that may open the client page may read it.
     ("vehicles.customer_vehicles", "customers"),
     ("vehicles.", "scan_vehicle"),
+    # Programme phase 6 (feature D / D2): scanning a disk to bring a rental back.
+    # Like scan_vehicle it stays out of the shared staff default set, so the main
+    # profile ticks it per account; the routes 403 without it.
+    ("returns.", "scan_return"),
     # The dashboard's cash-up / end of day panel. Same module as the screen it
     # lives on, so an account that may see the dashboard may cash its drawer up.
     ("cash.", "dashboard"),
