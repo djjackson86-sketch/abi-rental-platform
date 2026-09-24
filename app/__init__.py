@@ -61,6 +61,11 @@ def create_app(test_config=None):
         TELEGRAM_CHAT_ID=os.environ.get("TELEGRAM_CHAT_ID", ""),
         TELEGRAM_CRON_SECRET=os.environ.get("TELEGRAM_CRON_SECRET", ""),
         TELEGRAM_NOTIFICATIONS_ENABLED=os.environ.get("TELEGRAM_NOTIFICATIONS_ENABLED", ""),
+        # The "Sano Trailers daily summary" TEXT report is off by default (ticket
+        # ABI-341953054). Every other Telegram notification is unaffected. Set
+        # TELEGRAM_DAILY_SUMMARY_ENABLED=1 to bring the report back without a code
+        # change.
+        TELEGRAM_DAILY_SUMMARY_ENABLED=os.environ.get("TELEGRAM_DAILY_SUMMARY_ENABLED", ""),
         PUBLIC_BASE_URL=os.environ.get("PUBLIC_BASE_URL", ""),
         BUSINESS_TIMEZONE=os.environ.get("BUSINESS_TIMEZONE", "Africa/Johannesburg"),
         CURRENCY_SYMBOL=os.environ.get("CURRENCY_SYMBOL", "R"),

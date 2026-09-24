@@ -25,6 +25,19 @@ def telegram_configured():
     return bool(current_app.config.get("TELEGRAM_BOT_TOKEN") and current_app.config.get("TELEGRAM_CHAT_ID"))
 
 
+def daily_summary_enabled():
+    """Whether the ``Sano Trailers daily summary`` text report may be sent.
+
+    Off by default: ABI asked for that recurring text report to stop (ticket
+    ABI-341953054), so ``send_daily_summary()`` no longer posts it. Only that one
+    message is suppressed - new customer / new order notifications, the test
+    message and the manual day-report PDF all still send. Setting
+    ``TELEGRAM_DAILY_SUMMARY_ENABLED`` (env var, no code change needed) turns the
+    report back on, which is also how the toggle itself is proven in tests.
+    """
+    return _truthy(current_app.config.get("TELEGRAM_DAILY_SUMMARY_ENABLED"))
+
+
 def _escape(value):
     return html.escape(str(value if value is not None else ""), quote=False)
 
@@ -289,9 +302,27 @@ def format_daily_summary(summary):
 
 
 def send_daily_summary(date_text=None):
+    """Send (or, by default, deliberately NOT send) the daily summary text report.
+
+    Ticket ABI-341953054: the client asked for the ``Sano Trailers daily summary``
+    Telegram text report to stop. The report is now suppressed here, in the one
+    place that posts it, so it can never go out - including from the existing
+    external cron that calls ``POST /api/internal/telegram/daily-summary``.
+
+    The call still succeeds (``ok`` True, ``sent`` False) and still carries the
+    ``date`` and ``sections`` metadata, so any cron keeps getting a healthy 200
+    with no loud failure, while nothing at all is posted. Wording is preserved in
+    ``format_daily_summary()`` for when the report is switched back on.
+    """
     target_date = _parse_date(date_text)
     summary = daily_summary_counts(target_date)
-    result = _send_message(format_daily_summary(summary))
+    if not notifications_enabled():
+        # Unchanged, pre-existing behaviour: the global switch wins and says so.
+        result = {"ok": True, "sent": False, "skipped": "disabled"}
+    elif not daily_summary_enabled():
+        result = {"ok": True, "sent": False, "skipped": "daily_summary_disabled"}
+    else:
+        result = _send_message(format_daily_summary(summary))
     result["date"] = summary["date"]
     result["sections"] = {
         "going_out": len(summary["going_out"]),
