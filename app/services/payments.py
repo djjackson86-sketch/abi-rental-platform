@@ -1,12 +1,13 @@
 from datetime import datetime
 
 from app.db import get_db, now
+from app.services.access import order_branch_clause
+from app.services.orders import get_order
 
 
 def _active_payment_clause(alias=""):
     prefix = f"{alias}." if alias else ""
     return f"COALESCE({prefix}deleted_at, '') = '' AND COALESCE({prefix}status, 'paid') = 'paid'"
-from app.services.orders import get_order
 
 PAYMENT_LABELS = {
     "payment_due": "Payment due",
@@ -142,16 +143,60 @@ def archive_payment(payment_id):
     return recalculate_order_payment(payment["order_id"])
 
 
-def list_payments(include_archived=False):
-    where = "1=1" if include_archived else _active_payment_clause("p")
+PAYMENT_SORTS = {
+    "date": "COALESCE(NULLIF(p.payment_date, ''), p.created_at)",
+    "branch": "LOWER(COALESCE(cb.name, rb.name, ''))",
+    "order": "LOWER(COALESCE(o.order_number, ''))",
+    "customer": "LOWER(COALESCE(c.name, ''))",
+    "amount": "p.amount",
+    "method": "LOWER(COALESCE(p.method, ''))",
+    "status": "LOWER(COALESCE(p.status, ''))",
+}
+
+
+def _payment_order_clause(sort="date", direction="desc"):
+    sort = sort if sort in PAYMENT_SORTS else "date"
+    direction = "asc" if direction == "asc" else "desc"
+    expr = PAYMENT_SORTS[sort]
+    clauses = [f"{expr} {direction.upper()}"]
+    if sort == "branch":
+        clauses.append(f"LOWER(COALESCE(rb.name, '')) {direction.upper()}")
+    if sort != "date":
+        clauses.append("COALESCE(NULLIF(p.payment_date, ''), p.created_at) DESC")
+    clauses.extend(["p.created_at DESC", "p.id DESC"])
+    return ", ".join(clauses)
+
+
+def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc"):
+    where_parts = ["1=1" if include_archived else _active_payment_clause("p")]
+    branch_sql, params = order_branch_clause("o", branch_id=branch_id)
+    if branch_sql:
+        where_parts.append(branch_sql[5:] if branch_sql.startswith(" AND ") else branch_sql)
+    order_clause = _payment_order_clause(sort, direction)
     return get_db().execute(
-        f"""SELECT p.*, o.order_number, c.name AS customer_name
+        f"""SELECT p.*, o.order_number, o.collect_branch_id, o.return_branch_id,
+                  c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
+                  CASE
+                    WHEN cb.name IS NOT NULL AND rb.name IS NOT NULL AND cb.id <> rb.id THEN cb.name || ' → ' || rb.name
+                    WHEN cb.name IS NOT NULL THEN cb.name
+                    WHEN rb.name IS NOT NULL THEN rb.name
+                    ELSE ''
+                  END AS branch_label
         FROM payments p
         LEFT JOIN orders o ON o.id = p.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
-        WHERE {where}
-        ORDER BY COALESCE(NULLIF(p.payment_date, ''), p.created_at) DESC, p.created_at DESC, p.id DESC"""
+        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id
+        WHERE {' AND '.join(where_parts)}
+        ORDER BY {order_clause}""",
+        params,
     ).fetchall()
+
+
+def normalise_payment_sort(sort, direction):
+    sort = sort if sort in PAYMENT_SORTS else "date"
+    direction = "asc" if direction == "asc" else "desc"
+    return sort, direction
 
 
 def label_for(payment_status):

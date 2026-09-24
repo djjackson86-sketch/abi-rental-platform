@@ -1,19 +1,43 @@
 {% extends "admin/layout.html" %}
 {% set title='Payments' %}
+{% macro sort_link(key, label) -%}
+  {%- set active = filters.sort == key -%}
+  {%- set next_dir = 'desc' if active and filters.dir == 'asc' else 'asc' -%}
+  <a class="table-sort{% if active %} active{% endif %}" href="{{ url_for('payments.index', status=filters.status or None, branch=filters.branch or None, sort=key, dir=next_dir) }}">{{ label }}{% if active %} {{ '↑' if filters.dir == 'asc' else '↓' }}{% endif %}</a>
+{%- endmacro %}
 {% block admin_body %}
 <header class="page-header">
   <div><p class="eyebrow">Payments</p><h1>Payments</h1><p>Manual payment ledger for rental orders.</p></div>
-  <div class="header-actions"><a class="btn ghost" href="{{ url_for('payments.index') }}">Active</a><a class="btn ghost" href="{{ url_for('payments.index', status='archived') }}">Archived</a></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('payments.index', branch=filters.branch or None, sort=filters.sort, dir=filters.dir) }}">Active</a><a class="btn ghost" href="{{ url_for('payments.index', status='archived', branch=filters.branch or None, sort=filters.sort, dir=filters.dir) }}">Archived</a></div>
 </header>
 <section class="panel">
+  <form method="get" class="orders-filter-form payments-filter-form">
+    {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
+    {% if filters.sort %}<input type="hidden" name="sort" value="{{ filters.sort }}">{% endif %}
+    {% if filters.dir %}<input type="hidden" name="dir" value="{{ filters.dir }}">{% endif %}
+    <div class="filter-group">
+      <div class="filter-group-head"><strong>Branch</strong><span>⌃</span></div>
+      {% if branch_scope %}
+      <label class="filter-fixed" title="Your account only sees this branch">{{ branches[0].name if branches else 'Your branch' }}</label>
+      {% else %}
+      <select name="branch" aria-label="Branch" onchange="this.form.submit()">
+        <option value="">All branches</option>
+        {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+      </select>
+      {% endif %}
+      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('payments.index', status=filters.status or None, sort=filters.sort, dir=filters.dir) }}">Clear branch</a>{% endif %}
+    </div>
+    <noscript><button class="btn ghost" type="submit">Apply branch</button></noscript>
+  </form>
   {% if payments %}
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Payment date</th><th>Order</th><th>Customer</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>{{ sort_link('date', 'Payment date') }}</th><th>{{ sort_link('branch', 'Branch') }}</th><th>{{ sort_link('order', 'Order') }}</th><th>{{ sort_link('customer', 'Customer') }}</th><th>{{ sort_link('amount', 'Amount') }}</th><th>{{ sort_link('method', 'Method') }}</th><th>Reference</th><th>{{ sort_link('status', 'Status') }}</th><th>Actions</th></tr></thead>
       <tbody>
       {% for payment in payments %}
         <tr>
           <td>{{ display_payment_date(payment) }}</td>
+          <td>{{ payment.branch_label or '—' }}</td>
           <td>{{ payment.order_number or '—' }}</td>
           <td>{{ payment.customer_name or '—' }}</td>
           <td><strong>R{{ '%.2f'|format(payment.amount) }}</strong></td>
