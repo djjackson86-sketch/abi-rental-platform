@@ -202,7 +202,43 @@
     {% endif %}
   </section>
 
-  {# Spare wheel count (ticket ABI-341953036). Sits between the Cash up panel
+  <section class="panel pos-cashup-panel">
+    <div class="panel-title">
+      <h2>POS Cashup{% if cash_day.branch_name %} · {{ cash_day.branch_name }}{% endif %}</h2>
+      <span class="pill">{% if cash_day.pos_cashed_up %}POS cashed up{% else %}Not POS cashed up{% endif %}</span>
+    </div>
+    {% if cash_day.aggregate %}
+    <p class="cash-note">All branch POS/card cash-up figures are read-only totals. Select a branch in the top Branch filter to enter counted POS/card payments.</p>
+    <div class="metrics dashboard-metrics dashboard-day-metrics">
+      <div class="metric-card"><small>Expected card total</small><b>R{{ '%.2f'|format(cash_day.expected_card) }}</b><span>{{ cash_day.branch_name }} · {{ cash_day.day }}</span></div>
+      <div class="metric-card"><small>POS/card counted</small><b>{% if cash_day.pos_cashed_up %}R{{ '%.2f'|format(cash_day.counted_card) }}{% else %}—{% endif %}</b><span>{% if cash_day.pos_cashed_up %}Counted{% else %}Not POS cashed up yet{% endif %}</span></div>
+      <div class="metric-card"><small>Variance</small><b>{{ cash_day.pos_variance_display }}</b><span>{{ cash_day.pos_variance_label }}</span></div>
+    </div>
+    {% elif not day_is_today %}
+    <p class="cash-note">Depot: {{ cash_day.branch_name }} · {{ cash_day.day }} — {{ cash_day.pos_variance_label }}.</p>
+    <div class="metrics dashboard-metrics dashboard-day-metrics">
+      <div class="metric-card"><small>Expected card total</small><b>R{{ '%.2f'|format(cash_day.expected_card) }}</b><span>Card payments for {{ cash_day.day }}</span></div>
+      <div class="metric-card"><small>POS/card counted</small><b>{% if cash_day.pos_cashed_up %}R{{ '%.2f'|format(cash_day.counted_card) }}{% else %}—{% endif %}</b><span>{% if cash_day.pos_cashed_up %}Counted{% else %}Not POS cashed up yet{% endif %}</span></div>
+      <div class="metric-card"><small>Variance</small><b>{{ cash_day.pos_variance_display }}</b><span>{{ cash_day.pos_variance_label }}</span></div>
+    </div>
+    <p class="cash-note">{{ cash_past_note }}</p>
+    {% else %}
+    <p class="cash-note">Depot: {{ cash_day.branch_name }} · Expected card total R{{ '%.2f'|format(cash_day.expected_card) }}{% if cash_day.pos_cashed_up %} — {{ cash_day.pos_variance_label }} ({{ cash_day.pos_variance_display }}){% endif %}.</p>
+    <form method="post" action="{{ url_for('cash.save_pos') }}" class="settings-form">
+      <input type="hidden" name="day" value="{{ cash_day.day }}">
+      <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <div class="form-grid compact">
+        <label>POS/card counted<input type="number" step="0.01" min="0" name="counted_card" value="{% if cash_day.pos_cashed_up %}{{ '%.2f'|format(cash_day.counted_card) }}{% endif %}" placeholder="0.00" required></label>
+        <label>Expected card total<input value="R{{ '%.2f'|format(cash_day.expected_card) }}" disabled></label>
+      </div>
+      <div class="form-actions">
+        <button class="btn primary" type="submit">Save POS cashup</button>
+      </div>
+    </form>
+    {% endif %}
+  </section>
+
+  {# Spare wheel count (ticket ABI-341953036). Sits between the POS Cashup panel
      and the End of day notes panel, inside the same .two-col flow, so it is
      the section the client reads between the two. #}
   {% include "admin/_dashboard_spare_wheels.html" %}

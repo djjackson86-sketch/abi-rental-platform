@@ -301,6 +301,7 @@ CREATE TABLE IF NOT EXISTS cash_ups (
     business_day TEXT NOT NULL,
     opening_cash REAL NOT NULL DEFAULT 0,
     counted_cash REAL,
+    counted_card REAL,
     notes TEXT NOT NULL DEFAULT '',
     interaction_calls INTEGER NOT NULL DEFAULT 0,
     interaction_whatsapp INTEGER NOT NULL DEFAULT 0,
@@ -650,6 +651,7 @@ def run_migrations(db):
         UNIQUE(branch_id, business_day)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_cash_ups_branch_day ON cash_ups(branch_id, business_day)")
+    ensure_column(db, "cash_ups", "counted_card", "REAL")
     ensure_column(db, "cash_ups", "interaction_calls", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(db, "cash_ups", "interaction_whatsapp", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(db, "cash_ups", "interaction_emails", "INTEGER NOT NULL DEFAULT 0")

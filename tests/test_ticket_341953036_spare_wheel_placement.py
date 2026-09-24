@@ -203,10 +203,12 @@ def test_the_spare_wheel_block_is_inside_the_cash_up_day_section(client, app):
     movement = html.index('<h2 class="section-heading">Movement</h2>')
     block = html.index('<section class="panel spare-wheel-panel">')
     assert section < block < movement
-    # It is still the very next panel after the Cash up panel.
+    # ABI-341953052 inserts POS Cashup after the Cash up panel, so spare wheels
+    # now stay after that new panel and before End of day notes.
     panels = panel_headings(html)
     cash_index = next(i for i, heading in enumerate(panels) if heading.startswith("Cash up \u00b7 "))
-    assert panels[cash_index + 1] == NEW_PANEL_HEADING
+    assert panels[cash_index + 1].startswith("POS Cashup \u00b7 ")
+    assert panels[cash_index + 2] == NEW_PANEL_HEADING
 
 
 def test_the_branch_limited_staff_view_gets_the_same_order(client, app):
@@ -219,7 +221,8 @@ def test_the_branch_limited_staff_view_gets_the_same_order(client, app):
     assert cash_panel < block < notes_panel
     panels = panel_headings(html)
     cash_index = next(i for i, heading in enumerate(panels) if heading.startswith("Cash up \u00b7 "))
-    assert panels[cash_index + 1] == NEW_PANEL_HEADING
+    assert panels[cash_index + 1].startswith("POS Cashup \u00b7 ")
+    assert panels[cash_index + 2] == NEW_PANEL_HEADING
 
 
 def test_the_all_branches_view_keeps_the_order_and_stays_read_only(client, app):

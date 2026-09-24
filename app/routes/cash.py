@@ -86,6 +86,30 @@ def save():
     return _done(f"Cash up saved for {day}", branch_id)
 
 
+@bp.post("/pos")
+@login_required
+def save_pos():
+    """POS Cashup: record the counted card/POS total for the day."""
+    day = _day_from_request()
+    branch_id = _target_branch()
+    try:
+        # The dashboard never offers an All-branches POS save. Refuse a crafted
+        # aggregate post instead of falling back to the acting branch.
+        if not str(request.form.get("branch", "")).strip().isdigit():
+            raise ValueError("Select a branch to save POS cashup")
+        cash.guard_writable_day(day)
+        cash.save_pos_cash_up(
+            day,
+            request.form.get("counted_card", ""),
+            branch_id=branch_id,
+            user_id=_user_id(),
+        )
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(_dashboard_url(branch_id))
+    return _done(f"POS cashup saved for {day}", branch_id)
+
+
 @bp.post("/notes")
 @login_required
 def save_notes():

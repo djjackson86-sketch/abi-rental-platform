@@ -199,23 +199,28 @@ def opening_cash(day, branch_id):
     return _closing_before(day, branch_id)[1]
 
 
-def cash_received(day, branch_id):
-    """Cash payments received for the day, mirroring the dashboard cash card.
-
-    Same filters as the ``Total cash payments`` card: paid, not archived, and
-    dated by ``payment_date`` falling back to ``created_at``. Restricted to the
-    cashing-up depot, and the session scope still wins over that restriction.
-    """
+def payment_received(day, branch_id, method):
+    """Paid, non-deleted payments for one method/day/depot."""
     scope_sql, scope_params = order_branch_clause('o', branch_id=branch_id)
     row = get_db().execute(
         f"""SELECT COALESCE(SUM(pay.amount), 0) AS s
         FROM payments pay JOIN orders o ON o.id = pay.order_id
         WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
-          AND LOWER(pay.method) = 'cash'
+          AND LOWER(pay.method) = ?
           AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
-        [day, *scope_params],
+        [str(method or '').lower(), day, *scope_params],
     ).fetchone()
     return money(_value(row, 's'))
+
+
+def cash_received(day, branch_id):
+    """Cash payments received for the day, mirroring the dashboard cash card."""
+    return payment_received(day, branch_id, 'cash')
+
+
+def card_received(day, branch_id):
+    """POS/card payments received for the day, for the POS Cashup panel."""
+    return payment_received(day, branch_id, 'card')
 
 
 
@@ -241,7 +246,7 @@ def _day_row(day, branch_id):
     if not branch_id:
         return None
     return get_db().execute(
-        """SELECT id, opening_cash, counted_cash, notes, interaction_calls,
+        """SELECT id, opening_cash, counted_cash, counted_card, notes, interaction_calls,
         interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes
         FROM cash_ups WHERE branch_id = ? AND business_day = ?""",
         (branch_id, day),
@@ -323,14 +328,18 @@ def day_summary(day=None, branch_id=None):
     day_row = _day_row(day, branch_id)
     cash_up_id = int(_value(day_row, 'id') or 0) if day_row is not None else 0
     counted = _value(day_row, 'counted_cash') if day_row is not None else None
+    counted_card = _value(day_row, 'counted_card') if day_row is not None else None
     cashed_up = day_row is not None and counted is not None
+    pos_cashed_up = day_row is not None and counted_card is not None
     counted_value = money(counted) if cashed_up else None
+    counted_card_value = money(counted_card) if pos_cashed_up else None
     used_lines = _used_lines(cash_up_id)
     used_total = money(sum(line['amount'] for line in used_lines))
     drop_lines = _drop_lines(cash_up_id)
     drop_total = money(sum(line['amount'] for line in drop_lines))
     opening_from, opening = _closing_before(day, branch_id)
     received = cash_received(day, branch_id) if branch_id else 0.0
+    card_total = card_received(day, branch_id) if branch_id else 0.0
     deposit_refund_total = cash_deposit_refunds(day, branch_id) if branch_id else 0.0
     # Cash banked, spent, or paid back as a deposit refund is no longer in the
     # drawer, so all three come off the expected figure.
@@ -338,6 +347,9 @@ def day_summary(day=None, branch_id=None):
     variance = None
     if cashed_up:
         variance = money(float(counted_value or 0) - expected)
+    pos_variance = None
+    if pos_cashed_up:
+        pos_variance = money(float(counted_card_value or 0) - card_total)
     return {
         'day': day,
         'branch_id': branch_id,
@@ -345,6 +357,7 @@ def day_summary(day=None, branch_id=None):
         'opening': opening,
         'opening_from': opening_from,
         'cash_received': received,
+        'card_received': card_total,
         'used_lines': used_lines,
         'used_count': len(used_lines),
         'used_total': used_total,
@@ -358,6 +371,12 @@ def day_summary(day=None, branch_id=None):
         'variance': variance,
         'variance_display': _variance_text(variance, cashed_up),
         'variance_label': _variance_label(variance, cashed_up),
+        'counted_card': counted_card_value,
+        'pos_cashed_up': pos_cashed_up,
+        'expected_card': card_total,
+        'pos_variance': pos_variance,
+        'pos_variance_display': _variance_text(pos_variance, pos_cashed_up),
+        'pos_variance_label': _variance_label(pos_variance, pos_cashed_up),
         'notes': str(_value(day_row, 'notes') or '') if day_row is not None else '',
         'interactions': {
             'calls': int(_value(day_row, 'interaction_calls', 0) or 0) if day_row is not None else 0,
@@ -387,6 +406,8 @@ def aggregate_day_summary(day=None):
     notes = []
     counted_total = 0.0
     counted_count = 0
+    counted_card_total = 0.0
+    counted_card_count = 0
     for summary in summaries:
         for line in summary['used_lines']:
             item = dict(line)
@@ -399,6 +420,9 @@ def aggregate_day_summary(day=None):
         if summary.get('cashed_up'):
             counted_total += float(summary.get('counted') or 0)
             counted_count += 1
+        if summary.get('pos_cashed_up'):
+            counted_card_total += float(summary.get('counted_card') or 0)
+            counted_card_count += 1
         if summary.get('notes'):
             notes.append(f"{summary['branch_name']}: {summary['notes']}")
         if summary.get('interactions', {}).get('notes'):
@@ -406,6 +430,7 @@ def aggregate_day_summary(day=None):
 
     opening = money(sum(summary['opening'] for summary in summaries))
     received = money(sum(summary['cash_received'] for summary in summaries))
+    card_total = money(sum(summary.get('card_received', 0) for summary in summaries))
     used_total = money(sum(summary['used_total'] for summary in summaries))
     drop_total = money(sum(summary['drop_total'] for summary in summaries))
     deposit_refund_total = money(sum(summary.get('deposit_refund_total', 0) for summary in summaries))
@@ -418,6 +443,14 @@ def aggregate_day_summary(day=None):
         variance_label = f"Partial: {counted_count} of {len(summaries)} depots cashed up"
     else:
         variance_label = _variance_label(variance, cashed_up)
+    pos_cashed_up = counted_card_count > 0
+    counted_card_value = money(counted_card_total) if pos_cashed_up else None
+    pos_variance = money(counted_card_total - card_total) if pos_cashed_up else None
+    all_pos_cashed_up = bool(summaries) and counted_card_count == len(summaries)
+    if pos_cashed_up and not all_pos_cashed_up:
+        pos_variance_label = f"Partial: {counted_card_count} of {len(summaries)} depots POS cashed up"
+    else:
+        pos_variance_label = _variance_label(pos_variance, pos_cashed_up)
     return {
         'day': day,
         'branch_id': None,
@@ -428,6 +461,7 @@ def aggregate_day_summary(day=None):
         'opening': opening,
         'opening_from': 'summed per depot' if branches else '',
         'cash_received': received,
+        'card_received': card_total,
         'used_lines': used_lines,
         'used_count': sum(summary['used_count'] for summary in summaries),
         'used_total': used_total,
@@ -441,6 +475,12 @@ def aggregate_day_summary(day=None):
         'variance': variance,
         'variance_display': _variance_text(variance, cashed_up),
         'variance_label': variance_label,
+        'counted_card': counted_card_value,
+        'pos_cashed_up': pos_cashed_up,
+        'expected_card': card_total,
+        'pos_variance': pos_variance,
+        'pos_variance_display': _variance_text(pos_variance, pos_cashed_up),
+        'pos_variance_label': pos_variance_label,
         'notes': '\n'.join(notes),
         'interactions': {
             'calls': sum(summary['interactions']['calls'] for summary in summaries),
@@ -506,6 +546,26 @@ def save_cash_up(day, counted_cash, notes='', branch_id=None, user_id=None):
     db.execute(
         'UPDATE cash_ups SET counted_cash = ?, opening_cash = ?, notes = ?, updated_at = ? WHERE id = ?',
         (counted, opening_cash(day, branch_id), str(notes or '').strip(), now(), cash_up_id),
+    )
+    db.commit()
+    return cash_up_id
+
+
+def save_pos_cash_up(day, counted_card, branch_id=None, user_id=None):
+    """Record the counted POS/card total for the day."""
+    if branch_id is None:
+        branch_id = acting_branch_id()
+    if not branch_id:
+        raise ValueError('No depot is available to cash up POS')
+    day = parse_business_day(day)
+    counted = _parse_amount(counted_card, 'Enter the POS card total counted for the day')
+    if counted < 0:
+        raise ValueError('Counted POS card total cannot be negative')
+    db = get_db()
+    cash_up_id = _ensure_day(day, branch_id, user_id)
+    db.execute(
+        'UPDATE cash_ups SET counted_card = ?, opening_cash = ?, updated_at = ? WHERE id = ?',
+        (counted, opening_cash(day, branch_id), now(), cash_up_id),
     )
     db.commit()
     return cash_up_id
@@ -766,6 +826,19 @@ def day_report_rows(report):
             f"{cash['variance_display']} ({cash['variance_label']})" if cash['cashed_up'] else 'Not cashed up yet',
         ),
     ]
+    pos_rows = [
+        ('POS Cashup', 'Expected card total', f"R{cash.get('expected_card', 0):.2f}"),
+        (
+            'POS Cashup',
+            'POS/card counted',
+            f"R{cash['counted_card']:.2f}" if cash.get('pos_cashed_up') else 'Not POS cashed up yet',
+        ),
+        (
+            'POS Cashup',
+            'Variance (counted - expected)',
+            f"{cash['pos_variance_display']} ({cash['pos_variance_label']})" if cash.get('pos_cashed_up') else 'Not POS cashed up yet',
+        ),
+    ]
     interactions = cash.get('interactions') or {}
     interaction_rows = [
         ('New client interactions', 'Calls', str(interactions.get('calls', 0) or 0)),
@@ -774,7 +847,7 @@ def day_report_rows(report):
         ('New client interactions', 'Walk-in', str(interactions.get('walk_in', 0) or 0)),
         ('New client interactions', 'Notes', interactions.get('notes') or 'No interaction notes recorded'),
     ]
-    rows = money_rows + cash_rows + interaction_rows
+    rows = money_rows + cash_rows + pos_rows + interaction_rows
     # Ticket ABI-341953042 ask 1/3: the spare wheel count and the day's trailer
     # service lines are part of the same day report, read from the same figures
     # the dashboard panels show for that business day.
@@ -850,6 +923,7 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
 
     dashboard_cards = cards_for('Dashboard')
     cash_cards = cards_for('Cash up')
+    pos_cards = cards_for('POS Cashup')
     # The variance is the figure a manager scans for, so it is the one card that
     # is allowed to change colour (green over/balanced, red short).
     tone = _variance_tone(cash)
@@ -857,6 +931,11 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
         for card in cash_cards:
             if card['label'].startswith('Variance'):
                 card['tone'] = tone
+    pos_tone = _pos_variance_tone(cash)
+    if pos_tone:
+        for card in pos_cards:
+            if card['label'].startswith('Variance'):
+                card['tone'] = pos_tone
 
     notes_value = grouped.get('End of day notes', [('Notes', '')])[0][1]
     note_rows = [{'label': line} for line in ([line.strip() for line in str(notes_value).splitlines()] or [''])]
@@ -869,6 +948,7 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
     sections = [
         {'kind': 'cards', 'title': 'Dashboard', 'cards': dashboard_cards},
         {'kind': 'cards', 'title': 'Cash up', 'cards': cash_cards},
+        {'kind': 'cards', 'title': 'POS Cashup', 'cards': pos_cards},
     ]
     interaction_values = cash.get('interactions') or {}
     # Ticket ABI-341953030: the interaction notes are free text, so they cannot
@@ -951,6 +1031,16 @@ def _pdf_list_rows(rows, empty_label):
     """A list section's lines, or the one row that says nothing was recorded."""
     entries = [{'label': item, 'value': value} for item, value in rows if item != empty_label]
     return entries or [{'label': empty_label, 'value': ''}]
+
+
+def _pos_variance_tone(cash):
+    if not cash.get('pos_cashed_up'):
+        return ''
+    if cash.get('pos_variance', 0) < -0.005:
+        return 'short'
+    if cash.get('pos_variance', 0) > 0.005:
+        return 'over'
+    return 'balanced'
 
 
 def _variance_tone(cash):
