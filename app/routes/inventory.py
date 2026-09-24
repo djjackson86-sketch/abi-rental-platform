@@ -274,7 +274,7 @@ def edit(product_id):
                     "Product type and tracking method were not changed: this product has been used on an order",
                     "info",
                 )
-            return redirect(url_for("inventory.edit", product_id=product_id))
+            return redirect(url_for("inventory.index"))
         except ValueError as exc:
             flash(str(exc), "error")
     product = get_product(product_id)

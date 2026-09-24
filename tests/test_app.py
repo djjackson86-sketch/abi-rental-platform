@@ -478,7 +478,8 @@ def test_editing_product_group_assignment_keeps_order_creation_working(client, a
         'public_visible': '1',
     }, follow_redirects=True)
     assert b'Product saved' in edited.data
-    assert b'value="1" selected' in edited.data
+    assert b'<h1>Inventory</h1>' in edited.data
+    assert b'Order Trailer' in edited.data
 
     order = client.post('/orders/new', data={
         'customer_id': '1',

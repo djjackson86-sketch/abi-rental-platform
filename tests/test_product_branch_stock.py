@@ -121,6 +121,97 @@ def stored(client, product_id):
         return get_db().execute('SELECT quantity FROM products WHERE id = ?', (product_id,)).fetchone()['quantity']
 
 
+def test_successful_product_edit_redirects_to_inventory_index(client, app):
+    login(client)
+    product_id = create_product(client, name='Redirect Trailer', sku='REDIR-1')
+
+    payload = dict(OWNER_PRODUCT)
+    payload.update({
+        'name': 'Redirect Trailer Saved',
+        'sku': 'REDIR-1',
+        'quantity': '7',
+    })
+    res = client.post(f'/inventory/{product_id}/edit', data=payload, follow_redirects=False)
+
+    assert res.status_code == 302
+    assert res.headers['Location'].endswith('/inventory')
+    with app.app_context():
+        row = get_db().execute(
+            'SELECT name, quantity FROM products WHERE id = ?', (product_id,)
+        ).fetchone()
+        assert row is not None
+        assert row['name'] == 'Redirect Trailer Saved'
+        assert row['quantity'] == 7
+
+
+def test_successful_product_edit_follow_redirects_lands_on_inventory_list(client):
+    login(client)
+    product_id = create_product(client, name='Inventory Landing Trailer', sku='LAND-1')
+
+    payload = dict(OWNER_PRODUCT)
+    payload.update({
+        'name': 'Inventory Landing Trailer Saved',
+        'sku': 'LAND-1',
+        'price_amount': '275',
+    })
+    res = client.post(f'/inventory/{product_id}/edit', data=payload, follow_redirects=True)
+    body = res.data
+
+    assert res.status_code == 200
+    assert b'Product saved' in body
+    assert b'<h1>Inventory</h1>' in body
+    assert b'Inventory Landing Trailer Saved' in body
+    assert b'R275.00 / day' in body
+    assert b'<h1>Edit product</h1>' not in body
+
+
+def test_product_edit_validation_failure_stays_on_edit_form(client):
+    login(client)
+    product_id = create_product(client, name='Validation Trailer', sku='VAL-1')
+
+    payload = dict(OWNER_PRODUCT)
+    payload.update({'name': '', 'sku': 'VAL-1'})
+    res = client.post(f'/inventory/{product_id}/edit', data=payload, follow_redirects=True)
+    body = res.data
+
+    assert res.status_code == 200
+    assert b'Product name is required' in body
+    assert b'<h1>Edit product</h1>' in body
+    assert b'<h1>Inventory</h1>' not in body
+
+
+def test_blocked_type_tracking_change_still_redirects_to_inventory_with_both_flashes(client, app):
+    login(client)
+    product_id = create_product(client, name='Used Trailer', sku='USED-1')
+    create_customer(client)
+    create_order(client, product_id)
+
+    payload = dict(OWNER_PRODUCT)
+    payload.update({
+        'name': 'Used Trailer Saved',
+        'sku': 'USED-1',
+        'quantity': '8',
+        'product_type': 'sale',
+        'tracking_method': 'none',
+    })
+    res = client.post(f'/inventory/{product_id}/edit', data=payload, follow_redirects=True)
+    body = res.data
+
+    assert res.status_code == 200
+    assert b'Product saved' in body
+    assert b'Product type and tracking method were not changed' in body
+    assert b'<h1>Inventory</h1>' in body
+    assert b'Used Trailer Saved' in body
+    with app.app_context():
+        row = get_db().execute(
+            'SELECT product_type, tracking_method, quantity FROM products WHERE id = ?', (product_id,)
+        ).fetchone()
+        assert row is not None
+        assert row['product_type'] == 'rental'
+        assert row['tracking_method'] == 'bulk'
+        assert row['quantity'] == 8
+
+
 def field_tag(html, marker):
     """The opening tag that carries ``marker`` (a data-* attr or an input name)."""
     match = re.search(rb'<[^>]*' + marker + rb'[^>]*>', html)
