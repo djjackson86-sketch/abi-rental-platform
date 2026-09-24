@@ -3,18 +3,24 @@
 {% macro sort_link(key, label) -%}
   {%- set active = filters.sort == key -%}
   {%- set next_dir = 'desc' if active and filters.dir == 'asc' else 'asc' -%}
-  <a class="table-sort{% if active %} active{% endif %}" href="{{ url_for('payments.index', status=filters.status or None, branch=filters.branch or None, sort=key, dir=next_dir) }}">{{ label }}{% if active %} {{ '↑' if filters.dir == 'asc' else '↓' }}{% endif %}</a>
+  <a class="table-sort{% if active %} active{% endif %}" href="{{ url_for('payments.index', status=filters.status or None, branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=key, dir=next_dir) }}">{{ label }}{% if active %} {{ '↑' if filters.dir == 'asc' else '↓' }}{% endif %}</a>
 {%- endmacro %}
 {% block admin_body %}
 <header class="page-header">
-  <div><p class="eyebrow">Payments</p><h1>Payments</h1><p>Manual payment ledger for rental orders.</p></div>
-  <div class="header-actions"><a class="btn ghost" href="{{ url_for('payments.index', branch=filters.branch or None, sort=filters.sort, dir=filters.dir) }}">Active</a><a class="btn ghost" href="{{ url_for('payments.index', status='archived', branch=filters.branch or None, sort=filters.sort, dir=filters.dir) }}">Archived</a></div>
+  <div><p class="eyebrow">Payments</p><h1>Payments & refunds</h1><p>Combined payments and refunds ledger for rental orders.</p></div>
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('payments.index', branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir) }}">Active</a><a class="btn ghost" href="{{ url_for('payments.index', status='archived', branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir) }}">Archived</a></div>
 </header>
 <section class="panel">
   <form method="get" class="orders-filter-form payments-filter-form">
     {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
     {% if filters.sort %}<input type="hidden" name="sort" value="{{ filters.sort }}">{% endif %}
     {% if filters.dir %}<input type="hidden" name="dir" value="{{ filters.dir }}">{% endif %}
+    <div class="filter-group">
+      <div class="filter-group-head"><strong>Date range</strong><span>⌃</span></div>
+      <label>From <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+      <label>To <input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+      <div class="filter-actions"><button class="btn ghost" type="submit">Apply dates</button>{% if filters.date_from or filters.date_to %}<a class="filter-clear" href="{{ url_for('payments.index', status=filters.status or None, branch=filters.branch or None, sort=filters.sort, dir=filters.dir) }}">Clear dates</a>{% endif %}</div>
+    </div>
     <div class="filter-group">
       <div class="filter-group-head"><strong>Branch</strong><span>⌃</span></div>
       {% if branch_scope %}
@@ -25,9 +31,9 @@
         {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
       </select>
       {% endif %}
-      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('payments.index', status=filters.status or None, sort=filters.sort, dir=filters.dir) }}">Clear branch</a>{% endif %}
+      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('payments.index', status=filters.status or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir) }}">Clear branch</a>{% endif %}
     </div>
-    <noscript><button class="btn ghost" type="submit">Apply branch</button></noscript>
+    <noscript><button class="btn ghost" type="submit">Apply filters</button></noscript>
   </form>
   {% if payments %}
   <div class="table-wrap">
@@ -40,11 +46,11 @@
           <td>{{ payment.branch_label or '—' }}</td>
           <td>{{ payment.order_number or '—' }}</td>
           <td>{{ payment.customer_name or '—' }}</td>
-          <td><strong>R{{ '%.2f'|format(payment.amount) }}</strong></td>
+          <td><strong{% if is_refund(payment) %} class="text-danger"{% endif %}>{% if is_refund(payment) %}-R{{ '%.2f'|format((payment.amount * -1)) }}{% else %}R{{ '%.2f'|format(payment.amount) }}{% endif %}</strong></td>
           <td>{{ payment.method|title }}</td>
           <td>{{ payment.reference or '—' }}</td>
-          <td><span class="pill">{{ payment.status|title }}</span></td>
-          <td>{% if not payment.deleted_at %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a><form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
+          <td><span class="pill">{{ 'Refund' if is_refund(payment) else payment.status|title }}</span></td>
+          <td>{% if not payment.deleted_at %}{% if not is_refund(payment) %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a>{% else %}<small>Refund row</small>{% endif %}<form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

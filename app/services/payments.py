@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from app.db import get_db, now
 from app.services.access import order_branch_clause
@@ -30,6 +30,20 @@ def parse_payment_date(value):
 
 def display_payment_date(payment):
     return (payment["payment_date"] or payment["created_at"] or "")[:10]
+
+
+def normalise_payment_date_filter(value):
+    value = (value or "").strip()
+    if not value:
+        return ""
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        return ""
+
+
+def is_refund(payment):
+    return float(payment["amount"] or 0) < 0
 
 
 def payments_for_order(order_id, include_archived=False):
@@ -120,6 +134,8 @@ def update_payment(payment_id, form):
     payment = get_payment(payment_id)
     if not payment or payment["deleted_at"]:
         raise ValueError("Payment not found")
+    if is_refund(payment):
+        raise ValueError("Refund rows cannot be edited from the payments ledger")
     amount = _parse_payment_amount(form)
     method = form.get("method", "manual").strip() or "manual"
     reference = form.get("reference", "").strip()
@@ -167,11 +183,20 @@ def _payment_order_clause(sort="date", direction="desc"):
     return ", ".join(clauses)
 
 
-def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc"):
+def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc", date_from="", date_to=""):
     where_parts = ["1=1" if include_archived else _active_payment_clause("p")]
     branch_sql, params = order_branch_clause("o", branch_id=branch_id)
     if branch_sql:
         where_parts.append(branch_sql[5:] if branch_sql.startswith(" AND ") else branch_sql)
+    date_expr = "date(COALESCE(NULLIF(p.payment_date, ''), p.created_at))"
+    date_from = normalise_payment_date_filter(date_from)
+    date_to = normalise_payment_date_filter(date_to)
+    if date_from:
+        where_parts.append(f"{date_expr} >= ?")
+        params.append(date_from)
+    if date_to:
+        where_parts.append(f"{date_expr} <= ?")
+        params.append(date_to)
     order_clause = _payment_order_clause(sort, direction)
     return get_db().execute(
         f"""SELECT p.*, o.order_number, o.collect_branch_id, o.return_branch_id,

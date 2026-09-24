@@ -2,7 +2,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
 from app.services.access import resolve_branch_filter
-from app.services.payments import archive_payment, display_payment_date, get_payment, label_for, list_payments, normalise_payment_sort, update_payment
+from app.services.payments import archive_payment, display_payment_date, get_payment, is_refund, label_for, list_payments, normalise_payment_date_filter, normalise_payment_sort, update_payment
 from app.services.settings import get_company_settings
 
 bp = Blueprint("payments", __name__, url_prefix="/payments")
@@ -14,17 +14,34 @@ def index():
     include_archived = request.args.get("status") == "archived"
     selected_branch, branch_id, branch_label, branches, branch_scope = resolve_branch_filter(request.args.get("branch", ""))
     sort, direction = normalise_payment_sort(request.args.get("sort", "date"), request.args.get("dir", "desc"))
+    date_from = normalise_payment_date_filter(request.args.get("date_from", ""))
+    date_to = normalise_payment_date_filter(request.args.get("date_to", ""))
     return render_template(
         "admin/payments/index.html",
         settings=get_company_settings(),
-        payments=list_payments(include_archived=include_archived, branch_id=branch_id, sort=sort, direction=direction),
+        payments=list_payments(
+            include_archived=include_archived,
+            branch_id=branch_id,
+            sort=sort,
+            direction=direction,
+            date_from=date_from,
+            date_to=date_to,
+        ),
         label_for=label_for,
         display_payment_date=display_payment_date,
+        is_refund=is_refund,
         include_archived=include_archived,
         branches=branches,
         branch_label=branch_label,
         branch_scope=branch_scope,
-        filters={"status": "archived" if include_archived else "", "branch": selected_branch, "sort": sort, "dir": direction},
+        filters={
+            "status": "archived" if include_archived else "",
+            "branch": selected_branch,
+            "sort": sort,
+            "dir": direction,
+            "date_from": date_from,
+            "date_to": date_to,
+        },
     )
 
 
@@ -35,6 +52,9 @@ def edit(payment_id):
     if not payment or payment["deleted_at"]:
         flash("Payment not found", "error")
         return redirect(url_for("payments.index"))
+    if is_refund(payment):
+        flash("Refund rows cannot be edited from the payments ledger", "error")
+        return redirect(url_for("orders.detail", order_id=payment["order_id"]))
     if request.method == "POST":
         try:
             update_payment(payment_id, request.form)

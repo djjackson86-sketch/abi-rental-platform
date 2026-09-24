@@ -78,6 +78,7 @@ def seed_payment_rows(app):
         payments = [
             (order_ids[0], 300, 'cash', 'MID-CASH', 'paid', '2026-07-03T09:00:00', ''),
             (order_ids[1], 100, 'eft', 'PRE-EFT', 'paid', '2026-07-01T09:00:00', ''),
+            (order_ids[1], -75, 'eft', 'REFUND-PRE', 'paid', '2026-07-02T10:00:00', ''),
             (order_ids[2], 200, 'card', 'CROSS-CARD', 'paid', '2026-07-02T09:00:00', ''),
             (order_ids[3], 400, 'cash', 'ARCHIVED-ROOD', 'archived', '2026-07-04T09:00:00', '2026-07-05T10:00:00'),
         ]
@@ -114,6 +115,10 @@ def test_payments_page_renders_branch_column_and_cross_branch_label(client, app)
     assert 'Midrand' in html
     assert 'Pretoria' in html
     assert 'Midrand → Pretoria' in html
+    assert 'REFUND-PRE' in html
+    assert '-R75.00' in html
+    assert 'Refund row' in html
+    assert '<span class="pill">Refund</span>' in html
     assert 'ARCHIVED-ROOD' not in html
 
 
@@ -124,6 +129,7 @@ def test_branch_filter_narrows_payments_and_preserves_sort_links(client, app):
     html = body(client.get('/payments?branch=2&sort=customer&dir=asc'))
 
     assert 'PRE-EFT' in html
+    assert 'REFUND-PRE' in html
     assert 'CROSS-CARD' in html
     assert 'MID-CASH' not in html
     assert 'value="customer"' in html
@@ -140,6 +146,7 @@ def test_restricted_staff_cannot_widen_branch_filter(client, app):
     html = body(client.get('/payments?branch=1'))
 
     assert 'PRE-EFT' in html
+    assert 'REFUND-PRE' in html
     assert 'CROSS-CARD' in html
     assert 'MID-CASH' not in html
     assert 'Your account only sees this branch' in html
@@ -153,6 +160,7 @@ def test_invalid_branch_filter_is_ignored_for_owner(client, app):
 
     assert 'MID-CASH' in html
     assert 'PRE-EFT' in html
+    assert 'REFUND-PRE' in html
     assert 'CROSS-CARD' in html
 
 
@@ -160,11 +168,39 @@ def test_payment_sort_whitelist_default_and_amount_order(app):
     seed_payment_rows(app)
     with app.test_request_context('/payments'):
         rows = list_payments(sort='amount', direction='asc')
-        assert [row['reference'] for row in rows[:3]] == ['PRE-EFT', 'CROSS-CARD', 'MID-CASH']
+        assert [row['reference'] for row in rows[:4]] == ['REFUND-PRE', 'PRE-EFT', 'CROSS-CARD', 'MID-CASH']
         assert normalise_payment_sort('amount', 'asc') == ('amount', 'asc')
         assert normalise_payment_sort('amount; DROP TABLE payments', 'sideways') == ('date', 'desc')
         default_rows = list_payments(sort='amount; DROP TABLE payments', direction='sideways')
-        assert [row['reference'] for row in default_rows[:3]] == ['MID-CASH', 'CROSS-CARD', 'PRE-EFT']
+        assert [row['reference'] for row in default_rows[:4]] == ['MID-CASH', 'REFUND-PRE', 'CROSS-CARD', 'PRE-EFT']
+
+
+def test_date_filter_includes_refunds_and_excludes_outside_range(client, app):
+    seed_payment_rows(app)
+    login(client)
+
+    html = body(client.get('/payments?date_from=2026-07-02&date_to=2026-07-02'))
+
+    assert 'REFUND-PRE' in html
+    assert 'CROSS-CARD' in html
+    assert 'PRE-EFT' not in html
+    assert 'MID-CASH' not in html
+    assert 'name="date_from" value="2026-07-02"' in html
+    assert 'name="date_to" value="2026-07-02"' in html
+    assert 'Clear dates' in html
+
+
+def test_date_filters_are_preserved_in_links(client, app):
+    seed_payment_rows(app)
+    login(client)
+
+    html = body(client.get('/payments?branch=2&date_from=2026-07-02&date_to=2026-07-03&sort=amount&dir=asc'))
+
+    assert 'date_from=2026-07-02' in html
+    assert 'date_to=2026-07-03' in html
+    assert 'branch=2' in html
+    assert 'status=archived' in html
+    assert 'sort=customer' in html
 
 
 def test_sort_direction_toggle_markup_preserves_archived_and_branch(client, app):
@@ -192,3 +228,19 @@ def test_archived_payments_still_render_with_branch_filter(client, app):
     assert 'Rooderport' in html
     assert 'Deleted 2026-07-05' in html
     assert 'MID-CASH' not in html
+
+
+def test_refund_rows_do_not_offer_edit_and_direct_edit_is_refused(client, app):
+    seed_payment_rows(app)
+    login(client)
+
+    html = body(client.get('/payments'))
+    refund_row = html.split('REFUND-PRE', 1)[1].split('</tr>', 1)[0]
+    assert 'Refund row' in refund_row
+    assert '/edit' not in refund_row
+
+    with app.app_context():
+        refund_id = get_db().execute("SELECT id FROM payments WHERE reference = 'REFUND-PRE'").fetchone()['id']
+    response = client.get(f'/payments/{refund_id}/edit', follow_redirects=True)
+    assert response.status_code == 200
+    assert b'Refund rows cannot be edited from the payments ledger' in response.data
