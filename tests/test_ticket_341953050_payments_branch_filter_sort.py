@@ -1,5 +1,6 @@
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -244,3 +245,29 @@ def test_refund_rows_do_not_offer_edit_and_direct_edit_is_refused(client, app):
     response = client.get(f'/payments/{refund_id}/edit', follow_redirects=True)
     assert response.status_code == 200
     assert b'Refund rows cannot be edited from the payments ledger' in response.data
+
+
+def test_refund_amount_carries_the_danger_class_and_it_is_styled(client, app):
+    seed_payment_rows(app)
+    login(client)
+
+    html = body(client.get('/payments'))
+    assert '<strong class="text-danger">-R75.00</strong>' in html
+    assert '<strong>R300.00</strong>' in html
+
+    stylesheet = Path(__file__).resolve().parents[1] / 'static' / 'css' / 'app.css'
+    css = stylesheet.read_text(encoding='utf-8')
+    assert '.text-danger{color:var(--danger)}' in css
+
+
+def test_invalid_date_filters_are_ignored(client, app):
+    seed_payment_rows(app)
+    login(client)
+
+    html = body(client.get('/payments?date_from=not-a-date&date_to=9999-99-99'))
+
+    assert 'REFUND-PRE' in html
+    assert 'MID-CASH' in html
+    assert 'name="date_from" value=""' in html
+    assert 'name="date_to" value=""' in html
+    assert 'Clear dates' not in html

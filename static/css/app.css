@@ -249,6 +249,9 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
    width rather than 0 because .orders-metrics-staff is declared after the
    .orders-metrics phone breakpoints above, so it picks its own column count. */
 .metric-card.is-alert b{color:var(--danger)}
+/* Refund rows on the payments ledger (ABI-341953051): a refund is a negative
+   payment row, so its amount is shown in the danger colour. */
+.text-danger{color:var(--danger)}
 .orders-metrics-staff{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
 .report-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 .report-preset{display:inline-flex;align-items:center;justify-content:center;text-align:center;padding:6px 8px;border:1px solid var(--line);border-radius:999px;font-size:12px;font-weight:700;color:var(--ink);background:#fff;text-decoration:none;line-height:1.4}
