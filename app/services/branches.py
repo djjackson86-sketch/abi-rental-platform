@@ -357,5 +357,8 @@ def delete_branch(branch_id):
         (branch_id,),
     )
     db.execute("DELETE FROM cash_ups WHERE branch_id = ?", (branch_id,))
+    # The depot's day report submissions go with it (ticket ABI-341953055): a
+    # deleted depot must never keep a row that would make a day look submitted.
+    db.execute("DELETE FROM day_report_submissions WHERE branch_id = ?", (branch_id,))
     db.execute("DELETE FROM branches WHERE id = ?", (branch_id,))
     db.commit()

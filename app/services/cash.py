@@ -31,6 +31,7 @@ Every function returns **plain scalars and dicts**. Production rows are libsql
 tuples, so a raw row object must never leave this module (``row.count`` is the
 tuple method there, which is how /reports once 500'd in production only).
 """
+from contextlib import nullcontext
 from datetime import date
 
 from app.db import get_db, now
@@ -143,6 +144,24 @@ def cash_branches():
             continue
         options.append({'id': branch_id, 'name': str(_value(row, 'name') or '')})
     return options
+
+
+def active_depot_ids():
+    """Every **active** depot's id, straight from the branch table.
+
+    Deliberately session-independent (ticket ABI-341953055). The combined
+    "All branches" day report has to cover *every* active depot: a depot-scoped
+    staff sign-in is what triggers the last submission of the day, so anything
+    built off the session scope (``cash_branches()``) would produce a one-depot
+    "All branches" report. Read-only; ids are ints and junk rows are skipped.
+    """
+    ids = []
+    for row in branch_options():
+        try:
+            ids.append(int(_value(row, 'id')))
+        except (TypeError, ValueError):
+            continue
+    return ids
 
 
 def branch_for_request(requested=''):
@@ -389,16 +408,26 @@ def day_summary(day=None, branch_id=None):
     }
 
 
-def aggregate_day_summary(day=None):
+def aggregate_day_summary(day=None, branch_ids=None):
     """Read-only cash dashboard totals for every depot the session may see.
 
     Cash-up writes remain per depot. When the dashboard's top Branch filter is
     "All branches", this helper adds the same per-depot figures together but
     marks the result as non-writable so templates/routes do not offer a fake
     multi-depot save.
+
+    ``branch_ids`` (ticket ABI-341953055) overrides *which* depots are summed:
+    the automatic combined day report passes the full list of active depots, so
+    it never depends on the (possibly depot-scoped) session that triggered it.
+    Left out, the session scope is used exactly as before, so every existing
+    caller - the dashboard's All branches panel and the combined download - is
+    unchanged.
     """
     day = parse_business_day(day)
-    branches = cash_branches()
+    if branch_ids is None:
+        branches = cash_branches()
+    else:
+        branches = [{'id': int(branch_id), 'name': branch_name(branch_id)} for branch_id in branch_ids]
     summaries = [day_summary(day=day, branch_id=branch['id']) for branch in branches]
     used_lines = []
     drop_lines = []
@@ -742,7 +771,7 @@ def previous_day_notes(day, branch_id):
     }
 
 
-def day_report(day=None, branch_id=None, aggregate=False):
+def day_report(day=None, branch_id=None, aggregate=False, branch_ids=None, all_depots=False):
     """The day's dashboard figures plus its cash reconciliation.
 
     The dashboard metrics keep the dashboard's own branch scope (the session),
@@ -759,33 +788,163 @@ def day_report(day=None, branch_id=None, aggregate=False):
     spare wheel counts come back non-editable) and it is still bounded by the
     session: ``aggregate_day_summary`` walks ``cash_branches()``, so an account
     that may reach one depot gets exactly that depot's figures.
+
+    Ticket ABI-341953055: ``branch_ids`` is the explicit depot list the automatic
+    combined report passes (every active depot), so that send is decided by the
+    day's submissions and never by whose session happened to trigger it, and
+    ``all_depots`` runs the whole build inside ``access.all_depots_scope()`` so the
+    dashboard cards, the spare wheel counts and the service lines are the whole
+    business's too — the main profile's report, whoever triggered it.
     """
+    from app.services.access import all_depots_scope
     from app.services.reports import dashboard_day_metrics
     from app.services.settings import get_company_settings
     from app.services import spare_wheels
     from app.services import trailer_service
 
-    if aggregate:
-        summary = aggregate_day_summary(day=day)
-    else:
-        summary = day_summary(day=day, branch_id=branch_id)
-    settings = get_company_settings() or {}
-    report = {
-        'company': str(_value(settings, 'company_name') or ''),
-        'generated_at': now(),
-        'cash': summary,
-        'metrics': dashboard_day_metrics(summary['day']),
-    }
-    # One depot = that depot's own counted wheels; no depot resolved = the
-    # read-only sum across the depots this sign-in may already see, exactly like
-    # the dashboard panel (``spare_wheels.spare_wheel_rows``).
-    report['spare_wheels'] = spare_wheels.spare_wheel_rows(
-        summary['day'], branch_id=summary['branch_id'], editable=bool(summary['branch_id']),
-    )
-    report['trailer_service'] = trailer_service.services_for_day(
-        summary['day'], branch_id=summary['branch_id'],
-    )
+    report = {}
+    # Everything the report is made of sits inside the scope, the per-depot cash
+    # half included: passing an explicit depot list decides WHICH depots are
+    # summed, but each depot's own figures are still gathered through the shared
+    # branch clauses, so from a depot-scoped sign-in every depot would otherwise
+    # answer with that one depot's numbers - a combined report reading three
+    # times one depot's takings. Inside the scope each explicit depot answers for
+    # itself again.
+    with all_depots_scope() if all_depots else nullcontext():
+        if aggregate:
+            summary = aggregate_day_summary(day=day, branch_ids=branch_ids)
+        else:
+            summary = day_summary(day=day, branch_id=branch_id)
+        settings = get_company_settings() or {}
+        report.update({
+            'company': str(_value(settings, 'company_name') or ''),
+            'generated_at': now(),
+            'cash': summary,
+            'metrics': dashboard_day_metrics(summary['day']),
+        })
+        # One depot = that depot's own counted wheels; no depot resolved = the
+        # read-only sum across the depots this sign-in may already see, exactly
+        # like the dashboard panel (``spare_wheels.spare_wheel_rows``).
+        report['spare_wheels'] = spare_wheels.spare_wheel_rows(
+            summary['day'], branch_id=summary['branch_id'], editable=bool(summary['branch_id']),
+        )
+        report['trailer_service'] = trailer_service.services_for_day(
+            summary['day'], branch_id=summary['branch_id'],
+        )
     return report
+
+
+def day_report_prepared_by():
+    """``(name, role)`` for the "Prepared by" line of the combined report.
+
+    The combined "All branches" report is the main profile's report, so it is
+    signed by the owner account — never by whichever staff member happened to
+    press the last depot's Submit button (ticket ABI-341953055). Read-only, and
+    ``('', '')`` when the app has no owner row at all.
+    """
+    row = get_db().execute(
+        "SELECT name, role FROM users WHERE role = 'owner' ORDER BY active DESC, id LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return '', ''
+    return str(_value(row, 'name') or ''), str(_value(row, 'role') or 'owner')
+
+
+def record_day_report_submission(day, branch_id, user_id=None):
+    """Remember that one depot submitted its day report for ``day``.
+
+    One row per depot per business day (``UNIQUE(branch_id, business_day)``), so
+    a depot that submits twice, or retries after a failed send, still counts once.
+    Returns True only when this call is what recorded the submission.
+    """
+    day = parse_business_day(day)
+    if branch_id is None:
+        return False
+    try:
+        branch_id = int(branch_id)
+    except (TypeError, ValueError):
+        return False
+    db = get_db()
+    existing = db.execute(
+        'SELECT id FROM day_report_submissions WHERE branch_id = ? AND business_day = ?',
+        (branch_id, day),
+    ).fetchone()
+    if existing is not None:
+        return False
+    db.execute(
+        'INSERT INTO day_report_submissions (branch_id, business_day, user_id, sent_at) VALUES (?, ?, ?, ?)',
+        (branch_id, day, user_id, now()),
+    )
+    db.commit()
+    return True
+
+
+def submitted_depot_ids(day):
+    """The depot ids that have submitted their day report for ``day``."""
+    day = parse_business_day(day)
+    ids = set()
+    for row in get_db().execute(
+        'SELECT branch_id FROM day_report_submissions WHERE business_day = ?', (day,)
+    ).fetchall():
+        try:
+            ids.add(int(_value(row, 'branch_id')))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def missing_day_report_depots(day):
+    """Active depots that have not submitted yet, in branch order.
+
+    "Submitted" means the depot pressed Submit day report (ticket
+    ABI-341953055), and only **active** depots are required — a depot the client
+    has switched off can never block the day's combined report.
+    """
+    submitted = submitted_depot_ids(day)
+    return [branch_id for branch_id in active_depot_ids() if branch_id not in submitted]
+
+
+def all_branches_submitted(day):
+    """Whether every active depot has submitted its day report for ``day``."""
+    return bool(active_depot_ids()) and not missing_day_report_depots(day)
+
+
+def day_report_sent(day):
+    """``{'chat_id', 'sent_at'}`` when the combined report for ``day`` went out.
+
+    ``None`` means it has not been delivered (yet), which is also what a *failed*
+    send looks like — no marker is written on failure, so the retry sweep may try
+    the same day again.
+    """
+    day = parse_business_day(day)
+    row = get_db().execute(
+        'SELECT chat_id, sent_at FROM day_report_sends WHERE business_day = ?', (day,)
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        'chat_id': str(_value(row, 'chat_id') or ''),
+        'sent_at': str(_value(row, 'sent_at') or ''),
+    }
+
+
+def record_day_report_send(day, chat_id=''):
+    """Mark the day's combined report as delivered. Call only after a real send.
+
+    Returns True when this call created the marker. The ``UNIQUE`` day column
+    means a second call can never add a second row, and therefore a second send
+    can never be triggered for the same business day.
+    """
+    day = parse_business_day(day)
+    db = get_db()
+    if db.execute('SELECT id FROM day_report_sends WHERE business_day = ?', (day,)).fetchone() is not None:
+        return False
+    db.execute(
+        'INSERT INTO day_report_sends (business_day, sent_at, chat_id, ok) VALUES (?, ?, ?, 1)',
+        (day, now(), str(chat_id or '')),
+    )
+    db.commit()
+    return True
 
 
 def day_report_rows(report):

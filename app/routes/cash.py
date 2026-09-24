@@ -24,13 +24,13 @@ import re
 from io import StringIO
 from urllib.parse import quote
 
-from flask import Blueprint, Response, flash, redirect, request, session, url_for
+from flask import Blueprint, Response, current_app, flash, redirect, request, session, url_for
 
 from app.routes.auth import login_required
 from app.services import cash
 from app.services.access import resolve_branch_filter
 from app.services.pdf_documents import report_pdf_bytes
-from app.services.telegram import _send_document
+from app.services.telegram import _send_document, send_all_branches_day_report
 from app.services import trailer_service
 
 bp = Blueprint("cash", __name__, url_prefix="/cash-up")
@@ -339,10 +339,39 @@ def report_pdf():
     )
 
 
+def _note_submission_and_maybe_send_all_branches(day, branch_id):
+    """Record this depot's submission, then try the combined day report.
+
+    Best-effort by design (ticket ABI-341953055): the depot's own report has
+    already been submitted, so a failure here is logged and swallowed — nothing
+    about their flash or redirect may change and their submit must never break.
+
+    The combined send re-checks every one of its guards itself (kill switch, all
+    active depots in, one send per business day), so calling it after *every*
+    submission is safe: it is a quiet no-op until the last depot has reported.
+    """
+    try:
+        cash.record_day_report_submission(day, branch_id, _user_id())
+    except Exception as exc:
+        current_app.logger.exception("Day report submission was not recorded: %s", exc)
+        return
+    try:
+        send_all_branches_day_report(day)
+    except Exception as exc:  # the service swallows its own errors; belt and braces
+        current_app.logger.exception("All branches day report failed: %s", exc)
+
+
 @bp.post("/report/telegram")
 @login_required
 def submit_report_telegram():
-    """Send the same dashboard day-report PDF to the configured Telegram chat."""
+    """Send the same dashboard day-report PDF to the configured Telegram chat.
+
+    Ticket ABI-341953055: this depot's submission is also recorded, and once the
+    **last** active depot has submitted, the combined "All branches" dashboard
+    report follows automatically. The staff member's own message and redirect are
+    untouched — the record and the combined send are best-effort and can never
+    change what they see or break their submit.
+    """
     branch_id = _target_branch()
     report = _report_for_branch(branch_id)
     cash_summary = report["cash"]
@@ -354,6 +383,8 @@ def submit_report_telegram():
     filename = _report_filename(branch_name, day, cash_summary.get("branch_id"))
     caption = f"Day report — {branch_name} — {day}"
     result = _send_document(_report_pdf_bytes(report), filename, caption=caption)
+    if result.get("ok"):
+        _note_submission_and_maybe_send_all_branches(day, cash_summary.get("branch_id") or branch_id)
     if result.get("sent"):
         flash(f"Day report sent on Telegram for {branch_name} ({day})", "success")
     elif result.get("skipped") == "disabled":

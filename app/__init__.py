@@ -66,6 +66,14 @@ def create_app(test_config=None):
         # TELEGRAM_DAILY_SUMMARY_ENABLED=1 to bring the report back without a code
         # change.
         TELEGRAM_DAILY_SUMMARY_ENABLED=os.environ.get("TELEGRAM_DAILY_SUMMARY_ENABLED", ""),
+        # The combined "All branches" day report goes out automatically once every
+        # active depot has submitted its own day report (ticket ABI-341953055). On
+        # by default; set TELEGRAM_ALL_BRANCHES_REPORT_ENABLED=0 to switch it off
+        # without a code change. Still behind TELEGRAM_NOTIFICATIONS_ENABLED.
+        TELEGRAM_ALL_BRANCHES_REPORT_ENABLED=os.environ.get("TELEGRAM_ALL_BRANCHES_REPORT_ENABLED", "1"),
+        # Optional: post the combined report to a different chat (e.g. a managers
+        # group) instead of the depot group the bot already posts to.
+        TELEGRAM_ALL_BRANCHES_CHAT_ID=os.environ.get("TELEGRAM_ALL_BRANCHES_CHAT_ID", ""),
         PUBLIC_BASE_URL=os.environ.get("PUBLIC_BASE_URL", ""),
         BUSINESS_TIMEZONE=os.environ.get("BUSINESS_TIMEZONE", "Africa/Johannesburg"),
         CURRENCY_SYMBOL=os.environ.get("CURRENCY_SYMBOL", "R"),

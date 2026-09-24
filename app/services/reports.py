@@ -310,6 +310,13 @@ def dashboard_day_metrics(day=None, branch_id=None):
     rental fleet less what is currently out. "Other Rental Products" (ratchets,
     straps) is not trailer stock and is excluded from both.
 
+    Whole-business report (ticket ABI-341953055): the automatic combined
+    "All branches" day report is the main profile's report, so its cards must read
+    the whole business even when the depot-scoped sign-in of the last depot to
+    submit is what triggered the send. ``reports`` takes no flag for that: the
+    caller runs inside ``access.all_depots_scope()``, so the scope helpers below
+    answer "every depot" for the duration of that one block.
+
     Plain values only — production rows are libsql tuples, so nothing here
     hands a row object to the template.
     """

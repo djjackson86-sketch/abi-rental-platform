@@ -26,14 +26,18 @@ screen is separately gated.
 import json
 import re
 import uuid
+from contextlib import contextmanager
 from functools import wraps
 
-from flask import abort, has_request_context, session
+from flask import abort, g, has_app_context, has_request_context, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.db import get_db, now
 
 ADDITIONAL_USER_LIMIT = 10
+
+# In-process marker used by ``all_depots_scope()`` only (ticket ABI-341953055).
+_ALL_DEPOTS_SCOPE_FLAG = "_abi_all_depots_scope"
 
 DEFAULT_STAFF_MODULES = [
     "new_order",
@@ -671,6 +675,35 @@ def session_branch_choice_options():
     return [branch for branch in branch_options() if branch["id"] in granted]
 
 
+@contextmanager
+def all_depots_scope():
+    """Compute everything inside this block as the WHOLE BUSINESS.
+
+    Internal-only, and the **one** place where the "the session scope always
+    wins" rule is deliberately lifted. The automatic combined "All branches" day
+    report (ticket ABI-341953055) is the main profile's own report, and the sign-in
+    that triggers it is usually a depot-scoped staff member pressing Submit day
+    report last — so without this its cards, wheel counts and service lines would
+    quietly read that one depot inside a report headed "All branches".
+
+    It lifts the rule in-process only: the marker lives on ``g``, so it applies to
+    this request's own block and to nothing else, it is never persisted anywhere,
+    and no request value can ever reach it. The only caller is
+    ``cash.day_report(..., all_depots=True)``, and only the Telegram service asks
+    for that. An explicit ``branch_id`` still means exactly that depot inside the
+    block (a requested branch can only ever narrow).
+    """
+    if not has_app_context():
+        yield
+        return
+    previous = getattr(g, _ALL_DEPOTS_SCOPE_FLAG, False)
+    setattr(g, _ALL_DEPOTS_SCOPE_FLAG, True)
+    try:
+        yield
+    finally:
+        setattr(g, _ALL_DEPOTS_SCOPE_FLAG, previous)
+
+
 def session_branch_scope_ids():
     """Branch ids this session may see, or None when it may see every branch.
 
@@ -682,7 +715,12 @@ def session_branch_scope_ids():
     A multi-depot account that chose the branch it is managing for this sign-in
     is scoped to that one depot. The choice is validated against the granted set
     here as well, so even a tampered session cannot escape it.
+
+    The single exception is ``all_depots_scope()`` below, which is in-process only
+    and is used by the automatic combined day report (ticket ABI-341953055).
     """
+    if has_app_context() and getattr(g, _ALL_DEPOTS_SCOPE_FLAG, False):
+        return None
     granted = _session_granted_branch_ids()
     if granted is None:
         return None

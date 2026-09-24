@@ -358,6 +358,33 @@ CREATE TABLE IF NOT EXISTS spare_wheel_counts (
     UNIQUE(branch_id, business_day, wheel_size)
 );
 
+-- Day report submissions (ticket ABI-341953055). One row per depot per business
+-- day, written when that depot actually submits its own "Submit day report"
+-- PDF to Telegram. This is what lets the app know that *every* active depot has
+-- submitted, so the combined "All branches" dashboard report can follow.
+-- Additive only: nothing existing reads or writes it, and a day with no rows
+-- simply has nobody submitted yet.
+CREATE TABLE IF NOT EXISTS day_report_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    business_day TEXT NOT NULL,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    sent_at TEXT NOT NULL,
+    UNIQUE(branch_id, business_day)
+);
+
+-- One row per business day on which the combined "All branches" report was
+-- actually delivered, so it can never be posted twice for the same day.
+-- Written only on a successful send: a failed send leaves no row, which is
+-- what lets the retry sweep try again.
+CREATE TABLE IF NOT EXISTS day_report_sends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_day TEXT NOT NULL UNIQUE,
+    sent_at TEXT NOT NULL,
+    chat_id TEXT NOT NULL DEFAULT '',
+    ok INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
@@ -706,6 +733,28 @@ def run_migrations(db):
         UNIQUE(branch_id, business_day, wheel_size)
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_spare_wheel_counts_day ON spare_wheel_counts(business_day, branch_id)")
+
+    # --- Day report submissions (additive, ABI-341953055) ---------------------
+    # Which depots have submitted their own day report for a business day, and
+    # whether the combined "All branches" report has already gone out for it.
+    # Pure bookkeeping for the new combined send: no existing table is touched,
+    # so no existing figure can move.
+    db.execute("""CREATE TABLE IF NOT EXISTS day_report_submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        business_day TEXT NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        sent_at TEXT NOT NULL,
+        UNIQUE(branch_id, business_day)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_day_report_submissions_day ON day_report_submissions(business_day)")
+    db.execute("""CREATE TABLE IF NOT EXISTS day_report_sends (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_day TEXT NOT NULL UNIQUE,
+        sent_at TEXT NOT NULL,
+        chat_id TEXT NOT NULL DEFAULT '',
+        ok INTEGER NOT NULL DEFAULT 0
+    )""")
 
 
 def init_db():
