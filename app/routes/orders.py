@@ -5,7 +5,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.settings import get_company_settings
@@ -507,6 +507,48 @@ def use_deposit(order_id):
     _ensure_order_access(order_id)
     try:
         message = use_return_deposit(order_id, request.form)
+        flash(message, "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("orders.detail", order_id=order_id))
+
+
+@bp.route("/<int:order_id>/deposit-refund/edit", methods=["GET", "POST"])
+@login_required
+def deposit_refund_edit(order_id):
+    """Edit the recorded deposit refund payout for an order (ticket ABI-341953057)."""
+    order = _ensure_order_access(order_id)
+    if not order:
+        flash("Order not found", "error")
+        return redirect(url_for("orders.index"))
+    if request.method == "POST":
+        try:
+            message = update_deposit_refund(order_id, request.form)
+            flash(message, "success")
+            return redirect(url_for("orders.detail", order_id=order_id))
+        except ValueError as exc:
+            flash(str(exc), "error")
+    elif not can_process_return_deposit(order):
+        flash("Return and deposit settlement is available after pickup or cancelation", "error")
+        return redirect(url_for("orders.detail", order_id=order_id))
+    elif round(float(order["deposit_refund_amount"] or 0), 2) <= 0:
+        flash("There is no deposit refund recorded on this order to edit", "error")
+        return redirect(url_for("orders.detail", order_id=order_id))
+    return render_template(
+        "admin/orders/deposit_refund_edit.html",
+        order=order,
+        can_process_return_deposit=can_process_return_deposit(order),
+        default_deposit_processed_at=(order["deposit_processed_at"] or local_now_iso(timespec="minutes"))[:16],
+    )
+
+
+@bp.post("/<int:order_id>/deposit-refund/delete")
+@login_required
+def deposit_refund_delete(order_id):
+    """Reverse (soft delete) the recorded deposit refund payout (ticket ABI-341953057)."""
+    _ensure_order_access(order_id)
+    try:
+        message = delete_deposit_refund(order_id)
         flash(message, "success")
     except ValueError as exc:
         flash(str(exc), "error")

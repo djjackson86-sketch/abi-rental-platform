@@ -1789,6 +1789,93 @@ def use_return_deposit(order_id, form):
     return f"Security deposit used: R{deposit_applied:.2f}; refund R{deposit_refund:.2f}"
 
 
+def _parse_deposit_refund_amount(value):
+    """The payout amount the office types when correcting a refund (ABI-341953057)."""
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Deposit refund amount must be a number") from exc
+    if amount != amount or amount in (float("inf"), float("-inf")):
+        raise ValueError("Deposit refund amount must be a number")
+    if amount <= 0:
+        raise ValueError("Deposit refund amount must be more than zero — use Delete to remove the payout")
+    return round(amount, 2)
+
+
+def _write_deposit_split(order_id, applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note):
+    """Write the applied/refund split, keep the deposit_applied payments row in step.
+
+    ``Paid = non-deposit payments + deposit applied`` is the invariant the invoice
+    ("Less: deposit used"), the reports and the cash-up all read, so the payments
+    row is rewritten *before* the order fields and the payment totals recalculated.
+    """
+    db = get_db()
+    _upsert_deposit_applied_payment(order_id, applied_amount)
+    db.execute(
+        """UPDATE orders SET deposit_applied_amount = ?, deposit_refund_amount = ?,
+        deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
+        (applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note, order_id),
+    )
+    db.commit()
+    from app.services.payments import recalculate_order_payment
+    return recalculate_order_payment(order_id)
+
+
+def update_deposit_refund(order_id, form):
+    """Edit an already recorded deposit refund payout (ticket ABI-341953057).
+
+    The payout lives on the order (``deposit_refund_amount`` plus method/date/note),
+    not on a payments row, so correcting it means rewriting those fields. The split
+    is restated as ``applied = deposit_total - refund`` — a deposit can never add up
+    to more than it was — and the office may not pay out more than the deposit.
+    """
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    _require_return_deposit_allowed(order)
+    existing_refund = round(float(order["deposit_refund_amount"] or 0), 2)
+    if existing_refund <= 0:
+        raise ValueError("There is no deposit refund recorded on this order to edit")
+    refund_amount = _parse_deposit_refund_amount(form.get("refund_amount"))
+    deposit_process_method = (form.get("deposit_process_method") or "").strip().lower()
+    if deposit_process_method not in {"eft", "card", "cash"}:
+        raise ValueError("Deposit process method must be EFT, Card, or Cash")
+    deposit_available = round(float(order["deposit_total"] or 0), 2)
+    if refund_amount > deposit_available:
+        raise ValueError(f"Deposit refund cannot be more than the R{deposit_available:.2f} deposit")
+    deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
+    note = form.get("deposit_note", "").strip()
+    applied_amount = round(max(deposit_available - refund_amount, 0), 2)
+    _write_deposit_split(
+        order_id, applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note
+    )
+    return f"Deposit refund updated: R{refund_amount:.2f} paid out; R{applied_amount:.2f} used"
+
+
+def delete_deposit_refund(order_id):
+    """Remove a recorded deposit refund payout (ticket ABI-341953057).
+
+    Soft reversal only — nothing is hard deleted: the ``deposit_applied`` payments
+    row is archived, the deposit goes back to unprocessed (applied = refund = 0,
+    no method/date) so the order returns to the "Process deposit" folder and card,
+    and the cash-up/day report stop deducting a payout that never happened. The
+    previous note is kept on the order as an audit line.
+    """
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    _require_return_deposit_allowed(order)
+    refund_amount = round(float(order["deposit_refund_amount"] or 0), 2)
+    if refund_amount <= 0:
+        raise ValueError("There is no deposit refund recorded on this order to delete")
+    existing_note = (order["deposit_note"] or "").strip()
+    audit_note = f"Deposit refund of R{refund_amount:.2f} deleted {local_now().strftime('%Y-%m-%d %H:%M')}"
+    if existing_note:
+        audit_note = f"{existing_note} | {audit_note}"
+    _write_deposit_split(order_id, 0, 0, "", "", audit_note[:500])
+    return f"Deposit refund of R{refund_amount:.2f} deleted — the order is back in Process deposit"
+
+
 def _calendar_range(start_date=None, end_date=None):
     today = date.today()
     if start_date:
