@@ -42,7 +42,7 @@
       <thead><tr><th>{{ sort_link('date', 'Payment date') }}</th><th>{{ sort_link('branch', 'Branch') }}</th><th>{{ sort_link('order', 'Order') }}</th><th>{{ sort_link('customer', 'Customer') }}</th><th>{{ sort_link('amount', 'Amount') }}</th><th>{{ sort_link('method', 'Method') }}</th><th>Reference</th><th>{{ sort_link('status', 'Status') }}</th><th>Actions</th></tr></thead>
       <tbody>
       {% for payment in payments %}
-        <tr>
+        <tr{% if previous_limit and loop.index == previous_limit + 1 %} id="new-items" tabindex="-1"{% endif %}>
           <td>{{ display_payment_date(payment) }}</td>
           <td>{{ payment.branch_label or '—' }}</td>
           <td>{{ payment.order_number or '—' }}</td>
@@ -58,7 +58,7 @@
     </table>
   </div>
   {% if payments|length < total_payments %}
-  <div class="load-more-row"><a class="btn ghost" href="{{ url_for('payments.index', status=filters.status or None, branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir, limit=next_limit) }}">Load more payments (next 25)</a></div>
+  <div class="load-more-row"><a class="btn ghost" href="{{ url_for('payments.index', status=filters.status or None, branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir, limit=next_limit) }}#new-items">Load more payments (next 25)</a></div>
   {% endif %}
   {% else %}
   <p class="empty">No {{ 'archived' if include_archived else 'active' }} payments recorded yet. Open an order to record a payment.</p>

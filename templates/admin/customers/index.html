@@ -114,7 +114,7 @@
             </thead>
             <tbody>
               {% for c in customers %}
-                <tr>
+                <tr{% if previous_limit and loop.index == previous_limit + 1 %} id="new-items" tabindex="-1"{% endif %}>
                   <td><input type="checkbox" disabled aria-label="Select {{ c.name }}"></td>
                   <td>#{{ c.id }}</td>
                   <td>
@@ -138,7 +138,7 @@
         </div>
         <div class="table-footer-count">Showing 1 - {{ customers|length }} of {{ total_customers }}</div>
         {% if customers|length < total_customers %}
-        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('customers.index', query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, limit=next_limit) }}">Load more customers (next 25)</a></div>
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('customers.index', query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, limit=next_limit) }}#new-items">Load more customers (next 25)</a></div>
         {% endif %}
       {% else %}
         <div class="customers-empty-state">

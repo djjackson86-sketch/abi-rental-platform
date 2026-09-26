@@ -35,6 +35,7 @@ def index():
         customers=customers,
         total_customers=total,
         display_limit=display_limit,
+        previous_limit=max(display_limit - PAGE_SIZE, 0),
         next_limit=display_limit + PAGE_SIZE,
         counts=customer_counts(),
         filter_counts=customer_filter_counts(),

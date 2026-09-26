@@ -140,6 +140,7 @@ def index():
         settings=get_company_settings(),
         documents=documents,
         display_limit=display_limit,
+        previous_limit=max(display_limit - PAGE_SIZE, 0),
         next_limit=display_limit + PAGE_SIZE,
         label_for=label_for,
         filter_counts=document_filter_counts(),

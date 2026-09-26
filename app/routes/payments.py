@@ -46,6 +46,7 @@ def index():
         ),
         total_payments=total_payments,
         display_limit=display_limit,
+        previous_limit=max(display_limit - PAGE_SIZE, 0),
         next_limit=display_limit + PAGE_SIZE,
         label_for=label_for,
         display_payment_date=display_payment_date,

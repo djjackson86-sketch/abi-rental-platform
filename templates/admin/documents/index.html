@@ -113,7 +113,7 @@
             </thead>
             <tbody>
               {% for d in documents %}
-                <tr>
+                <tr{% if previous_limit and loop.index == previous_limit + 1 %} id="new-items" tabindex="-1"{% endif %}>
                   <td><input type="checkbox" disabled aria-label="Select {{ d.number or ('' if d.document_type == 'invoice' and d.status == 'draft' else 'Unnumbered') }}"></td>
                   <td><strong>{{ d.number or ('' if d.document_type == 'invoice' and d.status == 'draft' else 'Unnumbered') }}</strong></td>
                   <td>{% if d.document_type == 'invoice' and d.status == 'draft' and not d.number %}Proforma Invoice{% else %}{{ label_for(d.document_type) }}{% endif %}</td>
@@ -128,7 +128,7 @@
           </table>
         </div>
         {% if documents|length < docs_total %}
-        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('documents.index', query=filters.query or None, document_type=filters.document_type or None, status=filters.status or None, start_date=filters.start_date or None, end_date=filters.end_date or None, limit=next_limit) }}">Load more documents (next 25)</a></div>
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('documents.index', query=filters.query or None, document_type=filters.document_type or None, status=filters.status or None, start_date=filters.start_date or None, end_date=filters.end_date or None, limit=next_limit) }}#new-items">Load more documents (next 25)</a></div>
         {% endif %}
       {% else %}
         <div class="documents-empty-state">

@@ -231,6 +231,7 @@ def index():
         counts=counts,
         total_orders=counts["total"],
         display_limit=display_limit,
+        previous_limit=max(display_limit - PAGE_SIZE, 0),
         next_limit=display_limit + PAGE_SIZE,
         filter_counts=order_filter_counts(branch_id=branch_id),
         branches=branches,

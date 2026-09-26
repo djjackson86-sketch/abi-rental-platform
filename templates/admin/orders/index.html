@@ -166,7 +166,7 @@
             </thead>
             <tbody>
               {% for o in orders %}
-                <tr>
+                <tr{% if previous_limit and loop.index == previous_limit + 1 %} id="new-items" tabindex="-1"{% endif %}>
                   <td>
                     <strong>{{ o.order_number }}</strong>
                     <small>Created {{ o.created_at[:10] }}{% if o.created_by_name %} by {{ o.created_by_name }}{% endif %}</small>
@@ -188,7 +188,7 @@
           </table>
         </div>
         {% if orders|length < total_orders %}
-        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('orders.index', query=filters.query or None, status=filters.status or None, payment_status=filters.payment_status or None, return_status=filters.return_status or None, start_date=filters.start_date or None, end_date=filters.end_date or None, branch=filters.branch or None, limit=next_limit) }}">Load more orders (next 25)</a></div>
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('orders.index', query=filters.query or None, status=filters.status or None, payment_status=filters.payment_status or None, return_status=filters.return_status or None, start_date=filters.start_date or None, end_date=filters.end_date or None, branch=filters.branch or None, limit=next_limit) }}#new-items">Load more orders (next 25)</a></div>
         {% endif %}
       {% else %}
         <div class="orders-empty-state">
