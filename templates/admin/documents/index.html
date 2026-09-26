@@ -81,11 +81,11 @@
         <div class="bulk-actions">
           <button class="btn ghost" type="button" disabled>Actions⌄</button>
           <span>0 documents selected</span>
-          {% if documents %}<a href="#">Select all {{ documents|length }} document{% if documents|length != 1 %}s{% endif %}</a>{% endif %}
+          {% if documents %}<a href="#">Select visible {{ documents|length }} document{% if documents|length != 1 %}s{% endif %}</a>{% endif %}
         </div>
         <div class="table-tools">
           <button class="btn ghost" type="button" disabled>Columns</button>
-          <span>Showing {{ 1 if documents else 0 }} - {{ documents|length }} of {{ documents|length }}</span>
+          <span>Showing {{ 1 if documents else 0 }} - {{ documents|length }} of {{ docs_total }}</span>
         </div>
       </div>
 
@@ -127,6 +127,9 @@
             </tbody>
           </table>
         </div>
+        {% if documents|length < docs_total %}
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('documents.index', query=filters.query or None, document_type=filters.document_type or None, status=filters.status or None, start_date=filters.start_date or None, end_date=filters.end_date or None, limit=next_limit) }}">Load more documents (next 25)</a></div>
+        {% endif %}
       {% else %}
         <div class="documents-empty-state">
           <div class="empty-arrow" aria-hidden="true"></div>

@@ -148,6 +148,7 @@
       {% endif %}
 
       {% if orders %}
+        <div class="table-tools"><span>Showing 1 - {{ orders|length }} of {{ total_orders }}</span></div>
         <div class="table-wrap orders-table-wrap">
           <table class="data-table orders-table">
             <thead>
@@ -186,6 +187,9 @@
             </tbody>
           </table>
         </div>
+        {% if orders|length < total_orders %}
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('orders.index', query=filters.query or None, status=filters.status or None, payment_status=filters.payment_status or None, return_status=filters.return_status or None, start_date=filters.start_date or None, end_date=filters.end_date or None, branch=filters.branch or None, limit=next_limit) }}">Load more orders (next 25)</a></div>
+        {% endif %}
       {% else %}
         <div class="orders-empty-state">
           <div class="empty-arrow" aria-hidden="true"></div>

@@ -80,11 +80,11 @@
         <div class="bulk-actions">
           <button class="btn ghost" type="button" disabled>Actions⌄</button>
           <span>0 customers selected</span>
-          {% if customers %}<a href="#">Select all {{ customers|length }} customer{% if customers|length != 1 %}s{% endif %}</a>{% endif %}
+          {% if customers %}<a href="#">Select visible {{ customers|length }} customer{% if customers|length != 1 %}s{% endif %}</a>{% endif %}
         </div>
         <div class="table-tools">
           <button class="btn ghost" type="button" disabled>Columns</button>
-          <span>Showing {{ 1 if customers else 0 }} - {{ customers|length }} of {{ customers|length }}</span>
+          <span>Showing {{ 1 if customers else 0 }} - {{ customers|length }} of {{ total_customers }}</span>
         </div>
       </div>
 
@@ -136,7 +136,10 @@
             </tbody>
           </table>
         </div>
-        <div class="table-footer-count">Showing 1 - {{ customers|length }} of {{ customers|length }}</div>
+        <div class="table-footer-count">Showing 1 - {{ customers|length }} of {{ total_customers }}</div>
+        {% if customers|length < total_customers %}
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('customers.index', query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, limit=next_limit) }}">Load more customers (next 25)</a></div>
+        {% endif %}
       {% else %}
         <div class="customers-empty-state">
           <div class="empty-arrow" aria-hidden="true"></div>

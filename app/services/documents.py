@@ -108,12 +108,8 @@ def finalize_document(document_id):
     return document_id
 
 
-def list_documents(query="", document_type="", status="", start_date="", end_date=""):
-    sql = """SELECT d.*, o.order_number, o.total, o.deposit_option, c.name AS customer_name
-        FROM documents d
-        LEFT JOIN orders o ON o.id = d.order_id
-        LEFT JOIN customers c ON c.id = o.customer_id
-        WHERE 1=1"""
+def _document_filters(query="", document_type="", status="", start_date="", end_date=""):
+    sql = " WHERE 1=1"
     params = []
     if query:
         sql += """ AND (LOWER(d.number) LIKE ? OR LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ?)"""
@@ -131,8 +127,35 @@ def list_documents(query="", document_type="", status="", start_date="", end_dat
     if end_date:
         sql += " AND DATE(d.created_at) <= ?"
         params.append(end_date)
+    return sql, params
+
+
+def list_documents(query="", document_type="", status="", start_date="", end_date="", limit=None, offset=0):
+    sql = """SELECT d.*, o.order_number, o.total, o.deposit_option, c.name AS customer_name
+        FROM documents d
+        LEFT JOIN orders o ON o.id = d.order_id
+        LEFT JOIN customers c ON c.id = o.customer_id"""
+    where_sql, params = _document_filters(query, document_type, status, start_date, end_date)
+    sql += where_sql
     sql += " ORDER BY d.created_at DESC, d.id DESC"
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([int(limit), int(offset or 0)])
     return get_db().execute(sql, params).fetchall()
+
+
+def document_totals(query="", document_type="", status="", start_date="", end_date=""):
+    where_sql, params = _document_filters(query, document_type, status, start_date, end_date)
+    row = get_db().execute(
+        f"""SELECT COUNT(*) AS total, COALESCE(SUM(o.total), 0) AS total_amount
+        FROM documents d
+        LEFT JOIN orders o ON o.id = d.order_id
+        LEFT JOIN customers c ON c.id = o.customer_id{where_sql}""",
+        params,
+    ).fetchone()
+    if row is None:
+        return {"total": 0, "total_amount": 0.0}
+    return {"total": int(row["total"] or 0), "total_amount": float(row["total_amount"] or 0)}
 
 
 def document_filter_counts():

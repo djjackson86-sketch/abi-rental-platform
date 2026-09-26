@@ -43,7 +43,7 @@ CUSTOM_FIELD_FORM_KEYS = list(VISIBLE_CUSTOM_FIELD_ORDER)
 BLOCKING_PANEL_MARKER = "blocking_panel"
 
 
-def list_customers(query="", customer_type="", marketing=""):
+def list_customers(query="", customer_type="", marketing="", limit=None, offset=0):
     sql = """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email,
         (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count
         FROM customers c
@@ -62,7 +62,28 @@ def list_customers(query="", customer_type="", marketing=""):
     elif marketing == "not_subscribed":
         sql += " AND c.marketing_opt_in = 0"
     sql += " ORDER BY c.created_at DESC, c.name"
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([int(limit), int(offset or 0)])
     return get_db().execute(sql, params).fetchall()
+
+
+def customer_filtered_total(query="", customer_type="", marketing=""):
+    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1"
+    params = []
+    if query:
+        sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
+        needle = f"%{query.lower()}%"
+        params.extend([needle, needle, needle])
+    if customer_type in VALID_TYPES:
+        sql += " AND c.customer_type = ?"
+        params.append(customer_type)
+    if marketing == "subscribed":
+        sql += " AND c.marketing_opt_in = 1"
+    elif marketing == "not_subscribed":
+        sql += " AND c.marketing_opt_in = 0"
+    row = get_db().execute(sql, params).fetchone()
+    return int(row["total"] if row else 0)
 
 
 def customer_counts():

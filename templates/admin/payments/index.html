@@ -36,6 +36,7 @@
     <noscript><button class="btn ghost" type="submit">Apply filters</button></noscript>
   </form>
   {% if payments %}
+  <div class="table-tools"><span>Showing 1 - {{ payments|length }} of {{ total_payments }}</span></div>
   <div class="table-wrap">
     <table class="data-table">
       <thead><tr><th>{{ sort_link('date', 'Payment date') }}</th><th>{{ sort_link('branch', 'Branch') }}</th><th>{{ sort_link('order', 'Order') }}</th><th>{{ sort_link('customer', 'Customer') }}</th><th>{{ sort_link('amount', 'Amount') }}</th><th>{{ sort_link('method', 'Method') }}</th><th>Reference</th><th>{{ sort_link('status', 'Status') }}</th><th>Actions</th></tr></thead>
@@ -56,6 +57,9 @@
       </tbody>
     </table>
   </div>
+  {% if payments|length < total_payments %}
+  <div class="load-more-row"><a class="btn ghost" href="{{ url_for('payments.index', status=filters.status or None, branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir, limit=next_limit) }}">Load more payments (next 25)</a></div>
+  {% endif %}
   {% else %}
   <p class="empty">No {{ 'archived' if include_archived else 'active' }} payments recorded yet. Open an order to record a payment.</p>
   {% endif %}

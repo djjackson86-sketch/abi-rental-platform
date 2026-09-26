@@ -95,7 +95,7 @@ def _status_clause(status, alias="o"):
     return f"{alias}.status = ?", [status]
 
 
-def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
+def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None, limit=None, offset=0):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         cu.name AS created_by_name, cu.email AS created_by_email,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
@@ -130,6 +130,9 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
         sql += " AND DATE(o.start_at) <= ?"
         params.append(end_date)
     sql += " ORDER BY o.created_at DESC, o.id DESC"
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([int(limit), int(offset or 0)])
     return get_db().execute(sql, params).fetchall()
 
 

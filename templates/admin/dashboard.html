@@ -67,11 +67,18 @@
     </div>
   </form>
 </div>
-<section class="metrics dashboard-metrics">
+<section class="metrics dashboard-metrics" {% if dashboard_lazy %}data-dashboard-section="period" data-src="{{ url_for('admin.dashboard_period_partial', branch=filters.branch or None, range=filters.range, start_date=filters.start_date or None, end_date=filters.end_date or None, day=filters.day) }}"{% endif %}>
+  {% if dashboard_lazy %}
+  <div class="metric-card"><small>Total orders</small><b>Loading…</b><span>{{ range_label }}</span></div>
+  <div class="metric-card"><small>Catalog size</small><b>Loading…</b><span>{{ range_label }}</span></div>
+  <div class="metric-card"><small>Customer base</small><b>Loading…</b><span>{{ range_label }}</span></div>
+  <div class="metric-card"><small>Gross revenue</small><b>Loading…</b><span>{{ range_label }}</span></div>
+  {% else %}
   <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Created · {{ range_label }}</span></div>
   <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Added · {{ range_label }}</span></div>
   <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Added · {{ range_label }}</span></div>
   <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Received · {{ range_label }}</span></div>
+  {% endif %}
 </section>
 {% endif %}
 
@@ -80,18 +87,23 @@
      day is never mistaken for today (ticket ABI-341953042 ask 3). #}
   {% set day_heading = 'Today' if day_is_today else 'Business day ' ~ selected_day %}
   <div class="section-head"><h2 class="section-heading">{{ day_heading }}</h2></div>
-  {% include "admin/_dashboard_day_metrics.html" %}
+  <div {% if dashboard_lazy %}data-dashboard-section="day" data-src="{{ url_for('admin.dashboard_day_partial', branch=filters.branch or None, day=filters.day) }}"{% endif %}>
+    {% if dashboard_lazy %}<section class="metrics dashboard-metrics dashboard-day-metrics"><div class="metric-card"><small>Today</small><b>Loading…</b><span>{{ selected_day }}</span></div></section>{% else %}{% include "admin/_dashboard_day_metrics.html" %}{% endif %}
+  </div>
 </section>
 
 <section class="dashboard-day dashboard-card-section">
   <div class="section-head"><h2 class="section-heading">Cash up · end of day</h2></div>
-  {% include "admin/_dashboard_cash.html" %}
+  <div {% if dashboard_lazy %}data-dashboard-section="cash" data-src="{{ url_for('admin.dashboard_cash_partial', branch=filters.branch or None, day=filters.day) }}"{% endif %}>
+    {% if dashboard_lazy %}<section class="panel"><p class="muted">Loading end-of-day panels…</p></section>{% else %}{% include "admin/_dashboard_cash.html" %}{% endif %}
+  </div>
 </section>
 
 {% if current_user_is_main %}
 <section class="dashboard-card-section">
   <div class="section-head"><h2 class="section-heading">Movement</h2></div>
-  <div class="dashboard-grid">
+  <div class="dashboard-grid" {% if dashboard_lazy %}data-dashboard-section="movement" data-src="{{ url_for('admin.dashboard_movement_partial', branch=filters.branch or None, day=filters.day) }}"{% endif %}>
+    {% if dashboard_lazy %}<article class="panel movement-card"><div class="movement-head"><h2>Going out</h2></div><div class="movement-body"><div class="empty-results"><strong>Loading…</strong><span>Fetching movement after the stats above.</span></div></div></article>{% else %}
     <article class="panel movement-card">
       <div class="movement-head">
         <h2>Going out</h2>
@@ -140,7 +152,25 @@
       </div>
       {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>{% endif %}
     </article>
+    {% endif %}
   </div>
 </section>
+{% endif %}
+{% if dashboard_lazy %}
+<script>
+(function () {
+  var sections = Array.prototype.slice.call(document.querySelectorAll('[data-dashboard-section][data-src]'));
+  function loadNext(index) {
+    if (index >= sections.length) return;
+    var el = sections[index];
+    fetch(el.getAttribute('data-src'), {headers: {'X-Requested-With': 'fetch'}})
+      .then(function (response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.text(); })
+      .then(function (html) { el.innerHTML = html; })
+      .catch(function () { el.innerHTML = '<div class="flash error">Could not load this dashboard section. Refresh to try again.</div>'; })
+      .finally(function () { loadNext(index + 1); });
+  }
+  loadNext(0);
+}());
+</script>
 {% endif %}
 {% endblock %}

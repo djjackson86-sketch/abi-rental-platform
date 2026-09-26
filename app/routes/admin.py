@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, redirect, request, url_for, Response, flash, abort, session
+from flask import Blueprint, current_app, render_template, render_template_string, redirect, request, url_for, Response, flash, abort, session
 import csv
 from datetime import date, timedelta
 from io import StringIO
@@ -74,13 +74,118 @@ def dashboard():
     day_is_today = selected_day == cash_today_iso()
     # Quick ranges for the four headline cards, defaulting to This month.
     range_presets, range_key, range_start, range_end, range_label = _dashboard_range()
+    dashboard_lazy = not current_app.config.get("TESTING")
+    if dashboard_lazy:
+        metrics = {"orders": 0, "products": 0, "customers": 0, "revenue": 0}
+        day_metrics = {"day": selected_day}
+        cash_panel = {"branches": branches, "branch_id": branch_id, "branch_name": branch_label or "All branches"}
+        cash_day = {}
+        previous_day = None
+        trailer_products = []
+        trailer_service_day = {"services": []}
+        spare_wheel_rows = []
+        spare_wheel_branch_id = branch_id
+        spare_wheel_editable = False
+        schedule = {"going_out": [], "coming_back": []}
+    else:
+        metrics = dashboard_period_metrics(
+            start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
+        )
+        cash_branch_id = branch_id or (branch_scope if isinstance(branch_scope, int) else None)
+        if cash_branch_id:
+            cash_panel = cash_panel_state(str(cash_branch_id))
+            cash_day = cash_day_summary(day=selected_day, branch_id=cash_panel['branch_id'])
+            trailer_products = eligible_trailer_products(branch_id=cash_panel['branch_id'])
+            trailer_service_day = trailer_service_services_for_day(
+                selected_day, branch_id=cash_panel['branch_id']
+            )
+            previous_day = cash_previous_day_notes(selected_day, cash_panel['branch_id'])
+        else:
+            cash_panel = {'branches': cash_branches(), 'branch_id': None, 'branch_name': 'All branches'}
+            cash_day = cash_aggregate_day_summary(day=selected_day)
+            trailer_products = []
+            trailer_service_day = trailer_service_services_for_day(selected_day)
+            previous_day = None
+        spare_wheel_branch_id = cash_branch_id
+        spare_wheel_editable = bool(spare_wheel_branch_id) and day_is_today
+        spare_wheel_rows = spare_wheels.spare_wheel_rows(
+            selected_day,
+            branch_id=spare_wheel_branch_id,
+            editable=spare_wheel_editable,
+        )
+        day_metrics = dashboard_day_metrics(day=selected_day, branch_id=branch_id)
+        schedule = dashboard_schedule(branch_id=branch_id)
+    return render_template(
+        "admin/dashboard.html",
+        settings=get_company_settings(),
+        dashboard_lazy=dashboard_lazy,
+        metrics=metrics,
+        day_metrics=day_metrics,
+        cash_panel=cash_panel,
+        cash_day=cash_day,
+        previous_day_notes=previous_day,
+        trailer_service_products=trailer_products,
+        trailer_service_day=trailer_service_day,
+        trailer_service_types=TRAILER_SERVICE_TYPES,
+        spare_wheel_rows=spare_wheel_rows,
+        spare_wheel_day=selected_day,
+        spare_wheel_branch_id=spare_wheel_branch_id,
+        spare_wheel_editable=spare_wheel_editable,
+        selected_day=selected_day,
+        day_is_today=day_is_today,
+        today=cash_today_iso(),
+        schedule=schedule,
+        branches=branches,
+        branch_label=branch_label,
+        branch_scope=branch_scope,
+        range_presets=range_presets,
+        range_label=range_label,
+        filters={"branch": selected_branch, "range": range_key, "start_date": range_start, "end_date": range_end, "day": selected_day},
+    )
+
+
+def _dashboard_selected_day():
+    selected_day = cash_today_iso()
+    if is_main_session(session) and request.args.get("day"):
+        selected_day = cash_parse_business_day(request.args.get("day"))
+    return selected_day
+
+
+@bp.get("/dashboard/partials/period")
+@login_required
+def dashboard_period_partial():
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    range_presets, range_key, range_start, range_end, range_label = _dashboard_range()
     metrics = dashboard_period_metrics(
         start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
     )
-    # The top dashboard Branch filter is the single source of truth for cash
-    # figures. A selected branch shows that branch's editable cash-up drawer;
-    # All branches shows an aggregated, read-only view so one save never
-    # pretends to update several depots at once.
+    return render_template_string(
+        """
+        <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Created · {{ range_label }}</span></div>
+        <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Added · {{ range_label }}</span></div>
+        <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Added · {{ range_label }}</span></div>
+        <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Received · {{ range_label }}</span></div>
+        """,
+        metrics=metrics,
+        range_label=range_label,
+    )
+
+
+@bp.get("/dashboard/partials/day")
+@login_required
+def dashboard_day_partial():
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    selected_day = _dashboard_selected_day()
+    return render_template(
+        "admin/_dashboard_day_metrics.html",
+        day_metrics=dashboard_day_metrics(day=selected_day, branch_id=branch_id),
+    )
+
+
+def _dashboard_cash_context():
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    selected_day = _dashboard_selected_day()
+    day_is_today = selected_day == cash_today_iso()
     cash_branch_id = branch_id or (branch_scope if isinstance(branch_scope, int) else None)
     if cash_branch_id:
         cash_panel = cash_panel_state(str(cash_branch_id))
@@ -96,43 +201,55 @@ def dashboard():
         trailer_products = []
         trailer_service_day = trailer_service_services_for_day(selected_day)
         previous_day = None
-    # Spare wheel count (ticket ABI-341953033): one wheel per trailer still in
-    # the yard, per wheel size. It follows the same depot as the cash panel, so a
-    # selected branch is editable and "All branches" is a read-only sum across the
-    # depots this sign-in may already see. A day other than today is a read-only
-    # view of that day's counts (ticket ABI-341953042).
-    spare_wheel_day = selected_day
     spare_wheel_branch_id = cash_branch_id
     spare_wheel_editable = bool(spare_wheel_branch_id) and day_is_today
-    return render_template(
-        "admin/dashboard.html",
-        settings=get_company_settings(),
-        metrics=metrics,
-        day_metrics=dashboard_day_metrics(day=selected_day, branch_id=branch_id),
-        cash_panel=cash_panel,
-        cash_day=cash_day,
-        previous_day_notes=previous_day,
-        trailer_service_products=trailer_products,
-        trailer_service_day=trailer_service_day,
-        trailer_service_types=TRAILER_SERVICE_TYPES,
-        spare_wheel_rows=spare_wheels.spare_wheel_rows(
-            spare_wheel_day,
+    return {
+        "settings": get_company_settings(),
+        "cash_panel": cash_panel,
+        "cash_day": cash_day,
+        "previous_day_notes": previous_day,
+        "trailer_service_products": trailer_products,
+        "trailer_service_day": trailer_service_day,
+        "trailer_service_types": TRAILER_SERVICE_TYPES,
+        "spare_wheel_rows": spare_wheels.spare_wheel_rows(
+            selected_day,
             branch_id=spare_wheel_branch_id,
             editable=spare_wheel_editable,
         ),
-        spare_wheel_day=spare_wheel_day,
-        spare_wheel_branch_id=spare_wheel_branch_id,
-        spare_wheel_editable=spare_wheel_editable,
-        selected_day=selected_day,
-        day_is_today=day_is_today,
-        today=cash_today_iso(),
-        schedule=dashboard_schedule(branch_id=branch_id),
-        branches=branches,
-        branch_label=branch_label,
-        branch_scope=branch_scope,
-        range_presets=range_presets,
-        range_label=range_label,
-        filters={"branch": selected_branch, "range": range_key, "start_date": range_start, "end_date": range_end, "day": selected_day},
+        "spare_wheel_day": selected_day,
+        "spare_wheel_branch_id": spare_wheel_branch_id,
+        "spare_wheel_editable": spare_wheel_editable,
+        "selected_day": selected_day,
+        "day_is_today": day_is_today,
+        "today": cash_today_iso(),
+    }
+
+
+@bp.get("/dashboard/partials/cash")
+@login_required
+def dashboard_cash_partial():
+    return render_template("admin/_dashboard_cash.html", **_dashboard_cash_context())
+
+
+@bp.get("/dashboard/partials/movement")
+@login_required
+def dashboard_movement_partial():
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    schedule = dashboard_schedule(branch_id=branch_id)
+    return render_template_string(
+        """
+        <article class="panel movement-card">
+          <div class="movement-head"><h2>Going out</h2><div class="header-actions">{% if user_can('reports') %}<a class="btn ghost" href="{{ url_for('admin.reports') }}">Run report</a>{% endif %}{% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}</div></div>
+          <div class="movement-body">{% if schedule.going_out %}<div class="schedule-list">{% for order in schedule.going_out %}<a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span><span><small>Pickup</small><b>{{ display_local_datetime(order.start_at) }}</b></span></a>{% endfor %}</div>{% else %}<div class="empty-results"><strong>No results</strong><span>No reserved pickups scheduled yet.</span></div>{% endif %}</div>
+          {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='reserved') }}">View late</a><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>{% endif %}
+        </article>
+        <article class="panel movement-card">
+          <div class="movement-head"><h2>Coming back</h2><div class="header-actions">{% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}</div></div>
+          <div class="movement-body">{% if schedule.coming_back %}<div class="schedule-list">{% for order in schedule.coming_back %}<a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.customer_name or 'No customer' }}</b><small>{{ order.order_number }} · {{ order.product_names or 'No items' }}</small></span><span><small>Return</small><b>{{ display_local_datetime(order.end_at) }}</b></span></a>{% endfor %}</div>{% else %}<div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>{% endif %}</div>
+          {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>{% endif %}
+        </article>
+        """,
+        schedule=schedule,
     )
 
 

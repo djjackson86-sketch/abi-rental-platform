@@ -19,6 +19,7 @@ from app.services.documents import (
     get_document,
     label_for,
     list_documents,
+    document_totals,
     mark_document_email,
     printable_document,
     rental_days_label,
@@ -35,6 +36,15 @@ EMAIL_LOGO_STATIC_PATH = 'img/sano-trailers-email-logo.jpg'
 bp = Blueprint("documents", __name__, url_prefix="/documents")
 
 EMAIL_DRAFT_DOCUMENT_TYPES = {'invoice', 'quote'}
+PAGE_SIZE = 25
+
+
+def _display_limit():
+    try:
+        requested = int(request.args.get("limit") or PAGE_SIZE)
+    except (TypeError, ValueError):
+        requested = PAGE_SIZE
+    return max(PAGE_SIZE, min(requested, 5000))
 
 
 def _prevent_generated_document_cache(response):
@@ -120,14 +130,17 @@ def index():
     status = request.args.get("status", "")
     start_date = request.args.get("start_date", "")
     end_date = request.args.get("end_date", "")
-    documents = list_documents(query=query, document_type=document_type, status=status, start_date=start_date, end_date=end_date)
-    # Compute totals for metrics
-    docs_total = len(documents)
-    docs_total_amount = sum((d["total"] or 0) for d in documents)
+    display_limit = _display_limit()
+    documents = list_documents(query=query, document_type=document_type, status=status, start_date=start_date, end_date=end_date, limit=display_limit)
+    totals = document_totals(query=query, document_type=document_type, status=status, start_date=start_date, end_date=end_date)
+    docs_total = totals["total"]
+    docs_total_amount = totals["total_amount"]
     return render_template(
         "admin/documents/index.html",
         settings=get_company_settings(),
         documents=documents,
+        display_limit=display_limit,
+        next_limit=display_limit + PAGE_SIZE,
         label_for=label_for,
         filter_counts=document_filter_counts(),
         docs_total=docs_total,

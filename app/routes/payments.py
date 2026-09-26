@@ -2,10 +2,19 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
 from app.services.access import resolve_branch_filter
-from app.services.payments import archive_payment, display_payment_date, get_payment, is_refund, label_for, list_payments, normalise_payment_date_filter, normalise_payment_sort, update_payment
+from app.services.payments import archive_payment, display_payment_date, get_payment, is_refund, label_for, list_payments, normalise_payment_date_filter, normalise_payment_sort, payment_count, update_payment
 from app.services.settings import get_company_settings
 
 bp = Blueprint("payments", __name__, url_prefix="/payments")
+PAGE_SIZE = 25
+
+
+def _display_limit():
+    try:
+        requested = int(request.args.get("limit") or PAGE_SIZE)
+    except (TypeError, ValueError):
+        requested = PAGE_SIZE
+    return max(PAGE_SIZE, min(requested, 5000))
 
 
 @bp.route("")
@@ -16,6 +25,13 @@ def index():
     sort, direction = normalise_payment_sort(request.args.get("sort", "date"), request.args.get("dir", "desc"))
     date_from = normalise_payment_date_filter(request.args.get("date_from", ""))
     date_to = normalise_payment_date_filter(request.args.get("date_to", ""))
+    display_limit = _display_limit()
+    total_payments = payment_count(
+        include_archived=include_archived,
+        branch_id=branch_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
     return render_template(
         "admin/payments/index.html",
         settings=get_company_settings(),
@@ -26,7 +42,11 @@ def index():
             direction=direction,
             date_from=date_from,
             date_to=date_to,
+            limit=display_limit,
         ),
+        total_payments=total_payments,
+        display_limit=display_limit,
+        next_limit=display_limit + PAGE_SIZE,
         label_for=label_for,
         display_payment_date=display_payment_date,
         is_refund=is_refund,

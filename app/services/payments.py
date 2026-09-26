@@ -183,7 +183,7 @@ def _payment_order_clause(sort="date", direction="desc"):
     return ", ".join(clauses)
 
 
-def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc", date_from="", date_to=""):
+def _payment_where(include_archived=False, branch_id=None, date_from="", date_to=""):
     where_parts = ["1=1" if include_archived else _active_payment_clause("p")]
     branch_sql, params = order_branch_clause("o", branch_id=branch_id)
     if branch_sql:
@@ -197,7 +197,16 @@ def list_payments(include_archived=False, branch_id=None, sort="date", direction
     if date_to:
         where_parts.append(f"{date_expr} <= ?")
         params.append(date_to)
+    return where_parts, params
+
+
+def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc", date_from="", date_to="", limit=None, offset=0):
+    where_parts, params = _payment_where(include_archived, branch_id, date_from, date_to)
     order_clause = _payment_order_clause(sort, direction)
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = " LIMIT ? OFFSET ?"
+        params.extend([int(limit), int(offset or 0)])
     return get_db().execute(
         f"""SELECT p.*, o.order_number, o.collect_branch_id, o.return_branch_id,
                   c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
@@ -213,9 +222,21 @@ def list_payments(include_archived=False, branch_id=None, sort="date", direction
         LEFT JOIN branches cb ON cb.id = o.collect_branch_id
         LEFT JOIN branches rb ON rb.id = o.return_branch_id
         WHERE {' AND '.join(where_parts)}
-        ORDER BY {order_clause}""",
+        ORDER BY {order_clause}{limit_sql}""",
         params,
     ).fetchall()
+
+
+def payment_count(include_archived=False, branch_id=None, date_from="", date_to=""):
+    where_parts, params = _payment_where(include_archived, branch_id, date_from, date_to)
+    row = get_db().execute(
+        f"""SELECT COUNT(*) AS total
+        FROM payments p
+        LEFT JOIN orders o ON o.id = p.order_id
+        WHERE {' AND '.join(where_parts)}""",
+        params,
+    ).fetchone()
+    return int(row["total"] if row else 0)
 
 
 def normalise_payment_sort(sort, direction):

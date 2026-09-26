@@ -15,6 +15,16 @@ from app.services.timezone import local_now_iso
 from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
+PAGE_SIZE = 25
+
+
+def _display_limit():
+    try:
+        requested = int(request.args.get("limit") or PAGE_SIZE)
+    except (TypeError, ValueError):
+        requested = PAGE_SIZE
+    return max(PAGE_SIZE, min(requested, 5000))
+
 
 # Flat names of the editable attached-customer fields on the new-order form.
 CUSTOMER_EDIT_FIELD_KEYS = [
@@ -211,12 +221,17 @@ def index():
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     selected_branch, branch_id, branch_label, branches, branch_scope = resolve_branch_filter(request.args.get("branch", ""))
-    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id)
+    display_limit = _display_limit()
+    counts = order_counts(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id)
+    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id, limit=display_limit)
     return render_template(
         "admin/orders/index.html",
         settings=get_company_settings(),
         orders=orders,
-        counts=order_counts(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id),
+        counts=counts,
+        total_orders=counts["total"],
+        display_limit=display_limit,
+        next_limit=display_limit + PAGE_SIZE,
         filter_counts=order_filter_counts(branch_id=branch_id),
         branches=branches,
         branch_label=branch_label,

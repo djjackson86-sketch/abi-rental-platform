@@ -4,10 +4,20 @@ from io import StringIO
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
-from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_has_history, customer_orders, delete_customer, get_customer, list_customers, update_customer
+from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, delete_customer, get_customer, list_customers, update_customer
 from app.services.settings import get_company_settings
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
+
+PAGE_SIZE = 25
+
+
+def _display_limit():
+    try:
+        requested = int(request.args.get("limit") or PAGE_SIZE)
+    except (TypeError, ValueError):
+        requested = PAGE_SIZE
+    return max(PAGE_SIZE, min(requested, 5000))
 
 
 @bp.route("")
@@ -16,11 +26,16 @@ def index():
     query = request.args.get("query", "").strip()
     customer_type = request.args.get("customer_type", "")
     marketing = request.args.get("marketing", "")
-    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing)
+    display_limit = _display_limit()
+    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, limit=display_limit)
+    total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing)
     return render_template(
         "admin/customers/index.html",
         settings=get_company_settings(),
         customers=customers,
+        total_customers=total,
+        display_limit=display_limit,
+        next_limit=display_limit + PAGE_SIZE,
         counts=customer_counts(),
         filter_counts=customer_filter_counts(),
         filters={"query": query, "customer_type": customer_type, "marketing": marketing},
