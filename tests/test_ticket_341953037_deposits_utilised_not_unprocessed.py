@@ -384,7 +384,7 @@ def test_the_clause_is_still_a_single_definition_used_everywhere():
     # the money card are the four call sites) - no surface may hand-roll its own
     # applied/refund test.
     assert source.count('def _process_deposit_clause(') == 1
-    assert source.count('_process_deposit_clause(') == 5
+    assert source.count('_process_deposit_clause(') == 4
 
 
 def test_the_predicate_itself_reads_exactly_this_rule():

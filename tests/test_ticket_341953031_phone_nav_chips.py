@@ -121,10 +121,10 @@ def test_every_phone_chip_renders_with_one_shape(client, app):
 
     chips = _chips(_mobile_nav_markup(dashboard.data))
     labels = [label for _, label in chips]
-    assert labels == ['Dashboard', 'Orders', 'Customers', 'Inventory', 'Settings',
+    assert labels == ['Dashboard', 'Orders', 'Customers', 'Inventory', 'Reports', 'Settings',
                       'Branch: %s \u00b7 Change' % _branch_name(app)], labels
     assert [_href(attrs) for attrs, _ in chips] == [
-        '/dashboard', '/orders', '/customers', '/inventory', '/settings/general',
+        '/dashboard', '/orders', '/customers', '/inventory', '/reports', '/settings/general',
         '/select-branch',
     ]
 

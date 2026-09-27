@@ -349,6 +349,7 @@ def customer_summary_for(customer):
         "form": customer_form_values_for(customer),
         "standard_discount_percent": float(_customer_row_value(customer, "standard_discount_percent", 0) or 0),
         "previous_orders_balance": round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2),
+        "orders_to_date": int(_customer_row_value(customer, "orders_to_date", 0) or 0),
         "client_verified": _customer_row_value(customer, "client_verified", None),
         "client_verified_label": client_verified_label(_customer_row_value(customer, "client_verified", None)),
         # Ticket ABI-341953028: the order form renders the blocked banner from

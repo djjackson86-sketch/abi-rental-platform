@@ -95,7 +95,60 @@ def _status_clause(status, alias="o"):
     return f"{alias}.status = ?", [status]
 
 
-def list_orders(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None, limit=None, offset=0):
+def _filter_values(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        raw_values = value
+    else:
+        raw_values = [value]
+    values = []
+    for raw in raw_values:
+        text = str(raw or "").strip()
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
+def _or_clauses(parts):
+    clauses = []
+    params = []
+    for clause, clause_params in parts:
+        if clause:
+            clauses.append(f"({clause})")
+            params.extend(clause_params)
+    if not clauses:
+        return "", []
+    return " OR ".join(clauses), params
+
+
+def _status_filter_clause(status, alias="o"):
+    return _or_clauses(_status_clause(value, alias) for value in _filter_values(status))
+
+
+def _payment_filter_clause(payment_status, alias="o"):
+    parts = []
+    stored_values = []
+    for value in _filter_values(payment_status):
+        if value == "process_deposit":
+            parts.append((_process_deposit_clause(alias), []))
+        else:
+            stored_values.append(value)
+    if stored_values:
+        placeholders = ",".join("?" for _ in stored_values)
+        parts.append((f"{alias}.payment_status IN ({placeholders})", stored_values))
+    return _or_clauses(parts)
+
+
+def _return_filter_clause(return_status, alias="o"):
+    parts = []
+    for value in _filter_values(return_status):
+        if value == "late":
+            parts.append((f"{alias}.status = 'started' AND {alias}.end_at < ?", [now()]))
+    return _or_clauses(parts)
+
+
+def list_orders(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None, limit=None, offset=0):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         cu.name AS created_by_name, cu.email AS created_by_email,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
@@ -111,18 +164,18 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
         sql += " AND (LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ?)"
         needle = f"%{query.lower()}%"
         params.extend([needle, needle, needle])
-    if status:
-        status_clause, status_params = _status_clause(status, "o")
-        sql += f" AND {status_clause}"
+    status_clause, status_params = _status_filter_clause(status, "o")
+    if status_clause:
+        sql += f" AND ({status_clause})"
         params.extend(status_params)
-    if return_status == "late":
-        sql += " AND o.status = 'started' AND o.end_at < ?"
-        params.append(now())
-    if payment_status == "process_deposit":
-        sql += f" AND {_process_deposit_clause('o')}"
-    elif payment_status:
-        sql += " AND o.payment_status = ?"
-        params.append(payment_status)
+    return_clause, return_params = _return_filter_clause(return_status, "o")
+    if return_clause:
+        sql += f" AND ({return_clause})"
+        params.extend(return_params)
+    payment_clause, payment_params = _payment_filter_clause(payment_status, "o")
+    if payment_clause:
+        sql += f" AND ({payment_clause})"
+        params.extend(payment_params)
     if start_date:
         sql += " AND DATE(o.start_at) >= ?"
         params.append(start_date)
@@ -136,7 +189,7 @@ def list_orders(query="", status="", payment_status="", return_status="", start_
     return get_db().execute(sql, params).fetchall()
 
 
-def _order_filter_where(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
+def _order_filter_where(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None):
     clauses = ["1=1"]
     params = []
     scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
@@ -147,18 +200,18 @@ def _order_filter_where(query="", status="", payment_status="", return_status=""
         clauses.append("(LOWER(o.order_number) LIKE ? OR LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ?)")
         needle = f"%{query.lower()}%"
         params.extend([needle, needle, needle])
-    if status:
-        status_clause, status_params = _status_clause(status, "o")
-        clauses.append(status_clause)
+    status_clause, status_params = _status_filter_clause(status, "o")
+    if status_clause:
+        clauses.append(f"({status_clause})")
         params.extend(status_params)
-    if return_status == "late":
-        clauses.append("o.status = 'started' AND o.end_at < ?")
-        params.append(now())
-    if payment_status == "process_deposit":
-        clauses.append(_process_deposit_clause('o'))
-    elif payment_status:
-        clauses.append("o.payment_status = ?")
-        params.append(payment_status)
+    return_clause, return_params = _return_filter_clause(return_status, "o")
+    if return_clause:
+        clauses.append(f"({return_clause})")
+        params.extend(return_params)
+    payment_clause, payment_params = _payment_filter_clause(payment_status, "o")
+    if payment_clause:
+        clauses.append(f"({payment_clause})")
+        params.extend(payment_params)
     if start_date:
         clauses.append("DATE(o.start_at) >= ?")
         params.append(start_date)
@@ -168,7 +221,7 @@ def _order_filter_where(query="", status="", payment_status="", return_status=""
     return " AND ".join(clauses), params
 
 
-def order_counts(query="", status="", payment_status="", return_status="", start_date="", end_date="", branch_id=None):
+def order_counts(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None):
     """Totals for the Orders page metric cards.
 
     Revenue is money RECEIVED (ticket ABI-341952993) — paid, non-archived payments

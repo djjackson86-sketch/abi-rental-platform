@@ -151,12 +151,12 @@ def seed_orders(app):
 
 
 def rail_count(body, value):
-    """The count badge next to a filter-rail radio.
+    """The count badge next to a filter-rail checkbox.
 
-    Anchored on ``type="radio"`` because the search form carries a hidden
-    ``name="status"`` input with the same value when a status is selected.
+    Anchored on ``type="checkbox"`` because the search form carries hidden
+    inputs with the same name when filters are preserved across search.
     """
-    match = re.search(r'type="radio" name="status" value="' + value + r'"[\s\S]*?<em>\((\d+)\)</em>', body)
+    match = re.search(r'type="checkbox" name="status" value="' + value + r'"[\s\S]*?<em>\((\d+)\)</em>', body)
     assert match, f'no filter-rail count rendered for {value}'
     return int(match.group(1))
 

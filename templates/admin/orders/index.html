@@ -12,9 +12,9 @@
   <form class="orders-search" method="get">
     <span>⌕</span>
     <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search orders">
-    {% if filters.status %}<input type="hidden" name="status" value="{{ filters.status }}">{% endif %}
-    {% if filters.payment_status %}<input type="hidden" name="payment_status" value="{{ filters.payment_status }}">{% endif %}
-    {% if filters.return_status %}<input type="hidden" name="return_status" value="{{ filters.return_status }}">{% endif %}
+    {% for value in filters.status %}<input type="hidden" name="status" value="{{ value }}">{% endfor %}
+    {% for value in filters.payment_status %}<input type="hidden" name="payment_status" value="{{ value }}">{% endfor %}
+    {% for value in filters.return_status %}<input type="hidden" name="return_status" value="{{ value }}">{% endfor %}
     {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
     {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
     {% if filters.branch %}<input type="hidden" name="branch" value="{{ filters.branch }}">{% endif %}
@@ -26,7 +26,6 @@
   <aside class="orders-filter-rail panel">
     <form method="get" class="orders-filter-form">
       {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
-      {% if filters.return_status %}<input type="hidden" name="return_status" value="{{ filters.return_status }}">{% endif %}
       {% if filters.start_date %}<input type="hidden" name="start_date" value="{{ filters.start_date }}">{% endif %}
       {% if filters.end_date %}<input type="hidden" name="end_date" value="{{ filters.end_date }}">{% endif %}
       <div class="filter-group">
@@ -45,13 +44,13 @@
         <div class="filter-group-head"><strong>Status</strong><span>⌃</span></div>
         {% for s,label in [('draft','Draft'),('reserved','Reserved'),('started','Started'),('returned','Returned'),('archived','Archived'),('canceled','Canceled')] %}
           <label class="filter-check">
-            <input type="radio" name="status" value="{{ s }}" {% if filters.status==s %}checked{% endif %} onchange="this.form.submit()">
+            <input type="checkbox" name="status" value="{{ s }}" {% if s in filters.status %}checked{% endif %} onchange="this.form.submit()">
             <span>{{ label }}</span>
             <em>({{ filter_counts.status.get(s, 0) }})</em>
           </label>
         {% endfor %}
         <label class="filter-check" title="Orders with no rental items — sales, repairs/service and custom work only">
-          <input type="radio" name="status" value="sales_repairs" {% if filters.status=='sales_repairs' %}checked{% endif %} onchange="this.form.submit()">
+          <input type="checkbox" name="status" value="sales_repairs" {% if 'sales_repairs' in filters.status %}checked{% endif %} onchange="this.form.submit()">
           <span>{{ sales_repairs_label }}</span>
           <em>({{ filter_counts.status.get('sales_repairs', 0) }})</em>
         </label>
@@ -62,13 +61,13 @@
         <div class="filter-group-head"><strong>Payment status</strong><span>⌃</span></div>
         {% for s,label in [('partially_paid','Partially paid'),('paid','Paid'),('overpaid','Overpaid'),('payment_due','Payment due')] %}
           <label class="filter-check">
-            <input type="radio" name="payment_status" value="{{ s }}" {% if filters.payment_status==s %}checked{% endif %} onchange="this.form.submit()">
+            <input type="checkbox" name="payment_status" value="{{ s }}" {% if s in filters.payment_status %}checked{% endif %} onchange="this.form.submit()">
             <span>{{ label }}</span>
             <em>({{ filter_counts.payment_status.get(s, 0) }})</em>
           </label>
         {% endfor %}
         <label class="filter-check">
-          <input type="radio" name="payment_status" value="process_deposit" {% if filters.payment_status=='process_deposit' %}checked{% endif %} onchange="this.form.submit()">
+          <input type="checkbox" name="payment_status" value="process_deposit" {% if 'process_deposit' in filters.payment_status %}checked{% endif %} onchange="this.form.submit()">
           <span>Process deposit</span>
           <em>({{ filter_counts.payment_status.get('process_deposit', 0) }})</em>
         </label>
@@ -78,7 +77,7 @@
       <div class="filter-group compact">
         <div class="filter-group-head"><strong>Return status</strong><span>⌃</span></div>
         <label class="filter-check">
-          <input type="radio" name="return_status" value="late" {% if filters.return_status=='late' %}checked{% endif %} onchange="this.form.submit()">
+          <input type="checkbox" name="return_status" value="late" {% if 'late' in filters.return_status %}checked{% endif %} onchange="this.form.submit()">
           <span>Late</span>
           <em>({{ filter_counts.return_status.get('late', 0) }})</em>
         </label>
@@ -100,9 +99,9 @@
       <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
         <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index', branch=filters.branch or None) }}">All</a>
         <a href="#">Upcoming</a>
-        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
+        <a class="{% if 'late' in filters.return_status %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
         <a href="#">With shortage</a>
-        <a class="{% if filters.status=='sales_repairs' %}active{% endif %}" href="{{ url_for('orders.index', status='sales_repairs', branch=filters.branch or None) }}">{{ sales_repairs_label }}</a>
+        <a class="{% if 'sales_repairs' in filters.status %}active{% endif %}" href="{{ url_for('orders.index', status='sales_repairs', branch=filters.branch or None) }}">{{ sales_repairs_label }}</a>
       </nav>
       <button class="btn ghost metrics-toggle" type="button" aria-expanded="true" aria-controls="orders-metrics" title="Collapse or expand the totals row above the order list">Hide metrics⌃</button>
     </div>
@@ -120,9 +119,9 @@
       <nav class="tabs mini-tabs orders-tabs" aria-label="Order views">
         <a class="{% if not filters.query and not filters.status and not filters.payment_status and not filters.return_status %}active{% endif %}" href="{{ url_for('orders.index', branch=filters.branch or None) }}">All</a>
         <a href="#">Upcoming</a>
-        <a class="{% if filters.return_status=='late' %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
+        <a class="{% if 'late' in filters.return_status %}active{% endif %}" href="{{ url_for('orders.index', status='started', return_status='late', branch=filters.branch or None) }}">Late</a>
         <a href="#">With shortage</a>
-        <a class="{% if filters.status=='sales_repairs' %}active{% endif %}" href="{{ url_for('orders.index', status='sales_repairs', branch=filters.branch or None) }}">{{ sales_repairs_label }}</a>
+        <a class="{% if 'sales_repairs' in filters.status %}active{% endif %}" href="{{ url_for('orders.index', status='sales_repairs', branch=filters.branch or None) }}">{{ sales_repairs_label }}</a>
       </nav>
     </div>
 

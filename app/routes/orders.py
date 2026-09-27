@@ -18,6 +18,19 @@ bp = Blueprint("orders", __name__, url_prefix="/orders")
 PAGE_SIZE = 25
 
 
+def _selected_filters(name):
+    values = []
+    for raw in request.args.getlist(name):
+        value = (raw or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def _first_filter_value(values):
+    return values[0] if values else ""
+
+
 def _display_limit():
     try:
         requested = int(request.args.get("limit") or PAGE_SIZE)
@@ -46,7 +59,8 @@ def _customers():
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
                client_verified, is_blocked, blocked_reason,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
-                FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance
+                FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
+               (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
         ORDER BY name
     """).fetchall()
@@ -69,7 +83,8 @@ def _customer_summary_by_id(customer_id):
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
                client_verified, is_blocked, blocked_reason,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
-                FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance
+                FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
+               (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
         WHERE id = ?
     """, (customer_id,)).fetchone()
@@ -215,9 +230,9 @@ def _time_options(increment=15):
 @login_required
 def index():
     query = request.args.get("query", "").strip()
-    status = request.args.get("status", "")
-    payment_status = request.args.get("payment_status", "")
-    return_status = request.args.get("return_status", "")
+    status = _selected_filters("status")
+    payment_status = _selected_filters("payment_status")
+    return_status = _selected_filters("return_status")
     start_date = request.args.get("start_date", "").strip()
     end_date = request.args.get("end_date", "").strip()
     selected_branch, branch_id, branch_label, branches, branch_scope = resolve_branch_filter(request.args.get("branch", ""))
@@ -237,7 +252,7 @@ def index():
         branches=branches,
         branch_label=branch_label,
         branch_scope=branch_scope,
-        filters={"query": query, "status": status, "payment_status": payment_status, "return_status": return_status, "start_date": start_date, "end_date": end_date, "branch": selected_branch},
+        filters={"query": query, "status": status, "status_first": _first_filter_value(status), "payment_status": payment_status, "payment_status_first": _first_filter_value(payment_status), "return_status": return_status, "return_status_first": _first_filter_value(return_status), "start_date": start_date, "end_date": end_date, "branch": selected_branch},
         deposit_to_process_amount=deposit_to_process_amount,
         sales_repairs_label=SALES_REPAIRS_LABEL,
         status_label=status_label,
