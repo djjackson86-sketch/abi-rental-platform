@@ -116,9 +116,16 @@
       <form method="post" action="{{ url_for('orders.create_document_for_order', order_id=order.id) }}"><input type="hidden" name="document_type" value="packing_slip"><button class="btn ghost" type="submit">Packing slip</button></form>
     </div>
     {% if documents %}
+      <style>
+        .document-list .document-status-line{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+        .document-email-indicator{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;line-height:1;border:1px solid transparent}
+        .document-email-indicator-sent{color:#137333;background:#e6f4ea;border-color:#b7e1c1}
+        .document-email-indicator-unsent{color:#b3261e;background:#fce8e6;border-color:#f7b4ad}
+      </style>
       <div class="schedule-list document-list">
       {% for document in documents %}
-        <a class="schedule-row" href="{{ url_for('documents.detail', document_id=document.id) }}"><span><b>{{ document.number or '' }}</b><small>{% if document.document_type == 'invoice' and document.status == 'draft' and not document.number %}Proforma Invoice{% else %}{{ label_for(document.document_type) }}{% endif %}</small></span><span><small>Status</small><b>{{ document.status|title }}</b></span></a>
+        {% set email_prepared = (document.email_status or 'not_sent') != 'not_sent' or document.sent_at %}
+        <a class="schedule-row" href="{{ url_for('documents.detail', document_id=document.id) }}"><span><b>{{ document.number or '' }}</b><small>{% if document.document_type == 'invoice' and document.status == 'draft' and not document.number %}Proforma Invoice{% else %}{{ label_for(document.document_type) }}{% endif %}</small></span><span><small>Status</small><b class="document-status-line">{{ document.status|title }} <span class="document-email-indicator document-email-indicator-{{ 'sent' if email_prepared else 'unsent' }}" data-document-email-indicator="{{ 'sent' if email_prepared else 'unsent' }}">{{ 'Sent' if email_prepared else 'Unsent' }}</span></b></span></a>
       {% endfor %}
       </div>
     {% else %}
