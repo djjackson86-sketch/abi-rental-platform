@@ -11,7 +11,8 @@
     </div>
   </div>
   <div class="header-actions">
-    <a class="btn primary" href="{{ url_for('admin.reports_orders_csv', start_date=filters.start_date or None, end_date=filters.end_date or None, branch=filters.branch or None) }}">Download orders CSV</a>
+    <a class="btn primary" href="{{ url_for('admin.reports_pdf', start_date=filters.start_date or None, end_date=filters.end_date or None, branch=filters.branch or None) }}">Download PDF report</a>
+    <a class="btn ghost" href="{{ url_for('admin.reports_orders_csv', start_date=filters.start_date or None, end_date=filters.end_date or None, branch=filters.branch or None) }}">Download orders CSV</a>
   </div>
 </header>
 

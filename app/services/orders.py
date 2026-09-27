@@ -1799,12 +1799,25 @@ def settle_return_deposit(order_id, form):
     note = form.get("deposit_note", "").strip()
     deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
     deposit_available = round(float(order["deposit_total"] or 0), 2)
-    non_deposit_paid = _non_deposit_paid_total(order_id)
-    balance = round(max(float(order["total"] or 0) - non_deposit_paid, 0), 2)
-    # If rental money is still due, the security deposit must settle that first;
-    # only the true remainder can be paid out to the customer.
-    applied_amount = round(min(deposit_available, balance), 2)
-    refund_amount = round(max(deposit_available - applied_amount, 0), 2)
+    refund_override = (form.get("deposit_refund_amount") or "").strip()
+    if refund_override and (order["status"] or "") not in {"canceled", "cancelled"}:
+        raise ValueError("Manual partial/full deposit refunds are only available for canceled orders")
+    if refund_override:
+        refund_amount = _parse_deposit_refund_amount(refund_override)
+        if refund_amount > deposit_available:
+            raise ValueError(f"Deposit refund cannot be more than the R{deposit_available:.2f} deposit")
+        # Canceled bookings may need a discretionary partial or full payout. The
+        # office-entered refund is authoritative here; the remainder is kept as
+        # deposit applied/forfeited so accounting still satisfies
+        # applied + refund = original deposit.
+        applied_amount = round(deposit_available - refund_amount, 2)
+    else:
+        non_deposit_paid = _non_deposit_paid_total(order_id)
+        balance = round(max(float(order["total"] or 0) - non_deposit_paid, 0), 2)
+        # If rental money is still due, the security deposit must settle that first;
+        # only the true remainder can be paid out to the customer.
+        applied_amount = round(min(deposit_available, balance), 2)
+        refund_amount = round(max(deposit_available - applied_amount, 0), 2)
     db = get_db()
     _upsert_deposit_applied_payment(order_id, applied_amount)
     db.execute(

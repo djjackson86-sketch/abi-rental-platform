@@ -20,9 +20,11 @@ import pytest
 from app import create_app
 from app.services.pdf_documents import (
     INVOICE_TABLE_X,
+    INVOICE_TABLE_RIGHT_EDGE,
     _escape_pdf_text,
     _invoice_template_pdf,
     _pdf_text,
+    _pdf_text_width,
     _wrap_pdf_cell_text,
 )
 
@@ -278,7 +280,8 @@ def test_document_table_visual_ticket_changes_are_pinned(app):
     assert '0.070 0.540 0.300 rg' in decoded
     line_total = next(entry for entry in positions if entry['text'] == 'R690.00' and entry['y'] > 300)
     bottom_total = next(entry for entry in positions if entry['text'] == 'R5520.00' and entry['font'] == 'F2')
-    assert line_total['x'] == bottom_total['x'] == 470
+    assert round(line_total['x'] + _pdf_text_width(line_total['text'], line_total['size']), 1) == round(INVOICE_TABLE_RIGHT_EDGE - 7, 1)
+    assert round(bottom_total['x'] + _pdf_text_width(bottom_total['text'], bottom_total['size'], bold=True), 1) == round(INVOICE_TABLE_RIGHT_EDGE - 9, 1)
 
 
 @pytest.mark.parametrize('document_type', ['invoice', 'quote'])

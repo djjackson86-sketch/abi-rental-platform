@@ -121,7 +121,7 @@
                   <td>{{ d.customer_name or '—' }}</td>
                   <td><span class="pill">{{ d.status|title }}</span></td>
                   <td>R{{ '%.2f'|format(d.total or 0) }}</td>
-                  <td><a class="btn ghost" href="{{ url_for('documents.detail', document_id=d.id) }}">Open</a></td>
+                  <td class="table-actions"><a class="btn ghost" href="{{ url_for('documents.detail', document_id=d.id) }}">Open</a><a class="btn ghost" href="{{ url_for('documents.download_pdf', document_id=d.id, view=1) }}" target="_blank" rel="noopener">View PDF</a></td>
                 </tr>
               {% endfor %}
             </tbody>

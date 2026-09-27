@@ -221,10 +221,11 @@ def download_pdf(document_id):
         flash("Document not found", "error")
         return redirect(url_for("documents.index"))
     pdf_bytes = document_pdf_bytes(document_id)
+    disposition = "inline" if request.args.get("view") else "attachment"
     return _prevent_generated_document_cache(Response(
         pdf_bytes,
         mimetype="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={document_pdf_filename(document)}"},
+        headers={"Content-Disposition": f"{disposition}; filename={document_pdf_filename(document)}"},
     ))
 
 

@@ -405,3 +405,12 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .dashboard-custom-range .btn{height:38px}
 .dashboard-custom-range .filter-clear{align-self:center}
 @media(max-width:720px){.dashboard-custom-range .dashboard-range-field{flex:1 1 130px;min-width:0}.dashboard-custom-range .filter-group{gap:8px}}
+
+/* ABI-341953061: keep order filters visible above the order list. */
+@media(min-width:1051px){
+  .orders-filter-rail{position:sticky;top:0;max-height:100vh;overflow:auto;z-index:2}
+  .orders-tabs-row{position:sticky;top:0;background:var(--bg);z-index:3;padding-top:10px}
+  .orders-table thead th{position:sticky;top:0;z-index:2;background:#fff}
+}
+.discount-label-wrap{display:inline-flex;align-items:center;gap:4px;min-width:0}
+.table-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}

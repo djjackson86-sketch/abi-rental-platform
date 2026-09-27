@@ -35,6 +35,7 @@ from app.services.pdf_documents import (
     SUBTOTAL_COLUMN_X,
     TAX_COLUMN_X,
     TOTAL_INCL_COLUMN_X,
+    _pdf_text_width,
 )
 
 BASE_PRICE = 100.0
@@ -185,9 +186,12 @@ def pdf_pages(pdf_bytes):
         if ' Tm ' not in stream or ' Tj' not in stream:
             continue
         runs = [
-            {'font': match.group(1), 'size': float(match.group(2)), 'x': float(match.group(3)),
-             'y': float(match.group(4)), 'text': unescape_drawn_text(match.group(5))}
-            for match in re.finditer(r'/(F\d) ([\d.]+) Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \((.*?)\) Tj', stream)
+            {'index': index, 'font': match.group(1), 'size': float(match.group(2)),
+             'x': float(match.group(3)), 'y': float(match.group(4)),
+             'text': unescape_drawn_text(match.group(5))}
+            for index, match in enumerate(
+                re.finditer(r'/(F\d) ([\d.]+) Tf 1 0 0 1 ([\d.]+) ([\d.]+) Tm \((.*?)\) Tj', stream)
+            )
         ]
         rects = [
             {'x': float(match.group(1)), 'y': float(match.group(2)),
@@ -198,8 +202,19 @@ def pdf_pages(pdf_bytes):
     return pages
 
 
+def drawn_right_edge(run):
+    """The x a drawn run really ends on (ticket ABI-341953061(6) right alignment)."""
+    return run['x'] + _pdf_text_width(run['text'], run['size'])
+
+
 def row_runs(page):
-    """Item rows on a page, top to bottom: (name, qty, rate, subtotal, tax, total)."""
+    """Item rows on a page, top to bottom: (name, qty, rate, subtotal, tax, total).
+
+    The four money columns are right-aligned (ticket ABI-341953061(6)), so the
+    three widest columns are read from the RIGHT edge they end on and are then
+    put back in the order they are drawn (subtotal, tax, total incl. VAT) —
+    matching them by their left x would be ambiguous once values differ in width.
+    """
     by_y = {}
     for run in page['runs']:
         by_y.setdefault(run['y'], []).append(run)
@@ -209,15 +224,28 @@ def row_runs(page):
         names = [run for run in runs if run['text'].startswith('Extra Item')]
         if not names:
             continue
-        columns = {round(run['x']): run['text'] for run in by_y[y]}
+        # subtotal / tax / total incl. VAT are the three widest money columns on
+        # the line, left to right (the Rate column sits nearer the QTY column).
+        money_runs = sorted(
+            (r for r in page['runs'] if r['y'] == y and drawn_right_edge(r) > QTY_COLUMN_X + 60),
+            key=lambda r: r['x'],
+        )[-3:]
+        # Quantity and the rental-days marker are still drawn from their column x
+        # (they are counts, not money), so match them by a small window around it.
+        by_y_runs = by_y[y]
+        qty_runs = [run for run in by_y_runs if abs(run['x'] - QTY_COLUMN_X) <= 6]
+        rate_runs = [run for run in by_y_runs if abs(run['x'] - RATE_COLUMN_X) <= 20]
+        columns = {round(run['x']): run['text'] for run in by_y_runs}
+        money = [run['text'] for run in money_runs]
         rows.append({
             'y': y,
             'name': names[0]['text'],
-            'qty': columns.get(round(QTY_COLUMN_X)),
-            'rate': columns.get(round(RATE_COLUMN_X)),
-            'subtotal': columns.get(round(SUBTOTAL_COLUMN_X)),
-            'tax': columns.get(round(TAX_COLUMN_X)),
-            'total': columns.get(round(TOTAL_INCL_COLUMN_X)),
+            'qty': qty_runs[0]['text'] if qty_runs else columns.get(round(QTY_COLUMN_X)),
+            'rate': rate_runs[0]['text'] if rate_runs else None,
+            'subtotal': money[0] if len(money) > 0 else None,
+            'tax': money[1] if len(money) > 1 else None,
+            'total': money[2] if len(money) > 2 else None,
+            'money_runs': money_runs,
         })
     return rows
 
@@ -301,6 +329,18 @@ def test_every_edited_line_prints_its_own_qty_rate_and_totals(client, app):
         third = next(row for row in rows if row['name'] == item_name(3))
         assert third['qty'] == '2'
         assert third['total'] == money(item_price(3) * 2 * (1 + TAX_RATE / 100))
+
+        # Ticket ABI-341953061(6): every money column is right-aligned, so the
+        # values in each of the three widest columns must all END on one edge.
+        edges_by_column = {}
+        for row in rows:
+            for column, run in zip(('subtotal', 'tax', 'total'), row['money_runs']):
+                edges_by_column.setdefault(column, set()).add(round(drawn_right_edge(run), 1))
+        assert all(len(edges) == 1 for edges in edges_by_column.values()), (
+            f'{document_type}: money columns are not right-aligned: {edges_by_column}')
+        # and the three column edges must be distinct, left to right
+        edges = sorted(next(iter(e)) for e in edges_by_column.values())
+        assert len(set(edges)) == 3, f'{document_type}: columns collapsed onto one edge: {edges}'
 
         # the summary must reconcile with the rows the reader can see
         drawn_net = sum(Decimal(row['subtotal'][1:]) for row in rows)

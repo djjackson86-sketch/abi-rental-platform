@@ -167,7 +167,7 @@ def test_invoice_document_and_pdf_show_the_deposit_used_line(client, app):
     assert html.index('Security deposit (refundable)') < html.index('Less: deposit used') < html.index('Amount due')
 
     # --- PDF ---------------------------------------------------------------------
-    from app.services.pdf_documents import document_pdf_bytes
+    from app.services.pdf_documents import SUMMARY_VALUE_RIGHT_EDGE, document_pdf_bytes, _pdf_text_width
 
     with app.app_context():
         runs = pdf_text_runs(document_pdf_bytes(invoice_id))
@@ -175,9 +175,12 @@ def test_invoice_document_and_pdf_show_the_deposit_used_line(client, app):
     assert 'Less: deposit used' in labels
     deduction = labels['Less: deposit used']
 
-    # the deduction carries the minus sign and sits between the deposit and Paid
+    # the deduction carries the minus sign and sits between the deposit and Paid.
+    # Ticket ABI-341953061(6): the summary amounts are right-aligned, so the
+    # assertion is on the right edge the value ends on rather than where it starts.
     deduction_amount = next(run for run in runs if run['y'] == deduction['y'] and run['text'] == '-R300.00')
-    assert deduction_amount['x'] == 470
+    right_edge = deduction_amount['x'] + _pdf_text_width(deduction_amount['text'], deduction_amount['size'])
+    assert round(right_edge, 1) == round(SUMMARY_VALUE_RIGHT_EDGE, 1)
     deposit_run = labels['Security deposit']
     paid_run = labels['Paid']
     assert deposit_run['y'] == deduction['y'] + 14

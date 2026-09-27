@@ -4513,7 +4513,8 @@ def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
     table edge however wide the figures get.
     """
     from app.services.pdf_documents import (
-        INVOICE_TABLE_RIGHT_EDGE, TAX_COLUMN_X, TOTAL_INCL_COLUMN_X, document_pdf_bytes,
+        INVOICE_TABLE_RIGHT_EDGE, TAX_COLUMN_X, TAX_VALUE_RIGHT_EDGE, TOTAL_INCL_COLUMN_X,
+        TOTAL_INCL_VALUE_RIGHT_EDGE, _pdf_text_width, document_pdf_bytes,
     )
 
     login(client)
@@ -4543,14 +4544,24 @@ def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
     assert total_heading['x'] - tax_heading['x'] >= 55, 'the two money columns must keep a gutter'
 
     # R1 234 567.89 at 15%: tax R185 185.18, total incl. VAT R1 419 753.07
-    tax_amount = next(c for c in commands if c['text'] == 'R185185.18' and c['x'] == TAX_COLUMN_X)
-    total_amount = next(c for c in commands if c['text'] == 'R1419753.07' and c['x'] == TOTAL_INCL_COLUMN_X)
+    # Ticket ABI-341953061(6): the values are right-aligned on their column edge,
+    # so the assertion pins the RIGHT edge of the widest figures we can print
+    # rather than their left edge.
+    tax_amount = next(c for c in commands if c['text'] == 'R185185.18')
+    total_amount = next(c for c in commands if c['text'] == 'R1419753.07')
     assert tax_amount['y'] == total_amount['y'], 'both money columns must share the line'
+    tax_right = tax_amount['x'] + _pdf_text_width(tax_amount['text'], tax_amount['size'])
+    total_right = total_amount['x'] + _pdf_text_width(total_amount['text'], total_amount['size'])
+    assert round(tax_right, 1) == round(TAX_VALUE_RIGHT_EDGE, 1)
+    assert round(total_right, 1) == round(TOTAL_INCL_VALUE_RIGHT_EDGE, 1)
 
     # The widest glyphs we print are R (0.667 em) in money and O/N/C (0.778 em) in
     # the headings, so these right-edge checks are upper bounds on the real widths.
+    # Ticket ABI-341953061(6): the money values are right-aligned, so a wide figure
+    # grows LEFTWARDS from its edge and the right edge is what must stay inside
+    # the table border (the drawn value already sits 7pt inside it).
     money_right = max(
-        c['x'] + c['size'] * 0.667 * len(c['text']) for c in (tax_amount, total_amount)
+        c['x'] + _pdf_text_width(c['text'], c['size']) for c in (tax_amount, total_amount)
     )
     heading_right = total_heading['x'] + total_heading['size'] * 0.778 * len(total_heading['text'])
     assert money_right <= INVOICE_TABLE_RIGHT_EDGE

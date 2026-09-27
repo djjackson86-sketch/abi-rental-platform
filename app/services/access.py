@@ -94,6 +94,10 @@ _ENDPOINT_MODULE_RULES = [
     ("admin.app_store", "app_store"),
     ("admin.reports", "reports"),
     ("admin.reports_orders_csv", "reports"),
+    # Ticket ABI-341953061(4): the reports PDF download carries the same gate as
+    # the screen it is reached from, so an account without the reports module
+    # cannot pull the figures out through the print route.
+    ("admin.reports_pdf", "reports"),
     ("admin.scan_barcode", "scan_barcode"),
     # The dashboard's cash-up / end of day panel. Same module as the screen it
     # lives on, so an account that may see the dashboard may cash its drawer up.

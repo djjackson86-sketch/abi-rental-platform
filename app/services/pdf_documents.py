@@ -36,6 +36,18 @@ SUBTOTAL_COLUMN_X = 356
 TAX_COLUMN_X = 410
 TOTAL_INCL_COLUMN_X = 470
 INVOICE_TABLE_RIGHT_EDGE = 559
+# Ticket ABI-341953061(6): the four money columns are RIGHT-aligned on these
+# edges — Rate against the SUBTOTAL heading, Subtotal against the TAX heading,
+# Tax against the TOTAL INCL. VAT heading, and Total incl. VAT against the right
+# edge of the table (7pt inside it, so the widest figure still clears the border
+# and lines up with the summary/paid amounts below). The labels stay pinned to
+# the column x values above; only the values move, which is what the client
+# asked for.
+RATE_VALUE_RIGHT_EDGE = SUBTOTAL_COLUMN_X - 8
+SUBTOTAL_VALUE_RIGHT_EDGE = TAX_COLUMN_X - 8
+TAX_VALUE_RIGHT_EDGE = TOTAL_INCL_COLUMN_X - 8
+TOTAL_INCL_VALUE_RIGHT_EDGE = INVOICE_TABLE_RIGHT_EDGE - 7
+SUMMARY_VALUE_RIGHT_EDGE = INVOICE_TABLE_RIGHT_EDGE - 9
 
 
 def _pdf_text(value):
@@ -267,6 +279,11 @@ def report_pdf_bytes(view):
     if not isinstance(view, dict):
         return _simple_pdf([str(line) for line in view])
     return _report_template_pdf(view)
+
+
+def simple_lines_pdf_bytes(lines):
+    """Small public wrapper for simple one-off report downloads."""
+    return _simple_pdf([str(line) for line in lines], logo_bytes=_document_logo_bytes())
 
 
 def _pdf_rect(x, y, width, height, fill=None, stroke=None, line_width=0.6):
@@ -912,10 +929,10 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             _add_pdf_lines(text, INVOICE_TABLE_X, y_pos, product_lines, size=8, leading=10, max_lines=3)
             _add_pdf_lines(text, QTY_COLUMN_X, y_pos, [str(item['quantity'])], size=8)
             _add_pdf_lines(text, DAYS_COLUMN_X, y_pos, [days_text], size=8)
-            _add_pdf_lines(text, RATE_COLUMN_X, y_pos, [f"R{line_view['unit_excl']:.2f}"], size=8)
-            _add_pdf_lines(text, SUBTOTAL_COLUMN_X, y_pos, [f"R{line_view['subtotal_excl']:.2f}"], size=8)
-            _add_pdf_lines(text, TAX_COLUMN_X, y_pos, [f"R{line_view['tax']:.2f}"], size=8)
-            _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, y_pos, [f"R{line_view['total_incl']:.2f}"], size=8)
+            text.append(_pdf_right_text(RATE_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['unit_excl']:.2f}", size=8))
+            text.append(_pdf_right_text(SUBTOTAL_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['subtotal_excl']:.2f}", size=8))
+            text.append(_pdf_right_text(TAX_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['tax']:.2f}", size=8))
+            text.append(_pdf_right_text(TOTAL_INCL_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['total_incl']:.2f}", size=8))
             y_pos -= 43
         return y_pos
 
@@ -975,15 +992,19 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         line_y = totals_y - (index * 14)
         if label == 'Total with VAT':
             text_commands.append(_pdf_text_command(390, line_y, label, size=8.8, font='F2'))
-            text_commands.append(_pdf_text_command(TOTAL_INCL_COLUMN_X, line_y, amount, size=8.8, font='F2'))
+            text_commands.append(_pdf_right_text(INVOICE_TABLE_RIGHT_EDGE - 9, line_y, amount, size=8.8, font='F2'))
         else:
             text_commands.append(_pdf_text_command(390, line_y, label, size=8.8))
-            text_commands.append(_pdf_text_command(TOTAL_INCL_COLUMN_X, line_y, amount, size=8.8))
+            text_commands.append(_pdf_right_text(INVOICE_TABLE_RIGHT_EDGE - 9, line_y, amount, size=8.8))
     # Banking details belong on the left, aligned with the document/table edge,
     # while totals sit on the right. Keeping the two blocks side by side avoids
     # the old behaviour where 5-8 line invoices used page 1 for rows/totals but
     # pushed only the banking details onto page 2.
-    bank_y = totals_y
+    # Ticket ABI-341953061(7): the thank-you line and the banking block sit a
+    # little lower than the totals' first line (the client asked for them moved
+    # down). The page-fill rule below still moves the whole block to its own page
+    # when even the lowered position would run past the bottom margin.
+    bank_y = totals_y - 26
     bank_detail_lines = bank_lines[1:]
     bank_last_y = bank_y - 13 - ((len(bank_detail_lines) - 1) * 13 if bank_detail_lines else 0)
     if bank_last_y < 58:
@@ -993,13 +1014,13 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         bank_text_commands = ['BT']
         bank_text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
         bank_text_commands.append(_pdf_text_command(455, 746, f'Page {len(streams) + 1}', size=8.5))
-        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 715, 'Thank you for your business.', size=8.8, font='F2'))
-        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 690, 'Banking details', size=8.5, font='F2'))
-        _add_pdf_lines(bank_text_commands, INVOICE_TABLE_X, 675, bank_detail_lines, size=8.5, leading=13, max_lines=7)
+        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 700, 'Thank you for your business.', size=8.8, font='F2'))
+        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 675, 'Banking details', size=8.5, font='F2'))
+        _add_pdf_lines(bank_text_commands, INVOICE_TABLE_X, 660, bank_detail_lines, size=8.5, leading=13, max_lines=7)
         bank_text_commands.append('ET')
         streams.append('\n'.join(bank_draw_commands + bank_text_commands).encode('latin-1', 'replace'))
         return _pdf_objects(streams, image_object=image_object)
-    text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y + 18, 'Thank you for your business.', size=8.8, font='F2'))
+    text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y + 10, 'Thank you for your business.', size=8.8, font='F2'))
     text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y, 'Banking details', size=8.5, font='F2'))
     _add_pdf_lines(text_commands, INVOICE_TABLE_X, bank_y - 13, bank_detail_lines, size=8.5, leading=13, max_lines=7)
     text_commands.append('ET')

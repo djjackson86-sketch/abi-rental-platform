@@ -750,10 +750,11 @@ def unarchive(order_id):
 @login_required
 def change_status(order_id, action):
     _ensure_order_access(order_id)
-    if action in {"revert_draft", "unarchive"} and not is_main_session(session):
+    if action in {"archive", "revert_draft", "unarchive"} and not is_main_session(session):
         # Belt and braces: the dedicated routes above carry the gate, and this
         # refuses the same actions through the generic catch-all (a crafted URL
-        # must not be able to sidestep the main-profile rule).
+        # must not be able to sidestep the main-profile rule). Archive is also
+        # main-only: staff may still run ordinary operational status changes.
         abort(403)
     try:
         message = transition_order(order_id, action)

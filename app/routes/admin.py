@@ -11,6 +11,7 @@ from app.services.app_store import list_app_store_items, update_app_store_item, 
 from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 from app.services import spare_wheels
+from app.services.pdf_documents import simple_lines_pdf_bytes
 from app.services.cash import (
     aggregate_day_summary as cash_aggregate_day_summary,
     branch_for_request as cash_branch_for_request,
@@ -459,6 +460,49 @@ def reports():
         product_rows=product_performance(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id),
         customer_rows=customer_summary(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id),
         filters={"start_date": start_date, "end_date": end_date, "branch": selected_branch},
+    )
+
+
+def _reports_pdf_lines(start_date, end_date, branch_id, branch_label):
+    metrics = summary_metrics(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id)
+    lines = [
+        "ABI Rental Platform report",
+        _period_label(start_date, end_date, branch_label),
+        "",
+        f"Orders: {metrics['orders']}",
+        f"Recognised revenue: R{float(metrics['revenue'] or 0):.2f}",
+        f"Paid: R{float(metrics['paid'] or 0):.2f}",
+        f"Due: R{float(metrics['due'] or 0):.2f}",
+        f"Customers: {metrics['customers']}",
+        f"Products: {metrics['products']}",
+        "",
+        "Orders by status",
+    ]
+    for row in orders_by_status(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id):
+        lines.append(f"- {row['status']}: {row['count']} / R{float(row['total'] or 0):.2f}")
+    lines.extend(["", "Payments by method"])
+    for row in payments_by_method(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id):
+        lines.append(f"- {row['method']}: {row['count']} / R{float(row['total'] or 0):.2f}")
+    lines.extend(["", "Top products"])
+    for row in product_performance(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id)[:10]:
+        lines.append(f"- {row['product_name']}: {row['quantity']} / R{float(row['total'] or 0):.2f}")
+    lines.extend(["", "Top customers"])
+    for row in customer_summary(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id)[:10]:
+        lines.append(f"- {row['customer_name']}: {row['orders']} / R{float(row['total'] or 0):.2f}")
+    return lines
+
+
+@bp.route("/reports/report.pdf")
+@login_required
+def reports_pdf():
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
+    _selected_branch, branch_id, branch_label, _branches, _branch_scope = _branch_filter()
+    pdf = simple_lines_pdf_bytes(_reports_pdf_lines(start_date, end_date, branch_id, branch_label))
+    return Response(
+        pdf,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=abi-report.pdf"},
     )
 
 @bp.route("/reports/orders.csv")
