@@ -2373,6 +2373,58 @@ def test_flat_amount_discount_preserved_when_order_is_edited(client, app):
         assert order['total'] == 2550  # 1200 + 1500 - 150
 
 
+def test_order_discount_row_controls_are_direct_children_of_the_row(client):
+    """Guard the Discount row layout: label, controls and amount are siblings.
+
+    The controls used to be nested inside the label span, which left the row with two
+    items instead of three. The amount is painted after the form, so it covered the
+    number field and the Apply button: clicks hit the R0.00 text (elementFromPoint at
+    the field centre returned the amount element) and the value could never be typed.
+    Keep them as direct children so the row's flex layout can space them apart.
+    """
+    from html.parser import HTMLParser
+
+    login(client)
+    seed_customer_and_product(client)
+    order_id = create_order_for_status(client, quantity='1')
+    page = client.get(f'/orders/{order_id}').data.decode()
+
+    class RowParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.depth = 0
+            self.row_depth = None
+            self.form_depth = None
+            self.amount_depth = None
+            self.label_depth = None
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            classes = (attrs.get('class') or '').split()
+            if self.row_depth is None and 'discount-row' in classes:
+                self.row_depth = self.depth
+            elif self.row_depth is not None:
+                if self.label_depth is None and tag == 'span':
+                    self.label_depth = self.depth
+                if 'data-ajax-discount' in attrs and self.form_depth is None:
+                    self.form_depth = self.depth
+                if attrs.get('data-total-field') == 'discount_total' and self.amount_depth is None:
+                    self.amount_depth = self.depth
+            if tag not in ('br', 'img', 'input', 'meta', 'link'):
+                self.depth += 1
+
+        def handle_endtag(self, tag):
+            self.depth -= 1
+
+    parser = RowParser()
+    parser.feed(page)
+
+    assert parser.row_depth is not None, 'discount row missing'
+    assert parser.label_depth == parser.row_depth + 1
+    assert parser.form_depth == parser.row_depth + 1, 'discount controls are nested, not row children'
+    assert parser.amount_depth == parser.row_depth + 1, 'discount amount is nested, not a row child'
+
+
 def test_apply_discount_rejects_canceled_orders_and_bad_values(client):
     login(client)
     seed_customer_and_product(client)

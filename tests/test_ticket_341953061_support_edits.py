@@ -204,8 +204,16 @@ def test_order_detail_discount_label_stays_on_percent_amount_line(client, app):
     order_id = insert_order(app, status='returned')
     login_owner(client)
     html = client.get(f'/orders/{order_id}').get_data(as_text=True)
-    # Ticket ABI-341953061(5): the word "Discount" wraps only the label so the
-    # percentage/amount control stays on the same grid row (the row is a
-    # label | form | amount grid, and the wrapper is its own inline-flex item).
-    assert '<span class="discount-label-wrap"><span>Discount</span>' in html
-    assert '.totals .discount-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(130px,auto)' in html
+    # Ticket ABI-341953061(5): the word "Discount" must not push the percentage /
+    # amount controls onto another line, and the row must keep all three parts
+    # (label | controls | amount) on one line.
+    #
+    # The wrapper span this ticket originally added to achieve that
+    # (`<span class="discount-label-wrap">` around the label AND the form) was itself
+    # the bug: it left the row with two items instead of three, so the amount was
+    # painted over the number field and the Apply button and the discount could not
+    # be entered at all. The row is a wrapping flex line whose direct children ARE
+    # the label, the form and the amount, so the intent holds without the wrapper.
+    assert '<span>Discount</span>' in html
+    assert 'discount-label-wrap' not in html
+    assert '.totals .discount-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}' in html

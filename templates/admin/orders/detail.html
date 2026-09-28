@@ -147,18 +147,26 @@
   </div>
   <div class="totals">
     <style>
-      .totals .discount-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(130px,auto);align-items:center;gap:8px}
-      .totals .discount-form{display:inline-flex;align-items:center;gap:4px;margin-left:8px}
+      /* The discount row carries three parts on one line: the label, the controls and the
+         money it produced. They used to be a 3-column grid with the form nested inside
+         the label span, so the grid only ever had two items and the amount (which is
+         painted after the form) sat on top of the input and the Apply button — clicks
+         landed on the R0.00 text instead of the field. Lay the parts out as direct
+         siblings in a wrapping flex row so the amount can never cover the controls. */
+      .totals .discount-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+      .totals .discount-row>span{flex:0 0 auto}
+      .totals .discount-row>b{flex:0 1 auto;min-width:96px;margin-left:auto}
+      .totals .discount-form{display:inline-flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0}
       .totals .discount-form select,.totals .discount-form input{min-height:32px;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:inherit;font-family:inherit;font-size:13px}
-      .totals .discount-form select{width:56px}
-      .totals .discount-form input{width:88px;min-width:0}
-      .totals .discount-form .btn.discount-apply{min-height:32px;height:32px;padding:0 12px;font-size:13px;width:auto}
+      .totals .discount-form select{width:52px}
+      .totals .discount-form input{width:80px;min-width:0}
+      .totals .discount-form .btn.discount-apply{min-height:32px;height:32px;padding:0 10px;font-size:13px;width:auto}
       .btn[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none}
-      @media(max-width:520px){.totals .discount-row{gap:6px}.totals .discount-form{margin-left:4px}.totals .discount-form input{width:72px}.totals .discount-row b{min-width:0}}
+      @media(max-width:520px){.totals .discount-form input{width:72px}.totals .discount-row>b{min-width:0}}
     </style>
     <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(order.subtotal) }}</b></div>
     {% if order.coupon_code %}<div class="list-row"><span>Coupon</span><b>{{ order.coupon_code }}</b></div>{% endif %}
-    <div class="list-row discount-row"><span class="discount-label-wrap"><span>Discount</span>
+    <div class="list-row discount-row"><span>Discount</span>
       {% if order.status not in ['canceled', 'cancelled', 'archived'] %}
       <form method="post" action="{{ url_for('orders.apply_discount', order_id=order.id) }}" class="discount-form" data-ajax-discount>
         <select name="discount_mode" aria-label="Discount type">
@@ -169,7 +177,6 @@
         <button class="btn discount-apply" type="submit">Apply</button>
       </form>
       {% endif %}
-      </span>
       <b data-total-field="discount_total">R{{ '%.2f'|format(order.discount_total) }}</b>
     </div>
     <div class="list-row"><span>Tax</span><b data-total-field="tax_total">R{{ '%.2f'|format(order.tax_total) }}</b></div>
