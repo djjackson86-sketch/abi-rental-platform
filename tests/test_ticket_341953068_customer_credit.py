@@ -122,6 +122,46 @@ def test_order_refund_can_credit_customer_then_credit_can_pay_a_new_order(app, c
         assert method == 'customer_credit'
 
 
+def test_customer_credit_payment_works_when_row_has_no_keys_method(app):
+    """Turso/libSQL rows have no .keys(); probing one must not 500 the route.
+
+    Regression for ABI-341953068: the live route raised
+    AttributeError: 'Row' object has no attribute 'keys' because local sqlite3.Row
+    has keys() and the production driver does not.
+    """
+    from app.services import payments as payments_module
+
+    class NoKeysRow:
+        """Stands in for a live libSQL row: key access works, .keys() does not."""
+
+        def __init__(self, data):
+            self._data = data
+
+        def __getitem__(self, key):
+            return self._data[key]
+
+    with app.app_context():
+        db = get_db()
+        customer_id = seed_customer(db, 'No Keys Customer')
+        order_id = seed_order(db, customer_id, 'ORD-CREDIT-NOKEYS', total=500, due=500)
+        from app.services.customer_credits import create_customer_credit
+        create_customer_credit(customer_id, 300, order_id, 'order_refund', note='seed credit')
+        db.commit()
+        row = db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+        proxy = NoKeysRow({key: row[key] for key in row.keys()})
+
+        assert not hasattr(proxy, 'keys')
+        payments_module._record_customer_credit_payment(proxy, 200.0, 'Use credit', f'{DAY}T16:00')
+
+        assert customer_credit_balance(customer_id) == 100.0
+        summary = payment_summary(order_id)
+        assert summary['paid_total'] == 200.0
+        assert summary['due_total'] == 300.0
+        method = get_db().execute(
+            "SELECT method FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1", (order_id,)).fetchone()['method']
+        assert method == 'customer_credit'
+
+
 def test_deposit_refund_credit_updates_customer_credit_and_stays_out_of_cash_up(app, client):
     login(client)
     with app.app_context():

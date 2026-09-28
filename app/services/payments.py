@@ -142,11 +142,28 @@ def record_payment(order_id, form):
     return recalculate_order_payment(order_id)
 
 
+def _row_get(row, key, default=None):
+    """Read one field from any DB row driver.
+
+    sqlite3.Row has ``keys()``, libSQL/Turso rows do NOT, so never probe a row
+    with ``"x" in row.keys()`` - it works locally and raises AttributeError in
+    production (ABI-341953068: 'Row' object has no attribute 'keys' on the live
+    customer-credit payment route).
+    """
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
 def _record_customer_credit_payment(order, amount, reference, payment_date):
     customer_id = order["customer_id"]
     if not customer_id:
         raise ValueError("A customer is required before customer credit can be used")
-    due = round(max(float(order["due_total"] if "due_total" in order.keys() else order["total"] or 0), 0), 2)
+    due_value = _row_get(order, "due_total", None)
+    if due_value is None:
+        due_value = _row_get(order, "total", 0)
+    due = round(max(float(due_value or 0), 0), 2)
     if due <= 0:
         raise ValueError("This order has no due amount to pay with customer credit")
     if amount > due:
