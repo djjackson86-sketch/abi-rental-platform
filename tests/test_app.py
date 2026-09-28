@@ -3519,7 +3519,14 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert b'Pickup date:' not in pdf
     # Summary order: total without VAT, the VAT, then the total with VAT.
     assert pdf.index(b'(Total without VAT) Tj') < pdf.index(b'(VAT) Tj') < pdf.index(b'(Total with VAT) Tj')
-    assert b'470.00' in pdf
+    # Ticket ABI-341953067 right-aligned the money headings on their value columns,
+    # so the literal `470.00` this line used to look for — the TOTAL INCL. VAT
+    # column x, written into the stream as a Tm coordinate — is no longer drawn.
+    # That literal was all this assertion ever proved; the column is unchanged, so
+    # pin the geometry itself (and the totals a column of that x still carries).
+    from app.services.pdf_documents import TOTAL_INCL_COLUMN_X
+    assert TOTAL_INCL_COLUMN_X == 470
+    assert b'(R400.00) Tj' in pdf and b'(Total with VAT) Tj' in pdf
     assert pdf.index(b'Order: ORD-10145') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'Rental days 2')
     assert pdf.index(b'Invoice') < pdf.index(b'INV-10145') < pdf.index(b'Invoice date:') < pdf.index(invoice_date.encode()) < pdf.index(b'Order: ORD-10145') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
