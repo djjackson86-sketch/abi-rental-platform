@@ -293,6 +293,19 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS customer_credits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    source_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+    amount REAL NOT NULL,
+    source_type TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    applied_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+    applied_payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL
+);
+
 -- Day-end cash reconciliation: one row per depot per business day. Purely
 -- additive — nothing reads these tables until a user cashes a day up.
 CREATE TABLE IF NOT EXISTS cash_ups (
@@ -755,6 +768,25 @@ def run_migrations(db):
         chat_id TEXT NOT NULL DEFAULT '',
         ok INTEGER NOT NULL DEFAULT 0
     )""")
+
+    # --- Customer credit ledger (additive, ABI-341953068) ---------------------
+    # Positive rows are credits granted from refunds/deposit refunds; negative
+    # rows are credit used as an order payment. Only status='active' counts.
+    db.execute("""CREATE TABLE IF NOT EXISTS customer_credits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        source_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+        amount REAL NOT NULL,
+        source_type TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        applied_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+        applied_payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_customer ON customer_credits(customer_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_source_order ON customer_credits(source_order_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_applied_order ON customer_credits(applied_order_id)")
 
 
 def init_db():

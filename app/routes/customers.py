@@ -6,6 +6,7 @@ from flask import Blueprint, Response, flash, redirect, render_template, request
 from app.routes.auth import login_required
 from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, delete_customer, get_customer, list_customers, update_customer
 from app.services.settings import get_company_settings
+from app.services.customer_credits import customer_credit_balance, customer_credit_entries
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
 
@@ -90,7 +91,7 @@ def detail(customer_id):
         flash("Customer not found", "error")
         return redirect(url_for("customers.index"))
     orders = customer_orders(customer_id)
-    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=orders, customer_has_history=bool(orders) or customer_has_history(customer_id), custom_field_label=custom_field_label, client_verified_label=client_verified_label)
+    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=orders, customer_has_history=bool(orders) or customer_has_history(customer_id), custom_field_label=custom_field_label, client_verified_label=client_verified_label, customer_credit_balance=customer_credit_balance(customer_id), customer_credit_entries=customer_credit_entries(customer_id))
 
 
 @bp.route("/<int:customer_id>/delete", methods=["POST"])

@@ -247,7 +247,7 @@ def test_an_unknown_method_is_refused_when_recording(client, app):
         'amount': '5', 'method': 'bitcoin', 'payment_date': f'{TODAY}T10:00',
     }, follow_redirects=True)
     assert res.status_code == 200
-    assert b'Payment method must be Cash, EFT, Card, Other, or Manual' in res.data
+    assert b'Payment method must be Cash, EFT, Card, Other, Use Customer Credit, or Manual' in res.data
     assert payment_rows(app, order_id) == []
     assert order_row(app, order_id)['due_total'] == before['due_total']
 

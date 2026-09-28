@@ -21,8 +21,8 @@ PAYMENT_LABELS = {
 # legacy row's own method (allowed through on edit below) or junk, and is
 # refused: the dashboard and the day report decide which money line a payment
 # lands on from this stored value, so a typo here would drop money from a total.
-PAYMENT_METHODS = ("cash", "eft", "card", "other", "manual")
-PAYMENT_METHOD_ERROR = "Payment method must be Cash, EFT, Card, Other, or Manual"
+PAYMENT_METHODS = ("cash", "eft", "card", "other", "customer_credit", "manual")
+PAYMENT_METHOD_ERROR = "Payment method must be Cash, EFT, Card, Other, Use Customer Credit, or Manual"
 
 
 def normalise_payment_method(value, fallback="manual"):
@@ -129,6 +129,8 @@ def record_payment(order_id, form):
     method = normalise_payment_method(form.get("method"))
     reference = form.get("reference", "").strip()
     payment_date = parse_payment_date(form.get("payment_date"))
+    if method == "customer_credit":
+        return _record_customer_credit_payment(order, amount, reference, payment_date)
     created_at = now()
     db = get_db()
     db.execute(
@@ -138,6 +140,34 @@ def record_payment(order_id, form):
     )
     db.commit()
     return recalculate_order_payment(order_id)
+
+
+def _record_customer_credit_payment(order, amount, reference, payment_date):
+    customer_id = order["customer_id"]
+    if not customer_id:
+        raise ValueError("A customer is required before customer credit can be used")
+    due = round(max(float(order["due_total"] if "due_total" in order.keys() else order["total"] or 0), 0), 2)
+    if due <= 0:
+        raise ValueError("This order has no due amount to pay with customer credit")
+    if amount > due:
+        raise ValueError(f"Customer credit payment cannot be more than the order due R{due:.2f}")
+    from app.services.customer_credits import apply_customer_credit, link_applied_payment
+
+    db = get_db()
+    available_entry_id = apply_customer_credit(
+        customer_id,
+        amount,
+        order["id"],
+        note=reference or f"Customer credit used on {order['order_number']}",
+    )
+    cur = db.execute(
+        """INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
+        VALUES (?, ?, 'customer_credit', ?, 'paid', ?, ?)""",
+        (order["id"], amount, reference or "Customer credit used", payment_date, now()),
+    )
+    link_applied_payment(available_entry_id, cur.lastrowid)
+    db.commit()
+    return recalculate_order_payment(order["id"])
 
 
 def _parse_payment_amount(form):
@@ -290,12 +320,23 @@ def record_refund(order_id, form):
     if amount <= 0 or amount > credit:
         raise ValueError("Refund amount must be greater than zero and not more than the credit")
     method = (form.get("refund_method") or form.get("deposit_process_method") or "").strip().lower()
-    if method not in {"eft", "card", "cash"}:
-        raise ValueError("Refund method must be EFT, Card, or Cash")
+    if method not in {"eft", "card", "cash", "customer_credit"}:
+        raise ValueError("Refund method must be EFT, Card, Cash, or Credit to Customer")
     payment_date = parse_payment_date(form.get("refund_date") or form.get("deposit_processed_at"))
     reference = (form.get("reference") or "Customer refund").strip()
+    if method == "customer_credit" and not order["customer_id"]:
+        raise ValueError("A customer is required before credit can be stored")
     db = get_db()
     db.execute("""INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
         VALUES (?, ?, ?, ?, 'paid', ?, ?)""", (order_id, -amount, method, reference, payment_date, now()))
+    if method == "customer_credit":
+        from app.services.customer_credits import create_customer_credit, SOURCE_ORDER_REFUND
+        create_customer_credit(
+            order["customer_id"],
+            amount,
+            order_id,
+            SOURCE_ORDER_REFUND,
+            note=reference or f"Credit from refund on {order['order_number']}",
+        )
     db.commit()
     return recalculate_order_payment(order_id)

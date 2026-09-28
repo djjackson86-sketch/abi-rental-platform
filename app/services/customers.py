@@ -322,6 +322,20 @@ def client_verified_form_value(value):
         return ""
 
 
+def _customer_credit_balance_value(customer):
+    try:
+        return round(float(_customer_row_value(customer, "customer_credit_balance", 0) or 0), 2)
+    except (TypeError, ValueError):
+        customer_id = _customer_row_value(customer, "id", None)
+        if not customer_id:
+            return 0.0
+        try:
+            from app.services.customer_credits import customer_credit_balance
+            return customer_credit_balance(customer_id)
+        except Exception:
+            return 0.0
+
+
 def customer_summary_for(customer):
     if not customer:
         return None
@@ -338,6 +352,8 @@ def customer_summary_for(customer):
     display = customer["name"] or ""
     if email:
         display += f" — {email}"
+    credit_balance = _customer_credit_balance_value(customer)
+    previous_orders_balance = round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2)
     return {
         "id": customer["id"],
         "customer_type": customer["customer_type"] or "individual",
@@ -348,7 +364,9 @@ def customer_summary_for(customer):
         "custom_fields": custom_fields_for(customer),
         "form": customer_form_values_for(customer),
         "standard_discount_percent": float(_customer_row_value(customer, "standard_discount_percent", 0) or 0),
-        "previous_orders_balance": round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2),
+        "previous_orders_balance": previous_orders_balance,
+        "customer_credit_balance": credit_balance,
+        "previous_orders_balance_display": credit_balance if credit_balance > 0 else previous_orders_balance,
         "orders_to_date": int(_customer_row_value(customer, "orders_to_date", 0) or 0),
         "client_verified": _customer_row_value(customer, "client_verified", None),
         "client_verified_label": client_verified_label(_customer_row_value(customer, "client_verified", None)),

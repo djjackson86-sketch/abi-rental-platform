@@ -1754,6 +1754,8 @@ def add_return_charges(order_id, form):
 
 
 DEPOSIT_UTILISED_REFERENCE = "Deposit Amount Utilised"
+DEPOSIT_METHODS = {"eft", "card", "cash", "customer_credit"}
+DEPOSIT_METHOD_ERROR = "Deposit process method must be EFT, Card, or Cash"
 
 
 def _deposit_applied_payment(order_id):
@@ -1794,8 +1796,10 @@ def settle_return_deposit(order_id, form):
         raise ValueError("Order not found")
     _require_return_deposit_allowed(order)
     deposit_process_method = (form.get("deposit_process_method") or "").strip().lower()
-    if deposit_process_method not in {"eft", "card", "cash"}:
-        raise ValueError("Deposit process method must be EFT, Card, or Cash")
+    if deposit_process_method not in DEPOSIT_METHODS:
+        raise ValueError(DEPOSIT_METHOD_ERROR)
+    if deposit_process_method == "customer_credit" and not order["customer_id"]:
+        raise ValueError("A customer is required before credit can be stored")
     note = form.get("deposit_note", "").strip()
     deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
     deposit_available = round(float(order["deposit_total"] or 0), 2)
@@ -1824,6 +1828,14 @@ def settle_return_deposit(order_id, form):
         """UPDATE orders SET deposit_applied_amount = ?, deposit_refund_amount = ?,
         deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
         (applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note, order_id),
+    )
+    from app.services.customer_credits import replace_source_credit, SOURCE_DEPOSIT_REFUND
+    replace_source_credit(
+        order["customer_id"],
+        refund_amount if deposit_process_method == "customer_credit" else 0,
+        order_id,
+        SOURCE_DEPOSIT_REFUND,
+        note=note or f"Credit from deposit refund on {order['order_number']}",
     )
     db.commit()
     from app.services.payments import recalculate_order_payment
@@ -1872,18 +1884,31 @@ def _parse_deposit_refund_amount(value):
 
 
 def _write_deposit_split(order_id, applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note):
-    """Write the applied/refund split, keep the deposit_applied payments row in step.
+    """Write the applied/refund split, keep deposit payment + customer credit in step.
 
     ``Paid = non-deposit payments + deposit applied`` is the invariant the invoice
     ("Less: deposit used"), the reports and the cash-up all read, so the payments
     row is rewritten *before* the order fields and the payment totals recalculated.
+    Ticket ABI-341953068 adds a second invariant: a deposit refund processed as
+    customer credit owns exactly one active ``customer_credits`` row for this order;
+    editing/deleting or switching back to Cash/EFT/Card reverses the old credit.
     """
     db = get_db()
+    order = get_order(order_id)
     _upsert_deposit_applied_payment(order_id, applied_amount)
     db.execute(
         """UPDATE orders SET deposit_applied_amount = ?, deposit_refund_amount = ?,
         deposit_process_method = ?, deposit_processed_at = ?, deposit_note = ? WHERE id = ?""",
         (applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note, order_id),
+    )
+    from app.services.customer_credits import replace_source_credit, SOURCE_DEPOSIT_REFUND
+    credit_amount = refund_amount if deposit_process_method == "customer_credit" else 0
+    replace_source_credit(
+        order["customer_id"] if order else None,
+        credit_amount,
+        order_id,
+        SOURCE_DEPOSIT_REFUND,
+        note=note or (f"Credit from deposit refund on {order['order_number']}" if order else ""),
     )
     db.commit()
     from app.services.payments import recalculate_order_payment
@@ -1907,8 +1932,10 @@ def update_deposit_refund(order_id, form):
         raise ValueError("There is no deposit refund recorded on this order to edit")
     refund_amount = _parse_deposit_refund_amount(form.get("refund_amount"))
     deposit_process_method = (form.get("deposit_process_method") or "").strip().lower()
-    if deposit_process_method not in {"eft", "card", "cash"}:
-        raise ValueError("Deposit process method must be EFT, Card, or Cash")
+    if deposit_process_method not in DEPOSIT_METHODS:
+        raise ValueError(DEPOSIT_METHOD_ERROR)
+    if deposit_process_method == "customer_credit" and not order["customer_id"]:
+        raise ValueError("A customer is required before credit can be stored")
     deposit_available = round(float(order["deposit_total"] or 0), 2)
     if refund_amount > deposit_available:
         raise ValueError(f"Deposit refund cannot be more than the R{deposit_available:.2f} deposit")

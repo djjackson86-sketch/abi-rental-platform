@@ -8,6 +8,7 @@ from app.db import get_db
 from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
+from app.services.customer_credits import customer_credit_balance
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import branch_hours_summaries, branch_options, default_branch_id
@@ -60,6 +61,7 @@ def _customers():
                client_verified, is_blocked, blocked_reason,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
+               (SELECT COALESCE(SUM(cc.amount), 0) FROM customer_credits cc WHERE cc.customer_id = customers.id AND cc.status = 'active') AS customer_credit_balance,
                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
         ORDER BY name
@@ -84,6 +86,7 @@ def _customer_summary_by_id(customer_id):
                client_verified, is_blocked, blocked_reason,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
+               (SELECT COALESCE(SUM(cc.amount), 0) FROM customer_credits cc WHERE cc.customer_id = customers.id AND cc.status = 'active') AS customer_credit_balance,
                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
         WHERE id = ?
@@ -485,6 +488,7 @@ def detail(order_id):
         payments=payments_for_order(order_id),
         payment_summary=payment_summary(order_id),
         payment_label_for=payment_label_for,
+        customer_credit_balance=customer_credit_balance(order["customer_id"]),
         display_payment_date=display_payment_date,
         customer_custom_fields=custom_fields_for(order),
         return_charge_defaults=return_charge_defaults(order_id),

@@ -16,10 +16,12 @@
       <div class="form-grid customer-picker-grid"><label>Search customer
         <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') or (selected_customer_summary.display if selected_customer_summary else '') }}">
       </label>
-      {% set balance = (customer_summary.previous_orders_balance if customer_summary else (selected_customer_summary.previous_orders_balance if selected_customer_summary else 0)) if (customer_summary is defined) else (selected_customer_summary.previous_orders_balance if selected_customer_summary else 0) %}
+      {% set summary_obj = customer_summary if (customer_summary is defined and customer_summary) else selected_customer_summary %}
+      {% set balance = summary_obj.previous_orders_balance_display if summary_obj else 0 %}
+      {% set has_credit = (summary_obj.customer_credit_balance if summary_obj else 0) > 0 %}
       {% set orders_to_date = (customer_summary.orders_to_date if customer_summary else (selected_customer_summary.orders_to_date if selected_customer_summary else 0)) if (customer_summary is defined) else (selected_customer_summary.orders_to_date if selected_customer_summary else 0) %}
       <div class="stat-card previous-balance-card" id="previous-balance-card" aria-live="polite"><span>Previous Orders Balance</span>
-        <strong id="previous-balance-value" class="{{ 'balance-credit' if balance < 0 else ('balance-owing' if balance > 0 else 'balance-zero') }}">R{{ '%.2f'|format(balance) }}</strong></div>
+        <strong id="previous-balance-value" class="{{ 'balance-credit' if has_credit else ('balance-owing' if balance > 0 else 'balance-zero') }}">R{{ '%.2f'|format(balance) }}</strong></div>
       <div class="stat-card orders-to-date-card" id="orders-to-date-card" aria-live="polite"><span>Orders to Date</span>
         <strong id="orders-to-date-value">{{ orders_to_date }}</strong></div></div>
       {% set customer_summary = order_form.get('customer_summary') if editing else selected_customer_summary %}
@@ -220,7 +222,7 @@
   const customerEditCompany=document.querySelector('[data-edit-company-details]');
   const customerLabels={vehicle_make:'Vehicle Make',vehicle_color:'Vehicle Color',vehicle_reg_no:'Veh Reg No',alternative_contact_name:'Alternative Contact Name',alternative_contact_number:'Alternative Contact Number',alternative_contact_relationship:'Alternative Contact Relationship',vat_number:'VAT No',company_reg_no:'Company Reg No'};
   function customerLabel(key){ return customerLabels[key] || key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
-  function setCustomerStats(summary){ const balanceCard=document.getElementById('previous-balance-card'); const balanceEl=document.getElementById('previous-balance-value'); const ordersEl=document.getElementById('orders-to-date-value'); if(balanceCard&&balanceEl){ const value=summary?amount(summary.previous_orders_balance):0; balanceEl.textContent=fmt(value); balanceEl.className=value<0?'balance-credit':(value>0?'balance-owing':'balance-zero'); } if(ordersEl){ const count=summary?parseInt(summary.orders_to_date||0,10):0; ordersEl.textContent=String(Number.isFinite(count)?count:0); } }
+  function setCustomerStats(summary){ const balanceCard=document.getElementById('previous-balance-card'); const balanceEl=document.getElementById('previous-balance-value'); const ordersEl=document.getElementById('orders-to-date-value'); if(balanceCard&&balanceEl){ const credit=summary?amount(summary.customer_credit_balance):0; const value=credit>0?credit:(summary?amount(summary.previous_orders_balance):0); balanceEl.textContent=fmt(value); balanceEl.className=credit>0?'balance-credit':(value>0?'balance-owing':'balance-zero'); } if(ordersEl){ const count=summary?parseInt(summary.orders_to_date||0,10):0; ordersEl.textContent=String(Number.isFinite(count)?count:0); } }
   function syncBlockedBanner(summary){ const banner=document.getElementById('blocked-customer-banner'); const reasonEl=document.getElementById('blocked-customer-reason'); if(!banner) return; const blocked=!!(summary&&summary.is_blocked); banner.hidden=!blocked; if(reasonEl) reasonEl.textContent=blocked?('— '+(summary.blocked_reason||'no reason recorded')):''; }
   function textRow(label,value){ const row=document.createElement('div'); row.className='detail-row'; const span=document.createElement('span'); span.textContent=label; const bold=document.createElement('b'); bold.textContent=value||'—'; row.append(span,bold); return row; }
   function optionSummary(option){ if(!option||!option.dataset.summary) return null; try{return JSON.parse(option.dataset.summary);}catch(e){return null;} }
