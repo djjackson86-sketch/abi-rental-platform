@@ -17,11 +17,19 @@
         <input list="customer-options" id="customer-search" placeholder="Type name, email or phone" value="{{ order_form.get('customer_display', '') or (selected_customer_summary.display if selected_customer_summary else '') }}">
       </label>
       {% set summary_obj = customer_summary if (customer_summary is defined and customer_summary) else selected_customer_summary %}
-      {% set balance = summary_obj.previous_orders_balance_display if summary_obj else 0 %}
-      {% set has_credit = (summary_obj.customer_credit_balance if summary_obj else 0) > 0 %}
+      {# Ticket ABI-341953074: Previous Orders Balance always shows the customer's true
+         outstanding balance; available customer credit gets its own green card beside it,
+         rendered only when the customer actually has credit. #}
+      {% set balance = (summary_obj.previous_orders_balance if summary_obj else 0) or 0 %}
+      {% set credit = (summary_obj.customer_credit_balance if summary_obj else 0) or 0 %}
+      {% set has_credit = credit > 0 %}
       {% set orders_to_date = (customer_summary.orders_to_date if customer_summary else (selected_customer_summary.orders_to_date if selected_customer_summary else 0)) if (customer_summary is defined) else (selected_customer_summary.orders_to_date if selected_customer_summary else 0) %}
       <div class="stat-card previous-balance-card" id="previous-balance-card" aria-live="polite"><span>Previous Orders Balance</span>
-        <strong id="previous-balance-value" class="{{ 'balance-credit' if has_credit else ('balance-owing' if balance > 0 else 'balance-zero') }}">R{{ '%.2f'|format(balance) }}</strong></div>
+        <strong id="previous-balance-value" class="{{ 'balance-owing' if balance > 0 else 'balance-zero' }}">R{{ '%.2f'|format(balance) }}</strong></div>
+      {% if has_credit %}
+      <div class="stat-card customer-credit-card" id="customer-credit-card" aria-live="polite"><span>Customer Credit</span>
+        <strong id="customer-credit-value" class="balance-credit">R{{ '%.2f'|format(credit) }}</strong></div>
+      {% endif %}
       <div class="stat-card orders-to-date-card" id="orders-to-date-card" aria-live="polite"><span>Orders to Date</span>
         <strong id="orders-to-date-value">{{ orders_to_date }}</strong></div></div>
       {% set customer_summary = order_form.get('customer_summary') if editing else selected_customer_summary %}
@@ -175,8 +183,9 @@
       .order-lines-wrap .enhanced-line.can-remove .line-remove-row{display:inline-flex}
       .order-lines-wrap .add-line-help{margin:10px 2px 0}
       .order-lines-wrap .add-line-help .btn{min-height:36px;height:36px;padding:6px 14px;box-shadow:none}
-      .previous-balance-card{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal}.orders-to-date-card{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal}
+      .previous-balance-card{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal}.customer-credit-card{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal}.orders-to-date-card{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal}
       .previous-balance-card strong.balance-zero{color:#111827}.previous-balance-card strong.balance-credit{color:#047857}.previous-balance-card strong.balance-owing{color:#b42318}
+      .customer-credit-card strong.balance-credit{color:#047857}
       .order-lines-wrap #order-line-template{display:none}
     </style>
   </section>
@@ -222,7 +231,8 @@
   const customerEditCompany=document.querySelector('[data-edit-company-details]');
   const customerLabels={vehicle_make:'Vehicle Make',vehicle_color:'Vehicle Color',vehicle_reg_no:'Veh Reg No',alternative_contact_name:'Alternative Contact Name',alternative_contact_number:'Alternative Contact Number',alternative_contact_relationship:'Alternative Contact Relationship',vat_number:'VAT No',company_reg_no:'Company Reg No'};
   function customerLabel(key){ return customerLabels[key] || key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
-  function setCustomerStats(summary){ const balanceCard=document.getElementById('previous-balance-card'); const balanceEl=document.getElementById('previous-balance-value'); const ordersEl=document.getElementById('orders-to-date-value'); if(balanceCard&&balanceEl){ const credit=summary?amount(summary.customer_credit_balance):0; const value=credit>0?credit:(summary?amount(summary.previous_orders_balance):0); balanceEl.textContent=fmt(value); balanceEl.className=credit>0?'balance-credit':(value>0?'balance-owing':'balance-zero'); } if(ordersEl){ const count=summary?parseInt(summary.orders_to_date||0,10):0; ordersEl.textContent=String(Number.isFinite(count)?count:0); } }
+  function ensureCreditCard(){ let card=document.getElementById('customer-credit-card'); if(card) return card; const anchor=document.getElementById('previous-balance-card'); if(!anchor||!anchor.parentNode) return null; card=document.createElement('div'); card.className='stat-card customer-credit-card'; card.id='customer-credit-card'; card.setAttribute('aria-live','polite'); const label=document.createElement('span'); label.textContent='Customer Credit'; const value=document.createElement('strong'); value.id='customer-credit-value'; value.className='balance-credit'; card.append(label,value); anchor.parentNode.insertBefore(card,anchor.nextSibling); return card; }
+  function setCustomerStats(summary){ const balanceEl=document.getElementById('previous-balance-value'); const ordersEl=document.getElementById('orders-to-date-value'); if(balanceEl){ const value=summary?amount(summary.previous_orders_balance):0; balanceEl.textContent=fmt(value); balanceEl.className=value>0?'balance-owing':'balance-zero'; } const credit=summary?amount(summary.customer_credit_balance):0; const creditCard=credit>0?ensureCreditCard():document.getElementById('customer-credit-card'); if(creditCard){ creditCard.hidden=!(credit>0); const creditEl=document.getElementById('customer-credit-value'); if(creditEl) creditEl.textContent=fmt(credit); } if(ordersEl){ const count=summary?parseInt(summary.orders_to_date||0,10):0; ordersEl.textContent=String(Number.isFinite(count)?count:0); } }
   function syncBlockedBanner(summary){ const banner=document.getElementById('blocked-customer-banner'); const reasonEl=document.getElementById('blocked-customer-reason'); if(!banner) return; const blocked=!!(summary&&summary.is_blocked); banner.hidden=!blocked; if(reasonEl) reasonEl.textContent=blocked?('— '+(summary.blocked_reason||'no reason recorded')):''; }
   function textRow(label,value){ const row=document.createElement('div'); row.className='detail-row'; const span=document.createElement('span'); span.textContent=label; const bold=document.createElement('b'); bold.textContent=value||'—'; row.append(span,bold); return row; }
   function optionSummary(option){ if(!option||!option.dataset.summary) return null; try{return JSON.parse(option.dataset.summary);}catch(e){return null;} }
