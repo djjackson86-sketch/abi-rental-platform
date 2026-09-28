@@ -16,6 +16,26 @@ PAYMENT_LABELS = {
     "overpaid": "Overpaid",
 }
 
+# Every method the payment forms may write (ticket ABI-341953066 added "other").
+# "manual" is kept for legacy ledger rows and imports. Anything else is either a
+# legacy row's own method (allowed through on edit below) or junk, and is
+# refused: the dashboard and the day report decide which money line a payment
+# lands on from this stored value, so a typo here would drop money from a total.
+PAYMENT_METHODS = ("cash", "eft", "card", "other", "manual")
+PAYMENT_METHOD_ERROR = "Payment method must be Cash, EFT, Card, Other, or Manual"
+
+
+def normalise_payment_method(value, fallback="manual"):
+    """Lower-case a submitted method and check it against ``PAYMENT_METHODS``.
+
+    ``fallback`` (the historic default) applies only when the form hands us
+    nothing at all, so a blank method still stores "manual" exactly as before.
+    """
+    method = (value or "").strip().lower() or fallback
+    if method not in PAYMENT_METHODS:
+        raise ValueError(PAYMENT_METHOD_ERROR)
+    return method
+
 
 def parse_payment_date(value):
     value = (value or "").strip()
@@ -106,7 +126,7 @@ def record_payment(order_id, form):
     if not order:
         raise ValueError("Order not found")
     amount = _parse_payment_amount(form)
-    method = form.get("method", "manual").strip() or "manual"
+    method = normalise_payment_method(form.get("method"))
     reference = form.get("reference", "").strip()
     payment_date = parse_payment_date(form.get("payment_date"))
     created_at = now()
@@ -137,7 +157,13 @@ def update_payment(payment_id, form):
     if is_refund(payment):
         raise ValueError("Refund rows cannot be edited from the payments ledger")
     amount = _parse_payment_amount(form)
-    method = form.get("method", "manual").strip() or "manual"
+    existing_method = (payment["method"] or "").strip().lower()
+    method = (form.get("method") or existing_method or "manual").strip().lower()
+    # A legacy ledger row (an import, or one of the deposit rows) can carry a
+    # method the form cannot offer. Editing that row must never be blocked, so
+    # its own value is allowed through while anything else unknown is refused.
+    if method not in PAYMENT_METHODS and method != existing_method:
+        raise ValueError(PAYMENT_METHOD_ERROR)
     reference = form.get("reference", "").strip()
     payment_date = parse_payment_date(form.get("payment_date"))
     db = get_db()

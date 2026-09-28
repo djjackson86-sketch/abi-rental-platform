@@ -2190,7 +2190,7 @@ def test_order_estimate_hides_discount_and_damage_waiver_rows(client):
     assert b'name="damage_waiver_amount"' in edit_page.data  # hidden legacy waiver carry stays.
 
 
-def test_record_payment_method_options_are_cash_eft_card_only(client):
+def test_record_payment_method_options_are_cash_eft_card_and_other(client):
     login(client)
     seed_customer_and_product(client)
     order_id = create_order_for_status(client, quantity='1')
@@ -2201,6 +2201,9 @@ def test_record_payment_method_options_are_cash_eft_card_only(client):
     assert b'value="cash">Cash' in detail.data
     assert b'value="eft">EFT' in detail.data
     assert b'value="card">Card' in detail.data
+    # Ticket ABI-341953066: "Other" is a real, selectable method (it carries the
+    # Reference note) and gets its own dashboard/day-report line.
+    assert b'value="other">Other' in detail.data
     assert b'value="security_deposit"' not in detail.data
     assert b'value="damage_waiver"' not in detail.data
     assert b'value="manual"' not in detail.data

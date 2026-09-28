@@ -6,6 +6,7 @@
   {{ money_card('Total card payments', day_metrics.card_payments) }}
   {{ money_card('Total cash payments', day_metrics.cash_payments) }}
   {{ money_card('Total EFT payments', day_metrics.eft_payments) }}
+  {{ money_card('Total other payments', day_metrics.other_payments) }}
   <div class="metric-card"><small>Reservations for the day</small><b>{{ day_metrics.reservations }}</b><span>{{ day_metrics.day }}</span></div>
   <div class="metric-card"><small>Reservation pick ups for the day</small><b>{{ day_metrics.reservation_pickups }}</b><span>{{ day_metrics.day }}</span></div>
   <div class="metric-card"><small>Total no. of trailers out</small><b>{{ day_metrics.trailers_out }}</b><span>{{ day_metrics.day }}</span></div>

@@ -302,8 +302,10 @@ def dashboard_day_metrics(day=None, branch_id=None):
 
     Revenue for the day is money RECEIVED today (paid payments, by payment date),
     not the value of the orders raised today — the client asked for "actual
-    payments received, not just created orders". The three method cards add up to
-    it exactly.
+    payments received, not just created orders". The three named method cards
+    plus the "Other" card add up to it exactly (ticket ABI-341953066: "Other" is
+    a selectable method, and legacy/imported methods land on that same line
+    rather than showing in no card at all).
 
     The two trailer cards are a snapshot, not a day figure: **out** is what is on
     hire (a ``started`` order), and **in** is the rest of the yard — the active
@@ -351,6 +353,26 @@ def dashboard_day_metrics(day=None, branch_id=None):
               {method_sql}
               AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
             [*method_params, day, *scope_params],
+        )
+
+    def other_payments():
+        """Money received for the day by any method other than the three cards.
+
+        Ticket ABI-341953066: "Other" is a selectable payment method, so it needs
+        its own line or that money would show in the revenue card and in no
+        method card. Everything that is not cash/EFT/card lands here — a
+        deliberate "Other" payment, a legacy "manual" row, an imported method or
+        an applied deposit — and a row with no method at all counts as Other
+        rather than being dropped. Same paid/not-archived/branch/day rules as
+        ``payment_total``, so the four cards sum to revenue exactly.
+        """
+        return total(
+            f"""SELECT COALESCE(SUM(pay.amount), 0) s
+            FROM payments pay JOIN orders o ON o.id = pay.order_id
+            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+              AND LOWER(COALESCE(pay.method, '')) NOT IN (?, ?, ?)
+              AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
+            ["cash", "eft", "card", day, *scope_params],
         )
 
     new_orders = count(
@@ -424,6 +446,9 @@ def dashboard_day_metrics(day=None, branch_id=None):
         "card_payments": payment_total("card"),
         "cash_payments": payment_total("cash"),
         "eft_payments": payment_total("eft"),
+        # Everything that is not one of the three named cards (ticket
+        # ABI-341953066). Kept last so cash + EFT + card + other == revenue.
+        "other_payments": other_payments(),
         "reservations": reservations,
         "reservation_pickups": reservation_pickups,
         "trailers_out": on_hire,

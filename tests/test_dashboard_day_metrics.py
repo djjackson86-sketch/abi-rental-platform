@@ -204,7 +204,11 @@ def test_the_day_cards_count_what_the_client_asked_for(app):
     # raised today: 500 card + 250 cash + 700 EFT. The pending payment on the
     # draft, the archived payment and yesterday's card payment are all out.
     assert day['revenue'] == 1450.0
-    assert day['revenue'] == day['card_payments'] + day['cash_payments'] + day['eft_payments']
+    # Ticket ABI-341953066: no money hides between the cards — the three named
+    # methods plus "Other" (any other method, and every legacy one) are revenue.
+    assert day['other_payments'] == 0.0
+    assert day['revenue'] == (day['card_payments'] + day['cash_payments']
+                              + day['eft_payments'] + day['other_payments'])
 
 
 def test_trailer_cards_count_rental_items_and_skip_the_other_rental_group(app):

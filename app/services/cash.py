@@ -958,6 +958,10 @@ def day_report_rows(report):
         ('Dashboard', 'Total card payments', f"R{metrics['card_payments']:.2f}"),
         ('Dashboard', 'Total cash payments', f"R{metrics['cash_payments']:.2f}"),
         ('Dashboard', 'Total EFT payments', f"R{metrics['eft_payments']:.2f}"),
+        # Ticket ABI-341953066: "Other" money still has to appear in the day's
+        # figures, or a payment recorded as Other would show in the revenue line
+        # and in none of the method lines.
+        ('Dashboard', 'Total other payments', f"R{metrics.get('other_payments', 0):.2f}"),
         ('Dashboard', 'Reservations for the day', str(metrics['reservations'])),
         ('Dashboard', 'Reservation pick ups for the day', str(metrics['reservation_pickups'])),
         ('Dashboard', 'Total no. of trailers out', str(metrics['trailers_out'])),
