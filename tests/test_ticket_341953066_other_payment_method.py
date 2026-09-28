@@ -142,19 +142,25 @@ def payment_rows(app, order_id):
 
 # --- the two forms ---------------------------------------------------------
 
-def test_the_record_payment_form_offers_other(client):
+def test_the_record_payment_form_no_longer_offers_other(client):
+    """Ticket ABI-341953072(4) removed the option this ticket had added."""
     login(client)
     order_id = seed_customer_product_order(client)
     detail = client.get(f'/orders/{order_id}')
     assert detail.status_code == 200
-    assert b'value="other">Other' in detail.data
-    # The three original methods are untouched by the addition.
+    assert b'value="other"' not in detail.data
+    # The three original methods are untouched by the removal.
     for option in (b'value="cash">Cash', b'value="eft">EFT', b'value="card">Card'):
         assert option in detail.data, option
 
 
-def test_the_ledger_edit_form_offers_other_and_keeps_manual(client, app):
-    """Other is added; the legacy Manual option stays for historic rows."""
+def test_the_ledger_edit_form_offers_other_only_on_an_other_row_and_keeps_manual(client, app):
+    """'Other' is gone from the picker; a legacy row keeps its own method.
+
+    Ticket ABI-341953072(4): the option is drawn only when the row being edited
+    already holds it, so editing a Manual (or imported) row can never rewrite its
+    method to 'other' just because the picker had the value available.
+    """
     login(client)
     order_id = seed_customer_product_order(client)
     with app.app_context():
@@ -168,9 +174,8 @@ def test_the_ledger_edit_form_offers_other_and_keeps_manual(client, app):
 
     page = client.get(f'/payments/{payment_id}/edit')
     assert page.status_code == 200
-    assert b'value="other"' in page.data
+    assert b'value="other"' not in page.data
     assert b'value="manual" selected' in page.data
-    assert b'value="other" selected' not in page.data
 
 
 # --- recording and editing -------------------------------------------------

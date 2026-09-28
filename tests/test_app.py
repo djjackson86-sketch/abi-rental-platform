@@ -2201,9 +2201,10 @@ def test_record_payment_method_options_are_cash_eft_card_and_other(client):
     assert b'value="cash">Cash' in detail.data
     assert b'value="eft">EFT' in detail.data
     assert b'value="card">Card' in detail.data
-    # Ticket ABI-341953066: "Other" is a real, selectable method (it carries the
-    # Reference note) and gets its own dashboard/day-report line.
-    assert b'value="other">Other' in detail.data
+    # Ticket ABI-341953066 added "Other" and ticket ABI-341953072(4) removed it
+    # from the picker again: the three real methods are all that is offered now,
+    # while legacy rows keep their own stored method on the ledger edit form.
+    assert b'value="other"' not in detail.data
     assert b'value="security_deposit"' not in detail.data
     assert b'value="damage_waiver"' not in detail.data
     assert b'value="manual"' not in detail.data
@@ -4569,7 +4570,7 @@ def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
     """
     from app.services.pdf_documents import (
         INVOICE_TABLE_RIGHT_EDGE, TAX_COLUMN_X, TAX_VALUE_RIGHT_EDGE, TOTAL_INCL_COLUMN_X,
-        TOTAL_INCL_VALUE_RIGHT_EDGE, _pdf_text_width, document_pdf_bytes,
+        TOTAL_INCL_VALUE_RIGHT_EDGE, _pdf_exact_text_width, document_pdf_bytes,
     )
 
     login(client)
@@ -4594,9 +4595,12 @@ def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
 
     tax_heading = next(c for c in commands if c['text'] == 'TAX')
     total_heading = next(c for c in commands if c['text'] == 'TOTAL INCL. VAT')
-    assert tax_heading['x'] == TAX_COLUMN_X
-    assert total_heading['x'] == TOTAL_INCL_COLUMN_X
-    assert total_heading['x'] - tax_heading['x'] >= 55, 'the two money columns must keep a gutter'
+    # Ticket ABI-341953067 right-aligned the four money headings on their value
+    # columns, so a heading's own left edge is no longer the column x. The gutter
+    # this test exists to protect is between the two money COLUMNS.
+    assert TOTAL_INCL_COLUMN_X - TAX_COLUMN_X >= 55, 'the two money columns must keep a gutter'
+    assert round(tax_heading['x'] + _pdf_exact_text_width(tax_heading['text'], tax_heading['size']), 1) == round(TAX_VALUE_RIGHT_EDGE, 1)
+    assert round(total_heading['x'] + _pdf_exact_text_width(total_heading['text'], total_heading['size']), 1) == round(TOTAL_INCL_VALUE_RIGHT_EDGE, 1)
 
     # R1 234 567.89 at 15%: tax R185 185.18, total incl. VAT R1 419 753.07
     # Ticket ABI-341953061(6): the values are right-aligned on their column edge,
@@ -4605,8 +4609,8 @@ def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
     tax_amount = next(c for c in commands if c['text'] == 'R185185.18')
     total_amount = next(c for c in commands if c['text'] == 'R1419753.07')
     assert tax_amount['y'] == total_amount['y'], 'both money columns must share the line'
-    tax_right = tax_amount['x'] + _pdf_text_width(tax_amount['text'], tax_amount['size'])
-    total_right = total_amount['x'] + _pdf_text_width(total_amount['text'], total_amount['size'])
+    tax_right = tax_amount['x'] + _pdf_exact_text_width(tax_amount['text'], tax_amount['size'])
+    total_right = total_amount['x'] + _pdf_exact_text_width(total_amount['text'], total_amount['size'])
     assert round(tax_right, 1) == round(TAX_VALUE_RIGHT_EDGE, 1)
     assert round(total_right, 1) == round(TOTAL_INCL_VALUE_RIGHT_EDGE, 1)
 
@@ -4616,9 +4620,10 @@ def test_invoice_tax_and_total_columns_keep_a_gutter(client, app):
     # grows LEFTWARDS from its edge and the right edge is what must stay inside
     # the table border (the drawn value already sits 7pt inside it).
     money_right = max(
-        c['x'] + _pdf_text_width(c['text'], c['size']) for c in (tax_amount, total_amount)
+        c['x'] + _pdf_exact_text_width(c['text'], c['size']) for c in (tax_amount, total_amount)
     )
-    heading_right = total_heading['x'] + total_heading['size'] * 0.778 * len(total_heading['text'])
+    heading_right = total_heading['x'] + _pdf_exact_text_width(
+        total_heading['text'], total_heading['size'])
     assert money_right <= INVOICE_TABLE_RIGHT_EDGE
     assert heading_right <= INVOICE_TABLE_RIGHT_EDGE
 

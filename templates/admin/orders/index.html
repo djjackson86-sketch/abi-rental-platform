@@ -113,6 +113,10 @@
       <div class="metric-card is-alert"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
       <div class="metric-card"><small>Unprocessed deposits</small><b>{{ counts.deposits_unprocessed_total }}</b></div>
       <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>R{{ '%.2f'|format(counts.deposits_unprocessed_amount) }}</b></div>
+      {# Ticket ABI-341953072(1): finalized invoices whose email has not been
+         prepared yet, shown in red like the "Unsent" badge on the order's own
+         document list. Draft orders are excluded by the count itself. #}
+      <div class="metric-card is-alert"><small>Unsent Invoices</small><b>{{ counts.unsent_invoices }}</b></div>
     </section>
     {% else %}
     <div class="orders-tabs-row">
@@ -135,6 +139,9 @@
       <div class="metric-card is-alert"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
       <div class="metric-card"><small>Unprocessed deposits</small><b>{{ counts.deposits_unprocessed_total }}</b></div>
       <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>R{{ '%.2f'|format(counts.deposits_unprocessed_amount) }}</b></div>
+      {# Ticket ABI-341953072(1): staff see the same red "Unsent Invoices" figure
+         the main profile's row carries — it is counter work, not money. #}
+      <div class="metric-card is-alert"><small>Unsent Invoices</small><b>{{ counts.unsent_invoices }}</b></div>
     </section>
     {% endif %}
 

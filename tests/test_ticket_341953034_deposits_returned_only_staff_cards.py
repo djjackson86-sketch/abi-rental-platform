@@ -349,21 +349,24 @@ def test_the_started_and_canceled_orders_are_still_reachable_in_the_plain_list(c
     assert 'ORD-40003' in client.get('/orders?status=canceled').data.decode()
 
 
-def test_the_main_totals_row_still_shows_six_cards_with_two_red(client, app):
+def test_the_main_totals_row_keeps_its_cards_and_its_red_ones(client, app):
     seed_orders(app)
     login(client)
     section = _metric_section(client.get('/orders').data, b'id="orders-metrics"')
     cards = _sections(section)
 
+    # Ticket ABI-341953072(1) appended its red "Unsent Invoices" card; every card
+    # this ticket pinned is still there, in order, in front of it.
     assert [label for label, _, _ in cards] == [
         'Orders', 'Items ordered', 'Revenue received', 'Due',
         'Unprocessed deposits', 'Unprocessed deposit value',
+        'Unsent Invoices',
     ]
     values = {label: value for label, value, _ in cards}
     assert values['Unprocessed deposits'] == '2'
     assert values['Unprocessed deposit value'] == 'R820.00'
     assert [label for label, _, cls in cards if 'is-alert' in cls] == \
-        ['Due', 'Unprocessed deposit value']
+        ['Due', 'Unprocessed deposit value', 'Unsent Invoices']
 
 
 # --------------------------------------------------------------- staff visibility
@@ -375,7 +378,7 @@ def test_staff_see_the_unprocessed_deposit_count_and_value(client, app):
     cards = _cards(html)
 
     assert [label for label, _, _ in _sections(_metric_section(html, b'orders-staff-metrics'))] == [
-        'Due', 'Unprocessed deposits', 'Unprocessed deposit value',
+        'Due', 'Unprocessed deposits', 'Unprocessed deposit value', 'Unsent Invoices',
     ]
     # Branch 2 only: one returned order, R120 of deposit still to process.
     assert cards['Unprocessed deposits'][0] == '1'

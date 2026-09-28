@@ -195,9 +195,13 @@ def test_pdf_money_values_are_right_aligned_and_banking_block_moved_down(app):
     thank_you = next(entry for entry in positions if entry['text'] == 'Thank you for your business.')
     banking = next(entry for entry in positions if entry['text'] == 'Banking details')
     total_without_vat = next(entry for entry in positions if entry['text'] == 'Total without VAT')
-    # Ticket ABI-341953061(7): the block moved a clear step down, not just below.
-    assert thank_you['y'] <= total_without_vat['y'] - 12
+    # Ticket ABI-341953072(2): the client asked for space between the thank-you
+    # line and the banking block, so the thank-you line moved up to make room. It
+    # still closes the money block above it (the totals sit to its right) and
+    # still opens the banking block below it.
+    assert thank_you['y'] < total_without_vat['y']
     assert banking['y'] < thank_you['y']
+    assert thank_you['y'] - banking['y'] >= 20
 
 
 def test_order_detail_discount_label_stays_on_percent_amount_line(client, app):

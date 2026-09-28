@@ -48,6 +48,11 @@ SUBTOTAL_VALUE_RIGHT_EDGE = TAX_COLUMN_X - 8
 TAX_VALUE_RIGHT_EDGE = TOTAL_INCL_COLUMN_X - 8
 TOTAL_INCL_VALUE_RIGHT_EDGE = INVOICE_TABLE_RIGHT_EDGE - 7
 SUMMARY_VALUE_RIGHT_EDGE = INVOICE_TABLE_RIGHT_EDGE - 9
+# Ticket ABI-341953072(2): the client asked for visible space between the closing
+# "Thank you for your business." line and the banking block. One constant drives
+# both drawing paths — the block that shares the totals' page and the block that
+# drops onto a page of its own — so the two can never drift apart.
+BANKING_THANK_YOU_GAP = 22
 
 
 def _pdf_text(value):
@@ -311,9 +316,10 @@ def _pdf_text_width(text, size: int | float, bold=False):
 
 # Real Helvetica / Helvetica-Bold advance widths (AFM metrics, /1000 em) for the
 # printable ASCII range. The flat 0.5/0.56 factors above are good enough for
-# wrapping and right-alignment, but they are ~15% wide on a bold line: measuring
-# a centred title with them left it visibly off the midline, which is the whole
-# point of a centring fix. Only the centred helper uses these.
+# wrapping and truncation, but they are ~15% wide on a bold line: measuring a
+# centred title with them left it visibly off the midline, and a right-aligned
+# bold amount fell short of the plain rows above it (both are the whole point of
+# the fixes). The centred and right-aligned helpers use these.
 _HELVETICA_WIDTHS = dict(zip(
     ' ' + '!"#$%&\'()*+,-./' + '0123456789' + ':;<=>?@'
     + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + '[\\]^_`' + 'abcdefghijklmnopqrstuvwxyz' + '{|}~',
@@ -359,7 +365,16 @@ def _pdf_exact_text_width(text, size: int | float, bold=False):
 
 
 def _pdf_right_text(x_right, y, text, size: int | float = 9, font='F1'):
-    return _pdf_text_command(x_right - _pdf_text_width(text, size, bold=font == 'F2'), y, text, size=size, font=font)
+    """A run whose RIGHT edge lands exactly on ``x_right``.
+
+    Ticket ABI-341953072(3): this used the flat ``_pdf_text_width`` factors, which
+    are ~15% wide on a bold run, so the bold "Total with VAT" amount ended ~3.5pt
+    further left than the plain rows above it — the client's "align the Total with
+    VAT value with other values". Measuring with the real glyph widths (the same
+    ones the viewer uses) puts every right-aligned run on the same edge, bold or
+    not, which also fixes the summary's bold rows and the report rows.
+    """
+    return _pdf_text_command(x_right - _pdf_exact_text_width(text, size, bold=font == 'F2'), y, text, size=size, font=font)
 
 
 def _pdf_centre_text(y, text, size: int | float = 9, font='F1', centre=None):
@@ -1014,13 +1029,13 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         bank_text_commands = ['BT']
         bank_text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
         bank_text_commands.append(_pdf_text_command(455, 746, f'Page {len(streams) + 1}', size=8.5))
-        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 700, 'Thank you for your business.', size=8.8, font='F2'))
+        bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 675 + BANKING_THANK_YOU_GAP, 'Thank you for your business.', size=8.8, font='F2'))
         bank_text_commands.append(_pdf_text_command(INVOICE_TABLE_X, 675, 'Banking details', size=8.5, font='F2'))
         _add_pdf_lines(bank_text_commands, INVOICE_TABLE_X, 660, bank_detail_lines, size=8.5, leading=13, max_lines=7)
         bank_text_commands.append('ET')
         streams.append('\n'.join(bank_draw_commands + bank_text_commands).encode('latin-1', 'replace'))
         return _pdf_objects(streams, image_object=image_object)
-    text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y + 10, 'Thank you for your business.', size=8.8, font='F2'))
+    text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y + BANKING_THANK_YOU_GAP, 'Thank you for your business.', size=8.8, font='F2'))
     text_commands.append(_pdf_text_command(INVOICE_TABLE_X, bank_y, 'Banking details', size=8.5, font='F2'))
     _add_pdf_lines(text_commands, INVOICE_TABLE_X, bank_y - 13, bank_detail_lines, size=8.5, leading=13, max_lines=7)
     text_commands.append('ET')

@@ -27,6 +27,7 @@ from app.services.pdf_documents import (
     TOTAL_INCL_VALUE_RIGHT_EDGE,
     _escape_pdf_text,
     _invoice_template_pdf,
+    _pdf_exact_text_width,
     _pdf_text,
     _pdf_text_width,
     _wrap_pdf_cell_text,
@@ -282,7 +283,9 @@ def test_quote_and_invoice_money_headers_align_with_value_columns_on_all_pages(a
         headers = [entry for entry in positions if entry['text'] == label]
         assert [entry['page'] for entry in headers] == [1, 2]
         for header in headers:
-            header_right = header['x'] + _pdf_text_width(header['text'], header['size'])
+            # The real glyph widths: the renderer right-aligns on this measure
+            # (ticket ABI-341953072(3)), so the crude factors would be a fiction.
+            header_right = header['x'] + _pdf_exact_text_width(header['text'], header['size'])
             assert round(header_right, 1) == round(right_edge, 1), header
 
     first_line_values = {
@@ -292,7 +295,7 @@ def test_quote_and_invoice_money_headers_align_with_value_columns_on_all_pages(a
     }
     for text, right_edge in first_line_values.items():
         value = next(entry for entry in positions if entry['text'] == text and entry['y'] > 600)
-        value_right = value['x'] + _pdf_text_width(value['text'], value['size'])
+        value_right = value['x'] + _pdf_exact_text_width(value['text'], value['size'])
         assert round(value_right, 1) == round(right_edge, 1), value
 
 
@@ -314,8 +317,10 @@ def test_document_table_visual_ticket_changes_are_pinned(app):
     assert '0.070 0.540 0.300 rg' in decoded
     line_total = next(entry for entry in positions if entry['text'] == 'R690.00' and entry['y'] > 300)
     bottom_total = next(entry for entry in positions if entry['text'] == 'R5520.00' and entry['font'] == 'F2')
-    assert round(line_total['x'] + _pdf_text_width(line_total['text'], line_total['size']), 1) == round(INVOICE_TABLE_RIGHT_EDGE - 7, 1)
-    assert round(bottom_total['x'] + _pdf_text_width(bottom_total['text'], bottom_total['size'], bold=True), 1) == round(INVOICE_TABLE_RIGHT_EDGE - 9, 1)
+    assert round(line_total['x'] + _pdf_exact_text_width(line_total['text'], line_total['size']), 1) == round(INVOICE_TABLE_RIGHT_EDGE - 7, 1)
+    # Ticket ABI-341953072(3): the bold "Total with VAT" amount ends on the same
+    # edge as the plain rows above it, measured with the real glyph widths.
+    assert round(bottom_total['x'] + _pdf_exact_text_width(bottom_total['text'], bottom_total['size'], bold=True), 1) == round(INVOICE_TABLE_RIGHT_EDGE - 9, 1)
 
 
 @pytest.mark.parametrize('document_type', ['invoice', 'quote'])

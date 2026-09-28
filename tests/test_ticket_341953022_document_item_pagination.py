@@ -35,6 +35,7 @@ from app.services.pdf_documents import (
     SUBTOTAL_COLUMN_X,
     TAX_COLUMN_X,
     TOTAL_INCL_COLUMN_X,
+    _pdf_exact_text_width,
     _pdf_text_width,
 )
 
@@ -203,8 +204,13 @@ def pdf_pages(pdf_bytes):
 
 
 def drawn_right_edge(run):
-    """The x a drawn run really ends on (ticket ABI-341953061(6) right alignment)."""
-    return run['x'] + _pdf_text_width(run['text'], run['size'])
+    """The x a drawn run really ends on (ticket ABI-341953061(6) right alignment).
+
+    Measured with the real glyph widths, which is what the renderer right-aligns
+    on since ticket ABI-341953072(3) — the crude factors would report an edge
+    that is not on the page.
+    """
+    return run['x'] + _pdf_exact_text_width(run['text'], run['size'], bold=run['font'] == 'F2')
 
 
 def row_runs(page):

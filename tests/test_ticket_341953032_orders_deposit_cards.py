@@ -290,15 +290,16 @@ def test_the_main_profile_sees_every_card_and_the_red_ones(client, app):
     html = _metric_section(client.get('/orders').data, b'id="orders-metrics"')
     cards = _cards(html)
 
+    # Ticket ABI-341953072(1) appended its red "Unsent Invoices" card after these.
     assert [label for label, _, _ in cards] == [
         'Orders', 'Items ordered', 'Revenue received', 'Due',
-        'Unprocessed deposits', 'Unprocessed deposit value',
+        'Unprocessed deposits', 'Unprocessed deposit value', 'Unsent Invoices',
     ]
     values = {label: value for label, value, _ in cards}
     assert values['Unprocessed deposits'] == '3'
     assert values['Unprocessed deposit value'] == 'R1050.00'
     alert = [label for label, _, classes in cards if 'is-alert' in classes]
-    assert alert == ['Due', 'Unprocessed deposit value']
+    assert alert == ['Due', 'Unprocessed deposit value', 'Unsent Invoices']
 
 
 def test_staff_get_the_same_three_cards_branch_scoped(client, app):
@@ -309,7 +310,7 @@ def test_staff_get_the_same_three_cards_branch_scoped(client, app):
     cards = _cards(staff_bar)
 
     assert [label for label, _, _ in cards] == [
-        'Due', 'Unprocessed deposits', 'Unprocessed deposit value',
+        'Due', 'Unprocessed deposits', 'Unprocessed deposit value', 'Unsent Invoices',
     ]
     values = {label: value for label, value, _ in cards}
     # Branch 2 only: its own returned order is the only money owed there, and the

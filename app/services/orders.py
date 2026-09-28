@@ -283,6 +283,23 @@ def order_counts(query="", status: object = "", payment_status: object = "", ret
         {payment_window_sql}""",
         [*params, *payment_window_params],
     ).fetchone()
+    # Ticket ABI-341953072(1): "Unsent Invoices" counts the FINALIZED invoices the
+    # order page's own document list still marks with a red "Unsent" badge (ticket
+    # ABI-341953065): no email prepared yet — ``email_status`` still 'not_sent'
+    # with no ``sent_at``. Draft orders are excluded, so a booking still being
+    # built never nags with its proforma, and a draft (proforma) invoice never
+    # qualifies because only a finalized invoice counts. The same ``where`` clause
+    # as every other card means page filters and the branch scope are honoured.
+    unsent_row = db.execute(
+        f"""SELECT COUNT(DISTINCT d.id) unsent FROM documents d
+        JOIN orders o ON o.id = d.order_id
+        LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE {where} AND d.document_type = 'invoice' AND d.status = 'finalized'
+        AND COALESCE(d.email_status, 'not_sent') = 'not_sent'
+        AND COALESCE(d.sent_at, '') = ''
+        AND COALESCE(o.status, '') <> 'draft'""",
+        params,
+    ).fetchone()
     return {
         "total": row["total"] or 0,
         "revenue": received_row["revenue"] or 0,
@@ -290,6 +307,7 @@ def order_counts(query="", status: object = "", payment_status: object = "", ret
         "items": item_row["items"] or 0,
         "deposits_unprocessed_total": row["deposit_count"] or 0,
         "deposits_unprocessed_amount": round(float(row["deposit_amount"] or 0), 2),
+        "unsent_invoices": unsent_row["unsent"] or 0,
     }
 
 
