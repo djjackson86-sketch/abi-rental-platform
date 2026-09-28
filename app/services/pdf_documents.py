@@ -908,10 +908,10 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         _add_pdf_lines(text, INVOICE_TABLE_X, header_y, ['PRODUCT'], size=7.5)
         _add_pdf_lines(text, QTY_COLUMN_X, header_y, ['QTY'], size=7.5)
         _add_pdf_lines(text, DAYS_COLUMN_X, header_y, ['DAYS'], size=7.5)
-        _add_pdf_lines(text, RATE_COLUMN_X, header_y, ['RATE'], size=7.5)
-        _add_pdf_lines(text, SUBTOTAL_COLUMN_X, header_y, ['SUBTOTAL'], size=7.5)
-        _add_pdf_lines(text, TAX_COLUMN_X, header_y, ['TAX'], size=7.5)
-        _add_pdf_lines(text, TOTAL_INCL_COLUMN_X, header_y, ['TOTAL INCL. VAT'], size=7.5)
+        text.append(_pdf_right_text(RATE_VALUE_RIGHT_EDGE, header_y, 'RATE', size=7.5))
+        text.append(_pdf_right_text(SUBTOTAL_VALUE_RIGHT_EDGE, header_y, 'SUBTOTAL', size=7.5))
+        text.append(_pdf_right_text(TAX_VALUE_RIGHT_EDGE, header_y, 'TAX', size=7.5))
+        text.append(_pdf_right_text(TOTAL_INCL_VALUE_RIGHT_EDGE, header_y, 'TOTAL INCL. VAT', size=7.5))
         text.append('0 0 0 rg')
 
     def add_item_rows(text, page_items, start_index, first_row_y):

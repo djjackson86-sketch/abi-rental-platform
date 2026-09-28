@@ -21,6 +21,10 @@ from app import create_app
 from app.services.pdf_documents import (
     INVOICE_TABLE_X,
     INVOICE_TABLE_RIGHT_EDGE,
+    RATE_VALUE_RIGHT_EDGE,
+    SUBTOTAL_VALUE_RIGHT_EDGE,
+    TAX_VALUE_RIGHT_EDGE,
+    TOTAL_INCL_VALUE_RIGHT_EDGE,
     _escape_pdf_text,
     _invoice_template_pdf,
     _pdf_text,
@@ -260,6 +264,36 @@ def test_long_quote_and_invoice_repeat_headings_on_page_two(app, document_type):
 
     assert [entry['page'] for entry in product_headings] == [1, 2]
     assert [entry['page'] for entry in total_headings] == [1, 2]
+
+
+@pytest.mark.parametrize('document_type', ['invoice', 'quote'])
+def test_quote_and_invoice_money_headers_align_with_value_columns_on_all_pages(app, document_type):
+    with app.app_context():
+        pdf_bytes = _invoice_template_pdf(_sample_document(document_type), _many_items(12), _sample_settings())
+    positions = _drawn_text_positions(pdf_bytes)
+
+    expected_edges = {
+        'RATE': RATE_VALUE_RIGHT_EDGE,
+        'SUBTOTAL': SUBTOTAL_VALUE_RIGHT_EDGE,
+        'TAX': TAX_VALUE_RIGHT_EDGE,
+        'TOTAL INCL. VAT': TOTAL_INCL_VALUE_RIGHT_EDGE,
+    }
+    for label, right_edge in expected_edges.items():
+        headers = [entry for entry in positions if entry['text'] == label]
+        assert [entry['page'] for entry in headers] == [1, 2]
+        for header in headers:
+            header_right = header['x'] + _pdf_text_width(header['text'], header['size'])
+            assert round(header_right, 1) == round(right_edge, 1), header
+
+    first_line_values = {
+        'R600.00': RATE_VALUE_RIGHT_EDGE,
+        'R90.00': TAX_VALUE_RIGHT_EDGE,
+        'R690.00': TOTAL_INCL_VALUE_RIGHT_EDGE,
+    }
+    for text, right_edge in first_line_values.items():
+        value = next(entry for entry in positions if entry['text'] == text and entry['y'] > 600)
+        value_right = value['x'] + _pdf_text_width(value['text'], value['size'])
+        assert round(value_right, 1) == round(right_edge, 1), value
 
 
 def test_document_table_visual_ticket_changes_are_pinned(app):
