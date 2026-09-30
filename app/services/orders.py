@@ -10,7 +10,7 @@ from app.services.access import current_session_user_id, order_branch_clause, pr
 from app.services.branches import pickup_hours_error
 from app.services.settings import global_vat_rate
 from app.services.products import product_branch_stock
-from app.services.reports import collectible_due_expr
+from app.services.reports import accepted_quote_exists_condition, collectible_due_expr
 from app.services.timezone import local_now, local_now_iso
 
 # "Sales/Repairs" is a REAL stored order status (ticket ABI-341952962): a draft
@@ -234,12 +234,20 @@ def order_counts(query="", status: object = "", payment_status: object = "", ret
     where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date, branch_id=branch_id)
     db = get_db()
     due_expr = collectible_due_expr("o")
+    accepted_quote = accepted_quote_exists_condition("o")
     # Ticket ABI-341953038(2): the Due CARD is what is still collectable, so a
     # reserved order — a booking held, nothing collected yet — no longer adds to
-    # it. Only the card changes: the per-row Due column on the list, the order
-    # detail's own Due figure and the Reports "Amount due" basis all still count
-    # a reserved order, so nothing on the money surfaces disagrees with itself.
-    card_due_expr = f"CASE WHEN COALESCE(o.status, '') = 'reserved' THEN 0 ELSE {due_expr} END"
+    # it. Ticket ABI-341953078 tightens that same card-only basis: drafts never
+    # count, even when documents/proformas already exist, and a Sales/Repairs
+    # order only counts once its quote is accepted/finalized. The per-row Due
+    # column, order detail Due figure and Reports "Amount due" remain on the
+    # shared collectible_due_expr basis.
+    card_due_expr = (
+        "CASE "
+        "WHEN COALESCE(o.status, '') IN ('draft', 'reserved') THEN 0 "
+        f"WHEN COALESCE(o.status, '') = '{SALES_REPAIRS_STATUS}' AND NOT ({accepted_quote}) THEN 0 "
+        f"ELSE {due_expr} END"
+    )
     # "Unprocessed deposits" is the SAME set the rail's "Process deposit" filter and
     # badge already use (_process_deposit_clause: returned orders only, ticket
     # ABI-341953034; a fully utilised deposit leaves the set, ticket ABI-341953037),
@@ -1220,13 +1228,14 @@ TRANSITIONS = {
     },
     "cancel": {"from": {"draft", "reserved"}, "to": "canceled", "message": "Order canceled"},
     # Ticket ABI-341952993: the main profile can pull a live order back to draft.
-    # Only orders that hold stock or are active are offered (reserved, picked up,
-    # returned, Sales/Repairs) — a cancelled or archived order is never
-    # resurrected. Reservations only count `reserved`/`started` orders, so the
-    # stock a reserved or picked-up order held is released by the status change
-    # itself; payments, quotes and invoices are deliberately left intact.
+    # Orders that hold stock or are active are offered (reserved, picked up,
+    # returned, Sales/Repairs). Ticket ABI-341953078 allows the main profile to
+    # resurrect a cancelled order too. Reservations only count `reserved`/`started`
+    # orders, so the stock a reserved or picked-up order held is released by the
+    # status change itself; payments, quotes and invoices are deliberately left
+    # intact.
     "revert_draft": {
-        "from": {"reserved", "started", "returned", SALES_REPAIRS_STATUS},
+        "from": {"reserved", "started", "returned", SALES_REPAIRS_STATUS, "canceled", "cancelled"},
         "to": "draft",
         "message": "Order reverted to draft",
     },
@@ -1384,7 +1393,7 @@ def transition_order(order_id, action):
             current = STATUS_LABELS.get(order["status"], order["status"])
             raise ValueError(
                 f"Cannot revert an order with status {current} — Revert to Draft is available "
-                "for reserved, picked up, returned and Sales/Repairs orders"
+                "for reserved, picked up, returned, canceled and Sales/Repairs orders"
             )
         if action == "unarchive":
             raise ValueError("Only an archived order can be unarchived")
@@ -1473,11 +1482,11 @@ def status_actions(status, has_rental_items=False):
     "Save as draft" (plus archive once the sale is done).
 
     Ticket ABI-341952993 adds ``revert_draft`` ("Revert to Draft") to every status
-    that holds stock or is active. The button is only RENDERED for the main
-    profile (``current_user_is_main`` in templates/admin/orders/detail.html) and
-    the endpoint itself is main-gated, so a staff account is never offered it and
-    cannot post it either. Cancelled and archived orders get nothing: a cancelled
-    or archived order is not resurrected.
+    that holds stock or is active. Ticket ABI-341953078 extends it to cancelled
+    orders. The button is only RENDERED for the main profile
+    (``current_user_is_main`` in templates/admin/orders/detail.html) and the
+    endpoint itself is main-gated, so a staff account is never offered it and
+    cannot post it either. Archived orders still use the separate unarchive flow.
 
     Ticket ABI-341953038(1) adds the one exception that *is* about an archived
     order: ``unarchive`` ("Unarchive order"), offered only on an archived order
@@ -1512,6 +1521,8 @@ def status_actions(status, has_rental_items=False):
         # returns to the status it held before it was archived (see
         # unarchive_target_status).
         actions.append(("unarchive", "Unarchive order", "ghost"))
+    elif status in {"canceled", "cancelled"}:
+        actions.append(("revert_draft", "Revert to Draft", "ghost"))
     return actions
 
 

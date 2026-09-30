@@ -711,7 +711,7 @@ def revert_draft(order_id):
     stock the order held is released by the status change itself (availability
     only counts reserved and started orders) while payments, quotes and invoices
     are deliberately left intact, so nothing financial is rewritten or removed.
-    Cancelled and archived orders are refused by the transition table.
+    Cancelled orders are allowed by ticket ABI-341953078; archived orders use the separate unarchive flow.
     """
     order = _ensure_order_access(order_id)
     if not order:
