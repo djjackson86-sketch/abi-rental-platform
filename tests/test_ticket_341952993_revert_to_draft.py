@@ -226,6 +226,9 @@ def test_a_returned_one_way_order_goes_back_to_its_collect_branch(client, app):
     order_id = one_way_order(client, customer_id, product_id, collect='1', return_to='2')
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
+    client.post(f'/orders/{order_id}/payments',
+                data={'amount': '1.00', 'method': 'cash', 'payment_date': '2026-07-01'},
+                follow_redirects=True)
     finalize_invoice(client, order_id)
     tick_return_checklist(client, order_id)
     res = client.post(f'/orders/{order_id}/return', follow_redirects=True)
@@ -279,6 +282,9 @@ def test_a_cancelled_or_archived_order_is_never_resurrected(client, app):
     archived = new_order(client, customer_id, product_id)
     client.post(f'/orders/{archived}/reserve', follow_redirects=True)
     client.post(f'/orders/{archived}/start', follow_redirects=True)
+    client.post(f'/orders/{archived}/payments',
+                data={'amount': '1.00', 'method': 'cash', 'payment_date': '2026-07-01'},
+                follow_redirects=True)
     finalize_invoice(client, archived)
     tick_return_checklist(client, archived)
     client.post(f'/orders/{archived}/return', follow_redirects=True)

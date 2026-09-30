@@ -5,6 +5,7 @@ from app.services.settings import get_company_settings
 from app.services.timezone import display_local_date, display_local_datetime, parse_iso_datetime
 from app.services.numbering import next_in_sequence
 from app.services.orders import billed_rental_days, get_order, line_uses_order_days, order_has_rental_items, order_items
+from app.services.payments import payment_total
 
 DOCUMENT_TYPES = {
     "quote": {"label": "Quote", "prefix": "QUO"},
@@ -97,6 +98,8 @@ def finalize_document(document_id):
         ).fetchone()
         if existing:
             raise ValueError('A finalized invoice already exists for this order')
+        if payment_total(document['order_id']) <= 0:
+            raise ValueError('Record at least one payment before finalising an invoice')
     number = (document['number'] or '').strip()
     if document['document_type'] == 'invoice' and not number:
         number = _next_document_number('invoice')

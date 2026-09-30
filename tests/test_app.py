@@ -2643,6 +2643,40 @@ def create_order_for_status(client, quantity='2', start_date='2026-07-01', end_d
     return res.headers['Location'].rstrip('/').split('/')[-1]
 
 
+def record_invoice_finalization_payment(client, order_id, amount='1.00'):
+    return client.post(f'/orders/{order_id}/payments', data={
+        'amount': amount,
+        'method': 'cash',
+        'reference': 'INVOICE-FINALIZE-TEST',
+        'payment_date': '2026-07-01T10:00',
+    }, follow_redirects=True)
+
+
+def temporary_invoice_finalization_payment(client, order_id):
+    """Create a tiny paid row only long enough to exercise invoice finalising.
+
+    Some older workflow tests are about return/status behaviour and deliberately
+    expect no revenue or due-total movement. The production rule still checks the
+    real service path at finalise time; this helper archives its test-only row
+    immediately after the proforma has become a numbered invoice.
+    """
+    with client.application.app_context():
+        db = get_db()
+        cur = db.execute(
+            """INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
+            VALUES (?, 0.01, 'cash', 'TEMP-INVOICE-FINALIZE-TEST', 'paid', '2026-07-01T10:00', '2026-07-01T10:00')""",
+            (order_id,),
+        )
+        db.commit()
+        return cur.lastrowid
+
+
+def archive_temporary_invoice_finalization_payment(client, payment_id):
+    with client.application.app_context():
+        from app.services.payments import archive_payment
+        archive_payment(payment_id)
+
+
 
 
 def return_order_ready(client, order_id):
@@ -2656,7 +2690,9 @@ def return_order_ready(client, order_id):
             (order_id,),
         ).fetchone()
     if doc:
+        payment_id = temporary_invoice_finalization_payment(client, order_id)
         client.post(f'/documents/{doc["id"]}/finalize', follow_redirects=True)
+        archive_temporary_invoice_finalization_payment(client, payment_id)
     return client.post(f'/orders/{order_id}/return', follow_redirects=True)
 
 def test_order_status_workflow_and_calendar(client):
@@ -3256,6 +3292,7 @@ def test_invoice_finalize_assigns_number_once(client, app):
     assert b'Proforma Invoice' in created.data
     assert b'Unnumbered' not in created.data
 
+    record_invoice_finalization_payment(client, order_id, amount='100.00')
     finalized = client.post('/documents/1/finalize', follow_redirects=True)
     assert finalized.status_code == 200
     assert b'Invoice finalized and numbered' in finalized.data
@@ -4528,6 +4565,7 @@ def test_billed_rental_days_shows_the_days_the_money_was_charged_for(client, app
     client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     with app.app_context():
         document_id = get_db().execute('SELECT id FROM documents WHERE order_id=?', (order_id,)).fetchone()['id']
+    record_invoice_finalization_payment(client, order_id)
     client.post(f'/documents/{document_id}/finalize', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
     client.post(f'/orders/{order_id}/revise-return', data={'end_date': '2026-09-09', 'end_time': '10:00'}, follow_redirects=True)
@@ -4837,6 +4875,7 @@ def test_ticket_341952905_return_validation_taxed_extra_and_invoice_revision(cli
     assert b'already exists' in duplicate_draft.data
     with app.app_context():
         doc_id = get_db().execute("SELECT id FROM documents WHERE order_id=? AND document_type='invoice'", (order_id,)).fetchone()['id']
+    record_invoice_finalization_payment(client, order_id)
     client.post(f'/documents/{doc_id}/finalize', follow_redirects=True)
     duplicate_final = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert b'finalized invoice already exists' in duplicate_final.data
@@ -5139,6 +5178,7 @@ def test_return_checklist_json_toggle_saves_flag_and_preserves_sibling(client, a
 
     # With both flags persisted via the endpoint, the order can be returned.
     client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
+    record_invoice_finalization_payment(client, order_id)
     with app.app_context():
         doc = get_db().execute(
             "SELECT id FROM documents WHERE order_id = ? AND document_type = 'invoice' AND status = 'draft'",
@@ -6005,6 +6045,7 @@ def test_quote_and_invoice_numbers_start_at_the_clients_number(client, app):
         assert quotes == ['QUO-10145', 'QUO-10146']
         invoice_id = db.execute("SELECT id FROM documents WHERE document_type = 'invoice'").fetchone()["id"]
 
+    record_invoice_finalization_payment(client, order_id)
     client.post(f'/documents/{invoice_id}/finalize', follow_redirects=True)
     with app.app_context():
         number = get_db().execute("SELECT number FROM documents WHERE id = ?", (invoice_id,)).fetchone()["number"]

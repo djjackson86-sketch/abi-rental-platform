@@ -166,12 +166,14 @@ def take_payment(client, order_id, amount='100.00'):
     }, follow_redirects=True)
 
 
-def a_returned_order(client, customer_id, product_id):
+def a_returned_order(client, customer_id, product_id, *, take_initial_payment=True):
     """Draft → reserved → picked up → returned, with a finalized invoice."""
     order_id = new_order(client, customer_id, product_id)
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
     tick_return_checklist(client, order_id)
+    if take_initial_payment:
+        take_payment(client, order_id, '1.00')
     finalize_invoice(client, order_id)
     client.post(f'/orders/{order_id}/return', follow_redirects=True)
     return order_id
@@ -279,7 +281,6 @@ def test_unarchiving_keeps_payments_quotes_and_the_finalized_invoice(client, app
     order_id = a_returned_order(client, customer_id, product_id)
     client.post(f'/orders/{order_id}/documents', data={'document_type': 'quote'},
                 follow_redirects=True)
-    take_payment(client, order_id, '100.00')
     before = money_rows(app, order_id)
     assert before[0] == 1 and before[2] == 2
 
@@ -324,6 +325,7 @@ def test_unarchiving_a_returned_one_way_order_leaves_the_unit_at_the_return_bran
     client.post(f'/orders/{order_id}/reserve', follow_redirects=True)
     client.post(f'/orders/{order_id}/start', follow_redirects=True)
     tick_return_checklist(client, order_id)
+    take_payment(client, order_id, '1.00')
     finalize_invoice(client, order_id)
     client.post(f'/orders/{order_id}/return', follow_redirects=True)
     assert product_branch(app, product_id) == 2
