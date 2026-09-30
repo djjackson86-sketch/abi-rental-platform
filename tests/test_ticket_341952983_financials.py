@@ -120,12 +120,11 @@ def test_due_metrics_exclude_unaccepted_drafts_and_include_accepted_quotes(app):
             )
         db.commit()
 
-        # Tickets ABI-341953038(2) + ABI-341953078: the Orders page Due CARD no
-        # longer counts reserved orders, draft orders, or Sales/Repairs before an
-        # accepted quote. The Reports "Amount due" basis below — which reports
-        # each order's own balance — still counts the accepted draft and reserved
-        # balances.
-        assert order_counts()['due'] == 800 + 600
+        # Tickets ABI-341953078 + ABI-341953080: the Orders page Due CARD excludes
+        # draft orders and Sales/Repairs before an accepted quote, but includes
+        # reserved orders that are truly due. The Reports "Amount due" basis below
+        # still reports each order's own balance, including the accepted draft.
+        assert order_counts()['due'] == 500 + 800 + 600
         assert summary_metrics(DAY, DAY)['due'] == 1200 + 500 + 800 + 600
 
 

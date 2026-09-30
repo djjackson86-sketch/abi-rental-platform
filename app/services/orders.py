@@ -126,12 +126,29 @@ def _status_filter_clause(status, alias="o"):
     return _or_clauses(_status_clause(value, alias) for value in _filter_values(status))
 
 
+def _truly_due_condition(alias="o"):
+    """Orders that belong in the Orders-page Due card and Payment due folder."""
+    prefix = f"{alias}." if alias else ""
+    due_expr = collectible_due_expr(alias)
+    accepted_quote = accepted_quote_exists_condition(alias)
+    return (
+        f"({due_expr}) > 0 "
+        f"AND COALESCE({prefix}status, '') NOT IN ('draft', 'canceled', 'cancelled', 'archived') "
+        "AND ("
+        f"COALESCE({prefix}status, '') <> '{SALES_REPAIRS_STATUS}' "
+        f"OR {accepted_quote}"
+        ")"
+    )
+
+
 def _payment_filter_clause(payment_status, alias="o"):
     parts = []
     stored_values = []
     for value in _filter_values(payment_status):
         if value == "process_deposit":
             parts.append((_process_deposit_clause(alias), []))
+        elif value == "payment_due":
+            parts.append((_truly_due_condition(alias), []))
         else:
             stored_values.append(value)
     if stored_values:
@@ -234,19 +251,16 @@ def order_counts(query="", status: object = "", payment_status: object = "", ret
     where, params = _order_filter_where(query, status, payment_status, return_status, start_date, end_date, branch_id=branch_id)
     db = get_db()
     due_expr = collectible_due_expr("o")
-    accepted_quote = accepted_quote_exists_condition("o")
-    # Ticket ABI-341953038(2): the Due CARD is what is still collectable, so a
-    # reserved order — a booking held, nothing collected yet — no longer adds to
-    # it. Ticket ABI-341953078 tightens that same card-only basis: drafts never
-    # count, even when documents/proformas already exist, and a Sales/Repairs
-    # order only counts once its quote is accepted/finalized. The per-row Due
-    # column, order detail Due figure and Reports "Amount due" remain on the
-    # shared collectible_due_expr basis.
+    due_condition = _truly_due_condition("o")
+    # Ticket ABI-341953080: the Due card and the Payment due folder share one
+    # "truly due" basis: positive collectable due, not draft/cancelled/archived,
+    # Sales/Repairs only after an accepted/finalized quote, and reserved included.
+    # The per-row Due column, order detail Due figure and Reports "Amount due"
+    # remain on the shared collectible_due_expr basis.
     card_due_expr = (
         "CASE "
-        "WHEN COALESCE(o.status, '') IN ('draft', 'reserved') THEN 0 "
-        f"WHEN COALESCE(o.status, '') = '{SALES_REPAIRS_STATUS}' AND NOT ({accepted_quote}) THEN 0 "
-        f"ELSE {due_expr} END"
+        f"WHEN {due_condition} THEN {due_expr} "
+        "ELSE 0 END"
     )
     # "Unprocessed deposits" is the SAME set the rail's "Process deposit" filter and
     # badge already use (_process_deposit_clause: returned orders only, ticket
@@ -338,10 +352,12 @@ def order_filter_counts(branch_id=None):
     scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
     status_rows = db.execute(f"SELECT o.status AS status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.status", scope_params).fetchall()
     payment_rows = db.execute(f"SELECT o.payment_status AS payment_status, COUNT(*) count FROM orders o WHERE 1=1{scope_sql} GROUP BY o.payment_status", scope_params).fetchall()
+    payment_due_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_truly_due_condition('o')}", scope_params).fetchone()
     process_deposit_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND {_process_deposit_clause('o')}", scope_params).fetchone()
     late_return_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND o.status = 'started' AND o.end_at < ?", [*scope_params, now()]).fetchone()
     sales_repairs_row = db.execute(f"SELECT COUNT(*) AS count FROM orders o WHERE 1=1{scope_sql} AND o.status = ?", [*scope_params, SALES_REPAIRS_STATUS]).fetchone()
     payment_counts = {row["payment_status"]: row["count"] for row in payment_rows}
+    payment_counts["payment_due"] = payment_due_row["count"] if payment_due_row else 0
     payment_counts["process_deposit"] = process_deposit_row["count"] if process_deposit_row else 0
     status_counts = {row["status"]: row["count"] for row in status_rows}
     # Sales/Repairs is a stored status, so the GROUP BY above already carries it;

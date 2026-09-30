@@ -16,7 +16,7 @@ from flask import session as flask_session
 from app import create_app
 from app.db import get_db
 from app.services.access import create_additional_user
-from app.services.orders import SALES_REPAIRS_STATUS, order_counts
+from app.services.orders import SALES_REPAIRS_STATUS, list_orders, order_counts, order_filter_counts
 
 DAY = "2026-09-30"
 
@@ -182,10 +182,48 @@ def test_normal_started_and_returned_due_logic_is_unchanged(app):
         _insert_order(db, "ORD-341953078-RESERVED", "reserved", 325)
         db.commit()
 
-    assert _counts(app)["due"] == 400
+    assert _counts(app)["due"] == 725
     assert _counts(app, status="started")["due"] == 175
     assert _counts(app, status="returned")["due"] == 225
-    assert _counts(app, status="reserved")["due"] == 0
+    assert _counts(app, status="reserved")["due"] == 325
+
+
+def test_payment_due_filter_uses_same_truly_due_set_as_due_card(app):
+    with app.app_context():
+        db = get_db()
+        expected = {
+            "ORD-341953080-RESERVED": _insert_order(db, "ORD-341953080-RESERVED", "reserved", 325),
+            "ORD-341953080-STARTED": _insert_order(db, "ORD-341953080-STARTED", "started", 175),
+            "ORD-341953080-SALES-ACCEPTED": _insert_order(db, "ORD-341953080-SALES-ACCEPTED", SALES_REPAIRS_STATUS, 450),
+        }
+        _document(db, expected["ORD-341953080-SALES-ACCEPTED"], "quote", "accepted", "QUO-ACCEPTED")
+
+        draft_id = _insert_order(db, "ORD-341953080-DRAFT-ACCEPTED", "draft", 250)
+        _document(db, draft_id, "quote", "accepted", "QUO-DRAFT")
+        _insert_order(db, "ORD-341953080-CANCELED", "canceled", 275)
+        _insert_order(db, "ORD-341953080-CANCELLED", "cancelled", 285)
+        _insert_order(db, "ORD-341953080-ARCHIVED", "archived", 295)
+        sales_no_quote = _insert_order(db, "ORD-341953080-SALES-NO-QUOTE", SALES_REPAIRS_STATUS, 305)
+        _document(db, sales_no_quote, "quote", "draft", "QUO-DRAFT")
+        _insert_order(db, "ORD-341953080-ZERO-DUE", "started", 0)
+        db.commit()
+
+    ctx = app.test_request_context("/orders?payment_status=payment_due")
+    ctx.push()
+    flask_session["user_id"] = 1
+    flask_session["user_role"] = "owner"
+    try:
+        filtered = list_orders(payment_status="payment_due")
+        counts = order_counts(payment_status="payment_due")
+        badges = order_filter_counts()
+    finally:
+        ctx.pop()
+
+    filtered_numbers = {row["order_number"] for row in filtered}
+    assert filtered_numbers == set(expected)
+    assert counts["total"] == 3
+    assert counts["due"] == 950
+    assert badges["payment_status"]["payment_due"] == 3
 
 
 def test_main_user_can_revert_canceled_order_to_draft_without_deleting_related_rows(client, app):
