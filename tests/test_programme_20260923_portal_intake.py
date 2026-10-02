@@ -694,3 +694,112 @@ def test_the_database_still_refuses_duplicate_source_keys(app, branch):
                 "VALUES ('individual', 'B', 'portal', ?, '2026-09-23T10:01:00')",
                 (f"{slug}:AAAAAA",),
             )
+
+
+# --- parity with the staff Edit customer page ---------------------------------------------------
+#
+# The customer portal is the public twin of `customers/form.html`: a record typed by the customer
+# must be shaped exactly like one typed at the counter, so the two screens post the same fields.
+# Two things are deliberately NOT carried across, and both are pinned below so a later change
+# cannot quietly widen the public surface:
+#
+#   * the vehicle-details panel (plates, VIN, engine number, disk expiry) — staff capture vehicles;
+#   * the counter-only controls (Client Verified, Standard discount, Block customer) — a public
+#     page must never verify, discount or block anybody.
+
+STAFF_FORM_FIELDS = (
+    "customer_type",
+    "name",
+    "email",
+    "phone",
+    "marketing_opt_in",
+    "vat_number",
+    "company_reg_no",
+    "address_line1",
+    "address_line2",
+    "suburb",
+    "city",
+    "province",
+    "postal_code",
+    "country",
+    "vehicle_make",
+    "vehicle_color",
+    "vehicle_reg_no",
+    "alternative_contact_name",
+    "alternative_contact_number",
+    "alternative_contact_relationship",
+)
+
+STAFF_ONLY_FIELDS = ("client_verified", "standard_discount_percent", "is_blocked", "blocked_reason")
+
+VEHICLE_DETAIL_FIELDS = ("vin", "engine_number", "licence_number", "registration_number", "licence_disk_expiry")
+
+
+def test_the_portal_carries_the_same_inputs_as_the_staff_customer_form(client, branch, app):
+    slug = slug_of(app, branch)
+    body = client.get(f"/portal/{slug}/register").get_data(as_text=True)
+    for field in STAFF_FORM_FIELDS:
+        assert f'name="{field}"' in body, f"the staff form's {field} belongs on the portal too"
+    for staff_only in STAFF_ONLY_FIELDS:
+        assert f'name="{staff_only}"' not in body, f"{staff_only} is the counter's decision, not the public's"
+    for vehicle_field in VEHICLE_DETAIL_FIELDS:
+        assert f'name="{vehicle_field}"' not in body, f"{vehicle_field} is captured by staff, not here"
+
+
+def test_a_portal_submission_saves_every_field_the_staff_form_captures(client, branch, app):
+    """No half-capture: the customer's own words land on the same columns the counter fills in."""
+    import json
+
+    slug = slug_of(app, branch)
+    response = client.post(
+        f"/portal/{slug}/register",
+        data=submission(
+            customer_type="company",
+            address_line2="Unit 4, Sunset Complex",
+            country="South Africa",
+            vat_number="4123456789",
+            company_reg_no="2024/123456/07",
+            vehicle_make="Toyota Hilux",
+            vehicle_color="White",
+            vehicle_reg_no="CA 123-456",
+            alternative_contact_name="Jane Smith",
+            alternative_contact_number="082 111 2222",
+            alternative_contact_relationship="Sister",
+            marketing_opt_in="1",
+        ),
+    )
+    assert response.status_code == 200
+
+    stored = rows(app, "SELECT * FROM customers WHERE email = ?", ("pieter@example.co.za",))[0]
+    assert stored["customer_type"] == "company"
+    assert stored["address_line1"] == "12 Kerk Street"
+    assert stored["address_line2"] == "Unit 4, Sunset Complex"
+    assert stored["suburb"] == "Randburg"
+    assert stored["city"] == "Johannesburg"
+    assert stored["province"] == "Gauteng"
+    assert stored["postal_code"] == "2194"
+    assert stored["country"] == "South Africa"
+    assert stored["marketing_opt_in"] == 1
+    custom = json.loads(stored["custom_fields_json"] or "{}")
+    assert custom["vat_number"] == "4123456789"
+    assert custom["company_reg_no"] == "2024/123456/07"
+    assert custom["vehicle_make"] == "Toyota Hilux"
+    assert custom["vehicle_color"] == "White"
+    assert custom["vehicle_reg_no"] == "CA 123-456"
+    assert custom["alternative_contact_name"] == "Jane Smith"
+    assert custom["alternative_contact_number"] == "082 111 2222"
+    assert custom["alternative_contact_relationship"] == "Sister"
+
+    # The counter-only state a public page must not be able to touch.
+    assert stored["client_verified"] is None, "the portal must never verify a client"
+    assert float(stored["standard_discount_percent"] or 0) == 0
+    assert stored["is_blocked"] == 0
+    assert stored["source_system"] == "portal"
+
+
+def test_an_invalid_customer_type_falls_back_to_individual(client, branch, app):
+    """A crafted post cannot invent a third customer type."""
+    slug = slug_of(app, branch)
+    client.post(f"/portal/{slug}/register", data=submission(customer_type="wholesale"))
+    stored = rows(app, "SELECT * FROM customers WHERE email = ?", ("pieter@example.co.za",))[0]
+    assert stored["customer_type"] == "individual"

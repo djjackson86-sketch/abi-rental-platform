@@ -61,6 +61,9 @@ _LOOKUP_SALT = os.urandom(16).hex()
 
 #: The columns a portal submission may fill in on an existing record. Deliberately not the
 #: blocking columns and not the balance: a public page cannot block or unblock anybody.
+#: Client Verified and Standard discount are missing for the same reason — those are counter
+#: decisions. Custom details (VAT, company reg, vehicle make, alternative contact) are filled on
+#: the **create** path only: a link to an existing record never rewrites what the counter captured.
 FILLABLE_FIELDS = (
     "name",
     "email",
@@ -71,7 +74,24 @@ FILLABLE_FIELDS = (
     "city",
     "province",
     "postal_code",
+    "country",
 )
+
+#: The custom-detail keys the public form carries — the same eight the staff Edit customer page
+#: posts, so a record created from the portal is shaped exactly like one typed at the counter.
+PORTAL_CUSTOM_FIELD_KEYS = (
+    "vehicle_make",
+    "vehicle_color",
+    "vehicle_reg_no",
+    "alternative_contact_name",
+    "alternative_contact_number",
+    "alternative_contact_relationship",
+    "vat_number",
+    "company_reg_no",
+)
+
+#: The two customer types the staff form offers; anything else falls back to individual.
+PORTAL_CUSTOMER_TYPES = ("individual", "company")
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -295,12 +315,22 @@ def parse_decision(value):
 def submission_values(form):
     """The public form's values, cleaned and validated — the same shape the staff form posts.
 
+    The public form mirrors the staff Edit customer page field for field (minus the vehicle
+    details panel and the staff-only Client Verified / Standard discount / Block customer
+    controls), so this returns everything that page posts: the customer type, the contact block,
+    the address block including address line 2 and country, and the eight custom details.
+    ``create_customer`` reads exactly these keys, which is what keeps a record created on the
+    portal identical to one typed at the counter.
+
     Validation is deliberately small and honest: a name, at least one way to reach the customer,
     and a plausible email/phone when one was given. Everything else is optional, because a
     customer filling this in at a counter should never be blocked by a field they do not know.
     """
+    customer_type = str(form.get("customer_type") or "individual").strip().lower()
+    if customer_type not in PORTAL_CUSTOMER_TYPES:
+        customer_type = "individual"
     values = {
-        "customer_type": "individual",
+        "customer_type": customer_type,
         "name": str(form.get("name") or "").strip(),
         "email": normalise_email(form.get("email")),
         "phone": str(form.get("phone") or "").strip(),
@@ -310,8 +340,11 @@ def submission_values(form):
         "city": str(form.get("city") or "").strip(),
         "province": str(form.get("province") or "").strip(),
         "postal_code": str(form.get("postal_code") or "").strip(),
+        "country": str(form.get("country") or "").strip() or "South Africa",
         "marketing_opt_in": 1 if form.get("marketing_opt_in") else 0,
     }
+    for key in PORTAL_CUSTOM_FIELD_KEYS:
+        values[key] = str(form.get(key) or "").strip()
     if not values["name"]:
         raise ValueError("Please enter your name.")
     if not values["phone"] and not values["email"]:
