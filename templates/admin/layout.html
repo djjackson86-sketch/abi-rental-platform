@@ -23,10 +23,8 @@
     {% if user_can('branches') %}<a href="{{ url_for('branches.index') }}"><span>⌘</span><span>Branches</span></a>{% endif %}
     {% if user_can('documents') %}<a href="{{ url_for('documents.index') }}"><span>◴</span><span>Documents</span></a>{% endif %}
     {% if user_can('payments') %}<a href="{{ url_for('payments.index') }}"><span>▤</span><span>Payments</span></a>{% endif %}
-    {% if user_can('online_store') %}<a href="{{ url_for('admin.online_store') }}"><span>⌂</span><span>Online store</span></a>{% endif %}
-    {% if user_can('app_store') %}<a href="{{ url_for('admin.app_store') }}"><span>▧</span><span>App store</span></a>{% endif %}
     {% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}"><span>≋</span><span>Reports</span></a>{% endif %}
-    {% if user_can('scan_barcode') %}<a href="{{ url_for('admin.scan_barcode') }}"><span>▥</span><span>Scan a barcode</span></a>{% endif %}
+    {% if user_can('online_store') %}<a href="{{ url_for('admin.online_store') }}"><span>⌂</span><span>Online store</span></a>{% endif %}
     {% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}"><span>▦</span><span>Scan a vehicle disk</span></a>{% endif %}
     {% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}"><span>▩</span><span>Scan to return</span></a>{% endif %}
     {% if current_user_is_main %}<a href="{{ url_for('popia.index') }}"><span>🛡</span><span>POPIA pack</span></a>{% endif %}
