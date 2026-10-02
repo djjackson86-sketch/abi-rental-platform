@@ -87,7 +87,7 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
 /* Phone navigation chips (ticket ABI-341953031): every chip is one uniform button
    shape in an auto-fit grid, so Dashboard / Orders / Customers / Inventory /
    Branch / Settings all stay inside the viewport with no sideways clipping. */
-@media(max-width:860px){:root{--sidebar:0}.app-shell{display:block}.sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:0;padding-bottom:8px}.logo{grid-column:1/-1;height:72px}.logo img{height:52px}.sidebar>a:not(.logo),.logout{display:none}.main{padding:0 18px 36px}.trial-banner{margin:0 -18px}.page-header{margin:0 -18px 20px;padding:18px;min-height:auto;align-items:flex-start}.mobile-nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;padding:12px 0;overflow:visible}.mobile-nav a{display:block;min-width:0;height:44px;line-height:42px;padding:0 6px;font-size:13px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:999px;background:#fff;border:1px solid var(--line);font-weight:750}.mobile-nav a.branch-context{grid-column:1/-1;background:#fff;color:var(--brand)}.two-col,.form-grid,.feature-grid,.report-grid,.setup-aside{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.header-actions{width:100%}.page-header{flex-wrap:wrap}.product-detail-card{display:grid}.product-image.large{width:100%;min-width:0}.store-header{height:auto;padding:14px 18px;flex-wrap:wrap}.store-header input{max-width:none;margin-left:0}.data-table{min-width:680px}}
+@media(max-width:860px){:root{--sidebar:0}.app-shell{display:block}.sidebar{position:relative;height:auto;border-right:0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:0;padding-bottom:8px}.logo{grid-column:1/-1;height:72px}.logo img{height:52px}.sidebar>a:not(.logo),.logout{display:none}.main{padding:0 18px 36px}.trial-banner{margin:0 -18px}.page-header{margin:0 -18px 20px;padding:18px;min-height:auto;align-items:flex-start}.mobile-nav{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;padding:12px 0;overflow:visible}.mobile-nav a{display:flex;align-items:center;justify-content:center;min-width:0;height:48px;line-height:1.05;padding:6px 8px;font-size:12.5px;text-align:center;white-space:normal;overflow:hidden;border-radius:999px;background:#fff;border:1px solid var(--line);font-weight:750}.mobile-nav a.branch-context{grid-column:1/-1;background:#fff;color:var(--brand)}.two-col,.form-grid,.feature-grid,.report-grid,.setup-aside{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.header-actions{width:100%}.page-header{flex-wrap:wrap}.product-detail-card{display:grid}.product-image.large{width:100%;min-width:0}.store-header{height:auto;padding:14px 18px;flex-wrap:wrap}.store-header input{max-width:none;margin-left:0}.data-table{min-width:680px}}
 @media(max-width:520px){.metrics{grid-template-columns:1fr}.setup-card-head{align-items:flex-start}.setup-count{display:none}.check-row{grid-template-columns:24px minmax(0,1fr)}.task-arrow{display:none}.btn,button{width:100%}.toolbar .btn,.toolbar button{width:auto}.rental-period{display:grid}.document-head,.document-meta{display:grid}.invoice-top-grid,.invoice-header-grid,.invoice-footer-grid{grid-template-columns:1fr}.invoice-detail-stack{grid-column:auto;max-width:none}.invoice-number-block,.invoice-order-block{text-align:left;justify-self:start}.invoice-banking-block{justify-self:start;max-width:none}.timeline-row{grid-template-columns:1fr}.estimate-grid{grid-template-columns:1fr}}
 
 /* Dashboard page pass */
@@ -411,7 +411,19 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .scan-vehicle-header .module-title p{max-width:760px}
 .scan-capture-panel{margin-bottom:18px}
 .scan-capture-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:14px}
-.scan-capture-grid>label{min-width:0}
+.scan-capture-grid>label,.scan-camera-card{min-width:0}
+.scan-camera-card{display:grid;gap:10px;padding:14px;border:1px solid var(--line-soft);border-radius:var(--radius,12px);background:var(--surface-soft)}
+.scan-camera-start{justify-self:start}
+.scan-file-fallback{position:relative;justify-self:start;overflow:hidden}
+.scan-file-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.scan-camera-live{display:grid;gap:10px}
+.scan-camera-frame{position:relative;overflow:hidden;border-radius:16px;background:#0f172a;aspect-ratio:4/3;border:1px solid #111827;box-shadow:var(--shadow-sm)}
+.scan-camera-frame video{width:100%;height:100%;object-fit:cover;display:block}
+.scan-barcode-guide{position:absolute;left:10%;right:10%;top:38%;height:24%;border:3px solid rgba(255,255,255,.95);border-radius:14px;box-shadow:0 0 0 999px rgba(15,23,42,.34),0 0 18px rgba(37,99,235,.28);display:grid;place-items:end center;pointer-events:none}
+.scan-barcode-guide:before,.scan-barcode-guide:after{content:"";position:absolute;left:10%;right:10%;height:2px;background:rgba(37,99,235,.95)}
+.scan-barcode-guide:before{top:34%}.scan-barcode-guide:after{bottom:34%}
+.scan-barcode-guide span{margin-bottom:6px;padding:3px 8px;border-radius:999px;background:rgba(15,23,42,.78);color:#fff;font-size:12px;font-weight:800;letter-spacing:.02em}
+.scan-camera-actions{gap:8px}
 .scan-capture-form textarea{min-height:88px}
 .scan-capture-actions{margin-bottom:10px}
 .scan-review-panel .scan-warning{display:grid;gap:6px;margin:0 0 16px;padding:12px 14px;border:1px solid #fecaca;border-radius:var(--radius,12px);background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318);font-weight:650}

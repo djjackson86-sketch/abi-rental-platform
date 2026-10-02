@@ -7,7 +7,7 @@
     <div>
       <p class="eyebrow">Licence disk scanner</p>
       <h1>Scan a vehicle licence disk</h1>
-      <p>Photograph the disk on the car, check what came off it, then allocate the vehicle to a client.</p>
+      <p>Scan the disk on the car, check what came off it, then allocate the vehicle to a client.</p>
     </div>
   </div>
   {% if preselected_customer %}
@@ -20,10 +20,24 @@
   <form method="post" enctype="multipart/form-data" class="scan-capture-form">
     <input type="hidden" name="customer_id" value="{{ preselected_customer.id if preselected_customer else '' }}">
     <div class="scan-capture-grid">
-      <label>Photograph the disk
-        <input type="file" name="disk_image" accept="image/*" capture="environment">
-        <small>Flat, in focus, the whole disk face in frame — JPEG or PNG, up to 8 MB. The photo is read in memory and never stored.</small>
-      </label>
+      <div class="scan-camera-card">
+        <button class="btn primary scan-camera-start" type="button" id="scan-camera-start">Scan the disk</button>
+        <label class="btn ghost scan-file-fallback">Use photo/file fallback
+          <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment">
+        </label>
+        <small>On a phone, open the camera and line the barcode up inside the rectangle. If live scan is blocked, use the fallback button.</small>
+        <div class="scan-camera-live" id="scan-camera-live" hidden>
+          <div class="scan-camera-frame">
+            <video id="scan-camera-video" playsinline muted></video>
+            <div class="scan-barcode-guide" aria-hidden="true"><span>Align barcode here</span></div>
+          </div>
+          <div class="form-actions scan-camera-actions">
+            <button class="btn primary" type="button" id="scan-camera-capture">Capture &amp; read disk</button>
+            <button class="btn ghost" type="button" id="scan-camera-cancel">Cancel</button>
+          </div>
+        </div>
+        <p class="form-help" id="scan-camera-status" aria-live="polite"></p>
+      </div>
       <label>…or paste the decoded barcode text
         <textarea name="disc_text" rows="3" placeholder="Registering Authority GAUTENG&#10;Licence number ABC 123 GP&#10;Make TOYOTA"></textarea>
         <small>If a scanner app on the phone shows the raw PDF417 text, copy it in here instead.</small>
@@ -36,6 +50,75 @@
     <p class="form-help">Nothing is saved until you check the fields and pick the client on the next step.</p>
   </form>
 </section>
+
+<script>
+(function () {
+  var form = document.querySelector('.scan-capture-form');
+  var fileInput = document.getElementById('scan-disk-image');
+  var start = document.getElementById('scan-camera-start');
+  var live = document.getElementById('scan-camera-live');
+  var video = document.getElementById('scan-camera-video');
+  var capture = document.getElementById('scan-camera-capture');
+  var cancel = document.getElementById('scan-camera-cancel');
+  var status = document.getElementById('scan-camera-status');
+  var stream = null;
+  if (!form || !fileInput || !start || !live || !video || !capture || !cancel) { return; }
+
+  function say(message) { if (status) { status.textContent = message || ''; } }
+  function stopCamera() {
+    if (stream) { stream.getTracks().forEach(function (track) { track.stop(); }); }
+    stream = null;
+    video.srcObject = null;
+    live.hidden = true;
+  }
+  function showFallback(message) {
+    say(message || 'Camera unavailable. Use the file picker fallback.');
+    try { fileInput.click(); } catch (err) { /* the visible fallback input remains usable */ }
+  }
+
+  start.addEventListener('click', function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showFallback('This browser cannot open the live camera. Use the file picker fallback.');
+      return;
+    }
+    say('Opening camera…');
+    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}}, audio: false})
+      .then(function (mediaStream) {
+        stream = mediaStream;
+        video.srcObject = stream;
+        live.hidden = false;
+        say('Align the barcode in the rectangle, then capture.');
+        return video.play();
+      })
+      .catch(function () { showFallback('Camera permission was blocked or unavailable. Use the file picker fallback.'); });
+  });
+
+  capture.addEventListener('click', function () {
+    if (!video.videoWidth || !video.videoHeight) { say('Camera is still starting — try again in a second.'); return; }
+    var canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(function (blob) {
+      if (!blob) { showFallback('Could not capture the scan. Use the file picker fallback.'); return; }
+      try {
+        var file = new File([blob], 'vehicle-disk-scan.jpg', {type: 'image/jpeg'});
+        var transfer = new DataTransfer();
+        transfer.items.add(file);
+        fileInput.files = transfer.files;
+        say('Scan captured. Reading disk…');
+        stopCamera();
+        form.submit();
+      } catch (err) {
+        showFallback('This browser cannot attach the camera capture. Use the file picker fallback.');
+      }
+    }, 'image/jpeg', 0.92);
+  });
+
+  cancel.addEventListener('click', function () { stopCamera(); say('Scan cancelled.'); });
+  window.addEventListener('pagehide', stopCamera);
+})();
+</script>
 
 {% if review %}
 {% set values = review.fields %}
