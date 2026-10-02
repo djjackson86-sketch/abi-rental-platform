@@ -21,6 +21,7 @@ from app.services.documents import (
     list_documents,
     document_totals,
     mark_document_email,
+    mark_document_sent,
     printable_document,
     rental_days_label,
 )
@@ -258,6 +259,17 @@ def finalize(document_id):
     try:
         finalize_document(document_id)
         flash("Invoice finalized and numbered", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("documents.detail", document_id=document_id))
+
+
+@bp.post("/<int:document_id>/mark-sent")
+@login_required
+def mark_sent(document_id):
+    try:
+        mark_document_sent(document_id)
+        flash("Document marked as sent", "success")
     except ValueError as exc:
         flash(str(exc), "error")
     return redirect(url_for("documents.detail", document_id=document_id))

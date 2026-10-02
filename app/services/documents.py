@@ -338,3 +338,17 @@ def mark_document_email(document_id, sent_to, status, error=''):
     sent_at = now() if status == 'sent' else ''
     db.execute("UPDATE documents SET sent_at = ?, sent_to = ?, email_status = ?, email_error = ? WHERE id = ?", (sent_at, sent_to, status, error, document_id))
     db.commit()
+
+
+def mark_document_sent(document_id):
+    document = get_document(document_id)
+    if not document:
+        raise ValueError('Document not found')
+    sent_to = (document['sent_to'] or document['customer_email'] or '').strip()
+    db = get_db()
+    db.execute(
+        "UPDATE documents SET sent_at = ?, sent_to = ?, email_status = 'sent', email_error = '' WHERE id = ?",
+        (now(), sent_to, document_id),
+    )
+    db.commit()
+    return document_id
