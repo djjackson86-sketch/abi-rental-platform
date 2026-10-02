@@ -5,9 +5,8 @@
   <div class="module-title">
     <span class="module-icon">▦</span>
     <div>
-      <p class="eyebrow">Licence disk scanner</p>
-      <h1>Scan a vehicle licence disk</h1>
-      <p>Scan the disk on the car, check what came off it, then allocate the vehicle to a client.</p>
+      <h1>Scan vehicle licence disk</h1>
+      <p>Scan the disk, check the plate, and allocate the vehicle to a client.</p>
     </div>
   </div>
   {% if preselected_customer %}
@@ -16,38 +15,29 @@
 </header>
 
 <section class="panel scan-capture-panel">
-  <h2>1 · Read the disk</h2>
   <form method="post" enctype="multipart/form-data" class="scan-capture-form">
     <input type="hidden" name="customer_id" value="{{ preselected_customer.id if preselected_customer else '' }}">
-    <div class="scan-capture-grid">
-      <div class="scan-camera-card">
-        <button class="btn primary scan-camera-start" type="button" id="scan-camera-start">Scan the disk</button>
-        <label class="btn ghost scan-file-fallback">Use photo/file fallback
-          <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment">
-        </label>
-        <small>On a phone, open the camera and line the barcode up inside the rectangle. If live scan is blocked, use the fallback button.</small>
-        <div class="scan-camera-live" id="scan-camera-live" hidden>
-          <div class="scan-camera-frame">
-            <video id="scan-camera-video" playsinline muted></video>
-            <div class="scan-barcode-guide" aria-hidden="true"><span>Align barcode here</span></div>
-          </div>
-          <div class="form-actions scan-camera-actions">
-            <button class="btn primary" type="button" id="scan-camera-capture">Capture &amp; read disk</button>
-            <button class="btn ghost" type="button" id="scan-camera-cancel">Cancel</button>
-          </div>
-        </div>
-        <p class="form-help" id="scan-camera-status" aria-live="polite"></p>
+    <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment" hidden>
+
+    <div class="scan-actions-simple">
+      <button class="btn primary scan-big" type="button" id="scan-camera-start">Scan licence disk</button>
+      <button class="btn ghost scan-big" type="submit" name="action" value="manual" id="scan-manual">Add details manually</button>
+    </div>
+
+    <div class="scan-camera-live" id="scan-camera-live" hidden>
+      <div class="scan-camera-frame">
+        <video id="scan-camera-video" playsinline muted></video>
+        <div class="scan-barcode-guide" aria-hidden="true"></div>
       </div>
-      <label>…or paste the decoded barcode text
-        <textarea name="disc_text" rows="3" placeholder="Registering Authority GAUTENG&#10;Licence number ABC 123 GP&#10;Make TOYOTA"></textarea>
-        <small>If a scanner app on the phone shows the raw PDF417 text, copy it in here instead.</small>
-      </label>
+      <p class="scan-camera-hint">Line the barcode up inside the box.</p>
+      <div class="form-actions scan-camera-actions">
+        <button class="btn primary" type="button" id="scan-camera-capture">Capture</button>
+        <button class="btn ghost" type="button" id="scan-camera-cancel">Cancel</button>
+      </div>
     </div>
-    <div class="form-actions scan-capture-actions">
-      <button class="btn primary" type="submit" name="action" value="decode">Read the disk</button>
-      <button class="btn ghost" type="submit" name="action" value="manual">Type the details instead</button>
-    </div>
-    <p class="form-help">Nothing is saved until you check the fields and pick the client on the next step.</p>
+
+    <p class="form-help scan-camera-status" id="scan-camera-status" aria-live="polite"></p>
+    <button class="btn ghost scan-camera-fallback" type="button" id="scan-camera-fallback" hidden>Choose a photo instead</button>
   </form>
 </section>
 
@@ -56,11 +46,13 @@
   var form = document.querySelector('.scan-capture-form');
   var fileInput = document.getElementById('scan-disk-image');
   var start = document.getElementById('scan-camera-start');
+  var manual = document.getElementById('scan-manual');
   var live = document.getElementById('scan-camera-live');
   var video = document.getElementById('scan-camera-video');
   var capture = document.getElementById('scan-camera-capture');
   var cancel = document.getElementById('scan-camera-cancel');
   var status = document.getElementById('scan-camera-status');
+  var fallback = document.getElementById('scan-camera-fallback');
   var stream = null;
   if (!form || !fileInput || !start || !live || !video || !capture || !cancel) { return; }
 
@@ -70,15 +62,26 @@
     stream = null;
     video.srcObject = null;
     live.hidden = true;
+    start.hidden = false;
+    if (manual) { manual.hidden = false; }
   }
-  function showFallback(message) {
-    say(message || 'Camera unavailable. Use the file picker fallback.');
-    try { fileInput.click(); } catch (err) { /* the visible fallback input remains usable */ }
+  function offerFallback(message) {
+    say(message);
+    if (fallback) { fallback.hidden = false; }
   }
+  if (fallback) {
+    fallback.addEventListener('click', function () { fileInput.click(); });
+  }
+  fileInput.addEventListener('change', function () {
+    if (!fileInput.files || !fileInput.files.length) { return; }
+    say('Reading disk…');
+    stopCamera();
+    form.submit();
+  });
 
   start.addEventListener('click', function () {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showFallback('This browser cannot open the live camera. Use the file picker fallback.');
+      offerFallback('This browser cannot open the live camera.');
       return;
     }
     say('Opening camera…');
@@ -87,35 +90,36 @@
         stream = mediaStream;
         video.srcObject = stream;
         live.hidden = false;
-        say('Align the barcode in the rectangle, then capture.');
+        start.hidden = true;
+        if (manual) { manual.hidden = true; }
+        say('');
         return video.play();
       })
-      .catch(function () { showFallback('Camera permission was blocked or unavailable. Use the file picker fallback.'); });
+      .catch(function () { offerFallback('Camera blocked or unavailable.'); });
   });
 
   capture.addEventListener('click', function () {
-    if (!video.videoWidth || !video.videoHeight) { say('Camera is still starting — try again in a second.'); return; }
+    if (!video.videoWidth || !video.videoHeight) { say('Camera is still starting.'); return; }
     var canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(function (blob) {
-      if (!blob) { showFallback('Could not capture the scan. Use the file picker fallback.'); return; }
+      if (!blob) { offerFallback('Could not use the camera capture.'); return; }
       try {
-        var file = new File([blob], 'vehicle-disk-scan.jpg', {type: 'image/jpeg'});
         var transfer = new DataTransfer();
-        transfer.items.add(file);
+        transfer.items.add(new File([blob], 'vehicle-disk-scan.jpg', {type: 'image/jpeg'}));
         fileInput.files = transfer.files;
-        say('Scan captured. Reading disk…');
+        say('Reading disk…');
         stopCamera();
         form.submit();
       } catch (err) {
-        showFallback('This browser cannot attach the camera capture. Use the file picker fallback.');
+        offerFallback('This browser cannot attach the capture.');
       }
     }, 'image/jpeg', 0.92);
   });
 
-  cancel.addEventListener('click', function () { stopCamera(); say('Scan cancelled.'); });
+  cancel.addEventListener('click', function () { stopCamera(); say('Cancelled.'); });
   window.addEventListener('pagehide', stopCamera);
 })();
 </script>
@@ -125,12 +129,12 @@
 {% set owner = review.owner %}
 {% set owner_is_somebody_else = owner and (not review.customer or owner.id != review.customer.id) %}
 <section class="panel scan-review-panel">
-  <h2>2 · Check the details &amp; allocate the vehicle</h2>
+  <h2>Check the details &amp; allocate the vehicle</h2>
 
   {% if owner_is_somebody_else %}
   <div class="scan-warning" role="alert">
     <strong>{{ values.registration }} is already recorded for {{ owner.name }}{% if owner.phone %} ({{ owner.phone }}){% endif %}.</strong>
-    <p>Saving it for another client is refused while it belongs to {{ owner.name }}. If it really is now this client's vehicle, tick the box below and save — that <b>moves</b> the vehicle record across, so {{ owner.name }} will no longer have it.</p>
+    <p>Saving it for another client is refused while it belongs to {{ owner.name }}. If it really is now this client's vehicle, tick the box below and save — that <b>moves</b> the vehicle record across.</p>
   </div>
   {% endif %}
 
@@ -138,35 +142,19 @@
     <input type="hidden" name="source" value="{{ values.source or 'scan' }}">
 
     {% set scan_fields = [
-      ('registration', 'Number plate', 'text', ''),
-      ('registration_number', 'NaTIS registration number', 'text', 'The "Natis reg" field on the disk — not the plate.'),
-      ('licence_number', 'Disk licence number', 'text', "The disk's own licence number (Lisensienommer)."),
-      ('make', 'Make', 'text', ''),
-      ('model', 'Model / description', 'text', ''),
-      ('colour', 'Colour', 'text', ''),
-      ('year', 'Year', 'text', ''),
-      ('vin', 'VIN', 'text', ''),
-      ('engine_number', 'Engine number', 'text', ''),
-      ('vehicle_type', 'Vehicle category', 'text', ''),
-      ('registering_authority', 'Registering authority', 'text', ''),
-      ('control_number', 'Control number', 'text', ''),
-      ('licence_disk_expiry', 'Licence disk expiry', 'date', ''),
+      ('registration', 'Number plate', 'text'),
+      ('registration_number', 'NaTIS registration number', 'text'),
+      ('licence_number', 'Disk licence number', 'text'),
+      ('vin', 'VIN', 'text'),
+      ('engine_number', 'Engine number', 'text'),
+      ('make', 'Make', 'text'),
+      ('licence_disk_expiry', 'Licence disk expiry', 'date'),
     ] %}
-    {% for name, label, kind, hint in scan_fields %}
+    {% for name, label, kind in scan_fields %}
     <label>{{ label }}
       <input type="{{ kind }}" name="{{ name }}" value="{{ values[name] or '' }}"{% if name == 'registration' %} required{% endif %} autocomplete="off">
-      {% if hint %}<small>{{ hint }}</small>{% endif %}
     </label>
     {% endfor %}
-
-    <label>Tare (kg)
-      <input type="text" name="tare_kg" value="{{ values.tare_kg or '' }}" inputmode="decimal" autocomplete="off">
-      <small>Leave blank when the disk does not show it — blank is stored as unknown, never 0.</small>
-    </label>
-    <label>GVM (kg)
-      <input type="text" name="gvm_kg" value="{{ values.gvm_kg or '' }}" inputmode="decimal" autocomplete="off">
-      <small>Same rule: a figure nobody read off the disk is never invented.</small>
-    </label>
 
     <label class="span-2">Allocate to client
       <input name="customer_pick" id="scan-customer-pick" list="scan-customer-options" autocomplete="off"
@@ -174,36 +162,21 @@
              value="{{ (review.customer.name ~ ' · ' ~ review.customer.phone) if (review.customer and review.customer.phone) else (review.customer.name if review.customer else '') }}">
       <input type="hidden" name="customer_id" id="scan-customer-id" value="{{ review.customer.id if review.customer else '' }}">
       <datalist id="scan-customer-options"></datalist>
-      <small>Type two or more characters and pick the client from the list. Not on file yet? <a href="{{ url_for('customers.new') }}" target="_blank" rel="noopener">Create the client</a> in a new tab, then come back to this page.</small>
     </label>
 
     {% if owner_is_somebody_else %}
     <label class="span-2 scan-transfer-line">
       <span class="scan-transfer-check">
         <input type="checkbox" name="transfer" value="1">
-        <b>Transfer {{ values.registration }} from {{ owner.name }} to the client above</b>
+        <b>Transfer {{ values.registration }} to the client above</b>
       </span>
-      <small>Only tick this when the vehicle really has changed hands.</small>
     </label>
     {% endif %}
 
     <div class="form-actions span-2">
-      <button class="btn primary" type="submit">Save vehicle &amp; allocate</button>
+      <button class="btn primary" type="submit">Save vehicle</button>
       <a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle') }}">Start a new scan</a>
     </div>
-
-    {% if review.unparsed %}
-    <details class="span-2 scan-details">
-      <summary>The disk also carried {{ review.unparsed|length }} value{{ '' if review.unparsed|length == 1 else 's' }} the scanner could not place</summary>
-      <ul>{% for value, reason in review.unparsed.items() %}<li><code>{{ value }}</code> — {{ reason }}</li>{% endfor %}</ul>
-    </details>
-    {% endif %}
-    {% if review.raw_text %}
-    <details class="span-2 scan-details">
-      <summary>Raw barcode text ({{ review.raw_text|length }} characters)</summary>
-      <pre class="scan-raw-text">{{ review.raw_text }}</pre>
-    </details>
-    {% endif %}
   </form>
 </section>
 
@@ -217,8 +190,7 @@
   var timer = null;
   // What the server rendered into the box. On a re-render after a refusal the client is already
   // resolved (and its id already sits in the hidden field) while this page has fetched nothing, so
-  // an untouched box must never clear it. Measured in the A3 browser proof: without this guard,
-  // ticking "transfer" and saving posted no customer_id at all.
+  // an untouched box must never clear it.
   var initial = pick.value;
 
   function labelFor(client) {

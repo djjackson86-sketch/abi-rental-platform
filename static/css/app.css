@@ -413,17 +413,18 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .scan-capture-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:14px}
 .scan-capture-grid>label,.scan-camera-card{min-width:0}
 .scan-camera-card{display:grid;gap:10px;padding:14px;border:1px solid var(--line-soft);border-radius:var(--radius,12px);background:var(--surface-soft)}
-.scan-camera-start{justify-self:start}
-.scan-file-fallback{position:relative;justify-self:start;overflow:hidden}
-.scan-file-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
-.scan-camera-live{display:grid;gap:10px}
-.scan-camera-frame{position:relative;overflow:hidden;border-radius:16px;background:#0f172a;aspect-ratio:4/3;border:1px solid #111827;box-shadow:var(--shadow-sm)}
+.scan-actions-simple{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.scan-big{min-height:52px;font-size:15px}
+.scan-actions-simple .btn{width:auto}
+.scan-file-input{position:absolute;width:1px;height:1px;opacity:0}
+.scan-camera-live{display:grid;gap:10px;margin-top:12px}
+.scan-camera-frame{position:relative;overflow:hidden;border-radius:14px;background:#0f172a;aspect-ratio:4/3;border:1px solid #111827;box-shadow:var(--shadow-sm)}
 .scan-camera-frame video{width:100%;height:100%;object-fit:cover;display:block}
-.scan-barcode-guide{position:absolute;left:10%;right:10%;top:38%;height:24%;border:3px solid rgba(255,255,255,.95);border-radius:14px;box-shadow:0 0 0 999px rgba(15,23,42,.34),0 0 18px rgba(37,99,235,.28);display:grid;place-items:end center;pointer-events:none}
-.scan-barcode-guide:before,.scan-barcode-guide:after{content:"";position:absolute;left:10%;right:10%;height:2px;background:rgba(37,99,235,.95)}
-.scan-barcode-guide:before{top:34%}.scan-barcode-guide:after{bottom:34%}
-.scan-barcode-guide span{margin-bottom:6px;padding:3px 8px;border-radius:999px;background:rgba(15,23,42,.78);color:#fff;font-size:12px;font-weight:800;letter-spacing:.02em}
+.scan-barcode-guide{position:absolute;left:8%;right:8%;top:41%;height:18%;border:3px solid rgba(255,255,255,.95);border-radius:10px;box-shadow:0 0 0 999px rgba(15,23,42,.42);pointer-events:none}
+.scan-camera-hint{margin:0;color:var(--ink-2);font-weight:650;font-size:13px}
 .scan-camera-actions{gap:8px}
+.scan-camera-status{margin:10px 0 0}
+.scan-camera-fallback{justify-self:start}
 .scan-capture-form textarea{min-height:88px}
 .scan-capture-actions{margin-bottom:10px}
 .portal-privacy-template,.portal-template-privacy{padding:14px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft);margin:10px 0}

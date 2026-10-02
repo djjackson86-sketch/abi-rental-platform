@@ -16,6 +16,7 @@ from .routes.payments import bp as payments_bp
 from .routes.branches import bp as branches_bp
 from .routes.cash import bp as cash_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
+from .routes.internal_seed import bp as internal_seed_bp
 from .routes.popia import bp as popia_bp
 from .services.access import is_main_session, module_for_endpoint, session_active_branch, user_can_module
 from .services.popia_pack import pack_notification
@@ -87,6 +88,7 @@ def create_app(test_config=None):
     app.register_blueprint(branches_bp)
     app.register_blueprint(cash_bp)
     app.register_blueprint(internal_telegram_bp)
+    app.register_blueprint(internal_seed_bp)
     app.register_blueprint(popia_bp)
     app.register_blueprint(public_bp)
 

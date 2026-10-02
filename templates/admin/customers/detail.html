@@ -101,17 +101,15 @@
       {% endif %}
     </div>
     {% if vehicles %}
-      <p class="form-help">Read off a NaTIS licence disk or typed in by staff. A number plate belongs to one client, and a blank figure is shown as a dash — nothing is guessed.</p>
+      <p class="form-help">Read off a NaTIS licence disk or typed in by staff. A number plate belongs to one client, and a blank field is shown as a dash — nothing is guessed.</p>
       <div class="table-wrap vehicles-table-wrap">
         <table class="data-table vehicles-table">
           <thead>
             <tr>
               <th>Number plate</th>
               <th>Make</th>
-              <th>Model</th>
-              <th>Year</th>
-              <th>Tare (kg)</th>
-              <th>GVM (kg)</th>
+              <th>VIN</th>
+              <th>Engine number</th>
               <th>Disk expiry</th>
             </tr>
           </thead>
@@ -121,12 +119,11 @@
                 <td>
                   <strong>{{ vehicle.registration or 'No plate recorded' }}</strong>
                   {% if vehicle.registration_number %}<small class="vehicle-sub">NaTIS {{ vehicle.registration_number }}</small>{% endif %}
+                  {% if vehicle.licence_number %}<small class="vehicle-sub">Disk {{ vehicle.licence_number }}</small>{% endif %}
                 </td>
                 <td>{{ vehicle.make or '—' }}</td>
-                <td>{{ vehicle.model or '—' }}</td>
-                <td>{{ vehicle.year or '—' }}</td>
-                <td>{% if vehicle.tare_kg is not none %}{{ '%.0f'|format(vehicle.tare_kg) }}{% else %}—{% endif %}</td>
-                <td>{% if vehicle.gvm_kg is not none %}{{ '%.0f'|format(vehicle.gvm_kg) }}{% else %}—{% endif %}</td>
+                <td>{{ vehicle.vin or '—' }}</td>
+                <td>{{ vehicle.engine_number or '—' }}</td>
                 <td>{{ vehicle.licence_disk_expiry or '—' }}</td>
               </tr>
             {% endfor %}
@@ -140,14 +137,8 @@
             ('registration_number', 'NaTIS registration number'),
             ('licence_number', 'Disk licence number'),
             ('make', 'Make'),
-            ('model', 'Model / description'),
-            ('colour', 'Colour'),
-            ('year', 'Year'),
             ('vin', 'VIN'),
             ('engine_number', 'Engine number'),
-            ('vehicle_type', 'Vehicle category'),
-            ('registering_authority', 'Registering authority'),
-            ('control_number', 'Control number'),
             ('licence_disk_expiry', 'Licence disk expiry'),
           ] %}
           {% for vehicle in vehicles %}
