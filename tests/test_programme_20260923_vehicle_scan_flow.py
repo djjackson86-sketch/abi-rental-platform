@@ -144,7 +144,9 @@ def test_the_scan_page_opens_for_a_signed_in_staff_member(app, client):
     login_staff(client, user_id)
     response = client.get("/scan-vehicle")
     assert response.status_code == 200
-    assert b"Read the disk" in response.data
+    # The simplified page carries two actions and nothing else: scan the disk, or type it in.
+    assert b"Scan licence disk" in response.data
+    assert b"Add details manually" in response.data
     assert b"Scan a vehicle disk" in response.data  # the nav entry, next to "Scan a barcode"
 
 
@@ -179,8 +181,11 @@ def test_pasting_the_decoded_text_fills_the_review_form(app, client):
     assert b'value="ABC 123 GP"' in response.data          # the number plate
     assert b'value="TOYOTA"' in response.data
     assert b'value="AHTFR22G10L123456"' in response.data
-    assert b'value="1890.0"' in response.data               # tare from the disk
-    assert b"Raw barcode text" in response.data
+    assert b'value="2GD1234567"' in response.data           # engine number off the barcode
+    # Only the fields the app uses are offered back - the masses the disk also carries are not
+    # inputs anywhere, so the review form does not ask for them any more.
+    for dropped in (b'name="tare_kg"', b'name="gvm_kg"', b'name="model"', b'name="colour"', b'name="year"'):
+        assert dropped not in response.data, dropped
 
 
 def test_a_photographed_disk_is_read_in_memory_and_fills_the_form(app, client):
@@ -207,7 +212,7 @@ def test_a_photo_without_a_barcode_flashes_the_distinct_message_and_still_offers
     )
     assert response.status_code == 200
     assert b"No barcode found on that photo" in response.data
-    assert b"Type the details instead" in response.data     # the capture form is back
+    assert b"Add details manually" in response.data         # the manual action is offered
     assert b"Number plate" in response.data                 # ... and the review form is offered
 
 
@@ -222,8 +227,8 @@ def test_a_barcode_with_no_vehicle_fields_still_lets_staff_type_the_fields(app, 
     )
     assert response.status_code == 200
     assert b"holds no vehicle fields" in response.data
-    assert payload.encode() in response.data                # the raw text is shown for typing
-    assert b'name="registration"' in response.data
+    assert b'name="registration"' in response.data          # the fields are offered for typing
+    assert b'name="customer_pick"' in response.data         # and the client is chosen in the same step
 
 
 def test_a_file_that_is_not_an_image_is_named_as_such(app, client):
@@ -309,7 +314,7 @@ def test_saving_without_picking_a_client_is_refused(app, client):
     with app.app_context():
         before = get_db().execute("SELECT COUNT(*) AS c FROM vehicles").fetchone()["c"]
     response = save_scan(client, None, "ABC123GP")
-    assert b"Choose the client this vehicle belongs to" in response.data
+    assert b"Choose the client from the list" in response.data
     with app.app_context():
         after = get_db().execute("SELECT COUNT(*) AS c FROM vehicles").fetchone()["c"]
     assert after == before == 0
@@ -322,7 +327,7 @@ def test_a_plate_owned_by_another_client_is_refused_with_the_transfer_option(app
     body = response.data.decode()
     assert "already recorded for Charmaine Mokoena" in body
     assert 'name="transfer"' in body                        # the explicit transfer option is offered
-    assert "Transfer ABC123GP from Charmaine Mokoena" in body
+    assert "Transfer ABC123GP to the client above" in body
     with app.app_context():
         assert len(vehicles.list_vehicles(customer_id)) == 1
         assert vehicles.list_vehicles(other_customer_id) == []   # nothing was created or moved

@@ -1,12 +1,23 @@
-"""Programme phase 4 (feature A / A4) — the client page's Vehicles panel.
+"""Programme phase 4 (feature A / A4) — the customer's Vehicles panel.
 
 The acceptance list from ``docs/plans/2026-09-23-staff-vehicle-scan.md`` §A4, one test per line:
 
-* the panel renders on the client page (and has an empty state when there is nothing recorded);
+* the panel renders on the **Edit customer page** (and has an empty state when there is nothing
+  recorded);
 * it is **per client** — one client's page never shows another client's vehicles;
-* an unrecorded tare/GVM shows blank rather than 0 (the modern NaTIS payload carries no masses);
 * the remove action takes the vehicle away and leaves the **client** intact;
-* the edit action saves from the client page and the page redisplays what the database holds.
+* the edit action saves and the page redisplays what the database holds.
+
+Where the panel lives changed on request: it used to be a section of its own on the customer page,
+and it is now part of the Edit customer page, because vehicle details belong with the record the
+counter edits. These tests follow it there — the customer page must NOT carry the panel any more,
+and that is asserted below so the section cannot creep back.
+
+The panel also carries **only the fields the app uses** (number plate, make, VIN, engine number,
+disk expiry, plus NaTIS/disk numbers under the plate). Model, colour, year, vehicle type and the
+tare/GVM masses were dropped from the scan screen, the panel and the edit form on request, so the
+old column-index assertions are gone; what replaces them is a test that those columns are *absent*
+and that a stored mass survives an edit that does not post it.
 
 Two plan items are recorded here as measured facts rather than assumptions:
 
@@ -18,10 +29,6 @@ Two plan items are recorded here as measured facts rather than assumptions:
   next tick does not re-derive it.
 * **the towing column** — removed by decision D3b, so a test asserts the word never appears on
   the page (a towing field creeping back into the panel is a regression, not a feature).
-
-Masses are also asserted against the A1 fixtures: ``natis_positional.txt`` (the modern layout)
-carries no tare/GVM, ``labelvalue.txt`` carries 1890/2800 — the two shapes the panel must render
-differently ("—" versus the figure).
 """
 
 import inspect
@@ -122,6 +129,11 @@ def html_of(response):
     return response.data.decode("utf-8")
 
 
+def edit_page_of(client, customer_id):
+    """The page the panel now lives on: the customer's own edit screen."""
+    return html_of(client.get(f"/customers/{customer_id}/edit"))
+
+
 def vehicle_row(html, plate):
     """The <tr> block of the read table that carries this number plate."""
     for block in re.findall(r"<tr>(.*?)</tr>", html, re.S):
@@ -137,20 +149,29 @@ def row_cells(row_html):
 def panel_html(html):
     """Just the Vehicles panel, so assertions cannot be satisfied by another card."""
     start = html.find("customer-vehicles-card")
-    assert start != -1, "the client page has no vehicles panel"
-    end = html.find("</section>", start)
+    assert start != -1, "the page has no vehicles panel"
+    end = html.find("</article>", start)
     return html[start:end if end != -1 else len(html)]
 
 
-# ── the panel exists and is DB-accurate ─────────────────────────────────────
+# ── the panel exists on the edit page and is DB-accurate ────────────────────
 
 
-def test_the_client_page_has_a_vehicles_panel_with_an_empty_state(app, client, charmaine):
+def test_the_customer_page_no_longer_carries_a_vehicles_panel(app, client, charmaine):
+    """The section was moved on request — the customer page must show the record, not vehicles."""
+    add_vehicle(app, charmaine)
     login_owner(client)
-    response = client.get(f"/customers/{charmaine}")
+    page = html_of(client.get(f"/customers/{charmaine}"))
+    assert "customer-vehicles-card" not in page
+    assert "ABC123GP" not in page
+
+
+def test_the_edit_page_has_a_vehicles_panel_with_an_empty_state(app, client, charmaine):
+    login_owner(client)
+    response = client.get(f"/customers/{charmaine}/edit")
     assert response.status_code == 200
     panel = panel_html(html_of(response))
-    assert "<h2>Vehicles</h2>" in panel
+    assert "<h2>Vehicle details</h2>" in panel
     assert "No vehicles recorded" in panel
     assert "Scan a vehicle disk" in panel  # the empty-state call to action
 
@@ -158,24 +179,24 @@ def test_the_client_page_has_a_vehicles_panel_with_an_empty_state(app, client, c
 def test_an_allocated_vehicle_appears_in_the_panel(app, client, charmaine):
     vehicle_id = add_vehicle(app, charmaine)
     login_owner(client)
-    response = client.get(f"/customers/{charmaine}")
-    assert response.status_code == 200
-    row = vehicle_row(html_of(response), "ABC123GP")
-    assert row, "the vehicle row is not on the client page"
+    page = edit_page_of(client, charmaine)
+    row = vehicle_row(page, "ABC123GP")
+    assert row, "the vehicle row is not on the edit page"
     cells = row_cells(row)
+    # only the fields the app uses, in order: plate, make, VIN, engine number, disk expiry
     assert cells[1] == "MITSUBISHI"
-    assert cells[2] == "ASX"
-    assert cells[3] == "2019"
-    assert cells[6] == "2027-07-31"  # disk expiry
-    assert f"/vehicles/{vehicle_id}/edit" in panel_html(html_of(response))
+    assert cells[2] == "JMBXTGA2WJZ123456"
+    assert cells[3] == "K9K7654321"
+    assert cells[4] == "2027-07-31"
+    assert f"/vehicles/{vehicle_id}/edit" in panel_html(page)
 
 
 def test_the_panel_only_shows_this_clients_vehicles(app, client, charmaine, pieter):
     add_vehicle(app, charmaine, registration="ABC123GP")
-    add_vehicle(app, pieter, registration="XYZ789GP", make="TOYOTA", model="HILUX")
+    add_vehicle(app, pieter, registration="XYZ789GP", make="TOYOTA")
     login_owner(client)
-    charmaine_html = html_of(client.get(f"/customers/{charmaine}"))
-    pieter_html = html_of(client.get(f"/customers/{pieter}"))
+    charmaine_html = edit_page_of(client, charmaine)
+    pieter_html = edit_page_of(client, pieter)
     assert "ABC123GP" in panel_html(charmaine_html)
     assert "XYZ789GP" not in panel_html(charmaine_html)
     assert "XYZ789GP" in panel_html(pieter_html)
@@ -185,9 +206,9 @@ def test_the_panel_only_shows_this_clients_vehicles(app, client, charmaine, piet
 def test_the_panel_matches_the_json_feed(app, client, charmaine):
     """DB↔UI parity: the rendered rows and `/customers/<id>/vehicles` are the same set."""
     add_vehicle(app, charmaine, registration="ABC123GP")
-    add_vehicle(app, charmaine, registration="DEF456GP", model="OUTLANDER")
+    add_vehicle(app, charmaine, registration="DEF456GP")
     login_owner(client)
-    html = html_of(client.get(f"/customers/{charmaine}"))
+    html = edit_page_of(client, charmaine)
     feed = client.get(f"/customers/{charmaine}/vehicles").get_json()
     assert feed["count"] == 2
     rendered = [v for v in ("ABC123GP", "DEF456GP") if vehicle_row(html, v)]
@@ -195,49 +216,63 @@ def test_the_panel_matches_the_json_feed(app, client, charmaine):
     assert {row["registration"] for row in feed["vehicles"]} == {"ABC123GP", "DEF456GP"}
 
 
-# ── masses: blank stays blank, a real figure shows ──────────────────────────
+# ── only the fields the app uses ────────────────────────────────────────────
 
 
-def test_unrecorded_masses_render_blank_and_never_zero(app, client, charmaine):
+def test_the_panel_carries_no_dropped_columns_or_inputs(app, client, charmaine):
+    """Model, colour, year, vehicle type and the masses are not app inputs — they are gone.
+
+    They were trimmed from the scan screen on request ("only show/capture details that the app
+    uses as inputs"), so the panel and its edit form must not offer them back.
+    """
+    vehicle_id = add_vehicle(app, charmaine, tare_kg="1890", gvm_kg="2800", model="ASX", colour="WHITE", year="2019")
+    login_owner(client)
+    page = edit_page_of(client, charmaine)
+    panel = panel_html(page)
+    for dropped in ("Model", "Vehicle Color", "Colour", "Year", "Vehicle category", "Tare (kg)", "GVM (kg)"):
+        assert dropped not in panel, f"{dropped} is not an app input and must not be on the panel"
+    for dropped_field in ('name="tare_kg"', 'name="gvm_kg"', 'name="model"', 'name="colour"', 'name="year"'):
+        assert dropped_field not in panel, dropped_field
+    # …and the stored masses are untouched by an edit that does not post them
+    with app.app_context():
+        row = vehicles.get_vehicle(vehicle_id)
+    assert row["tare_kg"] == 1890.0 and row["gvm_kg"] == 2800.0
+
+
+def test_a_disc_that_carries_no_masses_still_records_the_rest(app, client, charmaine):
+    """The modern NaTIS payload has no tare/GVM; the fields the app uses must all still land."""
     payload = (FIXTURE_DIR / "natis_positional.txt").read_text(encoding="utf-8")
     parsed = vehicles.fields_from_disc(parse_disc_text(payload))
     assert parsed["tare_kg"] == "" and parsed["gvm_kg"] == ""
-    add_vehicle(app, charmaine, **{k: parsed[k] for k in ("tare_kg", "gvm_kg")})
+    disc_fields = ("tare_kg", "gvm_kg", "make", "vin", "engine_number", "licence_disk_expiry")
+    add_vehicle(app, charmaine, **{key: parsed[key] for key in disc_fields})
     login_owner(client)
-    row = vehicle_row(html_of(client.get(f"/customers/{charmaine}")), parsed["registration"])
+    row = vehicle_row(edit_page_of(client, charmaine), "ABC123GP")
+    assert row, "the vehicle the disc described is missing from the panel"
     cells = row_cells(row)
-    assert cells[4] == "—", cells
-    assert cells[5] == "—", cells
-    # the panel's own edit form must not turn "unknown" into a literal 0 either
-    assert 'name="tare_kg" inputmode="decimal" autocomplete="off" value="">' in panel_html(
-        html_of(client.get(f"/customers/{charmaine}"))
-    )
-
-
-def test_recorded_masses_render_the_figures(app, client, charmaine):
-    add_vehicle(app, charmaine, tare_kg="1890", gvm_kg="2800")
-    login_owner(client)
-    row = vehicle_row(html_of(client.get(f"/customers/{charmaine}")), "ABC123GP")
-    cells = row_cells(row)
-    assert cells[4] == "1890"
-    assert cells[5] == "2800"
+    assert cells[1] == parsed["make"]
+    assert cells[2] == parsed["vin"]
+    assert cells[3] == parsed["engine_number"]
+    assert cells[4] == parsed["licence_disk_expiry"]
+    assert cells[1] and cells[2] and cells[3], "the disc's own fields must render, not a dash"
 
 
 # ── decision D3b: no towing anywhere ───────────────────────────────────────
 
 
-def test_the_client_page_carries_no_towing_field(app, client, charmaine):
+def test_the_customer_and_edit_pages_carry_no_towing_field(app, client, charmaine):
     add_vehicle(app, charmaine)
     login_owner(client)
-    html = html_of(client.get(f"/customers/{charmaine}")).lower()
-    assert "towing" not in html
-    assert "gcm" not in html
+    for page in (html_of(client.get(f"/customers/{charmaine}")), edit_page_of(client, charmaine)):
+        lowered = page.lower()
+        assert "towing" not in lowered
+        assert "gcm" not in lowered
 
 
-# ── edit and remove from the client page ───────────────────────────────────
+# ── edit and remove from the edit page ─────────────────────────────────────
 
 
-def test_editing_a_vehicle_from_the_client_page_saves_and_redisplays(app, client, charmaine):
+def test_editing_a_vehicle_from_the_edit_page_saves_and_redisplays(app, client, charmaine):
     vehicle_id = add_vehicle(app, charmaine)
     login_owner(client)
     response = client.post(
@@ -247,15 +282,9 @@ def test_editing_a_vehicle_from_the_client_page_saves_and_redisplays(app, client
             "registration_number": "ZZ1234Z",
             "licence_number": "T9876543210X",
             "make": "MITSUBISHI",
-            "model": "ASX 1.6",
-            "colour": "SILVER",
-            "year": "2020",
             "vin": "JMBXTGA2WJZ123456",
             "engine_number": "K9K7654321",
-            "vehicle_type": "STATION WAGON",
             "licence_disk_expiry": "2028-01-31",
-            "tare_kg": "1900",
-            "gvm_kg": "",
         },
         follow_redirects=True,
     )
@@ -263,20 +292,16 @@ def test_editing_a_vehicle_from_the_client_page_saves_and_redisplays(app, client
     with app.app_context():
         row = vehicles.get_vehicle(vehicle_id)
     assert row["registration"] == "ABC 123 GP"
-    assert row["model"] == "ASX 1.6"
-    assert row["colour"] == "SILVER"
-    assert row["year"] == "2020"
     assert row["licence_disk_expiry"] == "2028-01-31"
-    assert row["tare_kg"] == 1900.0
-    assert row["gvm_kg"] is None  # blanked on purpose: unknown, not 0
     assert row["vin"] == "JMBXTGA2WJZ123456"  # untouched fields survive the edit
     page = html_of(response)
     cells = row_cells(vehicle_row(page, "ABC 123 GP"))
     assert cells[1] == "MITSUBISHI"
-    assert cells[2] == "ASX 1.6"
-    assert cells[3] == "2020"
-    assert cells[4] == "1900"
-    assert cells[5] == "—"
+    assert cells[2] == "JMBXTGA2WJZ123456"
+    assert cells[3] == "K9K7654321"
+    assert cells[4] == "2028-01-31"
+    # the save keeps the user on the page the panel lives on
+    assert "Vehicle saved." in page and "Vehicle details" in page
 
 
 def test_removing_a_vehicle_leaves_the_client_intact(app, client, charmaine):
@@ -287,7 +312,7 @@ def test_removing_a_vehicle_leaves_the_client_intact(app, client, charmaine):
     page = html_of(response)
     assert "Vehicle removed — the client record is untouched." in page
     assert "No vehicles recorded" in panel_html(page)
-    assert "Charmaine Mokoena" in page  # still the client's own page
+    assert "Charmaine Mokoena" in page  # still the client's own record
     with app.app_context():
         assert vehicles.get_vehicle(vehicle_id) is None
         assert vehicles.list_vehicles(charmaine) == []
@@ -308,7 +333,7 @@ def test_deleting_the_client_still_leaves_no_orphan_vehicles(app, charmaine):
 
 def test_the_add_button_links_the_client_into_the_scan_screen(app, client, charmaine):
     login_owner(client)
-    page = html_of(client.get(f"/customers/{charmaine}"))
+    page = edit_page_of(client, charmaine)
     assert f'/scan-vehicle?customer_id={charmaine}' in page
 
 
@@ -316,7 +341,7 @@ def test_an_account_without_the_scan_module_sees_the_list_but_no_controls(app, c
     vehicle_id = add_vehicle(app, charmaine)
     user_id = make_staff(app, "Nomsa Dlamini", modules=("dashboard", "customers"))
     login_staff(client, user_id)
-    response = client.get(f"/customers/{charmaine}")
+    response = client.get(f"/customers/{charmaine}/edit")
     assert response.status_code == 200
     page = html_of(response)
     # the list is the client's own record, so an account that may open the page may read it …
@@ -350,7 +375,7 @@ def test_customer_records_are_not_branch_scoped_today(app, client, charmaine):
     add_vehicle(app, charmaine)
     user_id = make_staff(app, "Depot Dlamini", modules=("dashboard", "customers"))
     login_staff(client, user_id)
-    page = html_of(client.get(f"/customers/{charmaine}"))
+    page = edit_page_of(client, charmaine)
     assert "ABC123GP" in panel_html(page)
     listing = inspect.getsource(customers_service.list_customers).lower()
     single = inspect.getsource(customers_service.get_customer).lower()
