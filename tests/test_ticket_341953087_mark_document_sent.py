@@ -6,6 +6,7 @@ from flask import session as flask_session
 
 from app import create_app
 from app.db import get_db
+from app.services.access import create_additional_user, save_user_modules
 from app.services.orders import order_counts
 
 
@@ -42,6 +43,29 @@ def login(client):
     )
 
 
+def login_staff(client, app, name='Orders Staff'):
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT id FROM users WHERE name = ?", (name,)
+        ).fetchone()
+    assert row is not None
+    return client.post(
+        '/login',
+        data={'user_id': str(row['id']), 'password': 'staff123'},
+        follow_redirects=True,
+    )
+
+
+def add_staff(app, name='Orders Staff', branch_id=1, modules=None):
+    with app.app_context():
+        user_id, error = create_additional_user(name, 'staff123', branch_id=branch_id)
+        assert error is None
+        if modules is not None:
+            ok, result = save_user_modules(user_id, modules)
+            assert ok, result
+        return user_id
+
+
 def _seed_order(db, order_number='ORD-SENT-1'):
     db.execute(
         "INSERT INTO customers (name, email, phone, created_at) VALUES (?, ?, '', ?)",
@@ -54,6 +78,22 @@ def _seed_order(db, order_number='ORD-SENT-1'):
         total, due_total, notes, created_at)
         VALUES (?, ?, 'return', 1, 1, 'started', 'payment_due', ?, ?, 100, 15, 115, 115, '', ?)""",
         (order_number, customer_id, '2026-10-02T09:00:00', '2026-10-02T17:00:00', '2026-10-02T08:00:00'),
+    )
+    return db.execute("SELECT id FROM orders WHERE order_number = ?", (order_number,)).fetchone()['id']
+
+
+def _seed_order_for_branch(db, order_number, branch_id):
+    db.execute(
+        "INSERT INTO customers (name, email, phone, created_at) VALUES (?, ?, '', ?)",
+        (f'Sent Customer {branch_id}', f'sent-customer-{branch_id}@example.test', '2026-10-02T09:00:00'),
+    )
+    customer_id = db.execute("SELECT last_insert_rowid() AS id").fetchone()['id']
+    db.execute(
+        """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id,
+        return_branch_id, status, payment_status, start_at, end_at, subtotal, tax_total,
+        total, due_total, notes, created_at)
+        VALUES (?, ?, 'return', ?, ?, 'started', 'payment_due', ?, ?, 100, 15, 115, 115, '', ?)""",
+        (order_number, customer_id, branch_id, branch_id, '2026-10-02T09:00:00', '2026-10-02T17:00:00', '2026-10-02T08:00:00'),
     )
     return db.execute("SELECT id FROM orders WHERE order_number = ?", (order_number,)).fetchone()['id']
 
@@ -174,3 +214,62 @@ def test_mark_as_sent_drops_the_unsent_invoice_count_and_order_badge(client, app
     order_page = client.get(f'/orders/{order_id}')
     assert b'data-document-email-indicator="sent"' in order_page.data
     assert b'data-document-email-indicator="unsent"' not in order_page.data
+
+
+def test_staff_with_order_access_can_mark_an_openable_document_sent(client, app):
+    add_staff(app, branch_id=1, modules=['orders'])
+    with app.app_context():
+        db = get_db()
+        order_id = _seed_order_for_branch(db, 'ORD-STAFF-SENT', branch_id=1)
+        document_id = _seed_document(db, order_id, document_type='invoice')
+        db.commit()
+
+    login_staff(client, app)
+    detail = client.get(f'/documents/{document_id}')
+    assert detail.status_code == 200
+    assert b'Mark as Sent' in detail.data
+    assert f'/documents/{document_id}/mark-sent'.encode() in detail.data
+
+    response = client.post(f'/documents/{document_id}/mark-sent', follow_redirects=True)
+    assert response.status_code == 200
+    assert b'Document marked as sent' in response.data
+    with app.app_context():
+        row = get_db().execute(
+            'SELECT status, email_status, sent_to, email_error FROM documents WHERE id = ?',
+            (document_id,),
+        ).fetchone()
+    assert row is not None
+    assert row['status'] == 'draft'
+    assert row['email_status'] == 'sent'
+    assert row['sent_to'] == 'sent-customer-1@example.test'
+    assert row['email_error'] == ''
+
+
+def test_staff_without_order_or_branch_access_cannot_open_or_mark_sent(client, app):
+    add_staff(app, name='No Orders Staff', branch_id=1, modules=['customers'])
+    add_staff(app, name='Other Branch Staff', branch_id=2, modules=['orders'])
+    with app.app_context():
+        db = get_db()
+        order_id = _seed_order_for_branch(db, 'ORD-BLOCKED-SENT', branch_id=1)
+        document_id = _seed_document(db, order_id, document_type='invoice')
+        db.commit()
+
+    login_staff(client, app, name='No Orders Staff')
+    assert client.get(f'/documents/{document_id}').status_code == 403
+    assert client.post(f'/documents/{document_id}/mark-sent').status_code == 403
+
+    client.post('/logout')
+    login_staff(client, app, name='Other Branch Staff')
+    assert client.get(f'/documents/{document_id}').status_code == 404
+    assert client.post(f'/documents/{document_id}/mark-sent').status_code == 404
+
+    with app.app_context():
+        row = get_db().execute(
+            'SELECT email_status, sent_at, sent_to, email_error FROM documents WHERE id = ?',
+            (document_id,),
+        ).fetchone()
+    assert row is not None
+    assert row['email_status'] == 'not_sent'
+    assert not row['sent_at']
+    assert row['sent_to'] == ''
+    assert row['email_error'] == 'old error'

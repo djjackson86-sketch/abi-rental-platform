@@ -1,4 +1,4 @@
-from flask import Blueprint, Response, current_app, flash, make_response, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, make_response, redirect, render_template, request, url_for
 import csv
 from io import StringIO
 from pathlib import Path
@@ -29,6 +29,7 @@ from app.services.settings import get_company_settings
 from app.services.email_delivery import build_invoice_email_subject, build_outlook_draft_eml, render_email_template
 from app.services.pdf_documents import DOCUMENT_LOGO_STATIC_PATH, document_pdf_bytes, document_pdf_filename
 from app.services.customers import custom_fields_for
+from app.services.access import user_can_access_order
 
 # Email-sized signature logo (360px wide) so clients that ignore CSS sizing
 # still show a sane logo instead of the full 1200px document artwork.
@@ -38,6 +39,12 @@ bp = Blueprint("documents", __name__, url_prefix="/documents")
 
 EMAIL_DRAFT_DOCUMENT_TYPES = {'invoice', 'quote'}
 PAGE_SIZE = 25
+
+
+def _ensure_document_access(document):
+    if document and not user_can_access_order(document):
+        abort(404)
+    return document
 
 
 def _display_limit():
@@ -183,6 +190,7 @@ def detail(document_id):
     if not document:
         flash("Document not found", "error")
         return redirect(url_for("documents.index"))
+    _ensure_document_access(document)
     settings = get_company_settings()
     if not settings:
         flash("Company settings not found", "error")
@@ -221,6 +229,7 @@ def download_pdf(document_id):
     if not document:
         flash("Document not found", "error")
         return redirect(url_for("documents.index"))
+    _ensure_document_access(document)
     pdf_bytes = document_pdf_bytes(document_id)
     disposition = "inline" if request.args.get("view") else "attachment"
     return _prevent_generated_document_cache(Response(
@@ -267,6 +276,11 @@ def finalize(document_id):
 @bp.post("/<int:document_id>/mark-sent")
 @login_required
 def mark_sent(document_id):
+    document = get_document(document_id)
+    if not document:
+        flash("Document not found", "error")
+        return redirect(url_for("documents.index"))
+    _ensure_document_access(document)
     try:
         mark_document_sent(document_id)
         flash("Document marked as sent", "success")

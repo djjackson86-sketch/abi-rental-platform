@@ -174,7 +174,7 @@ def document_filter_counts():
 
 def get_document(document_id):
     return get_db().execute(
-        """SELECT d.*, o.order_number, o.customer_id, o.status AS order_status, o.payment_status, o.start_at, o.end_at,
+        """SELECT d.*, o.order_number, o.customer_id, o.collect_branch_id, o.return_branch_id, o.status AS order_status, o.payment_status, o.start_at, o.end_at,
             o.extra_hours, o.return_revised_at,
             o.subtotal, o.discount_total, o.discount_mode, o.discount_value, o.tax_total, o.deposit_total, o.deposit_option, o.total, o.due_total, o.notes,
             o.deposit_applied_amount,
