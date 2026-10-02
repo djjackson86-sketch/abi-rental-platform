@@ -585,10 +585,33 @@ def billed_rental_days(start_at, end_at, extra_hours=0, revised=False):
 DURATION_PRICE_UNITS = {"day", "week", "month", "hour"}
 
 
-def calculate_line(product, quantity, days, tax_mode="exclusive"):
+def _parse_line_quantity(quantity, service=False):
+    if service:
+        return 1
+    try:
+        qty = float(quantity or 1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Quantity must be a number") from exc
+    if qty <= 0:
+        raise ValueError("Quantity must be greater than zero")
+    return round(qty, 2)
+
+
+def _parse_non_negative_amount(value, field_name):
+    try:
+        amount = float(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number") from exc
+    if amount < 0:
+        raise ValueError(f"{field_name} cannot be negative")
+    return round(amount, 2)
+
+
+def calculate_line(product, quantity, days, tax_mode="exclusive", unit_price=None):
     product_type = product["product_type"] or "rental"
-    qty = 1 if product_type == "service" else max(1, int(quantity or 1))
-    base = float(product["price_amount"] or 0) * qty
+    qty = _parse_line_quantity(quantity, service=(product_type == "service"))
+    price = _parse_non_negative_amount(product["price_amount"] if unit_price in (None, "") else unit_price, "Unit price")
+    base = price * qty
     if product_type in {"rental", "service"} and product["price_unit"] in DURATION_PRICE_UNITS:
         # v1 pricing is day-equivalent for duration-priced rental/service items;
         # service quantity stays 1 and service deposits stay zero.
@@ -603,7 +626,7 @@ def calculate_line(product, quantity, days, tax_mode="exclusive"):
         line_tax = base * tax_rate
         line_total = line_subtotal + line_tax
     deposit = 0 if product_type == "service" else float(product["security_deposit"] or 0) * qty
-    return {"quantity": qty, "line_subtotal": round(line_subtotal, 2), "line_tax": round(line_tax, 2), "line_total": round(line_total, 2), "deposit": round(deposit, 2)}
+    return {"quantity": qty, "unit_price": price, "line_subtotal": round(line_subtotal, 2), "line_tax": round(line_tax, 2), "line_total": round(line_total, 2), "deposit": round(deposit, 2)}
 
 
 def _form_list(form, name):
@@ -616,8 +639,8 @@ def _form_list(form, name):
 
 
 def calculate_custom_line(name, quantity, unit_price, billing_mode, days, tax_rate=0, tax_mode="exclusive"):
-    qty = max(1, int(quantity or 1))
-    price = max(0, float(unit_price or 0))
+    qty = _parse_line_quantity(quantity)
+    price = _parse_non_negative_amount(unit_price, "Unit price")
     multiplier = days if billing_mode == "rental_day" else 1
     base = price * qty * multiplier
     rate = max(0, float(tax_rate or 0)) / 100
@@ -802,7 +825,7 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
                 raise ValueError(under_maintenance_error(product))
             if collect_branch_id and product["branch_id"] and product["branch_id"] != collect_branch_id:
                 raise ValueError("Selected product is not assigned to the collection branch")
-            line = calculate_line(product, quantity, days, settings["tax_mode"])
+            line = calculate_line(product, quantity, days, settings["tax_mode"], custom_price)
             line["billing_mode"] = "catalog"
             lines.append({"product": product, "custom_name": "", "line": line})
         elif custom_name:
@@ -841,7 +864,14 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
         damage_waiver_amount = max(0, float(form.get("damage_waiver_amount") or 0)) if deposit_option == "damage_waiver" else 0
     except ValueError as exc:
         raise ValueError("Damage waiver amount must be a number") from exc
-    deposit_total = round(deposit_total, 2) if deposit_option == "security_deposit" else 0
+    if deposit_option == "security_deposit":
+        raw_deposit_override = form.get("security_deposit_amount") if hasattr(form, "get") else None
+        if raw_deposit_override is not None and str(raw_deposit_override).strip() != "":
+            deposit_total = _parse_non_negative_amount(raw_deposit_override, "Security deposit")
+        else:
+            deposit_total = round(deposit_total, 2)
+    else:
+        deposit_total = 0
     total = round(total + damage_waiver_amount + deposit_total, 2)
     return {
         "customer_id": customer_id,
@@ -871,7 +901,7 @@ def _insert_order_items(order_id, lines):
         product = entry["product"]
         line = entry["line"]
         product_id = product["id"] if product else None
-        unit_price = float(product["price_amount"] or 0) if product else line["unit_price"]
+        unit_price = line.get("unit_price", float(product["price_amount"] or 0) if product else 0)
         db.execute(
             """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -983,10 +1013,12 @@ def _restore_custom_line_prices(form, order_id):
     """
     stored = {}
     for item in get_db().execute(
-        """SELECT custom_name, billing_mode, unit_price FROM order_items
-        WHERE order_id = ? AND COALESCE(product_id, 0) = 0 ORDER BY id""",
+        """SELECT product_id, custom_name, billing_mode, unit_price FROM order_items
+        WHERE order_id = ? ORDER BY id""",
         (order_id,),
     ).fetchall():
+        if item["product_id"]:
+            continue
         name = (item["custom_name"] or "").strip().lower()
         if not name:
             continue
@@ -1196,7 +1228,7 @@ def draft_order_form(order_id):
             "product_display": product_display,
             "custom_name": item["custom_name"] or "",
             "custom_billing_mode": item["billing_mode"] if item["billing_mode"] in {"fixed", "rental_day"} else "fixed",
-            "custom_unit_price": item["unit_price"] if not item["product_id"] else "",
+            "custom_unit_price": item["unit_price"] or "",
             "quantity": item["quantity"] or 1,
         })
     if not lines:
@@ -1215,6 +1247,7 @@ def draft_order_form(order_id):
         "end_time": end_at.strftime("%H:%M") if end_at else "",
         "deposit_option": order["deposit_option"] or "security_deposit",
         "damage_waiver_amount": order["damage_waiver_amount"] or "",
+        "security_deposit_amount": order["deposit_total"] or "",
         "coupon_code": order["coupon_code"] or "",
         "notes": order["notes"] or "",
         "lines": lines,
@@ -1330,7 +1363,7 @@ def availability_errors(order_id):
             ORDER BY o.id""",
             out_params,
         ).fetchall():
-            out_quantity = int(out_row["quantity"] or 0)
+            out_quantity = float(out_row["quantity"] or 0)
             out_end = out_row["end_at"] or ""
             if out_end and out_end >= now():
                 continue  # still inside its hire period: the overlap check above covers it
@@ -1340,13 +1373,14 @@ def availability_errors(order_id):
                 overdue_order_number = out_row["order_number"] or ""
             overdue_units += out_quantity
         still_out_units = max(0, overdue_units - overdue_overlap_units)
-        busy = int(booked) + still_out_units
+        busy = float(booked or 0) + still_out_units
 
         def shortage_message(name):
+            available_display = f"{available:g}"
             if branch_stock:
-                message = f"Only {available} available for {name} at this collection branch during this rental period"
+                message = f"Only {available_display} available for {name} at this collection branch during this rental period"
             else:
-                message = f"Only {available} available for {name} during this rental period"
+                message = f"Only {available_display} available for {name} during this rental period"
             if still_out_units > 0 and overdue_order_number:
                 out_note = f"{name} is still out on {overdue_order_number} — return it before picking it up again."
                 if available + still_out_units >= item["quantity"]:
@@ -1357,12 +1391,12 @@ def availability_errors(order_id):
             return message
 
         if branch_stock:
-            stock_total = int(branch_stock.get(int(order["collect_branch_id"] or 0), 0))
+            stock_total = float(branch_stock.get(int(order["collect_branch_id"] or 0), 0))
             available = stock_total - busy
             if item["quantity"] > available:
                 errors.append(shortage_message(product["name"]))
         else:
-            available = int(product["quantity"] or 0) - busy
+            available = float(product["quantity"] or 0) - busy
             if item["quantity"] > available:
                 errors.append(shortage_message(product["name"]))
     return errors
