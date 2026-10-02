@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Thank you | {{ branch.name }} | {{ settings.company_name }}{% endblock %}
+{% block title %}Thank you | {{ settings.company_name }}{% endblock %}
 {# The portal's success page — feature B (§B2).
 
    It is deliberately the end of the line: no personal details are echoed back (there is nothing
@@ -17,18 +17,17 @@
     <p class="eyebrow">Customer registration</p>
     <h1>Thank you{% if first_name %}, {{ first_name }}{% endif %}</h1>
     {% if linked %}
-    <p>Your details have been added to the record we already had for you at
-    <strong>{{ branch.name }}</strong>. Anything the branch already knew about you has been left
+    <p>Your details have been added to the record we already had for you. Anything staff already knew about you has been left
     exactly as it was.</p>
     {% else %}
-    <p>Your details are with <strong>{{ branch.name }}</strong>. The counter can pull them up by
+    <p>Your details are on the system. The counter can pull them up by
     your name or your cellphone number next time.</p>
     {% endif %}
     {% if reference %}
     <p class="portal-reference">Your reference: <strong>{{ reference }}</strong></p>
     {% endif %}
     <div class="portal-actions">
-      <p>Branch phone: {% if branch.phone %}<a href="tel:{{ branch.phone }}">{{ branch.phone }}</a>{% else %}see the branch page{% endif %}</p>
+      {% if branch.phone %}<p>Phone: <a href="tel:{{ branch.phone }}">{{ branch.phone }}</a></p>{% endif %}
       <p><a href="{{ url_for('public.privacy_notice') }}">Read our privacy notice</a></p>
     </div>
   </article>

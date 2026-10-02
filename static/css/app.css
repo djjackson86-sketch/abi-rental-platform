@@ -426,6 +426,9 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .scan-camera-actions{gap:8px}
 .scan-capture-form textarea{min-height:88px}
 .scan-capture-actions{margin-bottom:10px}
+.portal-privacy-template,.portal-template-privacy{padding:14px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft);margin:10px 0}
+.portal-privacy-template h2,.portal-template-privacy h3{margin-top:0}
+.portal-template-privacy blockquote{margin:10px 0 0;padding:12px 14px;border-left:4px solid var(--brand);background:#fff;border-radius:10px;color:var(--ink-2)}
 .scan-review-panel .scan-warning{display:grid;gap:6px;margin:0 0 16px;padding:12px 14px;border:1px solid #fecaca;border-radius:var(--radius,12px);background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318);font-weight:650}
 .scan-review-panel .scan-warning p{margin:0;font-weight:600;color:#7a271a}
 .scan-transfer-line .scan-transfer-check{display:flex;align-items:center;gap:10px;font-weight:700}

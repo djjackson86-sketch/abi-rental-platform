@@ -407,14 +407,43 @@ def privacy_notice():
 
 def _portal_context(branch, **extra):
     """Everything the portal pages need, so the three routes cannot disagree about the branch."""
+    universal = bool(extra.get("universal"))
     context = {
         "settings": get_company_settings(),
         "branch": branch,
-        "portal_url": portal.portal_url(branch, request.url_root),
+        "portal_url": portal.universal_portal_url(request.url_root) if universal else portal.portal_url(branch, request.url_root),
         "intake_closed_message": portal_intake.INTAKE_CLOSED_MESSAGE,
+        "universal": universal,
     }
     context.update(extra)
     return context
+
+
+def _universal_portal_branch():
+    """Synthetic branch context for the universal portal.
+
+    Customers captured from the universal link are assigned to the default active branch internally
+    so existing branch-scoped admin screens still have a home for the record, but the public page no
+    longer asks the customer to choose or know a branch.
+    """
+    branch_id = branches_service.default_branch_id()
+    settings = get_company_settings()
+    company_name = (settings["company_name"] if settings else "") or "Customer portal"
+    return {
+        "id": branch_id,
+        "name": company_name,
+        "public_slug": portal.UNIVERSAL_PORTAL_SOURCE_SLUG,
+        "phone": (settings["phone"] or settings["store_contact_phone"] or "") if settings else "",
+        "portal_intro": "Register your customer details once. Staff can find your record from any branch.",
+        "address_line1": "",
+        "city": "",
+    }
+
+
+@bp.route("/portal")
+def customer_portal():
+    """The universal customer portal: one public link / one QR code for any customer."""
+    return _render_portal_form(_universal_portal_branch(), intake_closed=False, universal=True)
 
 
 @bp.route("/portal/<slug>")
@@ -452,10 +481,54 @@ def _render_portal_form(branch, status=200, intake_closed=None, **extra):
             intake_closed=(
                 not portal_intake.registration_is_open() if intake_closed is None else intake_closed
             ),
+            universal=extra.pop("universal", False),
             **extra,
         ),
     )
     return (html, status) if status != 200 else html
+
+
+@bp.route("/portal/register", methods=["GET", "POST"])
+def customer_portal_register():
+    """Universal customer registration: no branch in the URL or QR."""
+    branch = _universal_portal_branch()
+    if request.method == "GET":
+        return _render_portal_form(branch, intake_closed=False, universal=True)
+
+    form = request.form
+    posted = dict(form)
+    if portal_intake.honeypot_triggered(form):
+        return render_template(
+            "public/portal_confirm.html",
+            **_portal_context(branch, reference=None, linked=False, first_name="", universal=True),
+        )
+    try:
+        values = portal_intake.submission_values(form)
+    except ValueError as exc:
+        return _render_portal_form(branch, status=400, error=str(exc), form_values=posted, intake_closed=False, universal=True)
+    if not consent.acceptance_given(form.get("popia_consent")):
+        return _render_portal_form(branch, status=400, error=consent.consent_required_error(), form_values=posted, intake_closed=False, universal=True)
+    if not str(form.get("decision") or "").strip():
+        candidates = portal_intake.find_possible_matches(values["name"], values["phone"], values["email"])
+        if candidates:
+            return render_template(
+                "public/portal_exists.html",
+                **_portal_context(branch, candidates=candidates, form_values=posted, universal=True),
+            )
+    try:
+        result = portal_intake.create_or_link_customer(
+            form,
+            branch["id"],
+            form.get("decision"),
+            slug=portal.UNIVERSAL_PORTAL_SOURCE_SLUG,
+        )
+    except ValueError as exc:
+        return _render_portal_form(branch, status=400, error=str(exc), form_values=posted, intake_closed=False, universal=True)
+    consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"), notice_version="template-privacy-v1")
+    return render_template(
+        "public/portal_confirm.html",
+        **_portal_context(branch, reference=result["reference"], linked=result["linked"], first_name=(values["name"].split() or [""])[0], universal=True),
+    )
 
 
 @bp.route("/portal/<slug>/register", methods=["GET", "POST"])
@@ -542,6 +615,27 @@ def branch_portal_register(slug):
     )
 
 
+@bp.route("/portal/check", methods=["POST"])
+def customer_portal_check():
+    """Universal lookup: masked result, no branch named to the customer."""
+    branch = _universal_portal_branch()
+    if not portal_intake.allow_lookup(request.remote_addr):
+        return (
+            render_template("public/portal_check.html", **_portal_context(branch, closed=False, result=None, rate_limited=True, universal=True)),
+            429,
+        )
+    name = request.form.get("name", "")
+    phone = request.form.get("phone", "")
+    if not name.strip() or not phone.strip():
+        result = {"found": False, "display": "", "reason": "missing"}
+    else:
+        result = portal_intake.lookup_public(name, phone)
+    return render_template(
+        "public/portal_check.html",
+        **_portal_context(branch, closed=False, rate_limited=False, result=result, universal=True),
+    )
+
+
 @bp.route("/portal/<slug>/check", methods=["POST"])
 def branch_portal_check(slug):
     """The standalone "am I already a customer?" lookup (feature B §B2, decision D8).
@@ -581,6 +675,37 @@ def branch_portal_check(slug):
         "public/portal_check.html",
         **_portal_context(branch, closed=False, rate_limited=False, result=result),
     )
+
+
+@bp.route("/portal/qr.png")
+def customer_portal_qr():
+    png = portal.qr_png_bytes(
+        portal.universal_portal_url(request.url_root),
+        box_size=portal.clamp_box_size(request.args.get("box")),
+    )
+    response = make_response(png)
+    response.headers["Content-Type"] = "image/png"
+    response.headers["Cache-Control"] = f"public, max-age={PORTAL_QR_MAX_AGE_SECONDS}"
+    return response
+
+
+@bp.route("/portal/qr.pdf")
+def customer_portal_qr_sheet():
+    url = portal.universal_portal_url(request.url_root)
+    settings = get_company_settings()
+    company_name = (settings["company_name"] if settings else "").strip()
+    sheet = pdf_documents.qr_sheet_pdf_bytes(
+        "Customer portal",
+        url,
+        portal.qr_matrix(url),
+        company_name=company_name,
+        address="Universal customer registration link",
+    )
+    response = make_response(sheet)
+    response.headers["Content-Type"] = "application/pdf"
+    response.headers["Content-Disposition"] = 'inline; filename="customer-portal.pdf"'
+    response.headers["Cache-Control"] = f"public, max-age={PORTAL_QR_MAX_AGE_SECONDS}"
+    return response
 
 
 @bp.route("/portal/<slug>/qr.png")

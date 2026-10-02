@@ -33,6 +33,11 @@ from app.services.settings import get_company_settings
 #: cannot disagree about it.
 PORTAL_PATH_TEMPLATE = "/portal/{slug}"
 
+# The new public customer portal is universal: one link / one QR for any customer.
+# Old branch slugs are kept for backwards compatibility, but the admin screen now exposes only this.
+UNIVERSAL_PORTAL_PATH = "/portal"
+UNIVERSAL_PORTAL_SOURCE_SLUG = "universal"
+
 #: Quiet zone, in modules. A QR with no border scans badly off a printed page, and the house
 #: standard for a printed sheet is at least 4.
 QR_BORDER_MODULES = 4
@@ -183,6 +188,17 @@ def portal_url(branch, base_url=None):
         base = (base_url or "").strip()
     path = portal_path(branch["public_slug"])
     return f"{base.rstrip('/')}{path}" if base else path
+
+
+def universal_portal_url(base_url=None):
+    """The one customer portal link: ``/portal``."""
+    settings = get_company_settings()
+    base = ""
+    if settings is not None and "public_base_url" in settings.keys():
+        base = (settings["public_base_url"] or "").strip()
+    if not base:
+        base = (base_url or "").strip()
+    return f"{base.rstrip('/')}{UNIVERSAL_PORTAL_PATH}" if base else UNIVERSAL_PORTAL_PATH
 
 
 def qr_png_bytes(url, box_size=QR_BOX_SIZE_PX):

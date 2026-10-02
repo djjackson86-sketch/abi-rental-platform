@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Is this you? | {{ branch.name }} | {{ settings.company_name }}{% endblock %}
+{% block title %}Is this you? | {{ settings.company_name }}{% endblock %}
 {# The dedupe decision screen — feature B (§B2), decision D6.
 
    A submission arrived that looks like somebody already on the system. Nothing has been written:
@@ -26,12 +26,12 @@
   <article class="panel portal-panel">
     <p class="eyebrow">Customer registration</p>
     <h1>Is this you?</h1>
-    <p>We may already have your details at <strong>{{ branch.name }}</strong>. Nothing has been
+    <p>We may already have your details on the system. Nothing has been
     saved yet — please tell us which of these is you, or tell us that none of them is. We only ever
     show a first name and the last four digits of the number, so the rest of the record stays
     private.</p>
 
-    <form method="post" action="{{ url_for('public.branch_portal_register', slug=branch.public_slug) }}">
+    <form method="post" action="{{ url_for('public.customer_portal_register') if universal else url_for('public.branch_portal_register', slug=branch.public_slug) }}">
       {% for key, value in form_values.items() %}
       {% if key not in ['decision', 'popia_consent'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}
       {% endfor %}

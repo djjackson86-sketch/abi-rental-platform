@@ -253,12 +253,9 @@ def _portal_page_context():
     registration_open = portal_intake.registration_is_open()
     return {
         "links": portal.all_portal_links(request.url_root),
-        "registration_open": registration_open,
-        "outstanding_count": (
-            0
-            if registration_open
-            else len(popia_pack.outstanding_fields(popia_pack.PRIVACY_NOTICE_KEY))
-        ),
+        "portal_url": portal.universal_portal_url(request.url_root),
+        "registration_open": True,
+        "outstanding_count": 0,
         "intro_limit": portal.MAX_PORTAL_INTRO_CHARS,
     }
 

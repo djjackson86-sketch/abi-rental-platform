@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Are you registered? | {{ branch.name }} | {{ settings.company_name }}{% endblock %}
+{% block title %}Are you registered? | {{ settings.company_name }}{% endblock %}
 {# The "am I already a customer?" answer page — feature B (§B2), decision D8.
 
    The answer is the whole point of the page, and it is the only thing on it:
@@ -19,7 +19,7 @@
 <main class="store-main">
   <article class="panel portal-panel">
     <p class="eyebrow">Customer registration</p>
-    <h1>Are you registered with {{ branch.name }}?</h1>
+    <h1>Are you registered?</h1>
 
     {% if rate_limited %}
     <div class="portal-result">
@@ -39,13 +39,13 @@
     </div>
     {% else %}
     <div class="portal-result">
-      <p>We could not find a customer with that name and number at this branch. Please fill in the
+      <p>We could not find a customer with that name and number. Please fill in the
       registration form and we will open a new record for you.</p>
     </div>
     {% endif %}
 
     <div class="portal-actions">
-      <p><a href="{{ url_for('public.branch_portal_register', slug=branch.public_slug) }}">Back to the registration form</a></p>
+      <p><a href="{{ url_for('public.customer_portal') if universal else url_for('public.branch_portal_register', slug=branch.public_slug) }}">Back to the registration form</a></p>
     </div>
   </article>
 </main>
