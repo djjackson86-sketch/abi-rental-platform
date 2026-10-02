@@ -21,7 +21,7 @@ from flask import Blueprint, flash, jsonify, redirect, render_template, request,
 from app.routes.auth import login_required
 from app.services import vehicle_disk as disk
 from app.services import vehicles
-from app.services.customers import get_customer, search_customers
+from app.services.customers import find_customer_id_by_text, get_customer, search_customers
 from app.services.settings import get_company_settings
 
 bp = Blueprint("vehicles", __name__)
@@ -214,8 +214,19 @@ def save_scan_vehicle():
     customer_id = _to_int(request.form.get("customer_id"))
     transfer = str(request.form.get("transfer") or "").strip().lower() in {"1", "on", "yes", "true"}
 
+    # The picker's hidden id is a convenience, not the source of truth: staff routinely type the
+    # name (or pick the typeahead label) without the id landing in the form, which used to refuse a
+    # vehicle after the client had visibly been chosen. Resolve from the visible text when the id
+    # is missing — an ambiguous or unknown name still refuses.
     if not customer_id:
-        flash("Choose the client this vehicle belongs to.", "error")
+        customer_id = find_customer_id_by_text(request.form.get("customer_pick"))
+
+    if not customer_id:
+        flash(
+            "Choose the client from the list: type at least two letters of the name or number, "
+            "then pick the client from the suggestions.",
+            "error",
+        )
         return _render(_review(values, None, raw_text=values["raw_scan_text"]))
     customer = get_customer(customer_id)
     if customer is None:

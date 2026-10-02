@@ -1,4 +1,5 @@
 import json
+import re
 
 from app.db import get_db, now
 from app.services.access import current_session_user_id, session_active_branch_id, session_primary_branch_id
@@ -88,6 +89,63 @@ def search_customers(query, limit=8):
         (like, like, f"{needle.lower()}%", limit),
     ).fetchall()
     return [{"id": row["id"], "name": row["name"] or "", "phone": row["phone"] or ""} for row in rows]
+
+
+def _phone_digits(value):
+    """Digits only, with the SA trunk/country prefix folded away, so ``+27 82…`` == ``082…``."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("27") and len(digits) > 10:
+        digits = "0" + digits[2:]
+    return digits
+
+
+def find_customer_id_by_text(text):
+    """Resolve the scan screen's "Allocate to client" text to a customer id, or ``None``.
+
+    Staff type a name, a cellphone number, or pick the typeahead's own label
+    (``Name · 082 123 4567``). The hidden ``customer_id`` the page posts is a convenience; this
+    function is what makes the save work when only the visible text arrived, which is exactly the
+    case that used to refuse a vehicle with "choose the client" after the client had been chosen.
+
+    Only an **unambiguous** match is accepted. Two clients with the same number, or a name that
+    matches more than one record, return ``None`` so the caller keeps its refusal rather than
+    allocating a vehicle to the wrong person.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    label_name, _, label_phone = raw.partition("·")
+    label_name = label_name.strip()
+    label_phone = label_phone.strip()
+    # A bare number typed into the box is a phone search, not a name.
+    if not label_phone and re.fullmatch(r"[\d\s()+\-]{9,}", raw):
+        label_phone, label_name = raw, ""
+    rows = get_db().execute("SELECT id, name, phone FROM customers").fetchall()
+
+    phone_hits = []
+    if label_phone:
+        wanted = _phone_digits(label_phone)[-9:]
+        if len(wanted) == 9:
+            phone_hits = [row["id"] for row in rows if _phone_digits(row["phone"])[-9:] == wanted]
+    name_hits = []
+    if label_name:
+        key = " ".join(label_name.lower().split())
+        name_hits = [row["id"] for row in rows if " ".join(str(row["name"] or "").lower().split()) == key]
+
+    # One customer on that number is the strongest answer there is.
+    if len(phone_hits) == 1:
+        return phone_hits[0]
+    # A shared number (two clients on one household line) is narrowed by the name the label carries,
+    # but only to a row that really holds that number.
+    if len(phone_hits) > 1:
+        narrowed = [customer_id for customer_id in name_hits if customer_id in phone_hits]
+        return narrowed[0] if len(narrowed) == 1 else None
+    # No usable number: a unique name resolves.
+    if len(name_hits) == 1:
+        return name_hits[0]
+    return None
 
 
 def customer_counts():

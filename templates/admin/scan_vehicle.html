@@ -197,19 +197,49 @@
     return client.name + (client.phone ? ' · ' + client.phone : '');
   }
 
-  function match() {
-    var typed = pick.value.trim();
-    for (var i = 0; i < results.length; i++) {
-      if (labelFor(results[i]) === typed) { return results[i]; }
+  function digits(value) { return (value || '').replace(/\D/g, ''); }
+
+  // Tolerant on purpose: staff type a name, a number, or pick the typeahead label. An exact-label
+  // match is the normal path; the looser steps stop a chosen client from being thrown away when
+  // the text in the box is not byte-for-byte the option string.
+  function resolve(typed) {
+    var want = typed.trim();
+    if (!want) { return null; }
+    var lower = want.toLowerCase();
+    var wanted = digits(want);
+    var i, found;
+    for (i = 0; i < results.length; i++) {
+      if (labelFor(results[i]) === want) { return results[i]; }
+    }
+    for (i = 0; i < results.length; i++) {                       // bare name
+      if ((results[i].name || '').trim().toLowerCase() === lower) { return results[i]; }
+    }
+    if (wanted.length >= 9) {                                    // bare phone number
+      for (i = 0; i < results.length; i++) {
+        if (digits(results[i].phone).slice(-9) === wanted.slice(-9)) { return results[i]; }
+      }
+    }
+    for (i = 0; i < results.length; i++) {                       // unique partial name
+      if (lower.length >= 3 && (results[i].name || '').toLowerCase().indexOf(lower) !== -1) {
+        found = results[i];
+        break;
+      }
+    }
+    if (found) {
+      var matches = results.filter(function (client) {
+        return (client.name || '').toLowerCase().indexOf(lower) !== -1;
+      });
+      if (matches.length === 1) { return found; }
     }
     return null;
   }
 
   function syncId() {
     if (pick.value === initial) { return; }
-    var found = match();
+    var found = resolve(pick.value);
     if (found) {
       hidden.value = found.id;
+      if (labelFor(found) !== pick.value) { pick.value = labelFor(found); }
     } else if (/^\d+$/.test(pick.value.trim())) {
       hidden.value = pick.value.trim();
     } else {
@@ -220,7 +250,7 @@
   function load() {
     var query = pick.value.trim();
     if (query.length < 2) { list.innerHTML = ''; return; }
-    fetch('{{ url_for("vehicles.customer_search") }}?q=' + encodeURIComponent(query), {headers: {'Accept': 'application/json'}})
+    return fetch('{{ url_for("vehicles.customer_search") }}?q=' + encodeURIComponent(query), {headers: {'Accept': 'application/json'}})
       .then(function (response) { return response.json(); })
       .then(function (data) {
         results = data.customers || [];
@@ -231,7 +261,7 @@
           list.appendChild(option);
         });
       })
-      .catch(function () { /* the picker is a convenience; a typed client id still saves */ });
+      .catch(function () { /* the picker is a convenience; the server also resolves the typed name */ });
   }
 
   pick.addEventListener('input', function () {
@@ -240,7 +270,20 @@
     timer = setTimeout(load, 200);
   });
   pick.addEventListener('change', syncId);
-  pick.form.addEventListener('submit', syncId);
+
+  // Last line of defence: if the box holds a name but no id was resolved yet, look the name up
+  // once more before letting the save go, so "I selected a client" cannot become a refusal.
+  var submitting = false;
+  pick.form.addEventListener('submit', function (event) {
+    syncId();
+    if (submitting || hidden.value || !pick.value.trim()) { return; }
+    event.preventDefault();
+    load().then(function () {
+      syncId();
+      submitting = true;
+      pick.form.submit();
+    });
+  });
 })();
 </script>
 {% endif %}
