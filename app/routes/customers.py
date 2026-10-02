@@ -131,4 +131,13 @@ def edit(customer_id):
         except ValueError as exc:
             flash(str(exc), "error")
     customer = get_customer(customer_id)
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label)
+    # Vehicle details belong to the customer edit screen (the separate Vehicles panel on the
+    # customer page was removed), so the edit route is what supplies them.
+    return render_template(
+        "admin/customers/form.html",
+        settings=get_company_settings(),
+        customer=customer,
+        custom_fields=custom_fields_for(customer),
+        custom_field_label=custom_field_label,
+        vehicles=list_vehicles(customer_id),
+    )

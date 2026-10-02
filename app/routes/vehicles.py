@@ -276,7 +276,8 @@ def edit_vehicle(vehicle_id):
         flash(str(exc), "error")
     else:
         flash("Vehicle saved.", "success")
-    return redirect(url_for("customers.detail", customer_id=vehicle["customer_id"]))
+    # Vehicle details live on the customer edit screen now, so keep the user there.
+    return redirect(url_for("customers.edit", customer_id=vehicle["customer_id"]))
 
 
 @bp.post("/vehicles/<int:vehicle_id>/delete")
@@ -288,7 +289,8 @@ def delete_vehicle(vehicle_id):
         return redirect(url_for("customers.index"))
     vehicles.delete_vehicle(vehicle_id)
     flash("Vehicle removed — the client record is untouched.", "success")
-    return redirect(url_for("customers.detail", customer_id=vehicle["customer_id"]))
+    # Vehicle details live on the customer edit screen now, so keep the user there.
+    return redirect(url_for("customers.edit", customer_id=vehicle["customer_id"]))
 
 
 @bp.get("/customers/<int:customer_id>/vehicles")
