@@ -1043,6 +1043,253 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     return _pdf_objects(streams, image_object=image_object)
 
 
+# --- customer statement (ticket ABI-341953085) ------------------------------
+#
+# A statement of account the client hands to a customer, so it wears the same
+# clothes as the invoice: the SANO logo and issuer block top-left, the customer's
+# "Bill To" block on the left, and the invoice's own table styling (black column
+# band, right-aligned money). Two sections — INVOICES then PAYMENTS — flow across
+# as many pages as their rows need, repeating the column band and a page number
+# on every continuation page, and the opening/closing balance closes the range's
+# arithmetic. Rows are one line each, so nothing can be silently truncated
+# (ABI-341953022).
+STATEMENT_TITLE = 'CUSTOMER STATEMENT'
+STATEMENT_LEFT = LEFT_BLOCK_X
+STATEMENT_RIGHT = INVOICE_TABLE_RIGHT_EDGE
+STATEMENT_BOTTOM = 58
+STATEMENT_ROW_HEIGHT = 16
+STATEMENT_FIRST_TABLE_Y = 545
+STATEMENT_CONTINUATION_TABLE_Y = 700
+STATEMENT_SECTION_GAP = 18
+# The caption's baseline sits this far above the column band's baseline. The band
+# is 18pt tall ending 5pt BELOW its baseline, so anything less than ~22 leaves the
+# caption's ascenders touching the black bar (visually a collision) — 26 keeps a
+# clear 8pt+ of white between the caption and the band.
+STATEMENT_HEADING_DROP = 26
+STATEMENT_ROWS_DROP = 24
+STATEMENT_SUMMARY_X = 382
+STATEMENT_SUMMARY_WIDTH = 177
+STATEMENT_SUMMARY_RIGHT = INVOICE_TABLE_RIGHT_EDGE - 9
+STATEMENT_FOOTER_Y = 40
+STATEMENT_DETAIL_X = 400
+# Column geometry. Dates and numbers are short, so the columns stay wide enough
+# that a reference (the only free text) is the single column that can be clipped,
+# and it is clipped with a visible ellipsis rather than run into the amount.
+STATEMENT_DATE_X = STATEMENT_LEFT
+STATEMENT_METHOD_X = 110
+STATEMENT_INVOICE_X = 110
+STATEMENT_ORDER_X = 200
+STATEMENT_REFERENCE_X = 210
+STATEMENT_REFERENCE_WIDTH = 250
+STATEMENT_SECTIONS = (
+    ('invoices', 'INVOICES'),
+    ('payments', 'PAYMENTS'),
+)
+
+
+def _statement_columns(section):
+    if section == 'invoices':
+        return (
+            {'label': 'DATE', 'x': STATEMENT_DATE_X},
+            {'label': 'INVOICE', 'x': STATEMENT_INVOICE_X},
+            {'label': 'ORDER', 'x': STATEMENT_ORDER_X},
+            {'label': 'AMOUNT', 'right': STATEMENT_RIGHT},
+        )
+    return (
+        {'label': 'DATE', 'x': STATEMENT_DATE_X},
+        {'label': 'METHOD', 'x': STATEMENT_METHOD_X},
+        {'label': 'REFERENCE', 'x': STATEMENT_REFERENCE_X},
+        {'label': 'AMOUNT', 'right': STATEMENT_RIGHT},
+    )
+
+
+def _statement_row_cells(section, row):
+    if section == 'invoices':
+        return (
+            (STATEMENT_DATE_X, row.get('date') or '', False),
+            (STATEMENT_INVOICE_X, row.get('number') or '', False),
+            (STATEMENT_ORDER_X, row.get('order_number') or '', False),
+            (None, row.get('amount_display') or '', False),
+        )
+    return (
+        (STATEMENT_DATE_X, row.get('date') or '', False),
+        (STATEMENT_METHOD_X, row.get('method') or '', False),
+        (STATEMENT_REFERENCE_X, _pdf_fit(row.get('reference') or '', 8, STATEMENT_REFERENCE_WIDTH), False),
+        (None, row.get('amount_display') or '', False),
+    )
+
+
+def _statement_logo_object():
+    logo_bytes = _document_logo_bytes()
+    if not logo_bytes:
+        return None, None
+    logo_width, logo_height = _jpeg_dimensions(logo_bytes)
+    display_width = LOGO_IMAGE_WIDTH
+    display_height = display_width * logo_height / logo_width
+    logo_bottom = A4_PORTRAIT_HEIGHT - 104
+    command = f'q {display_width:.2f} 0 0 {display_height:.2f} {LOGO_IMAGE_X} {logo_bottom:.2f} cm /Im1 Do Q'
+    image_object = (
+        f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
+        f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
+    ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
+    return image_object, command
+
+
+def _statement_draw_band(draw, text, band_y, columns):
+    draw.append(_pdf_rect(STATEMENT_LEFT, band_y - 5, STATEMENT_RIGHT - STATEMENT_LEFT, 18, fill='0 0 0'))
+    text.append('1 1 1 rg')
+    for column in columns:
+        if column.get('right') is not None:
+            text.append(_pdf_right_text(column['right'], band_y, column['label'], size=7.5))
+        else:
+            text.append(_pdf_text_command(column['x'], band_y, column['label'], size=7.5))
+    text.append('0 0 0 rg')
+
+
+def _statement_new_page(pages, logo_command):
+    text = ['BT']
+    text.append(_pdf_text_command(STATEMENT_DETAIL_X, 760, STATEMENT_TITLE, size=8.5, font='F2'))
+    text.append(_pdf_text_command(STATEMENT_DETAIL_X, 746, f'Page {len(pages) + 1}', size=8.5))
+    page = {'draw': [logo_command] if logo_command else [], 'text': text, 'y': STATEMENT_CONTINUATION_TABLE_Y}
+    pages.append(page)
+    return page
+
+
+def _statement_rows_that_fit(first_row_y):
+    if first_row_y < STATEMENT_BOTTOM:
+        return 0
+    return int((first_row_y - STATEMENT_BOTTOM) // STATEMENT_ROW_HEIGHT) + 1
+
+
+def _statement_open_section(pages, page, logo_command, section, title):
+    """Start a section, moving to a fresh page unless heading+one row fit here."""
+    while True:
+        heading_y = page['y'] - STATEMENT_SECTION_GAP
+        band_y = heading_y - STATEMENT_HEADING_DROP
+        first_row_y = band_y - STATEMENT_ROWS_DROP
+        if _statement_rows_that_fit(first_row_y) >= 1:
+            break
+        page = _statement_new_page(pages, logo_command)
+    page['text'].append(_pdf_text_command(STATEMENT_LEFT, heading_y, title.upper(), size=8.6, font='F2'))
+    _statement_draw_band(page['draw'], page['text'], band_y, _statement_columns(section))
+    page['y'] = first_row_y
+    return page, first_row_y
+
+
+def _statement_draw_row(text, section, row, y):
+    cells = _statement_row_cells(section, row)
+    for index, (x, value_text, bold) in enumerate(cells):
+        if index == len(cells) - 1:
+            text.append(_pdf_right_text(STATEMENT_RIGHT, y, value_text, size=8, font='F2' if bold else 'F1'))
+        else:
+            text.append(_pdf_text_command(x, y, value_text, size=8, font='F2' if bold else 'F1'))
+
+
+def _statement_first_page(view, logo_command):
+    draw = [logo_command] if logo_command else []
+    text = ['BT']
+    issuer_lines = [view.get('issuer_name') or '']
+    issuer_lines.extend(line for line in [
+        view.get('issuer_phone') or '',
+        view.get('issuer_email') or '',
+        f"VAT No: {view['issuer_vat_number']}" if view.get('issuer_vat_number') else '',
+        f"Company Reg No: {view['issuer_company_reg_no']}" if view.get('issuer_company_reg_no') else '',
+    ] if line)
+    issuer_lines.extend(line for line in (view.get('issuer_address') or []) if line)
+    _add_pdf_lines(text, LEFT_BLOCK_X, 715, issuer_lines, size=8.2, leading=10, max_lines=9)
+
+    text.append(_pdf_text_command(STATEMENT_DETAIL_X, 760, STATEMENT_TITLE, size=8.5, font='F2'))
+    _add_pdf_lines(text, STATEMENT_DETAIL_X, 746, [
+        f"Customer no: {view.get('customer_id')}",
+        f"Period: {view.get('period_label')}",
+        f"Generated: {display_local_datetime(view.get('generated_at'))}",
+    ], size=8, leading=13)
+
+    customer_lines = ['Bill To:', *(view.get('customer_lines') or [])]
+    visible_customer_lines = customer_lines[:16]
+    text.append(_pdf_text_command(LEFT_BLOCK_X, 625, visible_customer_lines[0], size=8.5, font='F2'))
+    _add_pdf_lines(text, LEFT_BLOCK_X, 612, visible_customer_lines[1:], size=8.5, leading=13)
+    customer_bottom_y = 625 - ((len(visible_customer_lines) - 1) * 13)
+    table_y = min(STATEMENT_FIRST_TABLE_Y, customer_bottom_y - 28)
+    page = {'draw': draw, 'text': text, 'y': table_y}
+    return page
+
+
+def _statement_summary_rows(view):
+    """Opening/closing only make sense when the statement covers a range."""
+    rows = []
+    ranged = bool(view.get('date_from') or view.get('date_to'))
+    if ranged:
+        rows.append(('Opening balance', view.get('opening_balance_display') or 'R0.00', False))
+    rows.append(('Invoices', view.get('invoiced_total_display') or 'R0.00', False))
+    rows.append(('Payments', view.get('paid_total_display') or 'R0.00', False))
+    rows.append(('Closing balance' if ranged else 'Balance outstanding',
+                 (view.get('closing_balance_display') if ranged else view.get('outstanding_balance_display')) or 'R0.00',
+                 True))
+    return rows
+
+
+def customer_statement_pdf_bytes(view):
+    """The customer statement PDF, paginated so no invoice/payment row is lost."""
+    view = view or {}
+    image_object, logo_command = _statement_logo_object()
+    pages = []
+    page = _statement_first_page(view, logo_command)
+    pages.append(page)
+
+    for section, heading in STATEMENT_SECTIONS:
+        rows = list(view.get(section) or [])
+        index = 0
+        continued = False
+        if not rows:
+            title = heading
+            page, first_row_y = _statement_open_section(pages, page, logo_command, section, title)
+            page['text'].append(_pdf_text_command(STATEMENT_LEFT + 4, first_row_y, 'None in this period', size=8))
+            page['y'] = first_row_y - STATEMENT_ROW_HEIGHT
+            continue
+        while index < len(rows):
+            title = f'{heading} (CONTINUED)' if continued else heading
+            page, y = _statement_open_section(pages, page, logo_command, section, title)
+            while index < len(rows) and y >= STATEMENT_BOTTOM:
+                _statement_draw_row(page['text'], section, rows[index], y)
+                y -= STATEMENT_ROW_HEIGHT
+                index += 1
+            page['y'] = y
+            continued = True
+            if index < len(rows):
+                page = _statement_new_page(pages, logo_command)
+
+    summary_rows = _statement_summary_rows(view)
+    summary_height = (len(summary_rows) * 14) + 4
+    if page['y'] - STATEMENT_SECTION_GAP - summary_height < STATEMENT_BOTTOM:
+        page = _statement_new_page(pages, logo_command)
+    summary_y = page['y'] - STATEMENT_SECTION_GAP
+    page['draw'].append(_pdf_rect(
+        STATEMENT_SUMMARY_X,
+        summary_y - ((len(summary_rows) - 1) * 14) - 5,
+        STATEMENT_SUMMARY_WIDTH,
+        summary_height,
+        stroke='0.82 0.86 0.91',
+        line_width=0.6,
+    ))
+    for row_index, (label, amount, bold) in enumerate(summary_rows):
+        line_y = summary_y - (row_index * 14)
+        page['text'].append(_pdf_text_command(STATEMENT_SUMMARY_X + 8, line_y, label, size=8.8, font='F2' if bold else 'F1'))
+        page['text'].append(_pdf_right_text(STATEMENT_SUMMARY_RIGHT, line_y, amount, size=8.8, font='F2' if bold else 'F1'))
+    page['y'] = summary_y - summary_height
+
+    total_pages = len(pages)
+    streams = []
+    for page_index, statement_page in enumerate(pages, start=1):
+        statement_page['text'].append(_pdf_text_command(
+            STATEMENT_LEFT, STATEMENT_FOOTER_Y, f"Customer statement: {view.get('statement_number') or ''}", size=7.5))
+        statement_page['text'].append(_pdf_right_text(
+            STATEMENT_RIGHT, STATEMENT_FOOTER_Y, f'Page {page_index} of {total_pages}', size=7.5))
+        statement_page['text'].append('ET')
+        streams.append('\n'.join(statement_page['draw'] + statement_page['text']).encode('latin-1', 'replace'))
+    return _pdf_objects(streams, image_object=image_object)
+
+
 def document_pdf_bytes(document_id):
     document, items = printable_document(document_id)
     if not document:

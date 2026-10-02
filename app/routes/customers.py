@@ -4,7 +4,9 @@ from io import StringIO
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
-from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, delete_customer, get_customer, list_customers, update_customer
+from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_statement, delete_customer, get_customer, list_customers, update_customer
+from app.services.pdf_documents import customer_statement_pdf_bytes
+from app.services.payments import normalise_payment_date_filter
 from app.services.settings import get_company_settings
 from app.services.customer_credits import customer_credit_balance, customer_credit_entries
 
@@ -92,6 +94,37 @@ def detail(customer_id):
         return redirect(url_for("customers.index"))
     orders = customer_orders(customer_id)
     return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=orders, customer_has_history=bool(orders) or customer_has_history(customer_id), custom_field_label=custom_field_label, client_verified_label=client_verified_label, customer_credit_balance=customer_credit_balance(customer_id), customer_credit_entries=customer_credit_entries(customer_id))
+
+
+@bp.route("/<int:customer_id>/statement")
+@login_required
+def statement(customer_id):
+    """Ticket ABI-341953085: the customer's statement of account as a PDF.
+
+    Read-only: it renders finalised invoices and active payments for the
+    customer, optionally limited to an inclusive ``date_from``/``date_to``
+    range, and never writes anything.
+    """
+    customer = get_customer(customer_id)
+    if not customer:
+        flash("Customer not found", "error")
+        return redirect(url_for("customers.index"))
+    view = customer_statement(
+        customer_id,
+        date_from=normalise_payment_date_filter(request.args.get("date_from")),
+        date_to=normalise_payment_date_filter(request.args.get("date_to")),
+    )
+    response = Response(
+        customer_statement_pdf_bytes(view),
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=CUSTOMER-STATEMENT-{customer_id}.pdf"},
+    )
+    # Statements are re-rendered from the current ledger on every request, so a
+    # browser/proxy must never reuse an older copy under this URL.
+    response.headers["Cache-Control"] = "no-store, no-cache, max-age=0, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @bp.route("/<int:customer_id>/delete", methods=["POST"])

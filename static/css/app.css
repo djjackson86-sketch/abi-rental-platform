@@ -414,3 +414,11 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 }
 .discount-label-wrap{display:inline-flex;align-items:center;gap:4px;min-width:0}
 .table-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+
+/* Ticket ABI-341953085: "Customer Statement" button plus its optional date range
+   on the customer page header. The dates are plain GET args that open the PDF in
+   a new tab, so nothing else on the page changes. */
+.header-actions .statement-form{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.statement-form label{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:var(--muted)}
+.statement-form input[type=date]{width:auto;min-width:150px;min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+.statement-form .btn{width:auto}

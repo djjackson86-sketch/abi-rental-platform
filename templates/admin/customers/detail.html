@@ -12,6 +12,12 @@
   </div>
   <div class="header-actions">
     <a class="btn ghost" href="{{ url_for('customers.index') }}">Back</a>
+    {# Ticket ABI-341953085: statement of account PDF (finalised invoices + payments), with an optional inclusive date range. #}
+    <form class="statement-form" method="get" action="{{ url_for('customers.statement', customer_id=customer.id) }}" target="_blank" rel="noopener">
+      <label>From <input type="date" name="date_from" value="{{ request.args.get('date_from', '') }}"></label>
+      <label>To <input type="date" name="date_to" value="{{ request.args.get('date_to', '') }}"></label>
+      <button class="btn ghost" type="submit">Customer Statement</button>
+    </form>
     <a class="btn primary" href="{{ url_for('customers.edit', customer_id=customer.id) }}">Edit customer</a>
   </div>
 </header>

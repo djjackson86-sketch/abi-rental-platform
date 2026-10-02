@@ -2,6 +2,8 @@ import json
 
 from app.db import get_db, now
 from app.services.access import current_session_user_id, session_active_branch_id, session_primary_branch_id
+from app.services.payments import _active_payment_clause, normalise_payment_date_filter
+from app.services.settings import get_company_settings
 
 VALID_TYPES = {"individual", "company"}
 HIDDEN_CUSTOM_FIELD_KEYS = {
@@ -376,6 +378,237 @@ def customer_summary_for(customer):
         "is_blocked": customer_is_blocked(customer),
         "blocked_reason": blocked_reason_for(customer),
         "display": display,
+    }
+
+
+# --- Customer statement (ticket ABI-341953085) -------------------------------
+#
+# A read-only statement of account: one row per FINALISED invoice and one row per
+# ACTIVE payment (archived/deleted rows never appear), each dated by its own
+# transaction date — the invoice's own (finalised) date and the payment date —
+# so a caller can ask "what happened between these dates".
+#
+# The range still reconciles: everything dated before ``date_from`` becomes the
+# opening balance, then invoiced in range - paid in range = closing balance. With
+# no range at all the closing balance is simply the customer's live outstanding
+# position on this document ledger (invoiced - paid).
+#
+# Nothing here writes: no schema change, no totals recomputed, no document
+# touched. Draft invoices are excluded because only finalised invoices are
+# invoiced money, and cancelled orders are excluded so a cancelled booking's
+# lines never inflate the statement. Archived orders ARE included: archiving
+# hides an order from the working lists, it does not un-invoice it, and hiding
+# real debt from a statement of account would be the worse lie.
+STATEMENT_EXCLUDED_ORDER_STATUSES = ("canceled", "cancelled")
+STATEMENT_EMPTY_LABEL = "None in this period"
+
+
+def _statement_day(value):
+    """The YYYY-MM-DD the transaction belongs to (dates compare as text)."""
+    return str(value or "").strip()[:10]
+
+
+def _statement_money(value):
+    try:
+        return round(float(value or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _statement_money_display(value):
+    return f"R{_statement_money(value):.2f}"
+
+
+def _statement_setting(settings, key, default=""):
+    if not settings:
+        return default
+    try:
+        value = settings[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def _statement_branch(customer):
+    """The customer's own branch row, when the record claims one."""
+    try:
+        branch_id = customer["branch_id"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if not branch_id:
+        return None
+    return get_db().execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
+
+
+def customer_statement(customer_id, date_from="", date_to="", generated_at=None):
+    """The data behind the customer statement PDF (or ``None`` if unknown).
+
+    ``date_from``/``date_to`` are normalised with the same helper the payments
+    screen uses, so junk is ignored rather than raising, and the two bounds are
+    inclusive. A reversed range is a typo, not a request for an empty statement,
+    so the bounds are swapped.
+    """
+    customer = get_customer(customer_id)
+    if not customer:
+        return None
+    date_from = normalise_payment_date_filter(date_from)
+    date_to = normalise_payment_date_filter(date_to)
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+
+    db = get_db()
+    invoice_rows = db.execute(
+        """SELECT d.id AS document_id, d.number AS number, d.created_at AS invoice_at,
+                  o.order_number AS order_number, o.total AS total
+           FROM documents d
+           JOIN orders o ON o.id = d.order_id
+           WHERE o.customer_id = ?
+             AND d.document_type = 'invoice'
+             AND d.status = 'finalized'
+             AND LOWER(COALESCE(o.status, '')) NOT IN (?, ?)
+           ORDER BY d.created_at, d.id""",
+        (customer_id, *STATEMENT_EXCLUDED_ORDER_STATUSES),
+    ).fetchall()
+    payment_rows = db.execute(
+        f"""SELECT p.id AS payment_id, p.amount AS amount, p.method AS method,
+                   p.reference AS reference,
+                   COALESCE(NULLIF(p.payment_date, ''), p.created_at) AS paid_at,
+                   o.order_number AS order_number
+            FROM payments p
+            JOIN orders o ON o.id = p.order_id
+            WHERE o.customer_id = ? AND {_active_payment_clause('p')}
+            ORDER BY paid_at, p.id""",
+        (customer_id,),
+    ).fetchall()
+
+    invoices = []
+    payments = []
+    opening_invoiced = 0.0
+    opening_paid = 0.0
+    invoiced_total = 0.0
+    paid_total = 0.0
+    lifetime_invoiced = 0.0
+    lifetime_paid = 0.0
+
+    for row in invoice_rows:
+        amount = _statement_money(row["total"])
+        lifetime_invoiced += amount
+        day = _statement_day(row["invoice_at"])
+        if date_from and day < date_from:
+            opening_invoiced += amount
+            continue
+        if date_to and day > date_to:
+            continue
+        invoiced_total += amount
+        invoices.append({
+            "date": day,
+            "number": (row["number"] or "").strip() or "Unnumbered",
+            "order_number": row["order_number"] or "—",
+            "amount": amount,
+            "amount_display": _statement_money_display(amount),
+        })
+
+    for row in payment_rows:
+        amount = _statement_money(row["amount"])
+        lifetime_paid += amount
+        day = _statement_day(row["paid_at"])
+        if date_from and day < date_from:
+            opening_paid += amount
+            continue
+        if date_to and day > date_to:
+            continue
+        paid_total += amount
+        payments.append({
+            "date": day,
+            "method": (row["method"] or "manual").replace("_", " ").title(),
+            "reference": (row["reference"] or "").strip(),
+            "order_number": row["order_number"] or "—",
+            "amount": amount,
+            "amount_display": _statement_money_display(amount),
+        })
+
+    opening_balance = round(opening_invoiced - opening_paid, 2)
+    invoiced_total = round(invoiced_total, 2)
+    paid_total = round(paid_total, 2)
+    closing_balance = round(opening_balance + invoiced_total - paid_total, 2)
+
+    settings = get_company_settings()
+    branch = _statement_branch(customer)
+    issuer_name = _statement_setting(branch, "name", "") or _statement_setting(settings, "company_name", "")
+    issuer_phone = _statement_setting(branch, "phone", "") or _statement_setting(settings, "phone", "")
+    issuer_email = _statement_setting(branch, "email", "") or _statement_setting(settings, "email", "")
+    issuer_vat_number = str(_statement_setting(settings, "vat_number", "") or "").strip()
+    issuer_company_reg_no = str(_statement_setting(settings, "company_reg_no", "") or "").strip()
+    issuer_address = [
+        _statement_setting(branch, "address_line1", "") or _statement_setting(settings, "address_line1", ""),
+        _statement_setting(branch, "address_line2", "") or _statement_setting(settings, "address_line2", ""),
+        _statement_setting(branch, "city", "") or _statement_setting(settings, "city", ""),
+        " ".join(part for part in [
+            _statement_setting(branch, "province", "") or _statement_setting(settings, "province", ""),
+            _statement_setting(branch, "postal_code", "") or _statement_setting(settings, "postcode", ""),
+        ] if part),
+    ]
+
+    custom_fields = custom_fields_for(customer)
+    customer_lines = [customer["name"] or "-"]
+    if customer["email"]:
+        customer_lines.append(customer["email"])
+    if customer["phone"]:
+        customer_lines.append(customer["phone"])
+    if (customer["customer_type"] or "") == "company":
+        vat_number = str(custom_fields.get("vat_number") or "").strip()
+        company_reg_no = str(custom_fields.get("company_reg_no") or "").strip()
+        if vat_number:
+            customer_lines.append(f"VAT No: {vat_number}")
+        if company_reg_no:
+            customer_lines.append(f"Company Reg No: {company_reg_no}")
+    customer_lines.extend(line for line in [
+        customer["address_line1"],
+        customer["address_line2"],
+        customer["suburb"],
+        customer["city"],
+        " ".join(part for part in [customer["province"], customer["postal_code"]] if part),
+        customer["country"],
+    ] if line)
+
+    if date_from and date_to:
+        period_label = f"{date_from} to {date_to}"
+    elif date_from:
+        period_label = f"From {date_from}"
+    elif date_to:
+        period_label = f"Up to {date_to}"
+    else:
+        period_label = "Full history"
+
+    return {
+        "customer_id": customer["id"],
+        "customer_name": customer["name"] or "-",
+        "customer_lines": customer_lines,
+        "statement_number": f"CUSTOMER-STATEMENT-{customer['id']}",
+        "issuer_name": issuer_name,
+        "issuer_phone": issuer_phone,
+        "issuer_email": issuer_email,
+        "issuer_vat_number": issuer_vat_number,
+        "issuer_company_reg_no": issuer_company_reg_no,
+        "issuer_address": issuer_address,
+        "date_from": date_from,
+        "date_to": date_to,
+        "period_label": period_label,
+        "generated_at": generated_at or now(),
+        "invoices": invoices,
+        "payments": payments,
+        "invoice_count": len(invoices),
+        "payment_count": len(payments),
+        "opening_balance": opening_balance,
+        "invoiced_total": invoiced_total,
+        "paid_total": paid_total,
+        "closing_balance": closing_balance,
+        "outstanding_balance": round(lifetime_invoiced - lifetime_paid, 2),
+        "opening_balance_display": _statement_money_display(opening_balance),
+        "invoiced_total_display": _statement_money_display(invoiced_total),
+        "paid_total_display": _statement_money_display(paid_total),
+        "closing_balance_display": _statement_money_display(closing_balance),
+        "outstanding_balance_display": _statement_money_display(lifetime_invoiced - lifetime_paid),
     }
 
 
