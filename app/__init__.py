@@ -116,7 +116,13 @@ def create_app(test_config=None):
         # /popia. pack_notification() runs one acceptance query and, at most, one
         # hash per already-adopted document, so the bar stays cheap on every page.
         popia_notification = pack_notification() if is_main_session(session) else None
+        from app.services.settings import get_company_settings
+        try:
+            company_settings = get_company_settings()
+        except Exception:
+            company_settings = None
         return {
+            "settings": company_settings,
             "current_user_is_main": is_main_session(session),
             "user_can": lambda module: user_can_module(session, module),
             # Who is signed in, for the dashboard's greeting. Both fall back to

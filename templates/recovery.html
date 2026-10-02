@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Recover access | Sano Trailers{% endblock %}
+{% block title %}Recover access | {{ settings.company_name if settings is defined and settings else 'ABI Rental Platform' }}{% endblock %}
 {% block body_class %}login-body{% endblock %}
 {% block body %}
 <main class="login-card">
-  <img class="brand-logo" src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers">
+  <h1>{{ settings.company_name if settings is defined and settings else 'ABI Rental Platform' }}</h1>
   <h1>Recover access</h1>
   {% if not configured %}
     <p class="muted">Recovery is not configured on this system. Ask your service provider to set the master password.</p>

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Which branch? | Sano Trailers{% endblock %}
+{% block title %}Which branch? | {{ settings.company_name if settings is defined and settings else 'ABI Rental Platform' }}{% endblock %}
 {% block body_class %}login-body{% endblock %}
 {% block body %}
 <main class="login-card">
-  <img class="brand-logo" src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers">
+  <h1>{{ settings.company_name if settings is defined and settings else 'ABI Rental Platform' }}</h1>
   <h1>Which branch are you managing?</h1>
   <p class="muted">Choose the depot for this sign-in. Your dashboard, orders, inventory, calendar and reports will show that branch only until you change it.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
