@@ -256,7 +256,9 @@ def test_statement_pdf_carries_the_company_and_customer_details(client, app):
     assert "Bill To:" in source
     assert "(Statement Customer)" in source
     assert "(12 Statement Street)" in source
-    assert "INVOICES" in source and "PAYMENTS" in source
+    assert "INVOICES" not in source and "PAYMENTS" not in source
+    assert "ACTIVITY" in source
+    assert "(TYPE)" in source and "(DETAIL)" in source
     assert "INV-90001" in source and "ORD-ST-1" in source
     assert "EFT ref 88" in source
     assert "Balance outstanding" in source
@@ -288,16 +290,18 @@ def test_statement_pdf_paginates_and_keeps_every_invoice_and_payment(client, app
         assert view["payment_count"] == 45
         pdf_bytes = customer_statement_pdf_bytes(view)
     source = pdf_source(pdf_bytes)
-    for number in expected_invoices:
-        assert f"({number})" in source, f"{number} never reached the statement"
+    # Every row still reaches the page — as the merged table's DETAIL cell, so the
+    # invoice number now travels with its order number in brackets.
+    for index, number in enumerate(expected_invoices):
+        assert f"{number} \\(ORD-LONG-{index:03d}\\)" in source, f"{number} never reached the statement"
     for reference in expected_payments:
-        assert f"({reference})" in source, f"{reference} never reached the statement"
-    # The statement runs over more than one page and says so, continuing both
-    # sections with repeated headings rather than dropping rows. (Inner
-    # parentheses are escaped in the PDF text command, hence the backslashes.)
+        assert reference in source, f"{reference} never reached the statement"
+    # The statement runs over more than one page and says so, continuing the table
+    # with a repeated caption rather than dropping rows. (Inner parentheses are
+    # escaped in the PDF text command, hence the backslashes.)
     assert "Page 1 of" in source
     assert "Page 2 of" in source
-    assert "INVOICES \\(CONTINUED\\)" in source
+    assert "ACTIVITY \\(CONTINUED\\)" in source
     assert pdf_bytes.count(b"/Type /Page ") >= 2
 
 
@@ -314,3 +318,98 @@ def test_customer_detail_page_offers_the_statement_button_with_a_date_range(clie
     assert 'name="date_from"' in body
     assert 'name="date_to"' in body
     assert 'target="_blank"' in body
+
+
+# --- Ticket ABI-341953086: one merged, date-sorted activity table -----------------
+
+
+def test_activity_merges_invoices_and_payments_in_date_order(client, app):
+    """The two tables became one list, interleaved by date, not invoices-then-payments."""
+    login(client)
+    with app.app_context():
+        customer_id = seed_ticket_ledger(get_db())
+        get_db().commit()
+        view = customer_statement(customer_id)
+
+    activity = view["activity"]
+    assert view["activity_count"] == 4
+    assert [row["date"] for row in activity] == ["2026-08-10", "2026-08-12", "2026-09-05", "2026-09-06"]
+    assert [row["type"] for row in activity] == ["Invoice", "Payment", "Invoice", "Payment"]
+    assert [row["detail"] for row in activity] == [
+        "INV-90001 (ORD-ST-1)",
+        "Cash · EFT ref 88",
+        "INV-90002 (ORD-ST-2)",
+        "Eft",
+    ]
+    assert [row["amount_display"] for row in activity] == ["R1150.00", "R1150.00", "R575.00", "R300.00"]
+    # The merge never changes the money: the activity rows are the same amounts the
+    # summary block reconciles (invoiced 1725.00, paid 1450.00, closing 275.00).
+    assert round(sum(row["amount"] for row in activity if row["type"] == "Invoice"), 2) == view["invoiced_total"] == 1725.0
+    assert round(sum(row["amount"] for row in activity if row["type"] == "Payment"), 2) == view["paid_total"] == 1450.0
+    assert view["closing_balance"] == 275.0
+
+
+def test_activity_same_date_rows_tie_break_deterministically(client, app):
+    """Same date: invoices before payments, then the row's own id — never insertion luck."""
+    login(client)
+    with app.app_context():
+        db = get_db()
+        customer_id = seed_customer(db)
+        order_id = seed_order(db, customer_id, "ORD-TIE-1", 900.0)
+        # Both payments are inserted FIRST, so their ids are lower than the
+        # document's: the tie-break must still put the invoice first.
+        seed_payment(db, order_id, 100.0, "2026-10-01T09:00:00", method="cash", reference="PAY-A")
+        seed_payment(db, order_id, 200.0, "2026-10-01T10:00:00", method="eft", reference="PAY-B")
+        seed_invoice(db, order_id, "INV-93001", created_at="2026-10-01T08:00:00")
+        db.commit()
+        view = customer_statement(customer_id)
+        second_view = customer_statement(customer_id)
+
+    assert view["activity_count"] == 3
+    assert [(row["date"], row["type"], row["detail"]) for row in view["activity"]] == [
+        ("2026-10-01", "Invoice", "INV-93001 (ORD-TIE-1)"),
+        ("2026-10-01", "Payment", "Cash · PAY-A"),
+        ("2026-10-01", "Payment", "Eft · PAY-B"),
+    ]
+    # Re-reading the same ledger produces the identical order (a page break landing
+    # mid-date can never shuffle rows between runs).
+    assert view["activity"] == second_view["activity"]
+
+
+def test_statement_pdf_prints_one_activity_table_in_date_order(client, app):
+    login(client)
+    with app.app_context():
+        customer_id = seed_ticket_ledger(get_db())
+        get_db().commit()
+        source = pdf_source(customer_statement_pdf_bytes(customer_statement(customer_id)))
+
+    # One table, one caption, one band: DATE | TYPE | DETAIL | AMOUNT.
+    assert source.count("(ACTIVITY)") == 1
+    assert "INVOICES" not in source and "PAYMENTS" not in source
+    assert "(DATE)" in source and "(TYPE)" in source and "(DETAIL)" in source and "(AMOUNT)" in source
+    # Order in the drawn page stream: the August invoice, then its August payment,
+    # then the September invoice and payment (the old layout printed both invoices
+    # first, then both payments).
+    assert source.index("INV-90001") < source.index("EFT ref 88") < source.index("INV-90002")
+    # Both row types carry their merged detail and their own amount. The inner
+    # parentheses of the invoice detail are escaped in the PDF text command.
+    assert "(Cash · EFT ref 88)" in source
+    assert "(INV-90001 \\(ORD-ST-1\\))" in source
+    assert "(R1150.00)" in source and "(R300.00)" in source
+
+
+def test_statement_pdf_activity_table_shows_the_empty_state_once(client, app):
+    login(client)
+    with app.app_context():
+        db = get_db()
+        customer_id = seed_customer(db, name="Empty Ledger Customer", email="empty@example.com")
+        seed_order(db, customer_id, "ORD-EMPTY-1", 0.0, status="draft")
+        db.commit()
+        view = customer_statement(customer_id)
+        assert view["activity_count"] == 0
+        source = pdf_source(customer_statement_pdf_bytes(view))
+
+    # The emptied statement reads as ONE table with nothing in it, not two.
+    assert source.count("(ACTIVITY)") == 1
+    assert source.count("(None in this period)") == 1
+    assert "INVOICES" not in source and "PAYMENTS" not in source

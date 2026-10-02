@@ -401,6 +401,11 @@ def customer_summary_for(customer):
 # real debt from a statement of account would be the worse lie.
 STATEMENT_EXCLUDED_ORDER_STATUSES = ("canceled", "cancelled")
 STATEMENT_EMPTY_LABEL = "None in this period"
+# The merged ACTIVITY table (ticket ABI-341953086) sorts on these ranks: on the
+# same date an invoice comes before a payment, then the row's own id breaks the
+# remaining ties.
+STATEMENT_ACTIVITY_INVOICE_RANK = 0
+STATEMENT_ACTIVITY_PAYMENT_RANK = 1
 
 
 def _statement_day(value):
@@ -443,6 +448,10 @@ def _statement_branch(customer):
 def customer_statement(customer_id, date_from="", date_to="", generated_at=None):
     """The data behind the customer statement PDF (or ``None`` if unknown).
 
+    ``activity`` is the invoices and payments merged into one date-sorted table —
+    that is what the statement prints (ticket ABI-341953086); ``invoices`` and
+    ``payments`` stay as-is because the summary totals are built from them.
+
     ``date_from``/``date_to`` are normalised with the same helper the payments
     screen uses, so junk is ignored rather than raising, and the two bounds are
     inclusive. A reversed range is a typo, not a request for an empty statement,
@@ -483,6 +492,7 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
 
     invoices = []
     payments = []
+    activity = []
     opening_invoiced = 0.0
     opening_paid = 0.0
     invoiced_total = 0.0
@@ -500,12 +510,24 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         if date_to and day > date_to:
             continue
         invoiced_total += amount
+        number = (row["number"] or "").strip() or "Unnumbered"
+        order_number = row["order_number"] or "—"
+        amount_display = _statement_money_display(amount)
         invoices.append({
             "date": day,
-            "number": (row["number"] or "").strip() or "Unnumbered",
-            "order_number": row["order_number"] or "—",
+            "number": number,
+            "order_number": order_number,
             "amount": amount,
-            "amount_display": _statement_money_display(amount),
+            "amount_display": amount_display,
+        })
+        activity.append({
+            "date": day,
+            "type": "Invoice",
+            "detail": f"{number} ({order_number})",
+            "amount": amount,
+            "amount_display": amount_display,
+            "type_rank": STATEMENT_ACTIVITY_INVOICE_RANK,
+            "source_id": row["document_id"],
         })
 
     for row in payment_rows:
@@ -518,14 +540,34 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         if date_to and day > date_to:
             continue
         paid_total += amount
+        method = (row["method"] or "manual").replace("_", " ").title()
+        reference = (row["reference"] or "").strip()
+        amount_display = _statement_money_display(amount)
         payments.append({
             "date": day,
-            "method": (row["method"] or "manual").replace("_", " ").title(),
-            "reference": (row["reference"] or "").strip(),
+            "method": method,
+            "reference": reference,
             "order_number": row["order_number"] or "—",
             "amount": amount,
-            "amount_display": _statement_money_display(amount),
+            "amount_display": amount_display,
         })
+        activity.append({
+            "date": day,
+            "type": "Payment",
+            "detail": f"{method} · {reference}" if reference else method,
+            "amount": amount,
+            "amount_display": amount_display,
+            "type_rank": STATEMENT_ACTIVITY_PAYMENT_RANK,
+            "source_id": row["payment_id"],
+        })
+
+    # Ticket ABI-341953086: the statement prints ONE chronological activity table
+    # instead of separate INVOICES / PAYMENTS tables. The two source lists above
+    # stay (the summary block's totals are built from them). Rows sort by date,
+    # then invoices before payments on the same date, then the row's own id —
+    # a deterministic tie-break so a page break landing mid-date can never
+    # shuffle the order.
+    activity.sort(key=lambda item: (item["date"], item["type_rank"], item["source_id"]))
 
     opening_balance = round(opening_invoiced - opening_paid, 2)
     invoiced_total = round(invoiced_total, 2)
@@ -597,8 +639,10 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         "generated_at": generated_at or now(),
         "invoices": invoices,
         "payments": payments,
+        "activity": activity,
         "invoice_count": len(invoices),
         "payment_count": len(payments),
+        "activity_count": len(activity),
         "opening_balance": opening_balance,
         "invoiced_total": invoiced_total,
         "paid_total": paid_total,

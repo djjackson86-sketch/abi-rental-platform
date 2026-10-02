@@ -1048,11 +1048,11 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 # A statement of account the client hands to a customer, so it wears the same
 # clothes as the invoice: the SANO logo and issuer block top-left, the customer's
 # "Bill To" block on the left, and the invoice's own table styling (black column
-# band, right-aligned money). Two sections — INVOICES then PAYMENTS — flow across
-# as many pages as their rows need, repeating the column band and a page number
-# on every continuation page, and the opening/closing balance closes the range's
-# arithmetic. Rows are one line each, so nothing can be silently truncated
-# (ABI-341953022).
+# band, right-aligned money). One ACTIVITY table — invoices and payments merged
+# and sorted by date (ABI-341953086) — flows across as many pages as its rows
+# need, repeating the column band and a page number on every continuation page,
+# and the opening/closing balance closes the range's arithmetic. Rows are one
+# line each, so nothing can be silently truncated (ABI-341953022).
 STATEMENT_TITLE = 'CUSTOMER STATEMENT'
 STATEMENT_LEFT = LEFT_BLOCK_X
 STATEMENT_RIGHT = INVOICE_TABLE_RIGHT_EDGE
@@ -1072,49 +1072,38 @@ STATEMENT_SUMMARY_WIDTH = 177
 STATEMENT_SUMMARY_RIGHT = INVOICE_TABLE_RIGHT_EDGE - 9
 STATEMENT_FOOTER_Y = 40
 STATEMENT_DETAIL_X = 400
-# Column geometry. Dates and numbers are short, so the columns stay wide enough
-# that a reference (the only free text) is the single column that can be clipped,
-# and it is clipped with a visible ellipsis rather than run into the amount.
+# Column geometry for the merged table: DATE | TYPE | DETAIL | AMOUNT. Date and
+# type are short fixed-width values (10 and 7 characters), so DETAIL is the only
+# column that can be clipped, and it is clipped with a visible ellipsis rather
+# than being allowed to run into the right-aligned money. DETAIL ends at 468pt,
+# well left of the widest realistic amount ("R1 234 567.89" right-aligned on
+# STATEMENT_RIGHT starts at ~494pt).
 STATEMENT_DATE_X = STATEMENT_LEFT
-STATEMENT_METHOD_X = 110
-STATEMENT_INVOICE_X = 110
-STATEMENT_ORDER_X = 200
-STATEMENT_REFERENCE_X = 210
-STATEMENT_REFERENCE_WIDTH = 250
-STATEMENT_SECTIONS = (
-    ('invoices', 'INVOICES'),
-    ('payments', 'PAYMENTS'),
-)
+STATEMENT_TYPE_X = 118
+STATEMENT_DETAIL_COLUMN_X = 172
+STATEMENT_DETAIL_COLUMN_WIDTH = 296
+# ACTIVITY is the single table's caption, and it is also the caption used on a
+# continuation page.
+STATEMENT_ACTIVITY_TITLE = 'ACTIVITY'
 
 
-def _statement_columns(section):
-    if section == 'invoices':
-        return (
-            {'label': 'DATE', 'x': STATEMENT_DATE_X},
-            {'label': 'INVOICE', 'x': STATEMENT_INVOICE_X},
-            {'label': 'ORDER', 'x': STATEMENT_ORDER_X},
-            {'label': 'AMOUNT', 'right': STATEMENT_RIGHT},
-        )
+def _statement_columns():
+    """The merged activity table's columns: DATE | TYPE | DETAIL | AMOUNT."""
     return (
         {'label': 'DATE', 'x': STATEMENT_DATE_X},
-        {'label': 'METHOD', 'x': STATEMENT_METHOD_X},
-        {'label': 'REFERENCE', 'x': STATEMENT_REFERENCE_X},
+        {'label': 'TYPE', 'x': STATEMENT_TYPE_X},
+        {'label': 'DETAIL', 'x': STATEMENT_DETAIL_COLUMN_X},
         {'label': 'AMOUNT', 'right': STATEMENT_RIGHT},
     )
 
 
-def _statement_row_cells(section, row):
-    if section == 'invoices':
-        return (
-            (STATEMENT_DATE_X, row.get('date') or '', False),
-            (STATEMENT_INVOICE_X, row.get('number') or '', False),
-            (STATEMENT_ORDER_X, row.get('order_number') or '', False),
-            (None, row.get('amount_display') or '', False),
-        )
+def _statement_row_cells(row):
+    """One activity row. Invoices and payments share the same four columns."""
     return (
         (STATEMENT_DATE_X, row.get('date') or '', False),
-        (STATEMENT_METHOD_X, row.get('method') or '', False),
-        (STATEMENT_REFERENCE_X, _pdf_fit(row.get('reference') or '', 8, STATEMENT_REFERENCE_WIDTH), False),
+        (STATEMENT_TYPE_X, row.get('type') or '', False),
+        (STATEMENT_DETAIL_COLUMN_X,
+         _pdf_fit(row.get('detail') or '', 8, STATEMENT_DETAIL_COLUMN_WIDTH), False),
         (None, row.get('amount_display') or '', False),
     )
 
@@ -1161,8 +1150,8 @@ def _statement_rows_that_fit(first_row_y):
     return int((first_row_y - STATEMENT_BOTTOM) // STATEMENT_ROW_HEIGHT) + 1
 
 
-def _statement_open_section(pages, page, logo_command, section, title):
-    """Start a section, moving to a fresh page unless heading+one row fit here."""
+def _statement_open_section(pages, page, logo_command, title):
+    """Start the activity table, moving to a fresh page unless heading+one row fit here."""
     while True:
         heading_y = page['y'] - STATEMENT_SECTION_GAP
         band_y = heading_y - STATEMENT_HEADING_DROP
@@ -1171,13 +1160,13 @@ def _statement_open_section(pages, page, logo_command, section, title):
             break
         page = _statement_new_page(pages, logo_command)
     page['text'].append(_pdf_text_command(STATEMENT_LEFT, heading_y, title.upper(), size=8.6, font='F2'))
-    _statement_draw_band(page['draw'], page['text'], band_y, _statement_columns(section))
+    _statement_draw_band(page['draw'], page['text'], band_y, _statement_columns())
     page['y'] = first_row_y
     return page, first_row_y
 
 
-def _statement_draw_row(text, section, row, y):
-    cells = _statement_row_cells(section, row)
+def _statement_draw_row(text, row, y):
+    cells = _statement_row_cells(row)
     for index, (x, value_text, bold) in enumerate(cells):
         if index == len(cells) - 1:
             text.append(_pdf_right_text(STATEMENT_RIGHT, y, value_text, size=8, font='F2' if bold else 'F1'))
@@ -1230,34 +1219,33 @@ def _statement_summary_rows(view):
 
 
 def customer_statement_pdf_bytes(view):
-    """The customer statement PDF, paginated so no invoice/payment row is lost."""
+    """The customer statement PDF, paginated so no activity row is lost."""
     view = view or {}
     image_object, logo_command = _statement_logo_object()
     pages = []
     page = _statement_first_page(view, logo_command)
     pages.append(page)
 
-    for section, heading in STATEMENT_SECTIONS:
-        rows = list(view.get(section) or [])
-        index = 0
-        continued = False
-        if not rows:
-            title = heading
-            page, first_row_y = _statement_open_section(pages, page, logo_command, section, title)
-            page['text'].append(_pdf_text_command(STATEMENT_LEFT + 4, first_row_y, 'None in this period', size=8))
-            page['y'] = first_row_y - STATEMENT_ROW_HEIGHT
-            continue
-        while index < len(rows):
-            title = f'{heading} (CONTINUED)' if continued else heading
-            page, y = _statement_open_section(pages, page, logo_command, section, title)
-            while index < len(rows) and y >= STATEMENT_BOTTOM:
-                _statement_draw_row(page['text'], section, rows[index], y)
-                y -= STATEMENT_ROW_HEIGHT
-                index += 1
-            page['y'] = y
-            continued = True
-            if index < len(rows):
-                page = _statement_new_page(pages, logo_command)
+    # One chronological table: the service merges the invoices and the payments
+    # (and sorts them) into ``activity`` (ticket ABI-341953086).
+    rows = list(view.get('activity') or [])
+    index = 0
+    continued = False
+    if not rows:
+        page, first_row_y = _statement_open_section(pages, page, logo_command, STATEMENT_ACTIVITY_TITLE)
+        page['text'].append(_pdf_text_command(STATEMENT_LEFT + 4, first_row_y, 'None in this period', size=8))
+        page['y'] = first_row_y - STATEMENT_ROW_HEIGHT
+    while index < len(rows):
+        title = f'{STATEMENT_ACTIVITY_TITLE} (CONTINUED)' if continued else STATEMENT_ACTIVITY_TITLE
+        page, y = _statement_open_section(pages, page, logo_command, title)
+        while index < len(rows) and y >= STATEMENT_BOTTOM:
+            _statement_draw_row(page['text'], rows[index], y)
+            y -= STATEMENT_ROW_HEIGHT
+            index += 1
+        page['y'] = y
+        continued = True
+        if index < len(rows):
+            page = _statement_new_page(pages, logo_command)
 
     summary_rows = _statement_summary_rows(view)
     summary_height = (len(summary_rows) * 14) + 4
