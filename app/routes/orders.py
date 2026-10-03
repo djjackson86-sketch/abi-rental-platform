@@ -5,7 +5,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.customer_credits import customer_credit_balance
@@ -480,6 +480,7 @@ def detail(order_id):
         sales_repairs_label=SALES_REPAIRS_LABEL,
         status_label=status_label,
         actions=status_actions(order["status"], has_rental_items=has_rental_items),
+        pickup_missing_critical_fields=missing_pickup_critical_customer_fields(order),
         documents=documents,
         has_invoice=has_invoice,
         finalized_invoice_exists=finalized_invoice_exists,
@@ -753,13 +754,23 @@ def unarchive(order_id):
 @bp.post("/<int:order_id>/<action>")
 @login_required
 def change_status(order_id, action):
-    _ensure_order_access(order_id)
+    order = _ensure_order_access(order_id)
     if action in {"archive", "revert_draft", "unarchive"} and not is_main_session(session):
         # Belt and braces: the dedicated routes above carry the gate, and this
         # refuses the same actions through the generic catch-all (a crafted URL
         # must not be able to sidestep the main-profile rule). Archive is also
         # main-only: staff may still run ordinary operational status changes.
         abort(403)
+    if action == "start" and order and (request.form.get("pickup_critical_confirm") or "").strip() != "1":
+        missing = missing_pickup_critical_customer_fields(order)
+        if missing:
+            flash(
+                "Critical customer details are missing for pickup: "
+                + ", ".join(missing)
+                + ". Confirm pickup to continue without them.",
+                "warning",
+            )
+            return redirect(url_for("orders.detail", order_id=order_id))
     try:
         message = transition_order(order_id, action)
         flash(message, "success")

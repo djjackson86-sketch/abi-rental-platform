@@ -40,7 +40,9 @@
       {% elif action == 'return' and not finalized_invoice_exists %}
         <button class="btn {{ style }}" type="button" disabled title="Finalize the invoice before returning this order">{{ label }}</button>
       {% else %}
-        <form method="post" action="{{ url_for('orders.change_status', order_id=order.id, action=action) }}" class="inline-form">
+        {% set pickup_warning_fields = pickup_missing_critical_fields if action == 'start' else [] %}
+        <form method="post" action="{{ url_for('orders.change_status', order_id=order.id, action=action) }}" class="inline-form"{% if pickup_warning_fields %} data-pickup-critical-missing='{{ pickup_warning_fields|tojson|e }}' onsubmit="return confirmCriticalPickup(this);"{% endif %}>
+          {% if action == 'start' %}<input type="hidden" name="pickup_critical_confirm" value="">{% endif %}
           <button class="btn {{ style }}" type="submit">{{ label }}</button>
         </form>
       {% endif %}
@@ -237,6 +239,16 @@
 </section>
 
 <script>
+function confirmCriticalPickup(form){
+  let missing=[];
+  try{ missing=JSON.parse(form.getAttribute('data-pickup-critical-missing')||'[]'); }catch(err){ missing=[]; }
+  if(!missing.length) return true;
+  const message='Critical customer details are missing:\n\n- '+missing.join('\n- ')+'\n\nAre you sure you want to pick up this order without this information?';
+  if(!window.confirm(message)) return false;
+  const field=form.querySelector('input[name="pickup_critical_confirm"]');
+  if(field) field.value='1';
+  return true;
+}
 (function(){
   const dateInput=document.getElementById('actual-return-date'); const timeInput=document.getElementById('actual-return-time'); const out=document.getElementById('actual-return-breakdown');
   function parse(dt, tm){ if(!dt) return null; const d=dt.split('-').map(Number); const t=(tm||'00:00').split(':').map(Number); if(d.length!==3||!d[0]) return null; return new Date(d[0], d[1]-1, d[2], t[0]||0, t[1]||0); }

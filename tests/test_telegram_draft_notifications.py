@@ -88,6 +88,13 @@ def seed_customer_and_product(client, quantity='4'):
         'name': 'Order Customer',
         'email': 'order@example.com',
         'phone': '+270****0000',
+        'address_line1': '1 Order Street',
+        'client_verified': '1',
+        'vehicle_make': 'Toyota',
+        'vehicle_color': 'White',
+        'vehicle_reg_no': 'ORD123GP',
+        'alternative_contact_name': 'Order Backup',
+        'alternative_contact_number': '+270****0001',
     }, follow_redirects=True)
     client.post('/inventory/new', data={
         'name': 'Order Trailer',

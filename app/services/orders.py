@@ -33,12 +33,65 @@ STATUS_LABELS = {
 
 BLOCKED_EDIT_STATUSES = {"archived", "canceled", "cancelled"}
 BLOCKED_EDIT_MESSAGE = "Canceled and archived orders cannot be edited"
+PICKUP_CRITICAL_CUSTOMER_FIELDS = [
+    ("customer_name", "Customer name"),
+    ("customer_phone", "Customer phone"),
+    ("customer_client_verified", "Client verified"),
+    ("customer_address_line1", "Address line 1"),
+    ("vehicle_make", "Vehicle Make"),
+    ("vehicle_color", "Vehicle Colour"),
+    ("vehicle_reg_no", "Vehicle Reg No"),
+    ("alternative_contact_name", "Alternative Contact Name"),
+    ("alternative_contact_number", "Alternative Contact Number"),
+]
 
 
 def status_label(status):
     """Display label for a stored status ("sales_repairs" -> "Sales/Repairs")."""
     value = (status or "").strip()
     return STATUS_LABELS.get(value) or value.replace("_", " ").title()
+
+
+def _row_value(row, key, default=""):
+    try:
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    return default if value is None else value
+
+
+def missing_pickup_critical_customer_fields(order):
+    """Customer details that should warn before a pickup is confirmed.
+
+    This is a warning gate only; the existing hard requirements (attached customer,
+    availability, return readiness, etc.) still live in ``transition_order``.
+    """
+    if not order or not _row_value(order, "customer_id", None):
+        return []
+    try:
+        custom_fields = json.loads(_row_value(order, "custom_fields_json", "{}") or "{}")
+    except (TypeError, ValueError):
+        custom_fields = {}
+    if custom_fields.get("vehicle_details") and not custom_fields.get("vehicle_make"):
+        custom_fields["vehicle_make"] = custom_fields.get("vehicle_details")
+    if custom_fields.get("alternative_contact") and not custom_fields.get("alternative_contact_name"):
+        custom_fields["alternative_contact_name"] = custom_fields.get("alternative_contact")
+
+    missing = []
+    for key, label in PICKUP_CRITICAL_CUSTOMER_FIELDS:
+        if key == "customer_client_verified":
+            try:
+                verified = int(_row_value(order, key, 0) or 0)
+            except (TypeError, ValueError):
+                verified = 0
+            if verified != 1:
+                missing.append(label)
+        elif key.startswith("customer_"):
+            if not str(_row_value(order, key, "") or "").strip():
+                missing.append(label)
+        elif not str(custom_fields.get(key) or "").strip():
+            missing.append(label)
+    return missing
 
 
 def can_edit_order_status(status):
