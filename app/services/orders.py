@@ -81,11 +81,19 @@ def missing_pickup_critical_customer_fields(order):
     for key, label in PICKUP_CRITICAL_CUSTOMER_FIELDS:
         if key == "customer_client_verified":
             try:
-                verified = int(_row_value(order, key, 0) or 0)
-            except (TypeError, ValueError):
-                verified = 0
-            if verified != 1:
-                missing.append(label)
+                raw_verified = order[key]
+            except (KeyError, IndexError, TypeError):
+                raw_verified = None
+            raw_text = "" if raw_verified is None else str(raw_verified).strip()
+            if not raw_text:
+                missing.append("Client verification unconfirmed")
+            else:
+                try:
+                    verified = int(raw_text)
+                except (TypeError, ValueError):
+                    verified = None
+                if verified != 1:
+                    missing.append("Client not verified")
         elif key.startswith("customer_"):
             if not str(_row_value(order, key, "") or "").strip():
                 missing.append(label)

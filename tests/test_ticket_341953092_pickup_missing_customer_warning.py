@@ -145,7 +145,7 @@ def test_missing_critical_customer_details_require_explicit_pickup_confirmation(
     missing = missing_fields_for(app, order_id)
     assert missing == [
         'Customer phone',
-        'Client verified',
+        'Client not verified',
         'Address line 1',
         'Vehicle Make',
         'Vehicle Colour',
@@ -170,6 +170,39 @@ def test_missing_critical_customer_details_require_explicit_pickup_confirmation(
     assert stored['picked_up_at']
 
 
+def test_pickup_warning_uses_not_verified_when_no_is_ticked(client, app):
+    login(client)
+    product_id = seed_product(client)
+    customer_id = create_customer(client, client_verified='0')
+    order_id = create_draft_order(client, customer_id, product_id)
+
+    assert missing_fields_for(app, order_id) == ['Client not verified']
+
+    page = client.get(f'/orders/{order_id}')
+    body = page.data.decode('utf-8')
+    assert 'data-pickup-critical-missing=' in body
+    assert 'Client not verified' in body
+    assert 'Client verification unconfirmed' not in body
+    assert 'Client verified' not in body
+
+
+@pytest.mark.parametrize('submitted_value', ['', '  '])
+def test_pickup_warning_uses_unconfirmed_when_verification_is_blank(client, app, submitted_value):
+    login(client)
+    product_id = seed_product(client)
+    customer_id = create_customer(client, client_verified=submitted_value)
+    order_id = create_draft_order(client, customer_id, product_id)
+
+    assert missing_fields_for(app, order_id) == ['Client verification unconfirmed']
+
+    page = client.get(f'/orders/{order_id}')
+    body = page.data.decode('utf-8')
+    assert 'data-pickup-critical-missing=' in body
+    assert 'Client verification unconfirmed' in body
+    assert 'Client not verified' not in body
+    assert 'Client verified' not in body
+
+
 def test_pickup_page_renders_mobile_confirmation_hook_for_missing_details(client, app):
     login(client)
     product_id = seed_product(client)
@@ -182,7 +215,7 @@ def test_pickup_page_renders_mobile_confirmation_hook_for_missing_details(client
     assert 'data-pickup-critical-missing=' in body
     assert 'confirmCriticalPickup(this)' in body
     assert 'Customer phone' in body
-    assert 'Client verified' in body
+    assert 'Client verification unconfirmed' in body
     assert 'pickup_critical_confirm' in body
 
 
