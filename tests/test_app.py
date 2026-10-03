@@ -1757,7 +1757,8 @@ def test_customerless_order_edit_keeps_picker_and_no_customer_copy(client):
     edit_page = client.get(f'/orders/{order_id}/edit')
 
     assert edit_page.status_code == 200
-    assert b'No customer yet. Search above to attach customer details before reserving or pickup.' in edit_page.data
+    assert b'No customer yet. Search above to attach customer details before reserving or pickup.' not in edit_page.data
+    assert b'id="customer-empty-state"' in edit_page.data
     assert b'id="customer-search"' in edit_page.data
     assert b'name="customer_id" id="customer-id" value=""' in edit_page.data
     assert b'id="customer-select"' not in edit_page.data

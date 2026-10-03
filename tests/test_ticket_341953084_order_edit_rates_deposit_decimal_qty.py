@@ -79,7 +79,7 @@ def test_edit_order_accepts_catalog_rate_override_deposit_override_and_decimal_q
 
     edit_page = client.get(f"/orders/{order_id}/edit")
     assert edit_page.status_code == 200
-    assert b'Unit defaults from inventory' in edit_page.data
+    assert b'name="custom_unit_price"' in edit_page.data
     assert b'name="security_deposit_amount"' in edit_page.data
     assert b'name="quantity" step="0.01" min="0.01"' in edit_page.data
 
@@ -149,3 +149,38 @@ def test_blank_security_deposit_override_keeps_inventory_deposit(client, app):
     assert order["subtotal"] == pytest.approx(250.0)
     assert order["deposit_total"] == pytest.approx(937.5)
     assert order["total"] == pytest.approx(1187.5)
+
+
+def test_order_form_keeps_controls_after_requested_helper_copy_is_removed(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    page = client.get("/orders/new")
+    assert page.status_code == 200
+
+    removed_copy = [
+        b"Create a draft order with rental period and catalogue/custom lines. Customer details can be added now or attached later from Edit order before reserving or pickup.",
+        b"No customer yet. Search above to attach customer details before reserving or pickup.",
+        b"Customer is optional for saving a draft. Add customer details before reserving or pickup.",
+        "Answer Yes or No once this client has been checked. A record nobody has answered for shows “Not set”.".encode(),
+        b"Return bookings use the same branch. One-way bookings move the product/trailer to the return branch when returned.",
+        b"Pickup defaults to the current/next 15-minute slot. Return defaults to tomorrow at the same time. You can still edit both manually.",
+        b"Minimum 1 rental day; partial days round up.",
+        b"Unit defaults from inventory for catalogue products. Edit the Unit field when this order needs a different rate.",
+        b"Security deposit is refundable and defaults from selected inventory. Edit the amount when this order needs a different security deposit. Damage waiver removes security deposit and adds the waiver fee to the order total.",
+        b"Estimate updates before saving. Security-deposit mode includes the refundable deposit in the estimated order total. Saved orders are still recalculated on the server.",
+    ]
+    for snippet in removed_copy:
+        assert snippet not in page.data
+
+    for marker in [
+        b'name="customer_id"',
+        b'id="customer-search"',
+        b'name="client_verified"',
+        b'id="booking-type"',
+        b'id="start-date"',
+        b'name="custom_unit_price"',
+        b'name="security_deposit_amount"',
+        b'id="order-estimate-panel"',
+    ]:
+        assert marker in page.data
