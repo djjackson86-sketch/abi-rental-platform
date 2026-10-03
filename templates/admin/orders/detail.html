@@ -206,7 +206,6 @@
       <label class="switch"><input type="checkbox" name="no_revision_required" value="1" class="checklist-auto-save" data-return-checklist-url="{{ url_for('orders.return_checklist', order_id=order.id) }}" {% if order.no_revision_required %}checked{% endif %}> No Revision Required<span class="checklist-save-state"></span></label>
     </div>
     <p class="form-help" id="actual-return-breakdown" data-start-at="{{ order.start_at[:16] if order.start_at else '' }}">Live extra days/hours will appear here.</p>
-    <p class="form-help">Adjust before pressing Return order, or tick No Revision Required if the planned return is still correct. Billing recalculates full 24-hour rental days from pickup plus extra hours after the pickup time.</p>
     <button class="btn primary" type="submit">Revise return date/time and invoice</button>
   </form>
   {% endif %}
@@ -215,12 +214,10 @@
       <label>Damage Charge<input type="number" step="0.01" min="0" name="damage_charge" placeholder="0.00"></label>
       <label class="switch"><input type="checkbox" name="no_damages" value="1" class="checklist-auto-save" data-return-checklist-url="{{ url_for('orders.return_checklist', order_id=order.id) }}" {% if order.no_damages %}checked{% endif %}> No Damages<span class="checklist-save-state"></span></label>
     </div>
-    <p class="form-help">Damage Charge creates a return charge line item in the Items section above. Extra hours are calculated from the actual return date/time and taxed with the trailer tax profile.</p>
     <button class="btn ghost" type="submit">Add Charges</button>
   </form>
   <form method="post" action="{{ url_for('orders.use_deposit', order_id=order.id) }}" class="payment-form">
     <label>Use-deposit note<input name="deposit_note" value="{{ order.deposit_note or '' }}" placeholder="Balance or damage note"></label>
-    <p class="form-help">Use Deposit applies the available security deposit to outstanding charges first and records any remaining refund for processing below. Canceled orders can still be settled here for a partial or full refund.</p>
     <button class="btn primary" type="submit">Use Deposit</button>
   </form>
   <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
@@ -252,7 +249,7 @@ function confirmCriticalPickup(form){
 (function(){
   const dateInput=document.getElementById('actual-return-date'); const timeInput=document.getElementById('actual-return-time'); const out=document.getElementById('actual-return-breakdown');
   function parse(dt, tm){ if(!dt) return null; const d=dt.split('-').map(Number); const t=(tm||'00:00').split(':').map(Number); if(d.length!==3||!d[0]) return null; return new Date(d[0], d[1]-1, d[2], t[0]||0, t[1]||0); }
-  function update(){ if(!out) return; const startRaw=out.dataset.startAt||''; const parts=startRaw.split('T'); const start=parse(parts[0], parts[1]); const end=parse(dateInput&&dateInput.value, timeInput&&timeInput.value); if(!start||!end||end<=start){ out.textContent='Live calculated extra days/hours: 0 rental days + 0 extra hours'; return; } const hours=(end-start)/(60*60*1000); const days=Math.max(1, Math.floor(hours/24)); const extra=Math.max(0, Math.round((hours-(days*24))*100)/100); out.textContent='Live calculated extra days/hours: '+days+' rental day'+(days===1?'':'s')+' + '+extra+' extra hour'+(extra===1?'':'s'); }
+  function update(){ if(!out) return; const startRaw=out.dataset.startAt||''; const parts=startRaw.split('T'); const start=parse(parts[0], parts[1]); const end=parse(dateInput&&dateInput.value, timeInput&&timeInput.value); if(!start||!end||end<=start){ out.textContent='Calculated extra days/hours: 0 rental days + 0 extra hours'; return; } const hours=(end-start)/(60*60*1000); const days=Math.max(1, Math.floor(hours/24)); const extra=Math.max(0, Math.round((hours-(days*24))*100)/100); out.textContent='Calculated extra days/hours: '+days+' rental day'+(days===1?'':'s')+' + '+extra+' extra hour'+(extra===1?'':'s'); }
   if(dateInput) dateInput.addEventListener('input', update); if(timeInput) timeInput.addEventListener('input', update); update();
 })();
 (function(){

@@ -1758,12 +1758,39 @@ def test_customerless_order_edit_keeps_picker_and_no_customer_copy(client):
 
     assert edit_page.status_code == 200
     assert b'No customer yet. Search above to attach customer details before reserving or pickup.' not in edit_page.data
-    assert b'id="customer-empty-state"' in edit_page.data
+    assert b'id="customer-empty-state"' not in edit_page.data
     assert b'id="customer-search"' in edit_page.data
     assert b'name="customer_id" id="customer-id" value=""' in edit_page.data
     assert b'id="customer-select"' not in edit_page.data
-    assert b'Add customer from order' in edit_page.data
+    assert b'Add New Customer' in edit_page.data
     assert b'name="order_action" value=""' in edit_page.data
+
+
+def test_new_order_pickup_time_defaults_to_branch_hours_when_outside_hours(client, app, monkeypatch):
+    login(client)
+    with app.app_context():
+        db = get_db()
+        branch_id = db.execute("SELECT id FROM branches ORDER BY id LIMIT 1").fetchone()["id"]
+        for day in range(7):
+            db.execute(
+                """INSERT OR REPLACE INTO branch_operating_hours
+                (branch_id, day_of_week, open_time, close_time, closed, updated_at)
+                VALUES (?, ?, '08:00', '16:30', 0, '2026-07-01T00:00:00')""",
+                (branch_id, day),
+            )
+        db.commit()
+
+    import app.routes.orders as order_routes
+
+    monkeypatch.setattr(order_routes, 'next_time_slot', lambda increment_minutes=15: datetime(2026, 7, 6, 7, 15))
+    before_open = client.get('/orders/new')
+    assert before_open.status_code == 200
+    assert b'name="start_time" id="start-time" value="08:00"' in before_open.data
+
+    monkeypatch.setattr(order_routes, 'next_time_slot', lambda increment_minutes=15: datetime(2026, 7, 6, 17, 15))
+    after_close = client.get('/orders/new')
+    assert after_close.status_code == 200
+    assert b'name="start_time" id="start-time" value="16:30"' in after_close.data
 
 
 def test_edit_order_can_create_and_attach_inline_customer_without_changing_lines_or_status(client, app):
@@ -4894,7 +4921,8 @@ def test_ticket_341952905_return_validation_taxed_extra_and_invoice_revision(cli
     assert b'No Damages' in detail.data
     assert b'No Revision Required' in detail.data
     assert b'Save return checklist' not in detail.data
-    assert b'Live calculated extra days/hours' in detail.data
+    assert b'Calculated extra days/hours' in detail.data
+    assert b'Live calculated extra days/hours' not in detail.data
     assert b'Hourly extra rate' not in detail.data
     client.post(f'/orders/{order_id}/revise-return', data={'end_date': '2026-07-02', 'end_time': '11:00'}, follow_redirects=True)
     client.post(f'/orders/{order_id}/add-return-charges', data={'damage_charge': '30'}, follow_redirects=True)

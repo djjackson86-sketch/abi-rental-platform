@@ -113,6 +113,27 @@ def pickup_hours_error(branch_id, when):
     return None
 
 
+def adjusted_pickup_time_for_branch(branch_id, candidate_dt):
+    """Clamp a new-order default pickup time to today's saved branch hours."""
+    if not branch_id or candidate_dt is None:
+        return candidate_dt.strftime("%H:%M") if candidate_dt else ""
+    saved = _day_rows_for(branch_id)
+    if not saved:
+        return candidate_dt.strftime("%H:%M")
+    day = (candidate_dt.weekday() + 1) % 7
+    row = saved.get(day)
+    if row is None or row["closed"]:
+        return candidate_dt.strftime("%H:%M")
+    open_time = row["open_time"] or DEFAULT_OPEN_TIME
+    close_time = row["close_time"] or DEFAULT_CLOSE_TIME
+    candidate_time = candidate_dt.strftime("%H:%M")
+    if candidate_time < open_time:
+        return open_time
+    if candidate_time > close_time:
+        return close_time
+    return candidate_time
+
+
 def _summarize(hours):
     """Compact one-line summary for the branches table (e.g. 'Mon-Fri 09:00-17:00, Sat-Sun Closed')."""
     if not hours:

@@ -11,7 +11,7 @@ from app.services.payments import display_payment_date, label_for as payment_lab
 from app.services.customer_credits import customer_credit_balance
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
-from app.services.branches import branch_hours_summaries, branch_options, default_branch_id
+from app.services.branches import adjusted_pickup_time_for_branch, branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
 from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
 
@@ -329,6 +329,8 @@ def new():
                 flash(str(exc), "error")
                 submitted_customer_values = _submitted_customer_values(request.form)
     slot = next_time_slot(increment_minutes=15)
+    default_branch = _scoped_default_branch_id()
+    default_start_time = adjusted_pickup_time_for_branch(default_branch, slot)
     customers = _customers()
     selected_customer_summary = _selected_customer_summary(customers, selected_customer_id)
     # On POST errors keep the typed customer card values; otherwise the template
@@ -345,10 +347,10 @@ def new():
         customer_values=submitted_customer_values if selected_customer_summary else {},
         default_start_date=slot.date().isoformat(),
         default_return_date=(slot + timedelta(days=1)).date().isoformat(),
-        default_start_time=slot.strftime("%H:%M"),
+        default_start_time=default_start_time,
         time_options=_time_options(15),
         branches=_scoped_branch_options(),
-        default_branch_id=_scoped_default_branch_id(),
+        default_branch_id=default_branch,
         branch_hours=branch_hours_summaries(),
         form_mode="new",
         form_action=url_for("orders.new"),

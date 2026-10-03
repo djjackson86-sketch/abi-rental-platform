@@ -7,7 +7,7 @@ import os
 from app.db import get_db, now
 from app.services.numbering import next_in_sequence
 from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause, session_branch_scope_ids
-from app.services.branches import pickup_hours_error
+from app.services.branches import adjusted_pickup_time_for_branch, pickup_hours_error
 from app.services.settings import global_vat_rate
 from app.services.products import product_branch_stock
 from app.services.reports import accepted_quote_exists_condition, collectible_due_expr
@@ -836,7 +836,10 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
         return_branch_id = return_branch_id or collect_branch_id
 
     settings = db.execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
-    start_dt = _parse_dt(form.get("start_date"), form.get("start_time"), settings["default_pickup_time"])
+    default_pickup_time = settings["default_pickup_time"]
+    if not form.get("start_time") and form.get("start_date") == local_now().date().isoformat():
+        default_pickup_time = adjusted_pickup_time_for_branch(collect_branch_id, local_now())
+    start_dt = _parse_dt(form.get("start_date"), form.get("start_time"), default_pickup_time)
     end_dt = _parse_dt(form.get("end_date"), form.get("end_time"), settings["default_return_time"])
     if not start_dt or not end_dt:
         raise ValueError("Pickup and return dates are required")
