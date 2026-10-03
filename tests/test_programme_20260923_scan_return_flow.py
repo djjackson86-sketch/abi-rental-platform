@@ -39,7 +39,7 @@ from app.services import returns
 from app.services.access import create_additional_user, save_user_modules
 from app.services.customers import create_customer
 from app.services.documents import create_document, finalize_document
-from app.services.orders import create_order, get_order, transition_order, update_return_checklist
+from app.services.orders import create_order, get_order, return_damage_total, transition_order, update_return_checklist
 from app.services.products import create_product
 from app.services.vehicles import create_vehicle
 
@@ -281,8 +281,9 @@ def test_the_module_grants_the_screen_and_the_nav_link(app, client):
     body = _body(response)
     assert response.status_code == 200
     assert 'name="disk_image"' in body and 'capture="environment"' in body
-    assert 'name="disc_text"' in body and 'name="plate"' in body
-    assert "Scan to return" in body
+    assert "getUserMedia" in body and "scan-camera-live" in body
+    assert "Return" in body and "Manual entry" in body and 'name="plate"' in body
+    assert 'name="disc_text"' not in body
 
     _login_staff(client, without)
     assert "Scan to return" not in _body(client.get("/dashboard"))
@@ -299,6 +300,7 @@ def test_a_pasted_trailer_disc_offers_the_started_order_with_its_evidence(app, c
     assert expected in body
     assert "Charmaine Mokoena" in body
     assert "Mark returned" in body
+    assert "Damage report" in body
     assert TRAILER_PLATE in body
     # The confirm form carries the identifiers the scan actually read.
     assert 'name="scan_plate" value="ABC123GP"' in body
@@ -361,6 +363,34 @@ def test_one_candidate_is_marked_returned_and_lands_on_the_order(app, client):
     # The existing flow is untouched: nothing about the pickup changed.
     assert after["picked_up_at"] == before["picked_up_at"]
     assert "returned via disc scan" in body
+
+
+def test_return_can_file_a_damage_report_and_charge_in_one_step(app, client):
+    customer_id = _customer(app)
+    product_id = _product(app)
+    order_id = _started(app, customer_id, product_id)
+    _return_ready(app, order_id)
+    _login_owner(client)
+
+    response = _confirm(
+        client,
+        order_id,
+        damage_description="Bent jockey wheel",
+        damage_severity="moderate",
+        damage_charge="350",
+    )
+
+    assert response.status_code == 200
+    after = _order_row(app, order_id)
+    assert after is not None
+    assert after["status"] == "returned"
+    with app.app_context():
+        damage_total = return_damage_total(order_id)
+    assert damage_total == 350.0
+    assert after["no_damages"] == 0
+    assert "Damage report" in after["deposit_note"]
+    assert "Bent jockey wheel" in after["deposit_note"]
+    assert "Severity: Moderate" in after["deposit_note"]
 
 
 def test_the_towing_cars_disc_returns_its_rental_and_records_the_vehicle_source(app, client):
@@ -508,8 +538,9 @@ def test_junk_text_is_a_message_not_a_crash(app, client):
     response = _scan(client, disc_text="THIS IS NOT A LICENCE DISK")
     assert response.status_code == 200
     body = _body(response)
-    assert 'name="disc_text"' in body
+    assert 'name="disc_text"' not in body
     assert "could not" in body.lower() or "no vehicle fields" in body.lower()
+    assert "Return" in body and "Manual entry" in body
 
 
 # ── crafted posts are refused with the existing message ─────────────────────

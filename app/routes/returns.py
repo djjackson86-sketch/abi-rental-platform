@@ -27,17 +27,20 @@ hidden button.
 """
 
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
+from app.db import get_db
 from app.routes.vehicles import ALLOWED_IMAGE_TYPES, DECODE_ERROR_MESSAGES, MAX_DISK_UPLOAD_BYTES
 from app.services import returns
+from app.services.orders import add_return_charges, update_return_checklist
 from app.services import vehicle_disk as disk
 from app.services.settings import get_company_settings
 from app.services.vehicles import registration_key
 
 bp = Blueprint("returns", __name__)
 
-NO_INPUT_MESSAGE = "Photograph the disc, paste the barcode text, or type the plate on the disc."
+NO_INPUT_MESSAGE = "Scan the licence disk, or type the trailer/client vehicle plate manually."
 
 UNREADABLE_TEXT_MESSAGE = (
     "That text holds no vehicle fields. Type the plate (or the NaTIS number) in the box below."
@@ -178,6 +181,44 @@ def _render(review=None):
     )
 
 
+def _truthy(value):
+    return str(value or "").strip().lower() in {"1", "on", "yes", "true"}
+
+
+def _damage_form_for_return(form):
+    """The one-step return card's damage report, mapped to the existing order settlement flow."""
+    damage_charge = str(form.get("damage_charge") or "").strip()
+    damage_description = str(form.get("damage_description") or "").strip()
+    damage_severity = str(form.get("damage_severity") or "").strip().upper()
+    # Browser posts carry the checked No damage box by default. Crafted/test posts may omit it;
+    # when they also carry no damage charge, treat that as the same clean-return default.
+    no_damage = (not damage_charge) or _truthy(form.get("no_damages"))
+    payload = MultiDict()
+    if no_damage:
+        payload.add("no_damages", "1")
+    else:
+        payload.add("damage_charge", damage_charge or "0")
+    # ABI does not yet have TrailerPro's photo damage-log table. Preserve the written report text
+    # where staff already see return/deposit notes, and put the charge through the existing
+    # Damage charge line-item path so totals/deposits stay correct.
+    note_parts = []
+    if damage_description:
+        note_parts.append(damage_description)
+    if damage_severity:
+        note_parts.append(f"Severity: {damage_severity.title()}")
+    if note_parts:
+        payload.add("deposit_note", "Damage report — " + "; ".join(note_parts))
+    return payload
+
+
+def _save_damage_note(order_id, payload):
+    note = str(payload.get("deposit_note") or "").strip()
+    if not note:
+        return
+    get_db().execute("UPDATE orders SET deposit_note = ? WHERE id = ?", (note, order_id))
+    get_db().commit()
+
+
 def _read_scan(upload, pasted, typed_plate):
     """Read one submission and return ``(parsed, raw_text, message, category)``.
 
@@ -229,6 +270,11 @@ def scan_return():
     if request.method == "GET":
         return _render()
 
+    if (request.form.get("action") or "") == "manual":
+        # The button only opens the manual-entry panel client-side. If a browser posts it directly,
+        # render the same page with the manual panel visible rather than doing any work.
+        return _render({"manual_open": True})
+
     parsed, raw_text, message, category = _read_scan(
         request.files.get("disk_image"),
         request.form.get("disc_text") or "",
@@ -253,6 +299,14 @@ def confirm_return():
         return _render(_review(parsed))
 
     try:
+        returns.returnable_order(order_id)
+        # One-card flow: staff either leave the default "No damage" ticked or file the damage
+        # report/charge here, and the actual-return-date is accepted as not revised. Those are the
+        # exact gates the order page requires before a return transition is allowed.
+        update_return_checklist(order_id, MultiDict([("no_revision_required", "1")]))
+        damage_form = _damage_form_for_return(request.form)
+        add_return_charges(order_id, damage_form)
+        _save_damage_note(order_id, damage_form)
         result = returns.mark_returned_via_scan(
             order_id, user_id=session.get("user_id"), parsed=parsed
         )
@@ -260,7 +314,7 @@ def confirm_return():
         # The existing flow's refusal (or the matcher's scope/state guard),
         # surfaced verbatim — never rewritten, never swallowed.
         flash(str(exc), "error")
-        return _render(_review(parsed))
+        return _render(_review(parsed, message=str(exc), category="error"))
 
     what = "Trailer" if result["source"] == returns.SOURCE_TRAILER_DISC else "Towing vehicle"
     identity = result["registration"] or result["order_number"]
