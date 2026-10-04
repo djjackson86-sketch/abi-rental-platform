@@ -3135,8 +3135,8 @@ def test_invoice_send_email_prepares_outlook_eml_with_pdf_attachment(client, app
     assert b'Download Email Helper' not in invoice.data
     assert b'open-email-link' not in invoice.data
     assert b'Send Email' not in invoice.data
-    assert b'Outlook-compatible email draft' in invoice.data
-    assert b'is always copied on the draft' in invoice.data
+    assert b'Outlook-compatible email draft' not in invoice.data
+    assert b'is always copied on the draft' not in invoice.data
     assert b'Dear Order Customer' in invoice.data
     assert b'name="invoice_email_message"' not in invoice.data
 
@@ -3637,7 +3637,7 @@ def test_quote_without_collection_branch_falls_back_to_company_settings(client, 
     assert b'Save PDF' in quote.data
     assert b'/documents/1/download.pdf' in quote.data
     assert b'Generate Email' in quote.data
-    assert b'Outlook-compatible email draft' in quote.data
+    assert b'Outlook-compatible email draft' not in quote.data
     assert b'Open Email' not in quote.data
     assert b'Download Email Helper' not in quote.data
     assert b'Finalize invoice' not in quote.data
@@ -4503,7 +4503,7 @@ def test_document_email_prepares_outlook_draft_without_smtp_provider(client, app
     detail = client.get('/documents/1')
     assert b'Generate Email' in detail.data
     assert b'Send Email' not in detail.data
-    assert b'Outlook-compatible email draft' in detail.data
+    assert b'Outlook-compatible email draft' not in detail.data
     assert b'Email provider not configured' not in detail.data
 
     response = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=False)
@@ -6498,6 +6498,41 @@ def test_order_form_renders_the_client_verified_control(client, app):
     assert edited.status_code == 200
     edited_body = edited.data.decode()
     assert '<span>Client Verified</span><b>Yes</b>' in edited_body
+
+
+def _assert_field_order(body, markers):
+    positions = [body.index(marker) for marker in markers]
+    assert positions == sorted(positions)
+
+
+def test_customer_forms_place_verification_and_marketing_after_alternative_contact_relationship(client):
+    login(client)
+    body = client.get('/customers/new').data.decode()
+    _assert_field_order(body, [
+        'name="alternative_contact_relationship"',
+        'name="client_verified"',
+        'name="marketing_opt_in"',
+    ])
+
+
+def test_order_customer_forms_place_verification_and_marketing_after_alternative_contact_relationship(client):
+    login(client)
+    seed_customer_and_product(client)
+
+    attached = client.get('/orders/new?customer_id=1').data.decode()
+    _assert_field_order(attached, [
+        'data-customer-field="alternative_contact_relationship"',
+        'data-customer-field="client_verified"',
+        'data-customer-field="marketing_opt_in"',
+    ])
+
+    inline = client.get('/orders/new').data.decode()
+    section = inline[inline.index('id="inline-customer-section"'):inline.index('id="inline-customer-submit"')]
+    _assert_field_order(section, [
+        'name="alternative_contact_relationship"',
+        'name="client_verified"',
+        'name="marketing_opt_in"',
+    ])
 
 
 def test_public_booking_creates_an_unverified_client(client, app):
