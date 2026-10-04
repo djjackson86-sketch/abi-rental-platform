@@ -1,6 +1,8 @@
+from datetime import datetime, time
+
 from app.db import get_db
 from app.services.access import customer_branch_clause, order_branch_clause, product_branch_clause
-from app.services.timezone import local_now_iso
+from app.services.timezone import local_now, local_now_iso, parse_iso_datetime
 
 
 def money(value):
@@ -603,6 +605,91 @@ def customer_summary(start_date=None, end_date=None, limit=10, branch_id=None):
     return [row_dict(row) for row in db.execute(sql, params).fetchall()]
 
 
+
+def _taxed_line_total(base, tax_rate, tax_mode):
+    base = round(float(base or 0), 2)
+    rate = max(0.0, float(tax_rate or 0)) / 100
+    if tax_mode == "inclusive" and rate:
+        return base
+    return round(base + (base * rate), 2)
+
+
+def _stored_line_tax_rate(item):
+    subtotal = float(item.get("line_subtotal") or 0)
+    tax = float(item.get("line_tax") or 0)
+    if subtotal <= 0 or tax <= 0:
+        return 0.0
+    return round((tax / subtotal) * 100, 6)
+
+
+def _report_return_at(order):
+    start_at = parse_iso_datetime(order.get("start_at"))
+    if not start_at:
+        return None
+    end_at = parse_iso_datetime(order.get("end_at"))
+    expected_t = end_at.time().replace(second=0, microsecond=0) if end_at else time(15, 0)
+    return datetime.combine(local_now().date(), expected_t)
+
+
+def started_order_balance_due_today(order):
+    """Projected amount due if a started hire is returned today before its expected time."""
+    from app.services.orders import computed_discount, line_uses_order_days, rental_days
+
+    order_id = order.get("id")
+    start_at = parse_iso_datetime(order.get("start_at"))
+    return_at = _report_return_at(order)
+    if not order_id or not start_at or not return_at:
+        return money(order.get("due_total"))
+
+    days = rental_days(start_at, return_at)
+    db = get_db()
+    settings = db.execute("SELECT tax_mode FROM company_settings WHERE id = 1").fetchone()
+    tax_mode = settings["tax_mode"] if settings else "exclusive"
+    items = [row_dict(row) for row in db.execute(
+        """SELECT oi.*, p.product_type, p.price_unit, COALESCE(t.rate, 0) AS tax_rate
+        FROM order_items oi
+        LEFT JOIN products p ON p.id = oi.product_id
+        LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
+        WHERE oi.order_id = ?
+          AND COALESCE(oi.custom_name, '') != 'Extra hours'
+        ORDER BY oi.id""",
+        (order_id,),
+    ).fetchall()]
+
+    subtotal = tax_total = line_total = 0.0
+    for item in items:
+        if line_uses_order_days(item):
+            qty = max(float(item.get("quantity") or 1), 0)
+            base = float(item.get("unit_price") or 0) * qty * days
+            tax_rate = float(item.get("tax_rate") or 0) or _stored_line_tax_rate(item)
+            total = _taxed_line_total(base, tax_rate, tax_mode)
+            if tax_mode == "inclusive" and tax_rate:
+                tax = total - (total / (1 + (tax_rate / 100)))
+                subtotal_line = total - tax
+            else:
+                subtotal_line = base
+                tax = total - base
+        else:
+            subtotal_line = float(item.get("line_subtotal") or 0)
+            tax = float(item.get("line_tax") or 0)
+            total = float(item.get("line_total") or 0)
+        subtotal += round(subtotal_line, 2)
+        tax_total += round(tax, 2)
+        line_total += round(total, 2)
+
+    discount_total = float(order.get("discount_total") or 0)
+    if (order.get("discount_mode") or "") in {"percent", "amount"}:
+        discount_total = computed_discount(order.get("discount_mode"), order.get("discount_value"), subtotal, tax_total)
+    projected_total = round(
+        line_total
+        - discount_total
+        + float(order.get("deposit_total") or 0)
+        + float(order.get("damage_waiver_amount") or 0),
+        2,
+    )
+    paid_total = float(order.get("paid_total") or 0)
+    return round(projected_total - paid_total, 2)
+
 def orders_export_rows(start_date=None, end_date=None, branch_id=None):
     db = get_db()
     sql = """
@@ -629,6 +716,16 @@ def started_orders_report_rows(branch_id=None):
     rows = db.execute(
         f"""
         SELECT
+            o.id,
+            o.start_at,
+            o.end_at,
+            o.deposit_total,
+            o.damage_waiver_amount,
+            o.discount_mode,
+            o.discount_value,
+            o.discount_total,
+            o.due_total,
+            COALESCE((SELECT SUM(pay.amount) FROM payments pay WHERE pay.order_id = o.id AND COALESCE(pay.deleted_at, '') = '' AND COALESCE(pay.status, 'paid') = 'paid'), 0) AS paid_total,
             COALESCE(NULLIF(c.name, ''), 'No customer') AS customer_name,
             o.order_number,
             COALESCE(NULLIF(p.sku, ''), NULLIF(oi.custom_name, ''), p.name, '') AS trailer_sku,
@@ -660,7 +757,14 @@ def started_orders_report_rows(branch_id=None):
         """,
         scope_params,
     ).fetchall()
-    return [row_dict(row) for row in rows]
+    materialised = [row_dict(row) for row in rows]
+    balances = {}
+    for row in materialised:
+        order_id = row.get('id')
+        if order_id not in balances:
+            balances[order_id] = started_order_balance_due_today(row)
+        row['balance_due'] = balances[order_id]
+    return materialised
 
 
 def started_orders_report_pdf_lines(branch_label=None, branch_id=None):
@@ -686,6 +790,7 @@ def started_orders_report_pdf_lines(branch_label=None, branch_id=None):
             f"   Expected Time: {row.get('expected_time') or ''}",
             f"   Available Deposit: {deposit_text}",
             f"   Damage Waiver: {row.get('damage_waiver') or 'No'}",
+            f"   Balance Due: R{float(row.get('balance_due') or 0):.2f}",
             '',
         ])
     return lines

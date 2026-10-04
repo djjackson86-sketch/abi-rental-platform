@@ -89,8 +89,10 @@
         <label>From<input type="date" name="start_date" value="{{ filters.start_date }}"></label><label>To<input type="date" name="end_date" value="{{ filters.end_date }}"></label><button class="btn ghost" type="submit">Apply dates</button>{% if filters.start_date or filters.end_date %}<a class="filter-clear" href="{{ url_for('orders.index', query=filters.query, status=filters.status, payment_status=filters.payment_status, return_status=filters.return_status, branch=filters.branch or None) }}">Clear dates</a>{% endif %}
       </div>
 
+      {% if user_can('orders') %}
+        <a class="btn primary export-btn" href="{{ url_for('orders.started_orders_report_pdf', branch=filters.branch or None) }}">Started Orders Report</a>
+      {% endif %}
       {% if user_can('reports') %}
-        <a class="btn ghost export-btn" href="{{ url_for('orders.started_orders_report_pdf', branch=filters.branch or None) }}">Started Orders Report</a>
         <a class="btn ghost export-btn" href="{{ url_for('admin.reports_orders_csv', branch=filters.branch or None) }}">Export</a>
       {% endif %}
     </form>

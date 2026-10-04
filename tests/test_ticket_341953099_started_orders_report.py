@@ -2,12 +2,14 @@ import json
 import os
 import re
 import tempfile
+from datetime import datetime
 
 import pytest
 from werkzeug.security import generate_password_hash
 
 from app import create_app
 from app.db import get_db
+from app.services import reports as reports_service
 
 
 @pytest.fixture()
@@ -81,15 +83,20 @@ def seed_report_data(app):
         db.execute("""INSERT INTO users (name, email, password_hash, initials, role, branch_id, can_view_all_branches, active, modules_json, created_at)
                     VALUES ('North orders only', 'north-orders@example.test', ?, 'NO', 'staff', 101, 0, 1, ?, '2026-01-01')""",
                    (generate_password_hash('admin123'), json.dumps(['orders'])))
+        db.execute("""INSERT INTO users (name, email, password_hash, initials, role, branch_id, can_view_all_branches, active, modules_json, created_at)
+                    VALUES ('North reports only', 'north-reports-only@example.test', ?, 'RO', 'staff', 101, 0, 1, ?, '2026-01-01')""",
+                   (generate_password_hash('admin123'), json.dumps(['reports'])))
         db.commit()
 
 
-def test_started_orders_report_pdf_rows_and_button(client, app):
+def test_started_orders_report_pdf_rows_and_button(client, app, monkeypatch):
+    monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 7, 2, 8, 0))
     seed_report_data(app)
     login(client)
     page = client.get('/orders')
     assert b'Started Orders Report' in page.data
     assert b'/orders/started-orders-report.pdf' in page.data
+    assert b'btn primary export-btn' in page.data
 
     response = client.get('/orders/started-orders-report.pdf')
     assert response.status_code == 200
@@ -105,17 +112,18 @@ def test_started_orders_report_pdf_rows_and_button(client, app):
     assert 'Expected Date: 2026-07-03' in text
     assert 'Expected Time: 14:30' in text
     assert 'Available Deposit: R750.00' in text
-    assert 'Damage Waiver: No' in text
+    assert re.search(r'Damage Waiver: No\n\s*Balance Due: R1150\.00', text)
     assert 'South Started' in text
     assert 'Trailer: STH-1' in text
     assert 'Expected Time: 10:15' in text
     assert 'Available Deposit: N/A' in text
-    assert 'Damage Waiver: Yes' in text
+    assert re.search(r'Damage Waiver: Yes\n\s*Balance Due: R225\.00', text)
     assert 'ORD-RESERVED' not in text
     assert 'PART-1' not in text
 
 
-def test_started_orders_report_is_reports_gated_and_branch_scoped(client, app):
+def test_started_orders_report_is_orders_gated_and_branch_scoped(client, app, monkeypatch):
+    monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 7, 2, 8, 0))
     seed_report_data(app)
     login(client, 'North reports')
     response = client.get('/orders/started-orders-report.pdf')
@@ -126,5 +134,10 @@ def test_started_orders_report_is_reports_gated_and_branch_scoped(client, app):
     assert 'STH-1' not in text
 
     login(client, 'North orders only')
-    assert client.get('/orders').status_code == 200
+    page = client.get('/orders')
+    assert page.status_code == 200
+    assert b'Started Orders Report' in page.data
+    assert client.get('/orders/started-orders-report.pdf').status_code == 200
+
+    login(client, 'North reports only')
     assert client.get('/orders/started-orders-report.pdf').status_code == 403
