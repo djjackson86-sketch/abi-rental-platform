@@ -620,3 +620,72 @@ def orders_export_rows(start_date=None, end_date=None, branch_id=None):
     params.extend(scope_params)
     sql += " ORDER BY o.created_at DESC, o.id DESC"
     return db.execute(sql, params).fetchall()
+
+
+def started_orders_report_rows(branch_id=None):
+    """Started rental orders, one row per picked-up trailer line."""
+    db = get_db()
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    rows = db.execute(
+        f"""
+        SELECT
+            COALESCE(NULLIF(c.name, ''), 'No customer') AS customer_name,
+            o.order_number,
+            COALESCE(NULLIF(p.sku, ''), NULLIF(oi.custom_name, ''), p.name, '') AS trailer_sku,
+            substr(COALESCE(o.end_at, ''), 1, 10) AS expected_date,
+            substr(COALESCE(o.end_at, ''), 12, 5) AS expected_time,
+            CASE
+                WHEN COALESCE(o.deposit_option, 'security_deposit') = 'security_deposit'
+                THEN MAX(
+                    COALESCE(o.deposit_total, 0)
+                    - COALESCE(o.deposit_applied_amount, 0)
+                    - COALESCE(o.deposit_refund_amount, 0),
+                    0
+                )
+                ELSE NULL
+            END AS available_deposit,
+            CASE
+                WHEN COALESCE(o.deposit_option, '') = 'damage_waiver'
+                     OR COALESCE(o.damage_waiver_amount, 0) > 0
+                THEN 'Yes' ELSE 'No'
+            END AS damage_waiver
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        JOIN products p ON p.id = oi.product_id
+        LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE o.status = 'started'
+          AND COALESCE(p.product_type, 'rental') = 'rental'
+          {scope_sql}
+        ORDER BY o.end_at ASC, o.order_number ASC, p.sku ASC, oi.id ASC
+        """,
+        scope_params,
+    ).fetchall()
+    return [row_dict(row) for row in rows]
+
+
+def started_orders_report_pdf_lines(branch_label=None, branch_id=None):
+    rows = started_orders_report_rows(branch_id=branch_id)
+    scope_label = branch_label or 'All branches'
+    lines = [
+        'Started Orders Report',
+        f'Branch: {scope_label}',
+        f'Orders/trailers: {len(rows)}',
+        '',
+    ]
+    if not rows:
+        lines.append('No started trailer orders found.')
+        return lines
+    for index, row in enumerate(rows, start=1):
+        deposit = row.get('available_deposit')
+        deposit_text = 'N/A' if deposit is None else f"R{float(deposit or 0):.2f}"
+        lines.extend([
+            f"{index}. Customer Name: {row.get('customer_name') or 'No customer'}",
+            f"   Order No: {row.get('order_number') or ''}",
+            f"   Trailer: {row.get('trailer_sku') or ''}",
+            f"   Expected Date: {row.get('expected_date') or ''}",
+            f"   Expected Time: {row.get('expected_time') or ''}",
+            f"   Available Deposit: {deposit_text}",
+            f"   Damage Waiver: {row.get('damage_waiver') or 'No'}",
+            '',
+        ])
+    return lines

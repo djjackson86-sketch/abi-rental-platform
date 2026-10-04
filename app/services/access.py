@@ -77,6 +77,7 @@ _OPEN_ENDPOINT_PREFIXES = (
 # endpoint prefix -> module key. Order matters; first match wins.
 _ENDPOINT_MODULE_RULES = [
     ("orders.new", "new_order"),
+    ("orders.started_orders_report_pdf", "reports"),
     ("orders.", "orders"),
     ("documents.index", "documents"),
     ("documents.export_csv", "documents"),

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, Response, abort, flash, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
@@ -14,6 +14,8 @@ from app.services.customers import create_customer, customer_fields_changed, cus
 from app.services.branches import adjusted_pickup_time_for_branch, branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
 from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
+from app.services.pdf_documents import simple_lines_pdf_bytes
+from app.services.reports import started_orders_report_pdf_lines
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 PAGE_SIZE = 25
@@ -227,6 +229,18 @@ def _wants_sales_repairs(form, order_id):
 
 def _time_options(increment=15):
     return [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in range(0, 60, increment)]
+
+
+@bp.route("/started-orders-report.pdf")
+@login_required
+def started_orders_report_pdf():
+    _selected_branch, branch_id, branch_label, _branches, _branch_scope = resolve_branch_filter(request.args.get("branch", ""))
+    pdf = simple_lines_pdf_bytes(started_orders_report_pdf_lines(branch_label=branch_label, branch_id=branch_id))
+    return Response(
+        pdf,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=started-orders-report.pdf"},
+    )
 
 
 @bp.route("")
