@@ -56,7 +56,6 @@
 
   <section class="panel">
     <div class="panel-title"><h2>Trailer service and maintenance</h2><span class="pill">{{ trailer_service_day|length }} line{% if trailer_service_day|length != 1 %}s{% endif %}</span></div>
-    <p class="cash-note">Record service or maintenance done on a rental trailer. The history also appears on the product itself.</p>
     {# Ticket ABI-341953042 ask 3: the panel shows what was captured for the day
        being looked at, so the list changes with the selected business day. #}
     {% if trailer_service_day %}
@@ -142,7 +141,6 @@
 
   <section class="panel">
     <div class="panel-title"><h2>Cash drop off (to bank)</h2><span class="pill">{{ cash_day.drop_count }} line{% if cash_day.drop_count != 1 %}s{% endif %}</span></div>
-    <p class="cash-note">Cash taken out of the drawer and banked during the day. It comes off the cash expected in the drawer.</p>
     {% if cash_day.drop_lines %}
     <div class="cash-used-lines">
       {% for line in cash_day.drop_lines %}

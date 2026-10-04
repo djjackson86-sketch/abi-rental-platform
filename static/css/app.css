@@ -422,3 +422,14 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .statement-form label{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:var(--muted)}
 .statement-form input[type=date]{width:auto;min-width:150px;min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
 .statement-form .btn{width:auto}
+
+/* Ticket ABI-341953098: make the new-order form sections easier to scan. */
+.order-form .order-customer-section{padding:18px;border:1px solid var(--line);border-radius:var(--radius-lg);background:linear-gradient(180deg,#fff,#f8fbff);box-shadow:var(--shadow-sm)}
+.order-form .order-customer-section + .order-customer-section{margin-top:-6px}
+.order-form .order-details-section{padding-top:12px;border-top:2px solid var(--line-soft)}
+.order-form .order-section-heading{margin:0;color:#0f766e;font-size:18px;letter-spacing:.04em;text-transform:uppercase}
+.order-form .order-details-section>h3{margin:0;font-size:15px;letter-spacing:-.01em}
+.order-form .compact-choice-grid{gap:8px;max-width:520px}
+.order-form .compact-choice-card{padding:9px 11px;border-radius:10px;min-height:42px;align-items:center}
+.order-form .compact-choice-card input{width:auto;margin:0 7px 0 0}
+.order-form .compact-choice-card strong{font-size:13px}

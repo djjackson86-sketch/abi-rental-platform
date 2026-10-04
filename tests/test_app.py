@@ -891,6 +891,13 @@ def test_order_draft_creation_and_totals(client):
     assert b'id="rental-days-card"' in res.data
     assert b'Rental days' in res.data
     assert b'id="rental-days-count"' in res.data
+    assert b'id="rental-days-help"' not in res.data
+    assert b'>CUSTOMER INFORMATION<' in res.data
+    assert b'>ORDER DETAILS<' in res.data
+    assert b'>Customer</h2>' not in res.data
+    assert b'class="form-section order-customer-section"' in res.data
+    assert b'class="form-section order-details-section"' in res.data
+    assert b'compact-choice-card' in res.data
     assert b'id="order-estimate-panel"' in res.data
     assert b'Order estimate' in res.data
     assert b'Product total' in res.data
@@ -902,6 +909,7 @@ def test_order_draft_creation_and_totals(client):
     assert b'name="vat_number"' in res.data
     assert b'name="company_reg_no"' in res.data
     assert b"inlineCompanyDetails.hidden = !selected || selected.value !== 'company'" in res.data
+    assert b"if(!rentalDaysCount) return" in res.data
 
     res = client.post('/orders/new', data={
         'customer_id': '1',
@@ -1142,6 +1150,8 @@ def test_add_customer_continue_button_is_primary_and_ajax_returns_summary(client
     assert page.status_code == 200
     assert b'id="inline-customer-submit"' in page.data
     assert b'class="btn primary" type="submit" id="inline-customer-submit"' in page.data
+    assert b"fetch(form.action" in page.data
+    assert b"presentCustomerSummary(summary)" in page.data
 
     res = client.post('/orders/new', data={
         'order_action': 'create_customer_continue',
@@ -4977,6 +4987,9 @@ def test_main_can_manage_users_and_staff_have_restricted_access(client, app):
     assert b'Total orders' not in dashboard.data
     assert b'Going out' not in dashboard.data
     assert b'Add order' not in dashboard.data
+    assert b'Record service or maintenance done on a rental trailer' not in dashboard.data
+    assert b'Cash taken out of the drawer and banked during the day' not in dashboard.data
+    assert b'Expected counts one wheel for every trailer that has not been picked up' not in dashboard.data
 
     orders = client.get('/orders')
     assert orders.status_code == 200
