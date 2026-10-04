@@ -237,7 +237,11 @@ def _time_options(increment=15):
 @login_required
 def started_orders_report_pdf():
     _selected_branch, branch_id, branch_label, _branches, _branch_scope = resolve_branch_filter(request.args.get("branch", ""))
-    pdf = grouped_simple_lines_pdf_bytes(started_orders_report_pdf_blocks(branch_label=branch_label, branch_id=branch_id))
+    pdf = grouped_simple_lines_pdf_bytes(
+        started_orders_report_pdf_blocks(branch_label=branch_label, branch_id=branch_id),
+        columns=2,
+        highlight_prefixes=('Trailer:',),
+    )
     return Response(
         pdf,
         mimetype="application/pdf",

@@ -291,16 +291,46 @@ def simple_lines_pdf_bytes(lines):
     return _simple_pdf([str(line) for line in lines], logo_bytes=_document_logo_bytes())
 
 
-def grouped_simple_lines_pdf_bytes(blocks):
-    """Simple report PDF that keeps each supplied line block on one page."""
-    return _grouped_simple_pdf([[str(line) for line in block] for block in blocks], logo_bytes=_document_logo_bytes())
+# Two-column Started Orders Report geometry. The page is 595pt wide with a 50pt
+# margin each side, so two columns split 495pt with a 30pt gutter between them.
+GROUPED_SIMPLE_COLUMN_GAP = 30
+# Pale amber band drawn behind a highlighted line (the starter report's trailer
+# SKU). Kept as a constant so the report tests can assert the fill in the stream.
+GROUPED_SIMPLE_SKU_FILL = '1.00 0.96 0.72'
 
 
-def _grouped_simple_pdf(blocks, logo_bytes=None):
+def grouped_simple_lines_pdf_bytes(blocks, columns=1, highlight_prefixes=()):
+    """Simple report PDF that keeps each supplied line block on one page.
+
+    ``columns=2`` lays the blocks out two side by side per page row (the first
+    block is the report header and always stays full width; an odd trailing
+    block takes half a row). ``highlight_prefixes`` draws a line that starts
+    with any of those prefixes in bold on a pale band, so staff can spot it at
+    a glance — used for the ``Trailer:`` SKU line. Defaults preserve the
+    original single-column, plain-text behaviour.
+    """
+    return _grouped_simple_pdf(
+        [[str(line) for line in block] for block in blocks],
+        logo_bytes=_document_logo_bytes(),
+        columns=columns,
+        highlight_prefixes=highlight_prefixes,
+    )
+
+
+def _grouped_simple_pdf(blocks, logo_bytes=None, columns=1, highlight_prefixes=()):
     start_y = 680 if logo_bytes else 800
     leading = 18
     page_floor_y = 60
     lines_per_page = int((start_y - page_floor_y) // leading) + 1
+    columns = max(1, int(columns))
+    highlight_prefixes = tuple(highlight_prefixes or ())
+
+    margin_x = 50
+    usable_width = A4_PORTRAIT_WIDTH - (2 * margin_x)
+    column_gap = GROUPED_SIMPLE_COLUMN_GAP if columns > 1 else 0
+    column_width = (usable_width - column_gap * (columns - 1)) / columns
+    column_xs = [margin_x + index * (column_width + column_gap) for index in range(columns)]
+
     content_lines = []
     image_object = None
     if logo_bytes:
@@ -313,36 +343,70 @@ def _grouped_simple_pdf(blocks, logo_bytes=None):
             f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
         ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
 
+    # Pack the blocks into page rows: with more than one column the first block
+    # is the full-width header and the rest are laid out columns-per-row, so a
+    # pair of order blocks always moves to the next page together.
+    block_lists = [list(block or ['']) for block in blocks]
+    if columns > 1 and block_lists:
+        rows = [[block_lists[0]]]
+        tail = block_lists[1:]
+        rows.extend(tail[index:index + columns] for index in range(0, len(tail), columns))
+    else:
+        rows = [[block] for block in block_lists]
+
     pages = []
     current = []
-    for block in blocks:
-        block_lines = list(block or [''])
-        block_len = len(block_lines)
-        if current and len(current) + block_len > lines_per_page:
+    current_lines = 0
+
+    def flush():
+        nonlocal current, current_lines
+        if current:
             pages.append(current)
             current = []
-        if block_len > lines_per_page:
-            for start in range(0, block_len, lines_per_page):
-                chunk = block_lines[start:start + lines_per_page]
-                if current:
-                    pages.append(current)
-                    current = []
-                pages.append(chunk)
+            current_lines = 0
+
+    for row in rows:
+        row_height = max(len(block) for block in row)
+        if len(row) == 1 and row_height > lines_per_page:
+            # A single block taller than a whole page can only be split — do it
+            # as a last resort so nothing is silently dropped.
+            flush()
+            block = row[0]
+            for start in range(0, len(block), lines_per_page):
+                chunk = block[start:start + lines_per_page]
+                flush()
+                pages.append([[chunk]])
             continue
-        current.extend(block_lines)
-    if current or not pages:
-        pages.append(current)
+        if current and current_lines + row_height > lines_per_page:
+            flush()
+        current.append(row)
+        current_lines += row_height
+    flush()
+    if not pages:
+        pages.append([])
 
     streams = []
-    for page_index, page_lines in enumerate(pages, start=1):
+    for page_index, page_rows in enumerate(pages, start=1):
         commands = list(content_lines)
         if page_index > 1:
             commands.append(_pdf_text_command(500, 740, f'Page {page_index}', size=10))
         commands.append('BT')
         y = start_y
-        for line in page_lines:
-            commands.append(_pdf_text_command(50, y, line, size=12))
-            y -= leading
+        for row in page_rows:
+            row_height = max(len(block) for block in row)
+            for column_index, block in enumerate(row):
+                x = column_xs[min(column_index, columns - 1)]
+                for line_index, line in enumerate(block):
+                    line_y = y - (line_index * leading)
+                    # In a narrow column a long name would run into its
+                    # neighbour, so trim to the column with a visible ellipsis.
+                    text = line if columns == 1 else _pdf_fit(line, 12, column_width - 4)
+                    if highlight_prefixes and str(line).strip().startswith(highlight_prefixes):
+                        commands.append(_pdf_rect(x, line_y - 3, column_width, 14, fill=GROUPED_SIMPLE_SKU_FILL))
+                        commands.append(_pdf_text_command(x, line_y, text, size=12, font='F2'))
+                    else:
+                        commands.append(_pdf_text_command(x, line_y, text, size=12))
+            y -= row_height * leading
         commands.append('ET')
         streams.append('\n'.join(commands).encode('latin-1', 'replace'))
     return _pdf_objects(streams, image_object=image_object)
