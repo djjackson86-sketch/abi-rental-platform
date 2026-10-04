@@ -291,6 +291,63 @@ def simple_lines_pdf_bytes(lines):
     return _simple_pdf([str(line) for line in lines], logo_bytes=_document_logo_bytes())
 
 
+def grouped_simple_lines_pdf_bytes(blocks):
+    """Simple report PDF that keeps each supplied line block on one page."""
+    return _grouped_simple_pdf([[str(line) for line in block] for block in blocks], logo_bytes=_document_logo_bytes())
+
+
+def _grouped_simple_pdf(blocks, logo_bytes=None):
+    start_y = 680 if logo_bytes else 800
+    leading = 18
+    page_floor_y = 60
+    lines_per_page = int((start_y - page_floor_y) // leading) + 1
+    content_lines = []
+    image_object = None
+    if logo_bytes:
+        logo_width, logo_height = _jpeg_dimensions(logo_bytes)
+        display_width = 130
+        display_height = display_width * logo_height / logo_width
+        content_lines.append(f'q {display_width:.2f} 0 0 {display_height:.2f} 50 {A4_PORTRAIT_HEIGHT - 50 - display_height:.2f} cm /Im1 Do Q')
+        image_object = (
+            f'<< /Type /XObject /Subtype /Image /Width {logo_width} /Height {logo_height} '
+            f'/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(logo_bytes)} >>\n'
+        ).encode() + b'stream\n' + logo_bytes + b'\nendstream'
+
+    pages = []
+    current = []
+    for block in blocks:
+        block_lines = list(block or [''])
+        block_len = len(block_lines)
+        if current and len(current) + block_len > lines_per_page:
+            pages.append(current)
+            current = []
+        if block_len > lines_per_page:
+            for start in range(0, block_len, lines_per_page):
+                chunk = block_lines[start:start + lines_per_page]
+                if current:
+                    pages.append(current)
+                    current = []
+                pages.append(chunk)
+            continue
+        current.extend(block_lines)
+    if current or not pages:
+        pages.append(current)
+
+    streams = []
+    for page_index, page_lines in enumerate(pages, start=1):
+        commands = list(content_lines)
+        if page_index > 1:
+            commands.append(_pdf_text_command(500, 740, f'Page {page_index}', size=10))
+        commands.append('BT')
+        y = start_y
+        for line in page_lines:
+            commands.append(_pdf_text_command(50, y, line, size=12))
+            y -= leading
+        commands.append('ET')
+        streams.append('\n'.join(commands).encode('latin-1', 'replace'))
+    return _pdf_objects(streams, image_object=image_object)
+
+
 def _pdf_rect(x, y, width, height, fill=None, stroke=None, line_width=0.6):
     """A filled/stroked rectangle — the only panel primitive PDF actually has."""
     commands = ['q']

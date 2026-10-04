@@ -14,8 +14,8 @@ from app.services.customers import create_customer, customer_fields_changed, cus
 from app.services.branches import adjusted_pickup_time_for_branch, branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
 from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
-from app.services.pdf_documents import simple_lines_pdf_bytes
-from app.services.reports import started_orders_report_pdf_lines
+from app.services.pdf_documents import grouped_simple_lines_pdf_bytes
+from app.services.reports import started_orders_report_pdf_blocks
 
 bp = Blueprint("orders", __name__, url_prefix="/orders")
 PAGE_SIZE = 25
@@ -235,7 +235,7 @@ def _time_options(increment=15):
 @login_required
 def started_orders_report_pdf():
     _selected_branch, branch_id, branch_label, _branches, _branch_scope = resolve_branch_filter(request.args.get("branch", ""))
-    pdf = simple_lines_pdf_bytes(started_orders_report_pdf_lines(branch_label=branch_label, branch_id=branch_id))
+    pdf = grouped_simple_lines_pdf_bytes(started_orders_report_pdf_blocks(branch_label=branch_label, branch_id=branch_id))
     return Response(
         pdf,
         mimetype="application/pdf",

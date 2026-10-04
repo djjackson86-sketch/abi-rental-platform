@@ -767,22 +767,22 @@ def started_orders_report_rows(branch_id=None):
     return materialised
 
 
-def started_orders_report_pdf_lines(branch_label=None, branch_id=None):
+def started_orders_report_pdf_blocks(branch_label=None, branch_id=None):
     rows = started_orders_report_rows(branch_id=branch_id)
     scope_label = branch_label or 'All branches'
-    lines = [
+    blocks = [[
         'Started Orders Report',
         f'Branch: {scope_label}',
         f'Orders/trailers: {len(rows)}',
         '',
-    ]
+    ]]
     if not rows:
-        lines.append('No started trailer orders found.')
-        return lines
+        blocks[0].append('No started trailer orders found.')
+        return blocks
     for index, row in enumerate(rows, start=1):
         deposit = row.get('available_deposit')
         deposit_text = 'N/A' if deposit is None else f"R{float(deposit or 0):.2f}"
-        lines.extend([
+        blocks.append([
             f"{index}. Customer Name: {row.get('customer_name') or 'No customer'}",
             f"   Order No: {row.get('order_number') or ''}",
             f"   Trailer: {row.get('trailer_sku') or ''}",
@@ -793,4 +793,8 @@ def started_orders_report_pdf_lines(branch_label=None, branch_id=None):
             f"   Balance Due: R{float(row.get('balance_due') or 0):.2f}",
             '',
         ])
-    return lines
+    return blocks
+
+
+def started_orders_report_pdf_lines(branch_label=None, branch_id=None):
+    return [line for block in started_orders_report_pdf_blocks(branch_label=branch_label, branch_id=branch_id) for line in block]

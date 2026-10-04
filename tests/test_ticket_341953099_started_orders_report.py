@@ -49,6 +49,15 @@ def drawn_text(pdf_bytes):
     return '\n'.join(texts)
 
 
+def drawn_page_texts(pdf_bytes):
+    pages = []
+    for stream in re.findall(r'stream\r?\n(.*?)\r?\nendstream', pdf_bytes.decode('latin-1'), re.S):
+        texts = re.findall(r'Tm \((.*?)\) Tj', stream)
+        if texts:
+            pages.append('\n'.join(texts))
+    return pages
+
+
 def seed_report_data(app):
     with app.app_context():
         db = get_db()
@@ -120,6 +129,40 @@ def test_started_orders_report_pdf_rows_and_button(client, app, monkeypatch):
     assert re.search(r'Damage Waiver: Yes\n\s*Balance Due: R225\.00', text)
     assert 'ORD-RESERVED' not in text
     assert 'PART-1' not in text
+
+
+def test_started_orders_report_keeps_each_order_block_on_one_page(client, app, monkeypatch):
+    monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 7, 2, 8, 0))
+    seed_report_data(app)
+    with app.app_context():
+        db = get_db()
+        db.execute("""INSERT INTO products (id, name, product_type, sku, price_amount, price_unit, security_deposit, quantity, branch_id, created_at)
+                    VALUES (104, 'Trailer C', 'rental', 'TRL-C', 100, 'day', 500, 1, 101, '2026-01-01')""")
+        db.execute("""INSERT INTO orders (id, order_number, customer_id, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, deposit_total, deposit_option, damage_waiver_amount, deposit_applied_amount, deposit_refund_amount, total, due_total, created_at)
+                    VALUES (204, 'ORD-PAGE-BREAK', 10, 101, 101, 'started', 'paid', '2026-07-01T09:00', '2026-07-05T12:00', 500, 'security_deposit', 0, 0, 0, 500, 0, '2026-01-01')""")
+        db.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price, line_subtotal, line_total) VALUES (204, 104, 1, 100, 100, 100)")
+        db.commit()
+    login(client)
+
+    response = client.get('/orders/started-orders-report.pdf')
+
+    assert response.status_code == 200
+    pages = drawn_page_texts(response.data)
+    assert len(pages) == 2
+    page_break_block = [
+        '4. Customer Name: Alice Started',
+        'Order No: ORD-PAGE-BREAK',
+        'Trailer: TRL-C',
+        'Expected Date: 2026-07-05',
+        'Expected Time: 12:00',
+        'Available Deposit: R500.00',
+        'Damage Waiver: No',
+        'Balance Due: R700.00',
+    ]
+    unique_block_lines = page_break_block[:5] + [page_break_block[-1]]
+    containing_pages = [page for page in pages if any(line in page for line in unique_block_lines)]
+    assert len(containing_pages) == 1
+    assert all(line in containing_pages[0] for line in page_break_block)
 
 
 def test_started_orders_report_is_orders_gated_and_branch_scoped(client, app, monkeypatch):
