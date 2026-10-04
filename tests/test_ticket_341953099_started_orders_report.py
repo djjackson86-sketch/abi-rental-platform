@@ -272,7 +272,8 @@ def test_started_orders_report_is_orders_gated_and_branch_scoped(client, app, mo
     assert 'ORD-START-1' in text
     assert 'TRL-A' in text
     assert 'STH-1' not in text
-    assert 'Branch: All branches' in text
+    assert 'Branch: North' in text
+    assert 'Branch: All branches' not in text
 
     login(client, 'North orders only')
     page = client.get('/orders')

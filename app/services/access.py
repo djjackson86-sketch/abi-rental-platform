@@ -792,7 +792,7 @@ def resolve_branch_filter(requested=""):
     if scope_ids is not None:
         branches = [branch for branch in branches if branch["id"] in scope_ids]
         if len(branches) == 1:
-            return "", None, "", branches, branches[0]["id"]
+            return "", None, branches[0]["name"], branches, branches[0]["id"]
         if not branches:
             # Restricted to nothing: no chooser, and the SQL clause returns no rows.
             return "", None, "", [], 1
