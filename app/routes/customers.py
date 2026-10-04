@@ -9,6 +9,7 @@ from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import normalise_payment_date_filter
 from app.services.settings import get_company_settings
 from app.services.customer_credits import customer_credit_balance, customer_credit_entries
+from app.services.legacy_balances import legacy_balance_summary
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
 
@@ -93,7 +94,19 @@ def detail(customer_id):
         flash("Customer not found", "error")
         return redirect(url_for("customers.index"))
     orders = customer_orders(customer_id)
-    return render_template("admin/customers/detail.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), orders=orders, customer_has_history=bool(orders) or customer_has_history(customer_id), custom_field_label=custom_field_label, client_verified_label=client_verified_label, customer_credit_balance=customer_credit_balance(customer_id), customer_credit_entries=customer_credit_entries(customer_id))
+    return render_template(
+        "admin/customers/detail.html",
+        settings=get_company_settings(),
+        customer=customer,
+        custom_fields=custom_fields_for(customer),
+        orders=orders,
+        customer_has_history=bool(orders) or customer_has_history(customer_id),
+        custom_field_label=custom_field_label,
+        client_verified_label=client_verified_label,
+        customer_credit_balance=customer_credit_balance(customer_id),
+        customer_credit_entries=customer_credit_entries(customer_id),
+        legacy_balance=legacy_balance_summary(customer_id),
+    )
 
 
 @bp.route("/<int:customer_id>/statement")

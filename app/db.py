@@ -788,6 +788,30 @@ def run_migrations(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_source_order ON customer_credits(source_order_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_applied_order ON customer_credits(applied_order_id)")
 
+    # --- Legacy balances imported from the previous Sano/Booqable system ------
+    db.execute("""CREATE TABLE IF NOT EXISTS legacy_customer_balances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        source_system TEXT NOT NULL DEFAULT 'booqable',
+        source_customer_id TEXT NOT NULL DEFAULT '',
+        source_order_number TEXT NOT NULL,
+        source_payment_status TEXT NOT NULL DEFAULT '',
+        source_order_status TEXT NOT NULL DEFAULT '',
+        source_total REAL NOT NULL DEFAULT 0,
+        source_paid REAL NOT NULL DEFAULT 0,
+        amount_due REAL NOT NULL DEFAULT 0,
+        invoice_count INTEGER NOT NULL DEFAULT 0,
+        source_started_at TEXT NOT NULL DEFAULT '',
+        source_created_at TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(source_system, source_order_number)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_customer_balances_customer ON legacy_customer_balances(customer_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_customer_balances_status ON legacy_customer_balances(status)")
+
 
 def init_db():
     db = get_db()
