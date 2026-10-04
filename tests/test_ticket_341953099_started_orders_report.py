@@ -90,6 +90,9 @@ def seed_report_data(app):
         db.execute("INSERT INTO customers (id, name, email, created_at) VALUES (10, 'Alice Started', 'alice@example.test', '2026-01-01')")
         db.execute("INSERT INTO customers (id, name, email, created_at) VALUES (11, 'Bob Reserved', 'bob@example.test', '2026-01-01')")
         db.execute("INSERT INTO customers (id, name, email, created_at) VALUES (12, 'South Started', 'south@example.test', '2026-01-01')")
+        db.execute("INSERT INTO customers (id, name, email, created_at) VALUES (13, 'Other Rental Started', 'other@example.test', '2026-01-01')")
+        db.execute("""INSERT INTO product_groups (id, name, description, active, sort_order, created_at, updated_at)
+                    VALUES (301, 'Other Rental Products', '', 1, 0, '2026-01-01', '2026-01-01')""")
         db.execute("""INSERT INTO products (id, name, product_type, sku, price_amount, price_unit, security_deposit, quantity, branch_id, created_at)
                     VALUES (100, 'Trailer A', 'rental', 'TRL-A', 100, 'day', 500, 1, 101, '2026-01-01')""")
         db.execute("""INSERT INTO products (id, name, product_type, sku, price_amount, price_unit, security_deposit, quantity, branch_id, created_at)
@@ -98,16 +101,19 @@ def seed_report_data(app):
                     VALUES (102, 'South Trailer', 'rental', 'STH-1', 100, 'day', 500, 1, 102, '2026-01-01')""")
         db.execute("""INSERT INTO products (id, name, product_type, sku, price_amount, price_unit, security_deposit, quantity, branch_id, created_at)
                     VALUES (103, 'Part', 'part', 'PART-1', 10, 'fixed', 0, 1, 101, '2026-01-01')""")
+        db.execute("""INSERT INTO products (id, name, product_type, sku, price_amount, price_unit, security_deposit, quantity, branch_id, product_group_id, created_at)
+                    VALUES (105, 'Ratchet Strap', 'rental', 'OTHER-STRAP', 25, 'day', 0, 1, 101, 301, '2026-01-01')""")
         orders = [
             (200, 'ORD-START-1', 10, 101, 101, 'started', '2026-07-01T09:00', '2026-07-03T14:30', 750, 'security_deposit', 0, 0, 0, 750),
             (201, 'ORD-RESERVED', 11, 101, 101, 'reserved', '2026-07-01T09:00', '2026-07-03T09:00', 750, 'security_deposit', 0, 0, 0, 750),
             (202, 'ORD-SOUTH', 12, 102, 102, 'started', '2026-07-02T09:00', '2026-07-04T10:15', 0, 'damage_waiver', 125, 0, 0, 125),
             (203, 'ORD-PART', 10, 101, 101, 'started', '2026-07-02T09:00', '2026-07-04T10:15', 0, 'no_deposit', 0, 0, 0, 10),
+            (204, 'ORD-OTHER-RENTAL', 13, 101, 101, 'started', '2026-07-02T09:00', '2026-07-04T10:15', 0, 'no_deposit', 0, 0, 0, 25),
         ]
         for row in orders:
             db.execute("""INSERT INTO orders (id, order_number, customer_id, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, deposit_total, deposit_option, damage_waiver_amount, deposit_applied_amount, deposit_refund_amount, total, due_total, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?, ?, 0, '2026-01-01')""", row)
-        items = [(200, 100), (200, 101), (201, 100), (202, 102), (203, 103)]
+        items = [(200, 100), (200, 101), (201, 100), (202, 102), (203, 103), (204, 105)]
         for order_id, product_id in items:
             db.execute("INSERT INTO order_items (order_id, product_id, quantity, unit_price, line_subtotal, line_total) VALUES (?, ?, 1, 100, 100, 100)", (order_id, product_id))
         db.execute("""INSERT INTO users (name, email, password_hash, initials, role, branch_id, can_view_all_branches, active, modules_json, created_at)
@@ -160,6 +166,9 @@ def test_started_orders_report_pdf_rows_and_button(client, app, monkeypatch):
     assert re.search(r'Damage Waiver: Yes\s*Balance Due: R225\.00', text)
     assert 'ORD-RESERVED' not in text
     assert 'PART-1' not in text
+    assert 'ORD-OTHER-RENTAL' not in text
+    assert 'OTHER-STRAP' not in text
+    assert 'Other Rental Started' not in text
 
 
 def test_started_orders_report_highlights_the_trailer_sku_with_a_band(client, app, monkeypatch):
@@ -179,6 +188,32 @@ def test_started_orders_report_highlights_the_trailer_sku_with_a_band(client, ap
     assert stream.count('1.00 0.96 0.72 rg') == 3
 
 
+def test_started_orders_report_selected_branch_filter(client, app, monkeypatch):
+    monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 7, 2, 8, 0))
+    seed_report_data(app)
+    login(client)
+    page = client.get('/orders?branch=101')
+    assert page.status_code == 200
+    assert b'/orders/started-orders-report.pdf?branch=101' in page.data
+
+    north = client.get('/orders/started-orders-report.pdf?branch=101')
+    assert north.status_code == 200
+    north_text = drawn_text(north.data)
+    assert 'Branch: North' in north_text
+    assert 'ORD-START-1' in north_text
+    assert 'TRL-A' in north_text
+    assert 'STH-1' not in north_text
+    assert 'ORD-OTHER-RENTAL' not in north_text
+
+    south = client.get('/orders/started-orders-report.pdf?branch=102')
+    assert south.status_code == 200
+    south_text = drawn_text(south.data)
+    assert 'Branch: South' in south_text
+    assert 'ORD-SOUTH' in south_text
+    assert 'STH-1' in south_text
+    assert 'ORD-START-1' not in south_text
+
+
 def test_started_orders_report_is_two_columns_and_keeps_each_order_block_on_one_page(client, app, monkeypatch):
     monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 7, 2, 8, 0))
     seed_report_data(app)
@@ -188,10 +223,10 @@ def test_started_orders_report_is_two_columns_and_keeps_each_order_block_on_one_
                     VALUES (104, 'Trailer C', 'rental', 'TRL-C', 100, 'day', 500, 1, 101, '2026-01-01')""")
         # Four more single-trailer started orders so the report needs a second page
         # (three two-block rows fit under the header, the fourth overflows).
-        add_started_trailer_order(db, 204, 'ORD-PAGE-BREAK', '2026-07-05T12:00')
-        add_started_trailer_order(db, 205, 'ORD-205', '2026-07-06T09:00')
-        add_started_trailer_order(db, 206, 'ORD-206', '2026-07-07T09:00')
-        add_started_trailer_order(db, 207, 'ORD-207', '2026-07-08T09:00')
+        add_started_trailer_order(db, 205, 'ORD-PAGE-BREAK', '2026-07-05T12:00')
+        add_started_trailer_order(db, 206, 'ORD-206', '2026-07-06T09:00')
+        add_started_trailer_order(db, 207, 'ORD-207', '2026-07-07T09:00')
+        add_started_trailer_order(db, 208, 'ORD-208', '2026-07-08T09:00')
         db.commit()
     login(client)
 
@@ -222,21 +257,22 @@ def test_started_orders_report_is_two_columns_and_keeps_each_order_block_on_one_
     assert min(first[0], second[0]) == 50.0
     assert max(first[0], second[0]) > 297.5  # right-hand column sits past mid-page
 
-    # The block whose order dated last (ORD-207) is the odd trailing half-row.
-    assert 'ORD-207' in pages[1]
-    assert 'ORD-207' not in pages[0]
+    # The block whose order dated last (ORD-208) is the odd trailing half-row.
+    assert 'ORD-208' in pages[1]
+    assert 'ORD-208' not in pages[0]
 
 
 def test_started_orders_report_is_orders_gated_and_branch_scoped(client, app, monkeypatch):
     monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 7, 2, 8, 0))
     seed_report_data(app)
     login(client, 'North reports')
-    response = client.get('/orders/started-orders-report.pdf')
+    response = client.get('/orders/started-orders-report.pdf?branch=102')
     assert response.status_code == 200
     text = drawn_text(response.data)
     assert 'ORD-START-1' in text
     assert 'TRL-A' in text
     assert 'STH-1' not in text
+    assert 'Branch: All branches' in text
 
     login(client, 'North orders only')
     page = client.get('/orders')

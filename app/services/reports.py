@@ -749,13 +749,15 @@ def started_orders_report_rows(branch_id=None):
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
         JOIN products p ON p.id = oi.product_id
+        LEFT JOIN product_groups pg ON pg.id = p.product_group_id
         LEFT JOIN customers c ON c.id = o.customer_id
         WHERE o.status = 'started'
           AND COALESCE(p.product_type, 'rental') = 'rental'
+          AND COALESCE(pg.name, '') <> ?
           {scope_sql}
         ORDER BY o.end_at ASC, o.order_number ASC, p.sku ASC, oi.id ASC
         """,
-        scope_params,
+        [*TRAILER_GROUPS_EXCLUDED, *scope_params],
     ).fetchall()
     materialised = [row_dict(row) for row in rows]
     balances = {}
