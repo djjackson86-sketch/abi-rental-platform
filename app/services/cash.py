@@ -266,7 +266,8 @@ def _day_row(day, branch_id):
         return None
     return get_db().execute(
         """SELECT id, opening_cash, counted_cash, counted_card, notes, interaction_calls,
-        interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes
+        interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes,
+        interaction_saved_at
         FROM cash_ups WHERE branch_id = ? AND business_day = ?""",
         (branch_id, day),
     ).fetchone()
@@ -403,6 +404,8 @@ def day_summary(day=None, branch_id=None):
             'emails': int(_value(day_row, 'interaction_emails', 0) or 0) if day_row is not None else 0,
             'walk_in': int(_value(day_row, 'interaction_walk_in', 0) or 0) if day_row is not None else 0,
             'notes': str(_value(day_row, 'interaction_notes') or '') if day_row is not None else '',
+            'saved': bool(str(_value(day_row, 'interaction_saved_at') or '').strip()) if day_row is not None else False,
+            'saved_at': str(_value(day_row, 'interaction_saved_at') or '') if day_row is not None else '',
         },
         'has_day_row': day_row is not None,
     }
@@ -517,6 +520,8 @@ def aggregate_day_summary(day=None, branch_ids=None):
             'emails': sum(summary['interactions']['emails'] for summary in summaries),
             'walk_in': sum(summary['interactions']['walk_in'] for summary in summaries),
             'notes': '\n'.join(interaction_notes),
+            'saved': bool(summaries) and all(summary['interactions'].get('saved') for summary in summaries),
+            'saved_at': '',
         },
         'has_day_row': any(summary.get('has_day_row') for summary in summaries),
     }
@@ -537,8 +542,8 @@ def _ensure_day(day, branch_id, user_id=None):
     db.execute(
         """INSERT INTO cash_ups (branch_id, business_day, opening_cash, counted_cash, notes,
         interaction_calls, interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes,
-        created_by, created_at, updated_at)
-        VALUES (?, ?, ?, NULL, '', 0, 0, 0, 0, '', ?, ?, ?)""",
+        interaction_saved_at, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, NULL, '', 0, 0, 0, 0, '', '', ?, ?, ?)""",
         (branch_id, day, opening, user_id, ts, ts),
     )
     db.commit()
@@ -645,12 +650,13 @@ def save_interactions(day, calls, whatsapp, emails, walk_in, notes='', branch_id
     }
     db = get_db()
     cash_up_id = _ensure_day(day, branch_id, user_id)
+    timestamp = now()
     db.execute(
         """UPDATE cash_ups SET interaction_calls = ?, interaction_whatsapp = ?,
         interaction_emails = ?, interaction_walk_in = ?, interaction_notes = ?,
-        opening_cash = ?, updated_at = ? WHERE id = ?""",
+        interaction_saved_at = ?, opening_cash = ?, updated_at = ? WHERE id = ?""",
         (values['calls'], values['whatsapp'], values['emails'], values['walk_in'],
-         str(notes or '').strip(), opening_cash(day, branch_id), now(), cash_up_id),
+         str(notes or '').strip(), timestamp, opening_cash(day, branch_id), timestamp, cash_up_id),
     )
     db.commit()
     return cash_up_id
@@ -832,6 +838,29 @@ def day_report(day=None, branch_id=None, aggregate=False, branch_ids=None, all_d
             summary['day'], branch_id=summary['branch_id'],
         )
     return report
+
+
+def missing_day_report_required_sections(report):
+    """Required dashboard sections still missing before a depot day report submit.
+
+    A zero is valid when the relevant section was explicitly saved.  The cash and
+    POS sections already carry nullable counted fields; new-client interactions
+    use ``interaction_saved_at`` so a created cash-up row with default zeroes does
+    not pass as filled.  Spare-wheel rows use their existing ``counted`` marker,
+    so an explicit zero count is accepted while a blank/unsaved box is not.
+    """
+    cash_summary = report.get('cash') or {}
+    missing = []
+    if not (cash_summary.get('interactions') or {}).get('saved'):
+        missing.append('New client interactions')
+    if not cash_summary.get('cashed_up'):
+        missing.append('Cash up')
+    if not cash_summary.get('pos_cashed_up'):
+        missing.append('POS Cashup')
+    spare_rows = report.get('spare_wheels') or []
+    if not spare_rows or any(not row.get('counted') for row in spare_rows):
+        missing.append('Spare wheel count')
+    return missing
 
 
 def day_report_prepared_by():

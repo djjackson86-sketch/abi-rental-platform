@@ -377,8 +377,9 @@ def submit_report_telegram():
     cash_summary = report["cash"]
     day = cash_summary["day"]
     branch_name = cash_summary["branch_name"] or "this depot"
-    if not cash_summary.get("cashed_up"):
-        flash("Cash up amount must be filled before submitting the day report", "error")
+    missing = cash.missing_day_report_required_sections(report)
+    if missing:
+        flash(f"Complete these sections before submitting the day report: {', '.join(missing)}", "error")
         return redirect(_dashboard_url(branch_id))
     filename = _report_filename(branch_name, day, cash_summary.get("branch_id"))
     caption = f"Day report — {branch_name} — {day}"

@@ -40,7 +40,7 @@ if str(ROOT) not in sys.path:
 from app import create_app  # noqa: E402
 from app.db import get_db, run_migrations  # noqa: E402
 from app.routes import cash as cash_routes  # noqa: E402
-from app.services import access, cash, telegram  # noqa: E402
+from app.services import access, cash, spare_wheels, telegram  # noqa: E402
 from app.services.access import MODULE_KEYS, create_additional_user  # noqa: E402
 
 TODAY = cash.today_iso()
@@ -151,6 +151,13 @@ def add_depot_staff(client, app, name, branch_id, password='staff123'):
 def cash_up(app, day, branch_id, counted):
     with app.app_context():
         cash.save_cash_up(day, counted, branch_id=branch_id)
+        cash.save_pos_cash_up(day, '0', branch_id=branch_id)
+        cash.save_interactions(day, '0', '0', '0', '0', '', branch_id=branch_id)
+        spare_wheels.save_actual_counts(
+            day,
+            branch_id,
+            {size: 0 for size in spare_wheels.WHEEL_SIZES},
+        )
 
 
 def submit(client, day, branch_id):

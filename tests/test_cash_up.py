@@ -368,13 +368,13 @@ def test_new_client_interactions_render_defaults_save_and_reach_reports(client, 
     assert 'Two quote follow-ups needed.' in body
 
     summary = _summary(app)
-    assert summary['interactions'] == {
-        'calls': 4,
-        'whatsapp': 3,
-        'emails': 2,
-        'walk_in': 1,
-        'notes': 'Two quote follow-ups needed.',
-    }
+    assert summary['interactions']['calls'] == 4
+    assert summary['interactions']['whatsapp'] == 3
+    assert summary['interactions']['emails'] == 2
+    assert summary['interactions']['walk_in'] == 1
+    assert summary['interactions']['notes'] == 'Two quote follow-ups needed.'
+    assert summary['interactions']['saved'] is True
+    assert summary['interactions']['saved_at']
     csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
     for expected in [
         'New client interactions,Calls,4',
@@ -1257,8 +1257,72 @@ def test_submit_day_report_requires_cash_up_amount_before_sending(client, app, m
     monkeypatch.setattr(cash_routes, '_send_document', fake_send)
     login(client)
     body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
-    assert 'Cash up amount must be filled before submitting the day report' in body
+    assert 'Complete these sections before submitting the day report: New client interactions, Cash up, POS Cashup, Spare wheel count' in body
     assert sent['called'] is False
+
+
+def _fill_day_report_required_sections(client, day=TODAY, branch='1', skip=()):
+    skip = set(skip)
+    if 'New client interactions' not in skip:
+        client.post('/cash-up/interactions', data={
+            'day': day, 'branch': branch,
+            'interaction_calls': '0', 'interaction_whatsapp': '0',
+            'interaction_emails': '0', 'interaction_walk_in': '0',
+            'interaction_notes': '',
+        }, follow_redirects=True)
+    if 'Cash up' not in skip:
+        client.post('/cash-up', data={'day': day, 'branch': branch, 'counted_cash': '0'}, follow_redirects=True)
+    if 'POS Cashup' not in skip:
+        client.post('/cash-up/pos', data={'day': day, 'branch': branch, 'counted_card': '0'}, follow_redirects=True)
+    if 'Spare wheel count' not in skip:
+        data = {'day': day, 'branch': branch}
+        data.update({f'actual_{index}': '0' for index in range(5)})
+        client.post('/dashboard/spare-wheels', data=data, follow_redirects=True)
+
+
+@pytest.mark.parametrize('missing_section', [
+    'New client interactions',
+    'Cash up',
+    'POS Cashup',
+    'Spare wheel count',
+])
+def test_submit_day_report_blocks_when_any_required_section_is_missing(client, app, monkeypatch, missing_section):
+    sent = {'called': False}
+
+    def fake_send(*_args, **_kwargs):
+        sent['called'] = True
+        return {'ok': True, 'sent': True, 'status': 200}
+
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', fake_send)
+    login(client)
+    _fill_day_report_required_sections(client, skip={missing_section})
+
+    body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
+
+    assert f'Complete these sections before submitting the day report: {missing_section}' in body
+    assert sent['called'] is False
+    with app.app_context():
+        recorded = get_db().execute('SELECT COUNT(*) AS n FROM day_report_submissions').fetchone()['n']
+    assert recorded == 0
+
+
+def test_zero_values_count_as_filled_when_required_sections_are_saved(client, app, monkeypatch):
+    sent = {'called': False}
+
+    def fake_send(*_args, **_kwargs):
+        sent['called'] = True
+        return {'ok': True, 'sent': True, 'status': 200}
+
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', fake_send)
+    login(client)
+    _fill_day_report_required_sections(client)
+
+    body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
+
+    assert 'Day report sent on Telegram for Branch 1' in body
+    assert sent['called'] is True
 
 
 def test_submit_day_report_sends_the_existing_pdf_to_telegram(client, app, monkeypatch):
@@ -1273,7 +1337,7 @@ def test_submit_day_report_sends_the_existing_pdf_to_telegram(client, app, monke
     from app.routes import cash as cash_routes
     monkeypatch.setattr(cash_routes, '_send_document', fake_send)
     login(client)
-    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '0'}, follow_redirects=True)
+    _fill_day_report_required_sections(client)
     res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True)
     body = res.get_data(as_text=True)
     assert res.status_code == 200
@@ -1296,7 +1360,7 @@ def test_submit_day_report_cannot_widen_a_branch_limited_account(client, app, mo
     with app.app_context():
         create_additional_user('Depot Two Clerk', 'staff123', branch_id=2)
     login(client, name='Depot Two Clerk', password='staff123')
-    client.post('/cash-up', data={'day': TODAY, 'branch': '2', 'counted_cash': '0'}, follow_redirects=True)
+    _fill_day_report_required_sections(client, branch='2')
     res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=False)
     assert res.status_code == 302
     assert 'branch=2' in res.headers['Location']
@@ -1305,7 +1369,7 @@ def test_submit_day_report_cannot_widen_a_branch_limited_account(client, app, mo
 
 def test_submit_day_report_flashes_when_telegram_is_disabled_or_not_configured(client, app):
     login(client)
-    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '0'}, follow_redirects=True)
+    _fill_day_report_required_sections(client)
     app.config.update(TELEGRAM_NOTIFICATIONS_ENABLED='')
     body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True).get_data(as_text=True)
     assert 'Telegram notifications are disabled; day report was not sent' in body
@@ -1319,7 +1383,7 @@ def test_submit_day_report_failure_does_not_crash_dashboard(client, app, monkeyp
     from app.routes import cash as cash_routes
     monkeypatch.setattr(cash_routes, '_send_document', lambda *_args, **_kwargs: {'ok': False, 'sent': False, 'error': 'boom'})
     login(client)
-    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '0'}, follow_redirects=True)
+    _fill_day_report_required_sections(client)
     res = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'}, follow_redirects=True)
     body = res.get_data(as_text=True)
     assert res.status_code == 200
@@ -1511,8 +1575,8 @@ def test_the_telegram_copy_uses_the_same_filename_and_caption(client, app, monke
     _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1)
     login(client)
     download = client.get('/cash-up/report.pdf?branch=1')
-    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '500'},
-                follow_redirects=True)
+    _fill_day_report_required_sections(client)
+    client.post('/cash-up', data={'day': TODAY, 'branch': '1', 'counted_cash': '500'}, follow_redirects=True)
     body = client.post('/cash-up/report/telegram', data={'day': TODAY, 'branch': '1'},
                        follow_redirects=True).get_data(as_text=True)
     assert 'Day report sent on Telegram for Midrand / Depot' in body

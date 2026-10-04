@@ -206,7 +206,18 @@ def test_the_manual_day_report_pdf_still_goes_out(client, app, monkeypatch, sent
     monkeypatch.setattr(cash_routes, '_send_document', fake_document)
     day = today_iso()
     login(client)
+    client.post('/cash-up/interactions', data={
+        'day': day, 'branch': '1',
+        'interaction_calls': '0', 'interaction_whatsapp': '0',
+        'interaction_emails': '0', 'interaction_walk_in': '0',
+        'interaction_notes': '',
+    }, follow_redirects=True)
     client.post('/cash-up', data={'day': day, 'branch': '1', 'counted_cash': '0'}, follow_redirects=True)
+    client.post('/cash-up/pos', data={'day': day, 'branch': '1', 'counted_card': '0'}, follow_redirects=True)
+    client.post('/dashboard/spare-wheels', data={
+        'day': day, 'branch': '1',
+        'actual_0': '0', 'actual_1': '0', 'actual_2': '0', 'actual_3': '0', 'actual_4': '0',
+    }, follow_redirects=True)
     body = client.post('/cash-up/report/telegram', data={'day': day, 'branch': '1'},
                        follow_redirects=True).get_data(as_text=True)
     assert 'Day report sent on Telegram for Branch 1' in body
