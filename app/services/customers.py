@@ -356,6 +356,7 @@ def customer_summary_for(customer):
         display += f" — {email}"
     credit_balance = _customer_credit_balance_value(customer)
     previous_orders_balance = round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2)
+    legacy_balance = round(float(_customer_row_value(customer, "legacy_balance", 0) or 0), 2)
     return {
         "id": customer["id"],
         "customer_type": customer["customer_type"] or "individual",
@@ -369,6 +370,12 @@ def customer_summary_for(customer):
         "previous_orders_balance": previous_orders_balance,
         "customer_credit_balance": credit_balance,
         "previous_orders_balance_display": credit_balance if credit_balance > 0 else previous_orders_balance,
+        # Imported opening balance from the previous Sano system plus where staff
+        # settle it. The order form shows this beside Previous Orders Balance and
+        # links straight to the customer page's payment panel.
+        "legacy_balance": legacy_balance,
+        "legacy_balance_url": f"/customers/{customer['id']}#legacy-balance",
+        "unpaid_orders_total": round(previous_orders_balance + legacy_balance, 2),
         "orders_to_date": int(_customer_row_value(customer, "orders_to_date", 0) or 0),
         "client_verified": _customer_row_value(customer, "client_verified", None),
         "client_verified_label": client_verified_label(_customer_row_value(customer, "client_verified", None)),

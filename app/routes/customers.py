@@ -6,14 +6,26 @@ from flask import Blueprint, Response, flash, redirect, render_template, request
 from app.routes.auth import login_required
 from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
-from app.services.payments import normalise_payment_date_filter
+from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
 from app.services.customer_credits import customer_credit_balance, customer_credit_entries
-from app.services.legacy_balances import legacy_balance_summary
+from app.services.legacy_balances import legacy_balance_summary, record_legacy_payment
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
 
 PAGE_SIZE = 25
+
+# Methods staff may use to settle an imported legacy balance. Customer credit is
+# excluded on purpose: it is money the customer already has with us, not cash
+# collected against an old debt, and manual is a legacy ledger value only.
+LEGACY_PAYMENT_METHODS = ("cash", "eft", "card", "other")
+LEGACY_PAYMENT_METHOD_LABELS = {
+    "cash": "Cash",
+    "eft": "EFT",
+    "card": "Card",
+    "other": "Other",
+}
+assert set(LEGACY_PAYMENT_METHODS) <= set(PAYMENT_METHODS)
 
 
 def _display_limit():
@@ -106,7 +118,28 @@ def detail(customer_id):
         customer_credit_balance=customer_credit_balance(customer_id),
         customer_credit_entries=customer_credit_entries(customer_id),
         legacy_balance=legacy_balance_summary(customer_id),
+        legacy_payment_methods=[(method, LEGACY_PAYMENT_METHOD_LABELS[method]) for method in LEGACY_PAYMENT_METHODS],
     )
+
+
+@bp.post("/<int:customer_id>/legacy-payments")
+@login_required
+def record_legacy_balance_payment(customer_id):
+    """Settle part or all of a customer's imported legacy balance.
+
+    Ticket follow-up: the balance is only useful if staff can take the money on
+    the spot, so the customer page (and the order form's link to it) posts here.
+    """
+    customer = get_customer(customer_id)
+    if not customer:
+        flash("Customer not found", "error")
+        return redirect(url_for("customers.index"))
+    try:
+        result = record_legacy_payment(customer_id, request.form)
+        flash(f"R{result['amount']:.2f} recorded against previous orders. R{result['remaining']:.2f} still outstanding.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("customers.detail", customer_id=customer_id) + "#legacy-balance")
 
 
 @bp.route("/<int:customer_id>/statement")

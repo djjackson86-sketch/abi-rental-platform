@@ -444,3 +444,16 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .legacy-balance-money small{color:var(--muted);font-weight:700}
 .balance-owing{color:#b42318}
 @media(max-width:720px){.legacy-balance-summary{display:grid}.legacy-balance-row{grid-template-columns:1fr}.legacy-balance-row>b{justify-self:start}}
+
+/* Legacy balance stat card on the order form, plus the settlement panel on the
+   customer page where the money is actually taken. */
+.legacy-balance-stat-card{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal;border-color:#fed7aa;background:#fff7ed}
+.legacy-balance-stat-card .btn{width:auto;min-height:32px;padding:5px 11px;font-size:12.5px}
+.legacy-balance-settled{display:block;margin-top:4px;color:var(--muted);font-weight:700;font-size:12.5px}
+.legacy-payment-form{margin-top:16px;padding:16px;border:1px solid #fed7aa;border-radius:14px;background:#fffbeb}
+.legacy-payment-form h3{margin:0 0 12px;font-size:15px}
+.legacy-payment-form .form-grid{margin-bottom:12px}
+.legacy-payment-form .btn{width:auto}
+.legacy-payment-list{margin-top:18px}
+.legacy-payment-list h3{margin:0 0 10px;font-size:15px}
+@media(max-width:720px){.legacy-balance-stat-card{display:grid}.legacy-balance-stat-card .btn{justify-self:start}}

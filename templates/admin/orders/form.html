@@ -26,6 +26,15 @@
       {% set orders_to_date = (customer_summary.orders_to_date if customer_summary else (selected_customer_summary.orders_to_date if selected_customer_summary else 0)) if (customer_summary is defined) else (selected_customer_summary.orders_to_date if selected_customer_summary else 0) %}
       <div class="stat-card previous-balance-card" id="previous-balance-card" aria-live="polite"><span>Previous Orders Balance</span>
         <strong id="previous-balance-value" class="{{ 'balance-owing' if balance > 0 else 'balance-zero' }}">R{{ '%.2f'|format(balance) }}</strong></div>
+      {# Follow-up: the imported legacy balance is shown here too, with a link to the
+         customer page's payment panel where staff take the money. #}
+      {% set legacy = (summary_obj.legacy_balance if summary_obj else 0) or 0 %}
+      {% set legacy_url = (summary_obj.legacy_balance_url if summary_obj else '') or '' %}
+      <div class="stat-card legacy-balance-stat-card" id="legacy-balance-card" aria-live="polite" {% if legacy <= 0 %}hidden{% endif %}>
+        <span>Previous Orders Balance (Old System)</span>
+        <strong id="legacy-balance-value" class="balance-owing">R{{ '%.2f'|format(legacy) }}</strong>
+        <a class="btn ghost" id="settle-previous-orders" href="{{ legacy_url or '#' }}" {% if not legacy_url %}hidden{% endif %}>Settle Previous Order/s</a>
+      </div>
       {% if has_credit %}
       <div class="stat-card customer-credit-card" id="customer-credit-card" aria-live="polite"><span>Customer Credit</span>
         <strong id="customer-credit-value" class="balance-credit">R{{ '%.2f'|format(credit) }}</strong></div>
@@ -207,7 +216,7 @@
     </div>
   </section>
   <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional internal notes for this order">{{ order_form.get('notes', '') }}</textarea></label></section>
-  <div class="form-actions"><button class="btn primary" type="submit" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save order changes' if editing else 'Save as draft' }}</button>{% if sales_repairs_available %}<button class="btn ghost" type="submit" onclick="if(this.form.order_action){this.form.order_action.value='sales_repairs'}">Save as {{ sales_repairs_label }}</button>{% endif %}</div>
+  <div class="form-actions"><button class="btn primary" type="submit" id="save-order-button" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save order changes' if editing else 'Save as draft' }}</button>{% if sales_repairs_available %}<button class="btn ghost" type="submit" onclick="if(this.form.order_action){this.form.order_action.value='sales_repairs'}">Save as {{ sales_repairs_label }}</button>{% endif %}</div>
 </form>
 <script>
 (function(){
@@ -229,7 +238,9 @@
   const customerLabels={vehicle_make:'Vehicle Make',vehicle_color:'Vehicle Color',vehicle_reg_no:'Veh Reg No',alternative_contact_name:'Alternative Contact Name',alternative_contact_number:'Alternative Contact Number',alternative_contact_relationship:'Alternative Contact Relationship',vat_number:'VAT No',company_reg_no:'Company Reg No'};
   function customerLabel(key){ return customerLabels[key] || key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
   function ensureCreditCard(){ let card=document.getElementById('customer-credit-card'); if(card) return card; const anchor=document.getElementById('previous-balance-card'); if(!anchor||!anchor.parentNode) return null; card=document.createElement('div'); card.className='stat-card customer-credit-card'; card.id='customer-credit-card'; card.setAttribute('aria-live','polite'); const label=document.createElement('span'); label.textContent='Customer Credit'; const value=document.createElement('strong'); value.id='customer-credit-value'; value.className='balance-credit'; card.append(label,value); anchor.parentNode.insertBefore(card,anchor.nextSibling); return card; }
-  function setCustomerStats(summary){ const balanceEl=document.getElementById('previous-balance-value'); const ordersEl=document.getElementById('orders-to-date-value'); if(balanceEl){ const value=summary?amount(summary.previous_orders_balance):0; balanceEl.textContent=fmt(value); balanceEl.className=value>0?'balance-owing':'balance-zero'; } const credit=summary?amount(summary.customer_credit_balance):0; const creditCard=credit>0?ensureCreditCard():document.getElementById('customer-credit-card'); if(creditCard){ creditCard.hidden=!(credit>0); const creditEl=document.getElementById('customer-credit-value'); if(creditEl) creditEl.textContent=fmt(credit); } if(ordersEl){ const count=summary?parseInt(summary.orders_to_date||0,10):0; ordersEl.textContent=String(Number.isFinite(count)?count:0); } }
+  let currentCustomerSummary=null;
+  function setCustomerStats(summary){ currentCustomerSummary=summary||null; const balanceEl=document.getElementById('previous-balance-value'); const ordersEl=document.getElementById('orders-to-date-value'); if(balanceEl){ const value=summary?amount(summary.previous_orders_balance):0; balanceEl.textContent=fmt(value); balanceEl.className=value>0?'balance-owing':'balance-zero'; } const credit=summary?amount(summary.customer_credit_balance):0; const creditCard=credit>0?ensureCreditCard():document.getElementById('customer-credit-card'); if(creditCard){ creditCard.hidden=!(credit>0); const creditEl=document.getElementById('customer-credit-value'); if(creditEl) creditEl.textContent=fmt(credit); } const legacy=summary?amount(summary.legacy_balance):0; const legacyCard=document.getElementById('legacy-balance-card'); if(legacyCard) legacyCard.hidden=!(legacy>0); const legacyEl=document.getElementById('legacy-balance-value'); if(legacyEl) legacyEl.textContent=fmt(legacy); const settleLink=document.getElementById('settle-previous-orders'); if(settleLink){ const url=(summary&&summary.legacy_balance_url)||''; settleLink.hidden=!url; settleLink.href=url||'#'; } if(ordersEl){ const count=summary?parseInt(summary.orders_to_date||0,10):0; ordersEl.textContent=String(Number.isFinite(count)?count:0); } }
+  function unpaidOrdersTotal(summary){ if(!summary) return 0; if(summary.unpaid_orders_total!==undefined && summary.unpaid_orders_total!==null) return amount(summary.unpaid_orders_total); return amount(summary.previous_orders_balance)+amount(summary.legacy_balance); }
   function syncBlockedBanner(summary){ const banner=document.getElementById('blocked-customer-banner'); const reasonEl=document.getElementById('blocked-customer-reason'); if(!banner) return; const blocked=!!(summary&&summary.is_blocked); banner.hidden=!blocked; if(reasonEl) reasonEl.textContent=blocked?('— '+(summary.blocked_reason||'no reason recorded')):''; }
   function textRow(label,value){ const row=document.createElement('div'); row.className='detail-row'; const span=document.createElement('span'); span.textContent=label; const bold=document.createElement('b'); bold.textContent=value||'—'; row.append(span,bold); return row; }
   function optionSummary(option){ if(!option||!option.dataset.summary) return null; try{return JSON.parse(option.dataset.summary);}catch(e){return null;} }
@@ -279,6 +290,13 @@
   if(addLineBtn){ addLineBtn.addEventListener('click',function(){ if(window.orderLines) window.orderLines.addLine(); }); }
   document.querySelectorAll('.enhanced-line').forEach(bindLineRow); renumberLines();
   function syncWaiver(){ updateEstimate(); } if(depositOption) depositOption.addEventListener('change',syncWaiver); if(waiver) waiver.addEventListener('input',updateEstimate); if(securityDepositAmount) securityDepositAmount.addEventListener('input',updateEstimate); syncWaiver(); updateRentalDays();
+  // Saving a draft for a customer who still owes money (unpaid earlier orders or
+  // an imported legacy balance) asks them to confirm first.
+  const saveOrderButton=document.getElementById('save-order-button');
+  if(saveOrderButton){ saveOrderButton.addEventListener('click',function(ev){ const unpaid=unpaidOrdersTotal(currentCustomerSummary); if(unpaid>0 && !window.confirm('This customer has UNPAID orders ('+fmt(unpaid)+'). Do you want to continue?')){ ev.preventDefault(); } }); }
+  // Prime the stat cards (and the unpaid warning) for a customer chosen before
+  // the form rendered, so the guard works without touching the picker.
+  if(customerInput && customerInput.value){ syncCustomer(); }
 })();
 </script>
 {% endblock %}

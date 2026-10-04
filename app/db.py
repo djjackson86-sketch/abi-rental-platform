@@ -811,6 +811,23 @@ def run_migrations(db):
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_customer_balances_customer ON legacy_customer_balances(customer_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_customer_balances_status ON legacy_customer_balances(status)")
+    # Money collected against an imported legacy balance. The imported figure in
+    # amount_due is never edited; settled_amount accumulates here, so the
+    # original import stays auditable and outstanding = amount_due - settled_amount.
+    ensure_column(db, "legacy_customer_balances", "settled_amount", "REAL NOT NULL DEFAULT 0")
+    db.execute("""CREATE TABLE IF NOT EXISTS legacy_balance_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        amount REAL NOT NULL DEFAULT 0,
+        method TEXT NOT NULL DEFAULT 'cash',
+        reference TEXT NOT NULL DEFAULT '',
+        payment_date TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        deleted_at TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_balance_payments_customer ON legacy_balance_payments(customer_id)")
 
 
 def init_db():
