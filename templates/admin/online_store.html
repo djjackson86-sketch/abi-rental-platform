@@ -40,4 +40,64 @@
 
   <button class="btn primary" type="submit">Save online store settings</button>
 </form>
+
+<section class="panel store-category-setup-panel">
+  <div class="panel-title">
+    <div>
+      <p class="eyebrow">Inventory categories</p>
+      <h2>Store category photos</h2>
+    </div>
+    <a class="btn ghost" href="{{ url_for('inventory.groups') }}">Manage inventory categories</a>
+  </div>
+  <p class="muted">These are the same categories used on the Inventory page. Uploading here resizes the photo before saving it, so phone photos do not bloat the database or the public store.</p>
+  {% if store_categories %}
+  <div class="store-category-setup-grid">
+    {% for item in store_categories %}
+      {% set group = item.group %}
+      <article class="store-category-setup-card {% if not group %}is-ungrouped{% endif %}">
+        <div class="group-image-preview compact">
+          {% if group and item.image.has_image %}
+            <img src="{{ url_for('public.category_image', group_id=group.id) }}" alt="{{ group.name }}">
+          {% elif group %}
+            <div class="group-image-fallback">{{ group.name[:2].upper() }}</div>
+          {% else %}
+            <div class="group-image-fallback">UN</div>
+          {% endif %}
+        </div>
+        <div class="store-category-setup-copy">
+          <h3>{{ group.name if group else 'Ungrouped inventory' }}</h3>
+          {% if group %}
+            <p>{{ group.description or 'No category description yet.' }}</p>
+            <p class="muted">{{ item.product_count }} trailer{{ '' if item.product_count == 1 else 's' }} linked · {{ 'Shown on store' if group.becomes_store_visible else 'Hidden from store' }}</p>
+          {% else %}
+            <p class="muted">These rental products are public but not assigned to an inventory category yet. Link them from Inventory → Product groups so they correspond with a store section.</p>
+          {% endif %}
+          {% if item.products %}
+            <ul class="store-category-product-list">
+              {% for product in item.products[:5] %}<li>{{ product.name }}</li>{% endfor %}
+              {% if item.products|length > 5 %}<li>+ {{ item.products|length - 5 }} more</li>{% endif %}
+            </ul>
+          {% endif %}
+          {% if group %}
+          <div class="form-actions store-category-photo-actions">
+            <form method="post" enctype="multipart/form-data" action="{{ url_for('admin.online_store_category_image', group_id=group.id) }}" class="inline-form group-image-form">
+              <input type="file" name="group_image" accept="image/png,image/jpeg,image/webp" aria-label="Choose photo for {{ group.name }}">
+              <button class="btn primary">Upload photo</button>
+            </form>
+            {% if item.image.has_image %}
+            <form method="post" action="{{ url_for('admin.online_store_category_image_clear', group_id=group.id) }}" class="inline-form">
+              <button class="btn danger">Remove photo</button>
+            </form>
+            {% endif %}
+          </div>
+          {% if item.image.has_image %}<p class="muted">Current photo: {{ item.image.filename or item.image.source }} · {{ item.image.mime }}</p>{% endif %}
+          {% endif %}
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+  {% else %}
+    <p class="empty">No inventory categories yet. Create demo categories or add a Product group from Inventory first.</p>
+  {% endif %}
+</section>
 {% endblock %}

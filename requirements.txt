@@ -2,3 +2,7 @@ Flask==3.0.3
 pytest==8.3.3
 gunicorn==22.0.0
 libsql-client==0.3.1
+# Windows-local Python needs this for ZoneInfo("Africa/Johannesburg"); Linux usually gets it from the OS tzdb.
+tzdata==2026.5
+# Category photo upload/resize for online-store inventory categories.
+Pillow==12.3.0

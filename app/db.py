@@ -179,6 +179,11 @@ CREATE TABLE IF NOT EXISTS product_groups (
     description TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    image_blob BLOB,
+    image_mime TEXT NOT NULL DEFAULT '',
+    image_filename TEXT NOT NULL DEFAULT '',
+    image_source TEXT NOT NULL DEFAULT '',
+    becomes_store_visible INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -195,6 +200,9 @@ CREATE TABLE IF NOT EXISTS products (
     price_unit TEXT NOT NULL DEFAULT 'day',
     security_deposit REAL NOT NULL DEFAULT 0,
     hourly_extra_rate REAL NOT NULL DEFAULT 0,
+    registration TEXT NOT NULL DEFAULT '',
+    licence_number TEXT NOT NULL DEFAULT '',
+    registration_number TEXT NOT NULL DEFAULT '',
     tax_profile_id INTEGER REFERENCES tax_profiles(id) ON DELETE SET NULL,
     product_group_id INTEGER REFERENCES product_groups(id) ON DELETE SET NULL,
     quantity INTEGER NOT NULL DEFAULT 1,
@@ -472,9 +480,19 @@ def run_migrations(db):
         description TEXT NOT NULL DEFAULT '',
         active INTEGER NOT NULL DEFAULT 1,
         sort_order INTEGER NOT NULL DEFAULT 0,
+        image_blob BLOB,
+        image_mime TEXT NOT NULL DEFAULT '',
+        image_filename TEXT NOT NULL DEFAULT '',
+        image_source TEXT NOT NULL DEFAULT '',
+        becomes_store_visible INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )""")
+    ensure_column(db, "product_groups", "image_blob", "BLOB")
+    ensure_column(db, "product_groups", "image_mime", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "product_groups", "image_filename", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "product_groups", "image_source", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "product_groups", "becomes_store_visible", "INTEGER NOT NULL DEFAULT 1")
     db.execute("""CREATE TABLE IF NOT EXISTS branches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
@@ -518,6 +536,9 @@ def run_migrations(db):
     ensure_column(db, "products", "tracking_method", "TEXT NOT NULL DEFAULT 'bulk'")
     ensure_column(db, "products", "product_group_id", "INTEGER REFERENCES product_groups(id) ON DELETE SET NULL")
     ensure_column(db, "products", "hourly_extra_rate", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "products", "registration", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "products", "licence_number", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "products", "registration_number", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "products", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     # Which wheel size a rental trailer runs (ticket ABI-341953033). Additive with
     # a blank default, so every existing product simply has no wheel size and is
