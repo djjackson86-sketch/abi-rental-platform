@@ -1,6 +1,8 @@
+import io
 import json
 import os
 import re
+import sqlite3
 import tempfile
 from datetime import datetime, timedelta
 
@@ -344,6 +346,118 @@ def test_online_store_can_be_disabled(client):
     assert public.status_code == 200
     assert b'Online booking is temporarily unavailable' in public.data
     assert b'Should not be visible while disabled.' not in public.data
+
+
+def test_online_store_setup_lists_inventory_categories_and_products(client):
+    login(client)
+    client.post('/inventory/groups/new', data={
+        'name': 'Trailers',
+        'description': 'Rental trailers shown on the store.',
+        'sort_order': '1',
+        'active': '1',
+        'becomes_store_visible': '1',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Category Match Trailer',
+        'sku': 'CAT-MATCH',
+        'quantity': '2',
+        'tracking_method': 'bulk',
+        'description': 'This trailer belongs to the inventory category.',
+        'product_type': 'rental',
+        'product_group_id': '1',
+        'price_amount': '450',
+        'price_unit': 'day',
+        'security_deposit': '1000',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    inventory = client.get('/inventory?product_group_id=1')
+    setup = client.get('/online-store')
+    assert b'Trailers' in inventory.data
+    assert b'Category Match Trailer' in inventory.data
+    assert b'Inventory categories' in setup.data
+    assert b'Store category photos' in setup.data
+    assert b'Trailers' in setup.data
+    assert b'Category Match Trailer' in setup.data
+    assert b'/online-store/categories/1/image' in setup.data
+    assert b'Upload photo' in setup.data
+
+
+def test_online_store_category_photo_upload_resizes_before_storing(client, app):
+    from PIL import Image
+
+    login(client)
+    client.post('/inventory/groups/new', data={
+        'name': 'Large Photo Trailers',
+        'description': 'Photo resize target.',
+        'sort_order': '1',
+        'active': '1',
+        'becomes_store_visible': '1',
+    }, follow_redirects=True)
+    image = Image.new('RGB', (2200, 1300), '#2b5fb7')
+    uploaded = io.BytesIO()
+    image.save(uploaded, format='JPEG', quality=95)
+    original_size = len(uploaded.getvalue())
+    uploaded.seek(0)
+
+    response = client.post('/online-store/categories/1/image', data={
+        'group_image': (uploaded, 'huge-category.jpg'),
+    }, content_type='multipart/form-data', follow_redirects=True)
+    assert response.status_code == 200
+    assert b'photo saved and resized' in response.data
+    assert b'Current photo: huge-category.jpg' in response.data
+
+    with app.app_context():
+        row = get_db().execute('SELECT image_blob, image_mime, image_filename, image_source FROM product_groups WHERE id=1').fetchone()
+        assert row['image_filename'] == 'huge-category.jpg'
+        assert row['image_mime'] == 'image/jpeg'
+        assert row['image_source'] == 'upload'
+        assert len(row['image_blob']) < original_size
+        stored = Image.open(io.BytesIO(row['image_blob']))
+        assert max(stored.size) <= 1600
+
+    public_image = client.get('/store/category-image/1')
+    assert public_image.status_code == 200
+    assert public_image.headers['Content-Type'] == 'image/jpeg'
+
+
+def test_side_demo_seed_creates_matching_inventory_categories_and_photos(monkeypatch, tmp_path):
+    db_path = tmp_path / 'seed-demo.db'
+    monkeypatch.setenv('DATABASE_PATH', str(db_path))
+    monkeypatch.setenv('SECRET_KEY', 'test')
+    monkeypatch.setenv('ADMIN_EMAIL', 'admin@abi.local')
+    monkeypatch.setenv('ADMIN_PASSWORD', 'admin123')
+
+    from scripts.seed_side_demo import seed
+
+    result = seed()
+    assert result['groups'] == 12
+    assert result['products'] >= 17
+    assert result['category_images'] == 12
+
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    try:
+        categories = con.execute(
+            """SELECT g.name, COUNT(p.id) AS product_count, g.image_blob IS NOT NULL AS has_image
+               FROM product_groups g
+               LEFT JOIN products p ON p.product_group_id = g.id AND p.product_type = 'rental'
+               WHERE g.name LIKE '%Trailer%'
+               GROUP BY g.id
+               ORDER BY g.sort_order"""
+        ).fetchall()
+        assert len(categories) == 12
+        assert all(row['product_count'] >= 1 for row in categories)
+        assert all(row['has_image'] for row in categories)
+        assert [row['name'] for row in categories][:3] == [
+            'Single Axle Trailers',
+            'Single Axle Tarp Trailers',
+            'Single Axle Flatbed Trailers',
+        ]
+    finally:
+        con.close()
 
 
 def test_inventory_product_crud_and_public_store(client):

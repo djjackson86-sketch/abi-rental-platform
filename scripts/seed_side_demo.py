@@ -25,16 +25,54 @@ from app.db import get_db, now
 from app.services.documents import create_document, finalize_document
 from app.services.orders import create_order, get_order, transition_order, update_return_checklist
 from app.services.payments import record_payment
+from scripts.seed_default_group_images import seed_group_images
 
 DEMO_NOTE = "SIDE-DEMO"
+
+DEMO_GROUPS = [
+    ("Single Axle Trailers", "Compact everyday rental trailers for furniture moves, garden refuse and light cargo.", 10),
+    ("Single Axle Tarp Trailers", "Covered single-axle trailers for loads that need light weather protection.", 20),
+    ("Single Axle Flatbed Trailers", "Open flatbed single-axle trailers for pallets, boards and odd-shaped loads.", 30),
+    ("Single Axle Car Trailers", "Specialist vehicle and bike transport trailers with ramps and tie-down points.", 40),
+    ("Quad Bike Golf Cart Trailers", "Low-bed trailers for quad bikes, golf carts and compact equipment.", 50),
+    ("Piggyback Dolly Trailers", "Dolly and piggyback trailers for moving trailer combinations and yard equipment.", 60),
+    ("Luggage Trailers", "Lockable luggage trailers for holidays, events and overflow transport.", 70),
+    ("Livestock Trailers", "Ventilated trailers for small livestock and agricultural transport.", 80),
+    ("Double Axle Trailers", "Braked double-axle trailers for heavier equipment and longer-distance hauling.", 90),
+    ("Double Axle Flatbed Trailers", "Heavy-duty flatbed trailers for plant, pallets and construction materials.", 100),
+    ("Double Axle Car Trailers", "Twin-axle car carriers for safer vehicle recovery and longer hauls.", 110),
+    ("Closed Box Trailers", "Weather-protected enclosed trailers for furniture, events and boxed goods.", 120),
+]
+
+PRODUCT_GROUP_BY_SKU = {
+    "DEMO-TRL-750U": "Single Axle Trailers",
+    "DEMO-TRL-TARP": "Single Axle Tarp Trailers",
+    "DEMO-TRL-SFLAT": "Single Axle Flatbed Trailers",
+    "DEMO-TRL-CAR": "Single Axle Car Trailers",
+    "DEMO-TRL-QUAD": "Quad Bike Golf Cart Trailers",
+    "DEMO-TRL-DOLLY": "Piggyback Dolly Trailers",
+    "DEMO-TRL-LUG": "Luggage Trailers",
+    "DEMO-TRL-LIVE": "Livestock Trailers",
+    "DEMO-TRL-1500B": "Double Axle Trailers",
+    "DEMO-TRL-DFLAT": "Double Axle Flatbed Trailers",
+    "DEMO-TRL-DCAR": "Double Axle Car Trailers",
+    "DEMO-TRL-ENC": "Closed Box Trailers",
+}
 
 #: name, sku, product_type, quantity, price, price_unit, deposit, plate, licence no, NaTIS no, description
 PRODUCTS = [
     ("750kg Utility Trailer", "DEMO-TRL-750U", "rental", 4, 250, "day", 1000, "NBB 1234", "5120367QP4HD", "QWR419V", "Unbraked general-purpose open trailer."),
+    ("Single Axle Tarp Trailer", "DEMO-TRL-TARP", "rental", 3, 320, "day", 1200, "NBG 1122", "5120372QP9LM", "QWR424V", "Covered single-axle trailer for luggage and boxed goods."),
+    ("Single Axle Flatbed Trailer", "DEMO-TRL-SFLAT", "rental", 2, 380, "day", 1500, "NBH 3344", "5120373QP1NP", "QWR425V", "Flatbed trailer for pallets and long materials."),
+    ("Single Axle Car Trailer", "DEMO-TRL-CAR", "rental", 1, 850, "day", 3500, "NBE 3456", "5120370QP7JG", "QWR422V", "Single-axle vehicle transporter with ramps."),
+    ("Quad Bike / Golf Cart Trailer", "DEMO-TRL-QUAD", "rental", 2, 420, "day", 1800, "NBJ 5566", "5120374QP2RQ", "QWR426V", "Low-bed trailer for quad bikes and golf carts."),
+    ("Piggyback Dolly Trailer", "DEMO-TRL-DOLLY", "rental", 1, 500, "day", 2000, "NBK 7788", "5120375QP3ST", "QWR427V", "Dolly trailer for yard and trailer-combination moves."),
+    ("Luggage Trailer", "DEMO-TRL-LUG", "rental", 4, 280, "day", 1000, "NBL 9900", "5120376QP4UV", "QWR428V", "Lockable holiday and event luggage trailer."),
+    ("Livestock Trailer", "DEMO-TRL-LIVE", "rental", 1, 700, "day", 3000, "NBM 2468", "5120377QP5WX", "QWR429V", "Ventilated trailer for small livestock transport."),
     ("1.5 Ton Braked Trailer", "DEMO-TRL-1500B", "rental", 3, 450, "day", 1500, "NBC 5678", "5120368QP5HE", "QWR420V", "Braked axle for furniture and equipment."),
+    ("Double Axle Flatbed Trailer", "DEMO-TRL-DFLAT", "rental", 2, 680, "day", 2800, "NBN 1357", "5120378QP6YZ", "QWR430V", "Heavy-duty flatbed for plant and construction materials."),
+    ("Double Axle Car Trailer", "DEMO-TRL-DCAR", "rental", 1, 1100, "day", 4500, "NBP 9753", "5120379QP7AB", "QWR431V", "Twin-axle car carrier for longer hauls."),
     ("Enclosed Box Trailer", "DEMO-TRL-ENC", "rental", 2, 650, "day", 2500, "NBD 9012", "5120369QP6IF", "QWR421V", "Weather-protected enclosed trailer."),
-    ("Car Transporter", "DEMO-TRL-CAR", "rental", 1, 950, "day", 4000, "NBE 3456", "5120370QP7JG", "QWR422V", "Vehicle transporter with ramps."),
-    ("Bike Trailer", "DEMO-TRL-BIKE", "rental", 2, 300, "day", 1200, "NBF 7890", "5120371QP8KH", "QWR423V", "Two-bike motorbike trailer."),
     ("LED Trailer Light Kit", "DEMO-PART-LIGHT", "sale", 20, 475, "fixed", 0, "", "", "", "Left/right LED light kit with wiring."),
     ("48mm Jockey Wheel", "DEMO-PART-JOCKEY", "sale", 15, 695, "fixed", 0, "", "", "", "Clamp-on jockey wheel."),
     ("Wheel Bearing Kit", "DEMO-PART-BEAR", "sale", 18, 350, "fixed", 0, "", "", "", "Standard trailer wheel bearing kit."),
@@ -83,6 +121,32 @@ def upsert_product(db, tax_id, product):
         (*values, now()),
     )
     return cur.lastrowid
+
+
+def upsert_group(db, group):
+    name, description, sort_order = group
+    existing = db.execute("SELECT id FROM product_groups WHERE name = ?", (name,)).fetchone()
+    if existing:
+        db.execute(
+            """UPDATE product_groups SET description=?, active=1, becomes_store_visible=1,
+               sort_order=?, updated_at=? WHERE id=?""",
+            (description, sort_order, now(), existing["id"]),
+        )
+        return existing["id"]
+    cur = db.execute(
+        """INSERT INTO product_groups (name, description, active, becomes_store_visible, sort_order, created_at, updated_at)
+           VALUES (?, ?, 1, 1, ?, ?, ?)""",
+        (name, description, sort_order, now(), now()),
+    )
+    return cur.lastrowid
+
+
+def assign_demo_products_to_groups(db, product_ids, group_ids):
+    for sku, group_name in PRODUCT_GROUP_BY_SKU.items():
+        product_id = product_ids.get(sku)
+        group_id = group_ids.get(group_name)
+        if product_id and group_id:
+            db.execute("UPDATE products SET product_group_id = ? WHERE id = ?", (group_id, product_id))
 
 
 def upsert_customer(db, branch_id, customer):
@@ -178,7 +242,7 @@ def create_demo_orders(product_ids, customer_ids):
 
     closed = create_order(MultiDict([
         ("customer_id", str(customer_ids["admin@roodepoortgarden.test"])),
-        ("product_id", str(product_ids["DEMO-TRL-BIKE"])), ("quantity", "1"),
+        ("product_id", str(product_ids["DEMO-TRL-QUAD"])), ("quantity", "1"),
         ("start_date", "2026-09-15"), ("start_time", "08:00"),
         ("end_date", "2026-09-18"), ("end_time", "16:00"),
         ("notes", f"{DEMO_NOTE}: completed rental, paid and invoiced"),
@@ -225,7 +289,9 @@ def seed():
         branch = db.execute("SELECT id FROM branches WHERE active = 1 ORDER BY id LIMIT 1").fetchone()
         branch_id = branch["id"] if branch else None
 
+        group_ids = {group[0]: upsert_group(db, group) for group in DEMO_GROUPS}
         product_ids = {product[1]: upsert_product(db, tax_id, product) for product in PRODUCTS}
+        assign_demo_products_to_groups(db, product_ids, group_ids)
         customer_ids = {customer[2]: upsert_customer(db, branch_id, customer) for customer in CUSTOMERS}
         vehicle_ids = []
         for vehicle in VEHICLES:
@@ -235,12 +301,15 @@ def seed():
         created = {}
         if not demo_orders_exist(db):
             created = create_demo_orders(product_ids, customer_ids)
+        image_results = seed_group_images(ROOT / "static" / "img" / "trailer-categories-web", commit=True)
 
         return {
+            "groups": len(group_ids),
             "products": len(product_ids),
             "customers": len(customer_ids),
             "vehicles": len(vehicle_ids),
             "orders_created": len(created),
+            "category_images": sum(1 for row in image_results if row["outcome"] in {"set", "already", "protected"}),
             "branches": branch_id,
         }
 

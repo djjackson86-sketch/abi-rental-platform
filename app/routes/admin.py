@@ -5,6 +5,8 @@ from io import StringIO
 from app.routes.auth import login_required
 from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
+from app.services import group_images
+from app.services.products import list_product_groups, list_products, get_product_group
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
@@ -244,7 +246,79 @@ def online_store():
         update_online_store_settings(request.form)
         flash("Online store settings saved", "success")
         return redirect(url_for("admin.online_store"))
-    return render_template("admin/online_store.html", settings=get_company_settings())
+    return render_template(
+        "admin/online_store.html",
+        settings=get_company_settings(),
+        store_categories=_online_store_categories(),
+    )
+
+
+def _online_store_categories():
+    """Inventory categories as they appear in online-store setup.
+
+    Product groups are the single source of truth: the Inventory page manages the
+    names/membership and this setup page manages the public-store switch/photo for
+    those same rows. Products are listed beside each category so staff can see
+    exactly what the public category corresponds with before uploading a photo.
+    """
+    products_by_group = {}
+    for product in list_products(product_type="rental"):
+        products_by_group.setdefault(product["product_group_id"], []).append(product)
+    categories = []
+    for group in list_product_groups():
+        products = products_by_group.get(group["id"], [])
+        info = group_images.group_image_info(group["id"])
+        categories.append({
+            "group": group,
+            "products": products,
+            "product_count": len(products),
+            "image": info,
+        })
+    ungrouped = products_by_group.get(None, [])
+    if ungrouped:
+        categories.append({
+            "group": None,
+            "products": ungrouped,
+            "product_count": len(ungrouped),
+            "image": {"has_image": False, "mime": "", "filename": "", "source": ""},
+        })
+    return categories
+
+
+@bp.post("/online-store/categories/<int:group_id>/image")
+@login_required
+def online_store_category_image(group_id):
+    """Upload/replace a public category photo from the online-store setup page."""
+    group = get_product_group(group_id)
+    if not group:
+        flash("Inventory category not found", "error")
+        return redirect(url_for("admin.online_store"))
+    upload = request.files.get("group_image")
+    if upload is None or not (getattr(upload, "filename", "") or "").strip():
+        flash(f"Choose a photo for {group['name']}.", "error")
+        return redirect(url_for("admin.online_store"))
+    try:
+        result = group_images.set_group_image(group_id, upload)
+    except group_images.GroupImageError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin.online_store"))
+    size_kb = max(1, round(result["size"] / 1024))
+    flash(f"{group['name']} photo saved and resized ({size_kb} KB stored).", "success")
+    return redirect(url_for("admin.online_store"))
+
+
+@bp.post("/online-store/categories/<int:group_id>/image/clear")
+@login_required
+def online_store_category_image_clear(group_id):
+    group = get_product_group(group_id)
+    if not group:
+        flash("Inventory category not found", "error")
+        return redirect(url_for("admin.online_store"))
+    if group_images.clear_group_image(group_id):
+        flash(f"{group['name']} photo removed.", "success")
+    else:
+        flash(f"{group['name']} does not have a photo yet.", "info")
+    return redirect(url_for("admin.online_store"))
 
 def _period_label(start_date, end_date, branch_label=''):
     """Human label for the active report filters, e.g. '1 Jul 2026 – 11 Sep 2026 · Midrand'."""

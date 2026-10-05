@@ -2,6 +2,8 @@ Flask==3.0.3
 pytest==8.3.3
 gunicorn==22.0.0
 libsql-client==0.3.1
+# Windows-local Python needs this for ZoneInfo("Africa/Johannesburg"); Linux usually gets it from the OS tzdb.
+tzdata==2026.5
 
 # Licence-disc scanning (programme phase 1/A1) — see docs/plans/disc-decode-findings.md for the
 # measured engine comparison behind this list.
