@@ -274,8 +274,15 @@ def create_demo_orders(product_ids, customer_ids):
     return orders
 
 
-def seed():
-    app = create_app()
+def seed(app=None):
+    """Load the side-demo dataset. Idempotent: safe to run repeatedly.
+
+    ``app`` is supplied when the seed runs inside a running process (the temporary
+    token-guarded internal route on the side service, whose database lives on a
+    Render disk that cannot be written from a developer machine). Called with no
+    app it builds one from the environment, which is the CLI path used locally.
+    """
+    app = app or create_app()
     with app.app_context():
         db = get_db()
         tax = db.execute("SELECT id FROM tax_profiles WHERE is_default = 1 ORDER BY id LIMIT 1").fetchone()

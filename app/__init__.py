@@ -6,6 +6,7 @@ from .routes.auth import bp as auth_bp
 from .routes.admin import bp as admin_bp
 from .routes.settings import bp as settings_bp
 from .routes.public import bp as public_bp
+from .routes.demo_seed import bp as demo_seed_bp
 from .routes.inventory import bp as inventory_bp
 from .routes.customers import bp as customers_bp
 from .routes.vehicles import bp as vehicles_bp
@@ -89,6 +90,7 @@ def create_app(test_config=None):
     app.register_blueprint(internal_telegram_bp)
     app.register_blueprint(popia_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(demo_seed_bp)
 
     # Human-visible date-times always render through this helper so the ISO "T"
     # between the date and the time can never leak into a template (ticket
