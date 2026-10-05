@@ -3,6 +3,7 @@ from datetime import datetime, time
 from app.db import get_db
 from app.services.access import customer_branch_clause, order_branch_clause, product_branch_clause
 from app.services.timezone import local_now, local_now_iso, parse_iso_datetime
+from app.services.cash import card_received as net_card_received
 
 
 def money(value):
@@ -445,7 +446,7 @@ def dashboard_day_metrics(day=None, branch_id=None):
         "orders": new_orders,
         "customers": new_customers,
         "revenue": revenue,
-        "card_payments": payment_total("card"),
+        "card_payments": net_card_received(day, branch_id),
         "cash_payments": payment_total("cash"),
         "eft_payments": payment_total("eft"),
         # Everything that is not one of the three named cards (ticket

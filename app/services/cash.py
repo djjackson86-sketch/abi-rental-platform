@@ -237,10 +237,37 @@ def cash_received(day, branch_id):
     return payment_received(day, branch_id, 'cash')
 
 
-def card_received(day, branch_id):
-    """POS/card payments received for the day, for the POS Cashup panel."""
+def card_payment_received(day, branch_id):
+    """Gross POS/card payments received for the day, before card refunds."""
     return payment_received(day, branch_id, 'card')
 
+
+def card_received(day, branch_id):
+    """Net POS/card takings for the day after card deposit refunds."""
+    return money(card_payment_received(day, branch_id) - card_deposit_refunds(day, branch_id))
+
+
+def deposit_refunds(day, branch_id, method):
+    """Security-deposit refunds paid out by one method on this business day.
+
+    Refunds are recorded on the order, not as negative payment rows. The date is
+    the recorded payout timestamp, because that is when money left the till/POS.
+    """
+    scope_sql, scope_params = order_branch_clause('o', branch_id=branch_id)
+    row = get_db().execute(
+        f"""SELECT COALESCE(SUM(o.deposit_refund_amount), 0) AS s
+        FROM orders o
+        WHERE LOWER(COALESCE(o.deposit_process_method, '')) = ?
+          AND COALESCE(o.deposit_refund_amount, 0) > 0
+          AND substr(o.deposit_processed_at, 1, 10) = ?{scope_sql}""",
+        [str(method or '').lower(), day, *scope_params],
+    ).fetchone()
+    return money(_value(row, 's'))
+
+
+def card_deposit_refunds(day, branch_id):
+    """Card security-deposit refunds paid out on this business day."""
+    return deposit_refunds(day, branch_id, 'card')
 
 
 def cash_deposit_refunds(day, branch_id):
@@ -250,16 +277,8 @@ def cash_deposit_refunds(day, branch_id):
     subtract it just like cash used and bank drops. The date follows the recorded
     deposit_processed_at timestamp because that is when the payout happened.
     """
-    scope_sql, scope_params = order_branch_clause('o', branch_id=branch_id)
-    row = get_db().execute(
-        f"""SELECT COALESCE(SUM(o.deposit_refund_amount), 0) AS s
-        FROM orders o
-        WHERE LOWER(COALESCE(o.deposit_process_method, '')) = 'cash'
-          AND COALESCE(o.deposit_refund_amount, 0) > 0
-          AND substr(o.deposit_processed_at, 1, 10) = ?{scope_sql}""",
-        [day, *scope_params],
-    ).fetchone()
-    return money(_value(row, 's'))
+    return deposit_refunds(day, branch_id, 'cash')
+
 
 def _day_row(day, branch_id):
     if not branch_id:

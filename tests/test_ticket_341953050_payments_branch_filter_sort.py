@@ -234,13 +234,8 @@ def test_payment_method_totals_map_methods_and_keep_archived_out_of_active(app):
 
 
 
-def test_payment_method_totals_match_dashboard_and_do_not_net_synthetic_deposit_refunds(app):
-    """ABI-341953122: Midrand today's card total must match the dashboard card.
-
-    Deposit refunds are rendered as synthetic negative rows in the payments ledger,
-    but the method summary cards show payment takings, so they must not subtract
-    those order-level payout rows.  This pins the reported R495-style gap.
-    """
+def test_payment_method_totals_match_dashboard_and_net_synthetic_card_deposit_refunds(app):
+    """ABI-341953123: card method totals subtract card deposit refunds."""
     day = '2026-09-13'
     with app.app_context():
         db = get_db()
@@ -269,7 +264,7 @@ def test_payment_method_totals_match_dashboard_and_do_not_net_synthetic_deposit_
         totals = payment_method_totals(branch_id=1, date_from=day, date_to=day)
         ledger = list_payments(branch_id=1, date_from=day, date_to=day, sort='amount', direction='asc')
 
-    assert dashboard['card_payments'] == 5665.22
+    assert dashboard['card_payments'] == 5170.22
     assert totals['card'] == dashboard['card_payments']
     assert [(row['reference'], row['amount'], row['synthetic_kind']) for row in ledger] == [
         ('Refunded deposit', -495.0, 'deposit_refund'),

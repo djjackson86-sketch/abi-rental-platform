@@ -211,6 +211,39 @@ def test_the_day_cards_count_what_the_client_asked_for(app):
                               + day['eft_payments'] + day['other_payments'])
 
 
+def test_card_payment_day_card_subtracts_card_deposit_refunds_only(app):
+    seed_days(app)
+    with app.app_context():
+        db = get_db()
+        started = db.execute(
+            "SELECT id FROM orders WHERE order_number = 'ORD-1'"
+        ).fetchone()['id']
+        depot_two = db.execute(
+            "SELECT id FROM orders WHERE order_number = 'ORD-9'"
+        ).fetchone()['id']
+        db.execute(
+            """UPDATE orders SET deposit_refund_amount = 125, deposit_process_method = 'card',
+            deposit_processed_at = ? WHERE id = ?""",
+            (f'{TODAY}T14:30:00', started),
+        )
+        db.execute(
+            """UPDATE orders SET deposit_refund_amount = 50, deposit_process_method = 'card',
+            deposit_processed_at = ? WHERE id = ?""",
+            (f'{TODAY}T15:00:00', depot_two),
+        )
+        db.commit()
+
+    all_branches = metrics(app, user_id=1, user_role='owner')
+    branch_one = day_cards(app, filter_branch=1, user_id=1, user_role='owner')
+    branch_two = day_cards(app, filter_branch=2, user_id=1, user_role='owner')
+
+    assert all_branches['card_payments'] == 325.0
+    assert all_branches['cash_payments'] == 250.0
+    assert all_branches['eft_payments'] == 700.0
+    assert branch_one['card_payments'] == 375.0
+    assert branch_two['card_payments'] == -50.0
+
+
 def test_trailer_cards_count_rental_items_and_skip_the_other_rental_group(app):
     seed_days(app)
     day = metrics(app, user_id=1, user_role='owner')

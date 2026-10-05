@@ -139,6 +139,19 @@ def _seed_payment(app, amount, method='cash', day=TODAY, branch_id=1, number='OR
     return order_id
 
 
+
+
+def _seed_deposit_refund(app, order_id, amount, method='card', day=TODAY):
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            """UPDATE orders SET deposit_refund_amount = ?, deposit_process_method = ?,
+            deposit_processed_at = ? WHERE id = ?""",
+            (amount, method, f'{day}T14:30:00', order_id),
+        )
+        db.commit()
+
+
 def _cash_rows(app):
     with app.app_context():
         return [dict(row) for row in get_db().execute('SELECT * FROM cash_ups').fetchall()]
@@ -252,6 +265,38 @@ def test_expected_cash_and_variance_arithmetic(client, app):
     body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert '+R50.50' in body and 'Over by R50.50' in body
     assert 'R349.50' in body and 'R500.00' in body and 'R150.50' in body
+
+
+def test_card_cash_up_uses_card_payments_net_of_card_deposit_refunds(client, app):
+    branch_one = _seed_payment(app, 500.0, method='card', day=TODAY, branch_id=1, number='ORD-CARD-1')
+    branch_two = _seed_payment(app, 700.0, method='card', day=TODAY, branch_id=2, number='ORD-CARD-2')
+    _seed_payment(app, 250.0, method='cash', day=TODAY, branch_id=1, number='ORD-CASH-1')
+    _seed_payment(app, 900.0, method='eft', day=TODAY, branch_id=1, number='ORD-EFT-1')
+    _seed_deposit_refund(app, branch_one, 125.0, method='card', day=TODAY)
+    _seed_deposit_refund(app, branch_two, 50.0, method='card', day=TODAY)
+    # Different method/day refunds must not reduce the card total.
+    cash_refund = _seed_payment(app, 0.0, method='cash', day=TODAY, branch_id=1, number='ORD-CASH-REFUND')
+    _seed_deposit_refund(app, cash_refund, 60.0, method='cash', day=TODAY)
+    old_refund = _seed_payment(app, 10.0, method='card', day=YESTERDAY, branch_id=1, number='ORD-OLD-REFUND')
+    _seed_deposit_refund(app, old_refund, 80.0, method='card', day=YESTERDAY)
+
+    login(client)
+    branch_one_summary = _summary(app, day=TODAY, branch_id=1)
+    branch_two_summary = _summary(app, day=TODAY, branch_id=2)
+    with app.test_request_context('/dashboard'):
+        flask_session['user_id'] = 1
+        flask_session['user_role'] = 'owner'
+        all_summary = cash.aggregate_day_summary(day=TODAY, branch_ids=[1, 2])
+
+    assert branch_one_summary['card_received'] == 375.0
+    assert branch_one_summary['expected_card'] == 375.0
+    assert branch_one_summary['cash_received'] == 250.0
+    assert branch_one_summary['deposit_refund_total'] == 60.0
+    assert branch_two_summary['card_received'] == 650.0
+    assert branch_two_summary['expected_card'] == 650.0
+    assert all_summary['card_received'] == 1025.0
+    assert all_summary['expected_card'] == 1025.0
+    assert all_summary['cash_received'] == 250.0
 
 
 def test_a_short_drawer_is_reported_as_short(client, app):

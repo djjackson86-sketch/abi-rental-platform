@@ -360,12 +360,12 @@ def payment_count(include_archived=False, branch_id=None, date_from="", date_to=
 
 
 def payment_method_totals(include_archived=False, branch_id=None, date_from="", date_to=""):
-    # These cards are payment-method takings, matching the dashboard day cards and
-    # cash-up "received" figures.  Deposit-refund payout rows stay visible in the
-    # payments ledger, but they are order-settlement payouts stored on ``orders``
-    # rather than captured payment rows; subtracting them here made the payments
-    # page card disagree with the dashboard for the same branch/day (ABI-341953122).
+    # Method cards are net by method: real paid rows minus order-level deposit
+    # refunds paid by the same method/date/branch. Negative real refund payment
+    # rows are already included in the payment sum, so only the synthetic
+    # order-stored deposit refunds are subtracted here.
     real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
+    deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
     totals = {"card": 0.0, "cash": 0.0, "eft": 0.0}
     rows = get_db().execute(
         f"""SELECT LOWER(COALESCE(p.method, '')) AS method, COALESCE(SUM(p.amount), 0) AS total
@@ -378,6 +378,18 @@ def payment_method_totals(include_archived=False, branch_id=None, date_from="", 
     ).fetchall()
     for row in rows:
         totals[row["method"]] = round(float(row["total"] or 0), 2)
+    refund_rows = get_db().execute(
+        f"""SELECT LOWER(COALESCE(o.deposit_process_method, '')) AS method,
+                  COALESCE(SUM(o.deposit_refund_amount), 0) AS total
+        FROM orders o
+        WHERE {' AND '.join(deposit_where)}
+          AND LOWER(COALESCE(o.deposit_process_method, '')) IN ('card', 'cash', 'eft')
+        GROUP BY LOWER(COALESCE(o.deposit_process_method, ''))""",
+        deposit_params,
+    ).fetchall()
+    for row in refund_rows:
+        method = row["method"]
+        totals[method] = round(totals.get(method, 0.0) - float(row["total"] or 0), 2)
     return totals
 
 
