@@ -49,6 +49,9 @@ PRODUCT_GROUP_BY_SKU = {
     "DEMO-TRL-TARP": "Single Axle Tarp Trailers",
     "DEMO-TRL-SFLAT": "Single Axle Flatbed Trailers",
     "DEMO-TRL-CAR": "Single Axle Car Trailers",
+    # Legacy demo SKU from an earlier seed run: kept mapped (rather than deleted)
+    # because demo orders may already reference the row.
+    "DEMO-TRL-BIKE": "Single Axle Car Trailers",
     "DEMO-TRL-QUAD": "Quad Bike Golf Cart Trailers",
     "DEMO-TRL-DOLLY": "Piggyback Dolly Trailers",
     "DEMO-TRL-LUG": "Luggage Trailers",
@@ -142,10 +145,22 @@ def upsert_group(db, group):
 
 
 def assign_demo_products_to_groups(db, product_ids, group_ids):
+    """Put every demo SKU in its category — including SKUs from an earlier seed run.
+
+    Ids are resolved from the database rather than only from ``product_ids`` so a
+    demo product that is no longer in the current ``PRODUCTS`` list (a legacy row
+    that demo orders may still reference) is categorised instead of lingering
+    ungrouped on the store setup page.
+    """
     for sku, group_name in PRODUCT_GROUP_BY_SKU.items():
-        product_id = product_ids.get(sku)
         group_id = group_ids.get(group_name)
-        if product_id and group_id:
+        if not group_id:
+            continue
+        product_id = product_ids.get(sku)
+        if product_id is None:
+            row = db.execute("SELECT id FROM products WHERE sku = ?", (sku,)).fetchone()
+            product_id = row["id"] if row else None
+        if product_id:
             db.execute("UPDATE products SET product_group_id = ? WHERE id = ?", (group_id, product_id))
 
 
