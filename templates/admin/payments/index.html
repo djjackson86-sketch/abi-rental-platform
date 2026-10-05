@@ -35,6 +35,11 @@
     </div>
     <noscript><button class="btn ghost" type="submit">Apply filters</button></noscript>
   </form>
+  <div class="metrics payments-summary-cards">
+    <div class="metric-card"><small>Card Payments</small><b>R{{ '%.2f'|format(payment_totals.card) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
+    <div class="metric-card"><small>Cash Payments</small><b>R{{ '%.2f'|format(payment_totals.cash) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
+    <div class="metric-card"><small>EFT Payments</small><b>R{{ '%.2f'|format(payment_totals.eft) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
+  </div>
   {% if payments %}
   <div class="table-tools"><span>Showing 1 - {{ payments|length }} of {{ total_payments }}</span></div>
   <div class="table-wrap">

@@ -7,7 +7,7 @@ import pytest
 from app import create_app
 from app.db import get_db, now
 from app.services.access import create_additional_user
-from app.services.payments import list_payments, normalise_payment_sort
+from app.services.payments import list_payments, normalise_payment_sort, payment_method_totals
 
 
 @pytest.fixture()
@@ -189,6 +189,47 @@ def test_date_filter_includes_refunds_and_excludes_outside_range(client, app):
     assert 'name="date_from" value="2026-07-02"' in html
     assert 'name="date_to" value="2026-07-02"' in html
     assert 'Clear dates' in html
+
+
+def test_payments_page_renders_method_total_cards(client, app):
+    seed_payment_rows(app)
+    login(client)
+
+    html = body(client.get('/payments'))
+
+    assert 'Card Payments' in html
+    assert 'Cash Payments' in html
+    assert 'EFT Payments' in html
+    assert 'R200.00' in html
+    assert 'R300.00' in html
+    assert 'R25.00' in html
+
+
+def test_payment_method_total_cards_follow_date_and_branch_filters(client, app):
+    seed_payment_rows(app)
+    login(client)
+
+    html = body(client.get('/payments?branch=2&date_from=2026-07-02&date_to=2026-07-02'))
+
+    assert 'Card Payments' in html
+    assert 'R200.00' in html
+    assert 'Cash Payments' in html
+    assert 'R0.00' in html
+    assert 'EFT Payments' in html
+    assert '-R75.00' in html
+    assert 'PRE-EFT' not in html
+    assert 'CROSS-CARD' in html
+
+
+def test_payment_method_totals_map_methods_and_keep_archived_out_of_active(app):
+    seed_payment_rows(app)
+
+    with app.app_context():
+        active_totals = payment_method_totals()
+        archived_branch_totals = payment_method_totals(include_archived=True, branch_id=3)
+
+    assert active_totals == {'card': 200.0, 'cash': 300.0, 'eft': 25.0}
+    assert archived_branch_totals == {'card': 0.0, 'cash': 400.0, 'eft': 0.0}
 
 
 def test_date_filters_are_preserved_in_links(client, app):

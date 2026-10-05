@@ -359,6 +359,22 @@ def payment_count(include_archived=False, branch_id=None, date_from="", date_to=
     return int(row["total"] if row else 0)
 
 
+def payment_method_totals(include_archived=False, branch_id=None, date_from="", date_to=""):
+    real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
+    deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
+    totals = {"card": 0.0, "cash": 0.0, "eft": 0.0}
+    rows = get_db().execute(
+        f"""SELECT LOWER(COALESCE(method, '')) AS method, COALESCE(SUM(amount), 0) AS total
+        FROM ({_payments_ledger_sql(real_where, deposit_where)}) ledger
+        WHERE LOWER(COALESCE(method, '')) IN ('card', 'cash', 'eft')
+        GROUP BY LOWER(COALESCE(method, ''))""",
+        [*real_params, *deposit_params],
+    ).fetchall()
+    for row in rows:
+        totals[row["method"]] = round(float(row["total"] or 0), 2)
+    return totals
+
+
 def normalise_payment_sort(sort, direction):
     sort = sort if sort in PAYMENT_SORTS else "date"
     direction = "asc" if direction == "asc" else "desc"

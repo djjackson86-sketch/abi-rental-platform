@@ -2,7 +2,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.routes.auth import login_required
 from app.services.access import resolve_branch_filter
-from app.services.payments import archive_payment, display_payment_date, get_payment, is_refund, label_for, list_payments, normalise_payment_date_filter, normalise_payment_sort, payment_count, update_payment
+from app.services.payments import archive_payment, display_payment_date, get_payment, is_refund, label_for, list_payments, normalise_payment_date_filter, normalise_payment_sort, payment_count, payment_method_totals, update_payment
 from app.services.settings import get_company_settings
 
 bp = Blueprint("payments", __name__, url_prefix="/payments")
@@ -45,6 +45,12 @@ def index():
             limit=display_limit,
         ),
         total_payments=total_payments,
+        payment_totals=payment_method_totals(
+            include_archived=include_archived,
+            branch_id=branch_id,
+            date_from=date_from,
+            date_to=date_to,
+        ),
         display_limit=display_limit,
         previous_limit=max(display_limit - PAGE_SIZE, 0),
         next_limit=display_limit + PAGE_SIZE,
