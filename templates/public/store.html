@@ -228,7 +228,7 @@ R{{ '{:,.2f}'.format(value)|replace(',', ' ') }}
     {% if settings.store_contact_email or settings.store_contact_phone %}
     <span class="store-contact-line">{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>
     {% endif %}
-    <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+    {% if privacy_url %}<span><a href="{{ privacy_url }}">View our privacy notice</a></span>{% endif %}
   </footer>
 </div>
 

@@ -302,7 +302,10 @@ def test_store_empty_state(client):
     res = client.get('/store')
     assert res.status_code == 200
     assert b'No products' in res.data
-    assert b'Select a rental period' in res.data
+    # The rebuilt storefront still renders its shell with an empty catalogue: the hero and
+    # the "how it works" promise stay, and no rental-period bar is invented out of thin air.
+    assert b'store-hero' in res.data
+    assert b'No trailers are listed online right now' not in res.data
 
 
 def test_online_store_settings_persist_and_drive_public_store(client):
@@ -574,7 +577,10 @@ def test_inventory_product_crud_and_public_store(client):
 
     res = client.get('/store')
     assert b'Box Trailer' in res.data
-    assert b'R450.00 / day' in res.data
+    # Storefront prices read shop-style: whole rands carry no cents, and the unit is a
+    # separate span so it can be styled smaller than the number.
+    assert b'R450' in res.data
+    assert b'<span> / day</span>' in res.data
 
 
 

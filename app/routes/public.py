@@ -1,4 +1,4 @@
-from flask import Blueprint, abort, flash, make_response, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, make_response, redirect, render_template, request, url_for
 from urllib.parse import urlparse
 
 import secrets
@@ -166,6 +166,14 @@ def store():
         from_price_overall=cheapest["price_amount"] if cheapest else None,
         from_price_unit=cheapest["price_unit"] if cheapest else "day",
         fleet_units=sum(int(p["quantity"] or 0) for p in rental_products),
+        # The privacy notice is a POPIA-phase page: it exists on the programme branch and
+        # later on master, so the footer link is passed in only when the route is really
+        # registered rather than assumed by the template.
+        privacy_url=(
+            url_for("public.privacy_notice")
+            if "public.privacy_notice" in current_app.view_functions
+            else None
+        ),
     )
 
 
