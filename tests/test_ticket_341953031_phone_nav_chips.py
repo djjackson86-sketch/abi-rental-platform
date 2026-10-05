@@ -113,7 +113,7 @@ def _with_branch_session(client, branch_id=1):
 
 
 def test_every_phone_chip_renders_with_one_shape(client, app):
-    """All six chips are offered on a phone, in one predictable order."""
+    """All module chips are offered on a phone, in one predictable order."""
     login(client)
     _with_branch_session(client)
     dashboard = client.get('/dashboard')
@@ -121,10 +121,10 @@ def test_every_phone_chip_renders_with_one_shape(client, app):
 
     chips = _chips(_mobile_nav_markup(dashboard.data))
     labels = [label for _, label in chips]
-    assert labels == ['Dashboard', 'Orders', 'Customers', 'Inventory', 'Reports', 'Settings',
+    assert labels == ['Dashboard', 'Orders', 'Customers', 'Inventory', 'Payments', 'Reports', 'Settings',
                       'Branch: %s \u00b7 Change' % _branch_name(app)], labels
     assert [_href(attrs) for attrs, _ in chips] == [
-        '/dashboard', '/orders', '/customers', '/inventory', '/reports', '/settings/general',
+        '/dashboard', '/orders', '/customers', '/inventory', '/payments', '/reports', '/settings/general',
         '/select-branch',
     ]
 
@@ -168,9 +168,34 @@ def test_a_chip_can_only_appear_where_the_module_gate_allows_it(client, app):
     assert labels == ['Dashboard', 'Orders', 'Inventory', 'Settings',
                       'Branch: %s \u00b7 Change' % _branch_name(app)]
     assert b'/customers' not in nav
+    assert b'/payments' not in nav
     assert client.get('/customers').status_code == 403
+    assert client.get('/payments').status_code == 403
     # The depot chip still points at the picker, and both halves still agree.
     assert client.get('/select-branch').status_code in (200, 302)
+
+
+def test_phone_payments_chip_follows_payments_module_gate(client, app):
+    """A staff user with payments gets the phone chip and can open the module."""
+    login(client)
+    saved = client.post('/settings/users/permissions', data={
+        'module': ['new_order', 'dashboard', 'orders', 'payments'],
+    }, follow_redirects=True)
+    assert b'Additional account permissions saved' in saved.data
+    added = client.post('/settings/users/add', data={
+        'name': 'Phone Payments Staff', 'password': 'staff123',
+    }, follow_redirects=True)
+    assert b'Additional account created' in added.data
+    client.post('/logout')
+    login(client, 'Phone Payments Staff', 'staff123')
+    _with_branch_session(client)
+
+    nav = _mobile_nav_markup(client.get('/dashboard').data)
+    chips = _chips(nav)
+
+    assert (' href="/payments"', 'Payments') in chips
+    assert b'href="/reports"' not in nav
+    assert client.get('/payments').status_code == 200
 
 
 def test_no_chip_is_rendered_outside_the_phone_nav(client, app):
