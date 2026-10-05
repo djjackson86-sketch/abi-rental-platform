@@ -51,7 +51,7 @@
           <td>{{ payment.method|title }}</td>
           <td>{{ payment.reference or '—' }}</td>
           <td><span class="pill">{{ 'Refund' if is_refund(payment) else payment.status|title }}</span></td>
-          <td>{% if not payment.deleted_at %}{% if not is_refund(payment) %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a>{% else %}<small>Refund row</small>{% endif %}<form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
+          <td>{% if payment.synthetic_kind == 'deposit_refund' %}<small>Deposit refund</small>{% elif not payment.deleted_at %}{% if not is_refund(payment) %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a>{% else %}<small>Refund row</small>{% endif %}<form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

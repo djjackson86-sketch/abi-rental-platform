@@ -233,13 +233,13 @@ def archive_payment(payment_id):
 
 
 PAYMENT_SORTS = {
-    "date": "COALESCE(NULLIF(p.payment_date, ''), p.created_at)",
-    "branch": "LOWER(COALESCE(cb.name, rb.name, ''))",
-    "order": "LOWER(COALESCE(o.order_number, ''))",
-    "customer": "LOWER(COALESCE(c.name, ''))",
-    "amount": "p.amount",
-    "method": "LOWER(COALESCE(p.method, ''))",
-    "status": "LOWER(COALESCE(p.status, ''))",
+    "date": "COALESCE(NULLIF(payment_date, ''), created_at)",
+    "branch": "LOWER(COALESCE(branch_label, ''))",
+    "order": "LOWER(COALESCE(order_number, ''))",
+    "customer": "LOWER(COALESCE(customer_name, ''))",
+    "amount": "amount",
+    "method": "LOWER(COALESCE(method, ''))",
+    "status": "LOWER(COALESCE(status, ''))",
 }
 
 
@@ -248,20 +248,15 @@ def _payment_order_clause(sort="date", direction="desc"):
     direction = "asc" if direction == "asc" else "desc"
     expr = PAYMENT_SORTS[sort]
     clauses = [f"{expr} {direction.upper()}"]
-    if sort == "branch":
-        clauses.append(f"LOWER(COALESCE(rb.name, '')) {direction.upper()}")
     if sort != "date":
-        clauses.append("COALESCE(NULLIF(p.payment_date, ''), p.created_at) DESC")
-    clauses.extend(["p.created_at DESC", "p.id DESC"])
+        clauses.append("COALESCE(NULLIF(payment_date, ''), created_at) DESC")
+    clauses.extend(["created_at DESC", "COALESCE(id, 0) DESC"])
     return ", ".join(clauses)
 
 
-def _payment_where(include_archived=False, branch_id=None, date_from="", date_to=""):
-    where_parts = ["1=1" if include_archived else _active_payment_clause("p")]
-    branch_sql, params = order_branch_clause("o", branch_id=branch_id)
-    if branch_sql:
-        where_parts.append(branch_sql[5:] if branch_sql.startswith(" AND ") else branch_sql)
-    date_expr = "date(COALESCE(NULLIF(p.payment_date, ''), p.created_at))"
+def _date_filter_parts(date_expr, date_from="", date_to=""):
+    where_parts = []
+    params = []
     date_from = normalise_payment_date_filter(date_from)
     date_to = normalise_payment_date_filter(date_to)
     if date_from:
@@ -273,41 +268,93 @@ def _payment_where(include_archived=False, branch_id=None, date_from="", date_to
     return where_parts, params
 
 
+def _payment_where(include_archived=False, branch_id=None, date_from="", date_to=""):
+    where_parts = ["1=1" if include_archived else _active_payment_clause("p")]
+    branch_sql, params = order_branch_clause("o", branch_id=branch_id)
+    if branch_sql:
+        where_parts.append(branch_sql[5:] if branch_sql.startswith(" AND ") else branch_sql)
+    date_parts, date_params = _date_filter_parts("date(COALESCE(NULLIF(p.payment_date, ''), p.created_at))", date_from, date_to)
+    where_parts.extend(date_parts)
+    params.extend(date_params)
+    return where_parts, params
+
+
+def _deposit_refund_where(include_archived=False, branch_id=None, date_from="", date_to=""):
+    # Deposit refunds are stored on orders, not in payments, because counting them
+    # as real negative payments would make fully settled returned orders look due.
+    # They still belong in the Payments & refunds ledger as read-only payout rows.
+    where_parts = [
+        "0=1" if include_archived else "COALESCE(o.deposit_refund_amount, 0) > 0",
+        "(COALESCE(o.deposit_process_method, '') <> '' OR COALESCE(o.deposit_processed_at, '') <> '')",
+    ]
+    branch_sql, params = order_branch_clause("o", branch_id=branch_id)
+    if branch_sql:
+        where_parts.append(branch_sql[5:] if branch_sql.startswith(" AND ") else branch_sql)
+    date_parts, date_params = _date_filter_parts("date(COALESCE(NULLIF(o.deposit_processed_at, ''), o.created_at))", date_from, date_to)
+    where_parts.extend(date_parts)
+    params.extend(date_params)
+    return where_parts, params
+
+
+def _payments_ledger_sql(real_where, deposit_where):
+    branch_label = """CASE
+                    WHEN cb.name IS NOT NULL AND rb.name IS NOT NULL AND cb.id <> rb.id THEN cb.name || ' → ' || rb.name
+                    WHEN cb.name IS NOT NULL THEN cb.name
+                    WHEN rb.name IS NOT NULL THEN rb.name
+                    ELSE ''
+                  END"""
+    return f"""
+        SELECT p.id, p.order_id, p.amount, p.method, p.reference, p.status, p.payment_date,
+               p.created_at, p.deleted_at, NULL AS synthetic_kind,
+               o.order_number, o.collect_branch_id, o.return_branch_id,
+               c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
+               {branch_label} AS branch_label
+        FROM payments p
+        LEFT JOIN orders o ON o.id = p.order_id
+        LEFT JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id
+        WHERE {' AND '.join(real_where)}
+        UNION ALL
+        SELECT NULL AS id, o.id AS order_id, -ROUND(COALESCE(o.deposit_refund_amount, 0), 2) AS amount,
+               COALESCE(NULLIF(o.deposit_process_method, ''), 'deposit_refund') AS method,
+               'Refunded deposit' AS reference, 'paid' AS status,
+               COALESCE(NULLIF(o.deposit_processed_at, ''), o.created_at) AS payment_date,
+               COALESCE(NULLIF(o.deposit_processed_at, ''), o.created_at) AS created_at,
+               '' AS deleted_at, 'deposit_refund' AS synthetic_kind,
+               o.order_number, o.collect_branch_id, o.return_branch_id,
+               c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
+               {branch_label} AS branch_label
+        FROM orders o
+        LEFT JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
+        LEFT JOIN branches rb ON rb.id = o.return_branch_id
+        WHERE {' AND '.join(deposit_where)}
+    """
+
+
 def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc", date_from="", date_to="", limit=None, offset=0):
-    where_parts, params = _payment_where(include_archived, branch_id, date_from, date_to)
+    real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
+    deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
+    params = [*real_params, *deposit_params]
     order_clause = _payment_order_clause(sort, direction)
     limit_sql = ""
     if limit is not None:
         limit_sql = " LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset or 0)])
     return get_db().execute(
-        f"""SELECT p.*, o.order_number, o.collect_branch_id, o.return_branch_id,
-                  c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
-                  CASE
-                    WHEN cb.name IS NOT NULL AND rb.name IS NOT NULL AND cb.id <> rb.id THEN cb.name || ' → ' || rb.name
-                    WHEN cb.name IS NOT NULL THEN cb.name
-                    WHEN rb.name IS NOT NULL THEN rb.name
-                    ELSE ''
-                  END AS branch_label
-        FROM payments p
-        LEFT JOIN orders o ON o.id = p.order_id
-        LEFT JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN branches cb ON cb.id = o.collect_branch_id
-        LEFT JOIN branches rb ON rb.id = o.return_branch_id
-        WHERE {' AND '.join(where_parts)}
+        f"""SELECT * FROM ({_payments_ledger_sql(real_where, deposit_where)}) ledger
         ORDER BY {order_clause}{limit_sql}""",
         params,
     ).fetchall()
 
 
 def payment_count(include_archived=False, branch_id=None, date_from="", date_to=""):
-    where_parts, params = _payment_where(include_archived, branch_id, date_from, date_to)
+    real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
+    deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
     row = get_db().execute(
-        f"""SELECT COUNT(*) AS total
-        FROM payments p
-        LEFT JOIN orders o ON o.id = p.order_id
-        WHERE {' AND '.join(where_parts)}""",
-        params,
+        f"""SELECT COUNT(*) AS total FROM ({_payments_ledger_sql(real_where, deposit_where)}) ledger""",
+        [*real_params, *deposit_params],
     ).fetchone()
     return int(row["total"] if row else 0)
 
