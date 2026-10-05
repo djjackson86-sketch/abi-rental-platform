@@ -422,6 +422,85 @@ def test_online_store_category_photo_upload_resizes_before_storing(client, app):
     assert public_image.headers['Content-Type'] == 'image/jpeg'
 
 
+def test_online_store_category_description_saves_and_reaches_public_store(client, app):
+    login(client)
+    client.post('/inventory/groups/new', data={
+        'name': 'Description Trailers',
+        'description': 'Old blurb',
+        'sort_order': '1',
+        'active': '1',
+    }, follow_redirects=True)
+    client.post('/inventory/new', data={
+        'name': 'Blurb Trailer',
+        'sku': 'BLURB-1',
+        'quantity': '1',
+        'tracking_method': 'bulk',
+        'description': 'A trailer in the description category.',
+        'product_type': 'rental',
+        'product_group_id': '1',
+        'price_amount': '410',
+        'price_unit': 'day',
+        'security_deposit': '1000',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }, follow_redirects=True)
+
+    setup = client.get('/online-store').get_data(as_text=True)
+    assert 'store-category-description-form' in setup
+    assert '>Old blurb</textarea>' in setup
+    assert '/online-store/categories/1/description' in setup
+
+    saved = client.post('/online-store/categories/1/description', data={
+        'description': 'Rugged trailers for weekends away and site runs.',
+    }, follow_redirects=True)
+    assert saved.status_code == 200
+    assert b'Description Trailers description saved.' in saved.data
+    assert b'Rugged trailers for weekends away and site runs.' in saved.data
+
+    store = client.get('/store').get_data(as_text=True)
+    assert 'Rugged trailers for weekends away and site runs.' in store
+
+    with app.app_context():
+        row = get_db().execute(
+            'SELECT name, description, active, becomes_store_visible FROM product_groups WHERE id=1'
+        ).fetchone()
+        assert row['description'] == 'Rugged trailers for weekends away and site runs.'
+        # The description page must not touch anything the Inventory form owns.
+        assert row['name'] == 'Description Trailers'
+        assert row['active'] == 1
+        assert row['becomes_store_visible'] == 1
+
+
+def test_online_store_category_description_rejects_overlong_text(client, app):
+    login(client)
+    client.post('/inventory/groups/new', data={
+        'name': 'Long Blurb Trailers',
+        'description': 'Keep me',
+        'sort_order': '1',
+        'active': '1',
+    }, follow_redirects=True)
+
+    refused = client.post('/online-store/categories/1/description', data={
+        'description': 'x' * 401,
+    }, follow_redirects=True)
+    assert refused.status_code == 200
+    assert b'Keep the category description under 400 characters.' in refused.data
+
+    with app.app_context():
+        row = get_db().execute('SELECT description FROM product_groups WHERE id=1').fetchone()
+        assert row['description'] == 'Keep me'
+
+
+def test_online_store_category_description_unknown_group_is_refused(client):
+    login(client)
+    response = client.post('/online-store/categories/9999/description', data={
+        'description': 'Nowhere',
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert b'Inventory category not found' in response.data
+
+
 def test_side_demo_seed_creates_matching_inventory_categories_and_photos(monkeypatch, tmp_path):
     db_path = tmp_path / 'seed-demo.db'
     monkeypatch.setenv('DATABASE_PATH', str(db_path))

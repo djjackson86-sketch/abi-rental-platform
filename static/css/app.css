@@ -479,6 +479,10 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .store-category-setup-copy h3{margin:0 0 6px;font-size:16px;letter-spacing:-.02em}
 .store-category-setup-copy p{margin:0 0 8px}
 .store-category-product-list{margin:8px 0 0;padding-left:18px;color:var(--ink-2);font-size:13px}
+.store-category-description-form{display:grid;gap:6px;margin:10px 0 0}
+.store-category-description-form label{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.store-category-description-form textarea{width:100%;resize:vertical;min-height:56px;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line-soft);border-radius:10px;background:var(--surface);box-sizing:border-box}
+.store-category-description-form .btn{justify-self:start}
 .store-category-photo-actions{align-items:center;margin-top:10px}
 .store-category-photo-actions .inline-form{margin:0}
 .store-category-setup-card.is-ungrouped{opacity:.86}
