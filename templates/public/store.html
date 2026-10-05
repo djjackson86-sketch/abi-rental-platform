@@ -1,49 +1,260 @@
 {% extends "base.html" %}
+{% macro rands(amount) -%}
+{%- set value = amount or 0 -%}
+{%- if value == value|round(0) -%}
+R{{ '{:,.0f}'.format(value)|replace(',', ' ') }}
+{%- else -%}
+R{{ '{:,.2f}'.format(value)|replace(',', ' ') }}
+{%- endif -%}
+{%- endmacro %}
 {% block title %}{{ settings.store_title }} | {{ settings.company_name }}{% endblock %}
 {% block body %}
-<header class="store-header">
-  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
-  <input type="search" placeholder="Search products" aria-label="Search products">
-</header>
-<main class="store-main">
-  <section class="store-hero">
-    <p class="eyebrow">Online bookings</p>
-    <h1>{{ settings.store_title }}</h1>
-    {% if settings.store_hero_text %}<p class="hero-copy">{{ settings.store_hero_text }}</p>{% endif %}
-    {% if settings.store_intro %}<p>{{ settings.store_intro }}</p>{% endif %}
-  </section>
-  {% if settings.show_availability %}<section class="rental-period"><span>Select a rental period</span><strong>View prices and availability</strong></section>{% endif %}
-  {% if sections %}
-    {% for section in sections %}
-    <section class="store-category">
-      <div class="store-category-head">
-        {% if section.has_image %}
-        <img class="store-category-image" src="{{ url_for('public.category_image', group_id=section.id) }}" alt="{{ section.name }}" loading="lazy">
-        {% else %}
-        <div class="store-category-image store-category-fallback">{{ section.name[:2].upper() }}</div>
+{# Timed units read as "R250 / day"; a fixed price or an each-price reads as "R695". #}
+{% set timed_units = ['hour', 'day', 'week', 'weekend', 'month'] %}
+<div class="store-page">
+  <div class="store-ribbon">
+    <span>Book online in minutes · collect from our yard</span>
+    <span class="store-ribbon-tail">Roadworthy-checked before every hire{% if settings.store_contact_phone %} · <a href="tel:{{ settings.store_contact_phone }}">{{ settings.store_contact_phone }}</a>{% endif %}</span>
+  </div>
+
+  <header class="store-header">
+    <a class="store-logo" href="{{ url_for('public.store') }}">
+      <span class="store-logo-mark">{{ settings.company_name[:2].upper() }}</span>
+      <span class="store-logo-text">{{ settings.company_name }}</span>
+    </a>
+    <nav class="store-nav" aria-label="Store sections">
+      <a href="#rentals">Trailer rentals</a>
+      <a href="#shop">Parts &amp; services</a>
+      <a href="#how">How it works</a>
+    </nav>
+    <form class="store-search" role="search" onsubmit="return false">
+      <input type="search" id="store-search" placeholder="Search trailers, parts, services…" aria-label="Search products" autocomplete="off">
+    </form>
+    <a class="btn primary store-header-cta" href="#rentals">Book a trailer</a>
+  </header>
+
+  <main class="store-main">
+    <section class="store-hero">
+      <div class="store-hero-copy">
+        <p class="eyebrow">Trailer hire &amp; trailer shop</p>
+        <h1>{{ settings.store_title }}</h1>
+        {% if settings.store_hero_text %}<p class="hero-copy">{{ settings.store_hero_text }}</p>{% endif %}
+        {% if settings.store_intro %}<p class="hero-sub">{{ settings.store_intro }}</p>{% endif %}
+        {% if settings.show_prices and from_price_overall %}
+        <p class="store-hero-price">Trailer hire from <strong>{{ rands(from_price_overall) }}</strong>{% if from_price_unit in timed_units %} <span>/ {{ from_price_unit }}</span>{% endif %}</p>
         {% endif %}
-        <div class="store-category-copy">
-          <h2>{{ section.name }}</h2>
-          {% if section.description %}<p>{{ section.description }}</p>{% endif %}
+        <div class="store-hero-actions">
+          <a class="btn primary lg" href="#rentals">Browse trailer rentals{% if rental_count %} <span class="pill">{{ rental_count }}</span>{% endif %}</a>
+          <a class="btn ghost lg" href="#shop">Shop parts &amp; services{% if shop_count %} <span class="pill">{{ shop_count }}</span>{% endif %}</a>
         </div>
+        <ul class="store-trust">
+          <li>Book and confirm online — no queue at the counter</li>
+          <li>Lights, tyres and hitch checked before every hire</li>
+          <li>Hire by the day or the week{% if settings.store_contact_phone %}; call {{ settings.store_contact_phone }} for anything else{% endif %}</li>
+        </ul>
       </div>
+      <div class="store-hero-media">
+        {% if hero_image_section and hero_image_section.has_image %}
+        <img class="store-hero-photo" src="{{ url_for('public.category_image', group_id=hero_image_section.id) }}" alt="{{ hero_image_section.name }} trailer for hire">
+        <span class="store-hero-tag">Featured · {{ hero_image_section.name }}</span>
+        {% else %}
+        <div class="store-hero-photo store-category-fallback">Trailers</div>
+        {% endif %}
+        {% if fleet_units %}
+        <div class="store-hero-stat">
+          <strong>{{ fleet_units }}</strong>
+          <span>trailer{{ '' if fleet_units == 1 else 's' }} in the fleet, ready to hire</span>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    {% if rental_sections or shop_parts or shop_services %}
+    <nav class="store-splitbar" aria-label="Jump to store area">
+      <a href="#rentals" class="store-split-tab">
+        <span class="store-split-icon">🚚</span>
+        <span class="store-split-copy"><strong>Trailer rentals</strong><small>Hire a trailer by the day or week</small></span>
+        <span class="store-split-count">{{ rental_count }}</span>
+      </a>
+      <a href="#shop" class="store-split-tab">
+        <span class="store-split-icon">🛠</span>
+        <span class="store-split-copy"><strong>Parts &amp; services</strong><small>Buy spares or book a service</small></span>
+        <span class="store-split-count">{{ shop_count }}</span>
+      </a>
+    </nav>
+
+    <section class="store-area" id="rentals">
+      <header class="store-area-head">
+        <p class="eyebrow">Rentals</p>
+        <h2>Browse the fleet</h2>
+        <p>Pick the trailer that fits the job — every hire includes a roadworthy check, lights test and hitch guidance at collection.</p>
+      </header>
+      {% if rental_sections %}
+      <ul class="store-chips" aria-label="Trailer categories">
+        {% for section in rental_sections %}
+        <li><a href="#rental-cat-{{ section.id if section.id else 'more' }}">{% if section.has_image %}<img src="{{ url_for('public.category_image', group_id=section.id) }}" alt="" loading="lazy">{% endif %}<span>{{ section.name }}</span>{% if section.products|length > 1 %}<em>{{ section.products|length }}</em>{% endif %}</a></li>
+        {% endfor %}
+      </ul>
+      {% for section in rental_sections %}
+      <section class="store-category" id="rental-cat-{{ section.id if section.id else 'more' }}">
+        <div class="store-category-banner{% if not section.has_image %} is-plain{% endif %}">
+          {% if section.has_image %}
+          <img class="store-category-image" src="{{ url_for('public.category_image', group_id=section.id) }}" alt="{{ section.name }}" loading="lazy">
+          {% else %}
+          <div class="store-category-image store-category-fallback">{{ section.name[:2].upper() }}</div>
+          {% endif %}
+          <div class="store-category-copy">
+            <h2>{{ section.name }}</h2>
+            {% if section.description %}<p>{{ section.description }}</p>{% endif %}
+            <p class="store-category-meta">{{ section.units }} trailer{{ '' if section.units == 1 else 's' }} to hire{% if settings.show_prices and section.from_price %} · from <b>{{ rands(section.from_price) }}</b>{% if section.products[0].price_unit in timed_units %} / {{ section.products[0].price_unit }}{% endif %}{% endif %}</p>
+          </div>
+        </div>
+        <div class="product-grid">
+          {% for p in section.products %}
+          <article class="product-card">
+            <div class="product-card-top">
+              <h3>{{ p.name }}</h3>
+              {% if settings.show_availability %}
+              <span class="product-badge {% if p.quantity|int > 0 %}is-in{% else %}is-out{% endif %}">{% if p.quantity|int > 0 %}{{ p.quantity }} available{% else %}Fully booked{% endif %}</span>
+              {% endif %}
+            </div>
+            {% if p.description %}<p class="product-card-desc">{{ p.description }}</p>{% endif %}
+            <ul class="product-card-specs">
+              {% if p.wheel_size %}<li>Wheel size {{ p.wheel_size }}</li>{% endif %}
+              {% if p.security_deposit %}<li>Refundable deposit {{ rands(p.security_deposit) }}</li>{% endif %}
+            </ul>
+            <div class="product-card-foot">
+              {% if settings.show_prices %}<p class="store-price">{{ rands(p.price_amount) }}{% if p.price_unit in timed_units %}<span> / {{ p.price_unit }}</span>{% endif %}</p>{% endif %}
+              <a class="btn primary" href="{{ url_for('public.product_detail', product_id=p.id) }}">Book now</a>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+      <div class="store-steps store-steps-inline">
+        <h3 class="store-subhead">Hiring a trailer</h3>
+        <ol class="store-step-grid">
+          <li class="store-step"><span class="store-step-no">1</span><h4>Pick your trailer and dates</h4><p>Browse the fleet, choose your rental period and send the booking request online.</p></li>
+          <li class="store-step"><span class="store-step-no">2</span><h4>We confirm availability</h4><p>Our team checks the yard and confirms your booking with the deposit and total.</p></li>
+          <li class="store-step"><span class="store-step-no">3</span><h4>Bring your documents</h4><p>Driver's licence, proof of address and the tow vehicle's paperwork on collection.</p></li>
+          <li class="store-step"><span class="store-step-no">4</span><h4>Hook up and go</h4><p>We check the lights, tyres and hitch with you, then you're on the road.</p></li>
+        </ol>
+      </div>
+      {% else %}
+      <p class="store-empty">No trailers are listed online right now — please call us to arrange a hire.</p>
+      {% endif %}
+    </section>
+
+    <section class="store-area store-area-shop" id="shop">
+      <header class="store-area-head">
+        <p class="eyebrow">Shop</p>
+        <h2>Parts &amp; services</h2>
+        <p>Spares, lighting kits and workshop services — buy outright or book the trailer in for repairs.</p>
+      </header>
+      {% if shop_parts %}
+      <h3 class="store-subhead">Parts &amp; accessories <span>{{ shop_parts|length }}</span></h3>
       <div class="product-grid">
-        {% for p in section.products %}
-        <article class="product-card">
-          <div class="product-image">{{ p.name[:2].upper() }}</div>
-          <h2>{{ p.name }}</h2>
-          <p>{{ p.description }}</p>
-          {% if settings.show_prices %}<b>R{{ '%.2f'|format(p.price_amount) }} / {{ p.price_unit }}</b>{% endif %}
-          {% if settings.show_availability %}<p class="muted">{% if p.product_type == 'service' or p.tracking_method == 'none' %}Available on request{% else %}{{ p.quantity }} available{% endif %}</p>{% endif %}
-          <a class="btn primary" href="{{ url_for('public.product_detail', product_id=p.id) }}">Book now</a>
+        {% for p in shop_parts %}
+        <article class="product-card product-card-shop">
+          <div class="product-card-top">
+            <h4 class="product-card-name">{{ p.name }}</h4>
+            <span class="product-badge is-kind">For sale</span>
+          </div>
+          {% if p.description %}<p class="product-card-desc">{{ p.description }}</p>{% endif %}
+          {% if p.group_name %}<p class="product-card-tag">{{ p.group_name }}</p>{% endif %}
+          <div class="product-card-foot">
+            {% if settings.show_prices %}<p class="store-price">{{ rands(p.price_amount) }}{% if p.price_unit in timed_units %}<span> / {{ p.price_unit }}</span>{% endif %}</p>{% endif %}
+            <a class="btn ghost" href="{{ url_for('public.product_detail', product_id=p.id) }}">View item</a>
+          </div>
         </article>
         {% endfor %}
       </div>
+      {% endif %}
+      {% if shop_services %}
+      <h3 class="store-subhead">{{ 'Services' if shop_parts else 'Workshop services' }} <span>{{ shop_services|length }}</span></h3>
+      <div class="product-grid">
+        {% for p in shop_services %}
+        <article class="product-card product-card-shop">
+          <div class="product-card-top">
+            <h4 class="product-card-name">{{ p.name }}</h4>
+            <span class="product-badge is-kind">Service</span>
+          </div>
+          {% if p.description %}<p class="product-card-desc">{{ p.description }}</p>{% endif %}
+          {% if p.group_name %}<p class="product-card-tag">{{ p.group_name }}</p>{% endif %}
+          <div class="product-card-foot">
+            {% if settings.show_prices %}<p class="store-price">{{ rands(p.price_amount) }}{% if p.price_unit in timed_units %}<span> / {{ p.price_unit }}</span>{% endif %}</p>{% endif %}
+            <a class="btn ghost" href="{{ url_for('public.product_detail', product_id=p.id) }}">Book service</a>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if not shop_parts and not shop_services %}
+      <p class="store-empty">No parts or services are listed online right now.</p>
+      {% endif %}
+      {% if shop_parts or shop_services %}
+      <div class="store-steps store-steps-inline">
+        <h3 class="store-subhead">Buying parts or booking a service</h3>
+        <ol class="store-step-grid store-step-grid-3">
+          <li class="store-step"><span class="store-step-no">1</span><h4>Send the request</h4><p>Add the part or service to a booking request — or call the yard if you need advice first.</p></li>
+          <li class="store-step"><span class="store-step-no">2</span><h4>We check stock or book you in</h4><p>We confirm the part is on the shelf, or book the trailer into the workshop slot.</p></li>
+          <li class="store-step"><span class="store-step-no">3</span><h4>Collect or drop off</h4><p>Collect the part from the counter, or bring the trailer in and collect when it's done.</p></li>
+        </ol>
+      </div>
+      {% endif %}
     </section>
-    {% endfor %}
-  {% else %}
-  <section class="empty-state"><h1>No products</h1><p>Unfortunately, we couldn’t find any products in this collection.</p><a class="btn ghost" href="#">Browse all products</a></section>
-  {% endif %}
-</main>
-<footer class="store-footer">© 2026, {{ settings.company_name }}{% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}<span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span></footer>
+
+    <section class="store-cta">
+      <div>
+        <h2>Ready when you are</h2>
+        <p>Hire a trailer online, or talk to the yard about parts, spares and workshop bookings.</p>
+      </div>
+      <div class="store-cta-actions">
+        <a class="btn primary lg" href="#rentals">Browse trailers</a>
+        {% if settings.store_contact_phone %}<a class="btn ghost lg" href="tel:{{ settings.store_contact_phone }}">Call us</a>{% endif %}
+      </div>
+    </section>
+    {% else %}
+    <section class="empty-state">
+      <h1>No products</h1>
+      <p>Unfortunately, we couldn’t find any products in this collection.</p>
+    </section>
+    {% endif %}
+  </main>
+
+  <footer class="store-footer">
+    <span>© 2026, {{ settings.company_name }}</span>
+    {% if settings.store_contact_email or settings.store_contact_phone %}
+    <span class="store-contact-line">{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>
+    {% endif %}
+    <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+  </footer>
+</div>
+
+<script>
+// Progressive enhancement only — with JS off every product stays visible.
+(function () {
+  var input = document.getElementById('store-search');
+  if (!input) { return; }
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.product-card'));
+  var sections = Array.prototype.slice.call(document.querySelectorAll('.store-category'));
+  var areas = Array.prototype.slice.call(document.querySelectorAll('.store-area'));
+  function apply() {
+    var term = input.value.trim().toLowerCase();
+    cards.forEach(function (card) {
+      card.hidden = term !== '' && card.textContent.toLowerCase().indexOf(term) === -1;
+    });
+    sections.forEach(function (section) {
+      section.hidden = !section.querySelector('.product-card:not([hidden])');
+    });
+    areas.forEach(function (area) {
+      var visible = area.querySelectorAll('.product-card:not([hidden])').length;
+      var note = area.querySelector('.store-empty');
+      if (note) { note.hidden = visible > 0; }
+    });
+  }
+  input.addEventListener('input', apply);
+})();
+</script>
 {% endblock %}

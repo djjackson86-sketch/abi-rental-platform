@@ -96,12 +96,77 @@ def _store_sections():
     return sections
 
 
+def _is_rental_product(product):
+    """Rentals are what a customer hires; everything else (sale, service) is shop stock."""
+    return (product["product_type"] or "rental") == "rental"
+
+
+def _store_areas(sections):
+    """Split the storefront into the halves a customer thinks in.
+
+    Someone hiring a trailer, someone buying a jockey wheel and someone booking a repair
+    are doing three different jobs, so the page leads with that split instead of one
+    undifferentiated grid: rentals stay grouped into their category sections (with the
+    cheapest day rate for the section), while shop stock is returned already divided into
+    parts and services. A rental that has no store-visible category is never dropped — it
+    lands in a trailing "More trailers" section.
+    """
+    rentals = []
+    shop_parts = []
+    shop_services = []
+    for section in sections:
+        rental_products = [p for p in section["products"] if _is_rental_product(p)]
+        for product in section["products"]:
+            if _is_rental_product(product):
+                continue
+            item = dict(product)
+            item["group_name"] = section["name"] if section["id"] is not None else ""
+            if product["product_type"] == "service":
+                shop_services.append(item)
+            else:
+                shop_parts.append(item)
+        if not rental_products:
+            continue
+        priced = [p["price_amount"] for p in rental_products if (p["price_amount"] or 0) > 0]
+        rentals.append({
+            "id": section["id"],
+            "name": section["name"] if section["id"] is not None else "More trailers from our fleet",
+            "description": section["description"],
+            "has_image": section["has_image"],
+            "products": rental_products,
+            "from_price": min(priced) if priced else None,
+            # Units, not product lines: the banner must not say "1 trailer" while the card
+            # underneath it says "4 available".
+            "units": sum(int(p["quantity"] or 0) for p in rental_products),
+        })
+    return rentals, shop_parts, shop_services
+
+
 @bp.route("/store")
 def store():
     settings = get_company_settings()
     if not settings["store_enabled"]:
         return render_template("public/store_unavailable.html", settings=settings)
-    return render_template("public/store.html", settings=settings, sections=_store_sections())
+    sections = _store_sections()
+    rental_sections, shop_parts, shop_services = _store_areas(sections)
+    rental_products = [p for section in rental_sections for p in section["products"]]
+    priced = [p for p in rental_products if (p["price_amount"] or 0) > 0]
+    cheapest = min(priced, key=lambda p: p["price_amount"]) if priced else None
+    return render_template(
+        "public/store.html",
+        settings=settings,
+        sections=sections,
+        rental_sections=rental_sections,
+        shop_parts=shop_parts,
+        shop_services=shop_services,
+        hero_image_section=next((s for s in rental_sections if s["has_image"]), None),
+        rental_count=len(rental_products),
+        shop_count=len(shop_parts) + len(shop_services),
+        # Hero anchors: the cheapest way onto the road, and how big the fleet is.
+        from_price_overall=cheapest["price_amount"] if cheapest else None,
+        from_price_unit=cheapest["price_unit"] if cheapest else "day",
+        fleet_units=sum(int(p["quantity"] or 0) for p in rental_products),
+    )
 
 
 @bp.route("/store/category-image/<int:group_id>")

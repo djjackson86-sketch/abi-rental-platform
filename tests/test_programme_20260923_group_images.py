@@ -346,7 +346,8 @@ def test_store_renders_one_section_per_category_with_photo_url(app, client):
     body = client.get("/store").get_data(as_text=True)
     assert "Single Axle" in body
     assert "Double Axle" in body
-    assert "Other" in body
+    # An ungrouped rental keeps a section of its own, under the customer-facing label.
+    assert "More trailers from our fleet" in body
     assert "Red Cage Trailer" in body
     assert "Blue Flatbed Trailer" in body
     assert "Loose Wheel Pump" in body
