@@ -67,8 +67,13 @@
         <div class="store-category-setup-copy">
           <h3>{{ group.name if group else 'Ungrouped inventory' }}</h3>
           {% if group %}
-            <p>{{ group.description or 'No category description yet.' }}</p>
             <p class="muted">{{ item.product_count }} trailer{{ '' if item.product_count == 1 else 's' }} linked · {{ 'Shown on store' if group.becomes_store_visible else 'Hidden from store' }}</p>
+            <form method="post" action="{{ url_for('admin.online_store_category_description', group_id=group.id) }}" class="store-category-description-form">
+              <label for="description-{{ group.id }}">Store description</label>
+              <textarea id="description-{{ group.id }}" name="description" rows="2" maxlength="400"
+                        placeholder="e.g. Compact trailers for furniture moves and garden refuse">{{ group.description }}</textarea>
+              <button class="btn ghost">Save description</button>
+            </form>
           {% else %}
             <p class="muted">These rental products are public but not assigned to an inventory category yet. Link them from Inventory → Product groups so they correspond with a store section.</p>
           {% endif %}

@@ -120,6 +120,39 @@ def update_product_group(group_id, form):
         raise
 
 
+#: A category blurb is public store copy, not a document — a generous cap that still
+#: stops a wall of text being pasted into a section header.
+MAX_GROUP_DESCRIPTION = 400
+
+
+def update_group_description(group_id, description):
+    """Save ONLY the category blurb shown under its name on the public store.
+
+    The online-store setup page owns this one field; the Inventory group form remains the
+    owner of the name, order, active flag and store visibility. Writing this single column
+    means a save here can never blank a name or hide a category by accident — the failure
+    mode that makes a whole-form round trip unsafe from a second page.
+    """
+    text = (description or "").strip()
+    if len(text) > MAX_GROUP_DESCRIPTION:
+        raise ValueError(
+            f"Keep the category description under {MAX_GROUP_DESCRIPTION} characters."
+        )
+    _assert_group_exists(group_id)
+    db = get_db()
+    db.execute(
+        "UPDATE product_groups SET description = ?, updated_at = ? WHERE id = ?",
+        (text, now(), group_id),
+    )
+    db.commit()
+
+
+def _assert_group_exists(group_id):
+    row = get_db().execute("SELECT id FROM product_groups WHERE id = ?", (group_id,)).fetchone()
+    if row is None:
+        raise ValueError("Product group not found")
+
+
 def assign_products_to_group(group_id, product_ids):
     """Move the ticked products into a group and return how many rows actually moved.
 

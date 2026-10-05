@@ -6,7 +6,7 @@ from app.routes.auth import login_required
 from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services import group_images
-from app.services.products import list_product_groups, list_products, get_product_group
+from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
@@ -318,6 +318,28 @@ def online_store_category_image_clear(group_id):
         flash(f"{group['name']} photo removed.", "success")
     else:
         flash(f"{group['name']} does not have a photo yet.", "info")
+    return redirect(url_for("admin.online_store"))
+
+
+@bp.post("/online-store/categories/<int:group_id>/description")
+@login_required
+def online_store_category_description(group_id):
+    """Save the blurb shown under this category's name on the public store.
+
+    Only the description is written — the Inventory group form stays the owner of the
+    name, order, active flag and store visibility, so this page cannot blank a name or
+    hide a category by accident.
+    """
+    group = get_product_group(group_id)
+    if not group:
+        flash("Inventory category not found", "error")
+        return redirect(url_for("admin.online_store"))
+    try:
+        update_group_description(group_id, request.form.get("description", ""))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin.online_store"))
+    flash(f"{group['name']} description saved.", "success")
     return redirect(url_for("admin.online_store"))
 
 def _period_label(start_date, end_date, branch_label=''):
