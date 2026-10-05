@@ -8,6 +8,7 @@ from app import create_app
 from app.db import get_db, now
 from app.services.access import create_additional_user
 from app.services.payments import list_payments, normalise_payment_sort, payment_method_totals
+from app.services.reports import dashboard_day_metrics
 
 
 @pytest.fixture()
@@ -231,6 +232,49 @@ def test_payment_method_totals_map_methods_and_keep_archived_out_of_active(app):
     assert active_totals == {'card': 200.0, 'cash': 300.0, 'eft': 25.0}
     assert archived_branch_totals == {'card': 0.0, 'cash': 400.0, 'eft': 0.0}
 
+
+
+def test_payment_method_totals_match_dashboard_and_do_not_net_synthetic_deposit_refunds(app):
+    """ABI-341953122: Midrand today's card total must match the dashboard card.
+
+    Deposit refunds are rendered as synthetic negative rows in the payments ledger,
+    but the method summary cards show payment takings, so they must not subtract
+    those order-level payout rows.  This pins the reported R495-style gap.
+    """
+    day = '2026-09-13'
+    with app.app_context():
+        db = get_db()
+        stamp = f'{day}T09:00:00'
+        db.execute("UPDATE branches SET name = 'Midrand', active = 1 WHERE id = 1")
+        db.execute("INSERT INTO customers (name, created_at) VALUES ('Midrand Card Customer', ?)", (stamp,))
+        customer_id = db.execute("SELECT id FROM customers ORDER BY id DESC LIMIT 1").fetchone()['id']
+        db.execute(
+            """INSERT INTO orders (order_number, customer_id, collect_branch_id, return_branch_id,
+               status, total, due_total, deposit_refund_amount, deposit_process_method,
+               deposit_processed_at, created_at)
+               VALUES ('ORD-ABI-341953122', ?, 1, 1, 'returned', 6160.22, 0, 495,
+                       'card', ?, ?)""",
+            (customer_id, f'{day}T15:00:00', stamp),
+        )
+        order_id = db.execute("SELECT id FROM orders WHERE order_number = 'ORD-ABI-341953122'").fetchone()['id']
+        db.execute(
+            """INSERT INTO payments (order_id, amount, method, reference, status, payment_date,
+               deleted_at, created_at) VALUES (?, 5665.22, 'card', 'MIDRAND-CARD', 'paid', ?, '', ?)""",
+            (order_id, f'{day}T10:00:00', stamp),
+        )
+        db.commit()
+
+    with app.test_request_context('/payments'):
+        dashboard = dashboard_day_metrics(day=day, branch_id=1)
+        totals = payment_method_totals(branch_id=1, date_from=day, date_to=day)
+        ledger = list_payments(branch_id=1, date_from=day, date_to=day, sort='amount', direction='asc')
+
+    assert dashboard['card_payments'] == 5665.22
+    assert totals['card'] == dashboard['card_payments']
+    assert [(row['reference'], row['amount'], row['synthetic_kind']) for row in ledger] == [
+        ('Refunded deposit', -495.0, 'deposit_refund'),
+        ('MIDRAND-CARD', 5665.22, None),
+    ]
 
 def test_date_filters_are_preserved_in_links(client, app):
     seed_payment_rows(app)

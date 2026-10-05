@@ -360,15 +360,21 @@ def payment_count(include_archived=False, branch_id=None, date_from="", date_to=
 
 
 def payment_method_totals(include_archived=False, branch_id=None, date_from="", date_to=""):
+    # These cards are payment-method takings, matching the dashboard day cards and
+    # cash-up "received" figures.  Deposit-refund payout rows stay visible in the
+    # payments ledger, but they are order-settlement payouts stored on ``orders``
+    # rather than captured payment rows; subtracting them here made the payments
+    # page card disagree with the dashboard for the same branch/day (ABI-341953122).
     real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
-    deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
     totals = {"card": 0.0, "cash": 0.0, "eft": 0.0}
     rows = get_db().execute(
-        f"""SELECT LOWER(COALESCE(method, '')) AS method, COALESCE(SUM(amount), 0) AS total
-        FROM ({_payments_ledger_sql(real_where, deposit_where)}) ledger
-        WHERE LOWER(COALESCE(method, '')) IN ('card', 'cash', 'eft')
-        GROUP BY LOWER(COALESCE(method, ''))""",
-        [*real_params, *deposit_params],
+        f"""SELECT LOWER(COALESCE(p.method, '')) AS method, COALESCE(SUM(p.amount), 0) AS total
+        FROM payments p
+        LEFT JOIN orders o ON o.id = p.order_id
+        WHERE {' AND '.join(real_where)}
+          AND LOWER(COALESCE(p.method, '')) IN ('card', 'cash', 'eft')
+        GROUP BY LOWER(COALESCE(p.method, ''))""",
+        real_params,
     ).fetchall()
     for row in rows:
         totals[row["method"]] = round(float(row["total"] or 0), 2)
