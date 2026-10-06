@@ -68,17 +68,27 @@ def _done(message, branch_id=None):
 @bp.post("")
 @login_required
 def save():
-    """Cash up: record the cash counted in the drawer for the day."""
+    """Cash up: record the cash counted in the drawer for the day.
+
+    Ticket ABI-341953127: the panel's own Notes box posts ``cash_up_notes`` and
+    is saved in its own column, separate from the End of day notes panel. The
+    legacy ``notes`` key is still honoured when a caller sends it, so nothing
+    that used to write end of day notes through this route changes.
+    """
     day = _day_from_request()
     branch_id = _target_branch()
+    legacy_notes = {}
+    if "notes" in request.form:
+        legacy_notes["notes"] = request.form.get("notes", "")
     try:
         cash.guard_writable_day(day)
         cash.save_cash_up(
             day,
             request.form.get("counted_cash", ""),
-            request.form.get("notes", ""),
             branch_id=branch_id,
             user_id=_user_id(),
+            cash_up_notes=request.form.get("cash_up_notes", ""),
+            **legacy_notes,
         )
     except ValueError as exc:
         flash(str(exc), "error")
@@ -89,7 +99,11 @@ def save():
 @bp.post("/pos")
 @login_required
 def save_pos():
-    """POS Cashup: record the counted card/POS total for the day."""
+    """POS Cashup: record the counted card/POS total for the day.
+
+    Ticket ABI-341953127: the POS panel's Notes box posts
+    ``pos_cash_up_notes``, saved in its own column.
+    """
     day = _day_from_request()
     branch_id = _target_branch()
     try:
@@ -103,6 +117,7 @@ def save_pos():
             request.form.get("counted_card", ""),
             branch_id=branch_id,
             user_id=_user_id(),
+            pos_cash_up_notes=request.form.get("pos_cash_up_notes", ""),
         )
     except ValueError as exc:
         flash(str(exc), "error")

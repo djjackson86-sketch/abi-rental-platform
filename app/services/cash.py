@@ -284,9 +284,9 @@ def _day_row(day, branch_id):
     if not branch_id:
         return None
     return get_db().execute(
-        """SELECT id, opening_cash, counted_cash, counted_card, notes, interaction_calls,
-        interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes,
-        interaction_saved_at
+        """SELECT id, opening_cash, counted_cash, counted_card, cash_up_notes,
+        pos_cash_up_notes, notes, interaction_calls, interaction_whatsapp,
+        interaction_emails, interaction_walk_in, interaction_notes, interaction_saved_at
         FROM cash_ups WHERE branch_id = ? AND business_day = ?""",
         (branch_id, day),
     ).fetchone()
@@ -416,6 +416,8 @@ def day_summary(day=None, branch_id=None):
         'pos_variance': pos_variance,
         'pos_variance_display': _variance_text(pos_variance, pos_cashed_up),
         'pos_variance_label': _variance_label(pos_variance, pos_cashed_up),
+        'cash_up_notes': str(_value(day_row, 'cash_up_notes') or '') if day_row is not None else '',
+        'pos_cash_up_notes': str(_value(day_row, 'pos_cash_up_notes') or '') if day_row is not None else '',
         'notes': str(_value(day_row, 'notes') or '') if day_row is not None else '',
         'interactions': {
             'calls': int(_value(day_row, 'interaction_calls', 0) or 0) if day_row is not None else 0,
@@ -455,6 +457,8 @@ def aggregate_day_summary(day=None, branch_ids=None):
     drop_lines = []
     interaction_notes = []
     notes = []
+    cash_up_notes = []
+    pos_cash_up_notes = []
     counted_total = 0.0
     counted_count = 0
     counted_card_total = 0.0
@@ -476,6 +480,10 @@ def aggregate_day_summary(day=None, branch_ids=None):
             counted_card_count += 1
         if summary.get('notes'):
             notes.append(f"{summary['branch_name']}: {summary['notes']}")
+        if summary.get('cash_up_notes'):
+            cash_up_notes.append(f"{summary['branch_name']}: {summary['cash_up_notes']}")
+        if summary.get('pos_cash_up_notes'):
+            pos_cash_up_notes.append(f"{summary['branch_name']}: {summary['pos_cash_up_notes']}")
         if summary.get('interactions', {}).get('notes'):
             interaction_notes.append(f"{summary['branch_name']}: {summary['interactions']['notes']}")
 
@@ -532,6 +540,8 @@ def aggregate_day_summary(day=None, branch_ids=None):
         'pos_variance': pos_variance,
         'pos_variance_display': _variance_text(pos_variance, pos_cashed_up),
         'pos_variance_label': pos_variance_label,
+        'cash_up_notes': '\n'.join(cash_up_notes),
+        'pos_cash_up_notes': '\n'.join(pos_cash_up_notes),
         'notes': '\n'.join(notes),
         'interactions': {
             'calls': sum(summary['interactions']['calls'] for summary in summaries),
@@ -559,10 +569,11 @@ def _ensure_day(day, branch_id, user_id=None):
     opening = opening_cash(day, branch_id)
     ts = now()
     db.execute(
-        """INSERT INTO cash_ups (branch_id, business_day, opening_cash, counted_cash, notes,
-        interaction_calls, interaction_whatsapp, interaction_emails, interaction_walk_in, interaction_notes,
-        interaction_saved_at, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, NULL, '', 0, 0, 0, 0, '', '', ?, ?, ?)""",
+        """INSERT INTO cash_ups (branch_id, business_day, opening_cash, counted_cash,
+        cash_up_notes, pos_cash_up_notes, notes, interaction_calls, interaction_whatsapp,
+        interaction_emails, interaction_walk_in, interaction_notes, interaction_saved_at,
+        created_by, created_at, updated_at)
+        VALUES (?, ?, ?, NULL, '', '', '', 0, 0, 0, 0, '', '', ?, ?, ?)""",
         (branch_id, day, opening, user_id, ts, ts),
     )
     db.commit()
@@ -579,12 +590,18 @@ def _parse_amount(value, message):
     return amount
 
 
-def save_cash_up(day, counted_cash, notes='', branch_id=None, user_id=None):
+def save_cash_up(day, counted_cash, notes=None, branch_id=None, user_id=None, cash_up_notes=''):
     """Record the counted (closing) cash for the day — the actual cash up.
 
     Re-saving the same day updates the count and refreshes the opening snapshot
     from the previous day's closing cash, so entering yesterday's count late
     still leaves today's opening honest.
+
+    Ticket ABI-341953127: the panel's own Notes box is stored in
+    ``cash_up_notes`` and is deliberately separate from the End of day notes
+    panel (``notes``). ``notes`` is written only when a caller passes it
+    explicitly, so a normal cash up (the dashboard form) can never blank the
+    day's end of day notes.
     """
     if branch_id is None:
         branch_id = acting_branch_id()
@@ -596,16 +613,30 @@ def save_cash_up(day, counted_cash, notes='', branch_id=None, user_id=None):
         raise ValueError('Counted cash cannot be negative')
     db = get_db()
     cash_up_id = _ensure_day(day, branch_id, user_id)
-    db.execute(
-        'UPDATE cash_ups SET counted_cash = ?, opening_cash = ?, notes = ?, updated_at = ? WHERE id = ?',
-        (counted, opening_cash(day, branch_id), str(notes or '').strip(), now(), cash_up_id),
-    )
+    values = (counted, opening_cash(day, branch_id), str(cash_up_notes or '').strip())
+    if notes is None:
+        db.execute(
+            'UPDATE cash_ups SET counted_cash = ?, opening_cash = ?, cash_up_notes = ?, '
+            'updated_at = ? WHERE id = ?',
+            (*values, now(), cash_up_id),
+        )
+    else:
+        db.execute(
+            'UPDATE cash_ups SET counted_cash = ?, opening_cash = ?, cash_up_notes = ?, '
+            'notes = ?, updated_at = ? WHERE id = ?',
+            (*values, str(notes or '').strip(), now(), cash_up_id),
+        )
     db.commit()
     return cash_up_id
 
 
-def save_pos_cash_up(day, counted_card, branch_id=None, user_id=None):
-    """Record the counted POS/card total for the day."""
+def save_pos_cash_up(day, counted_card, branch_id=None, user_id=None, pos_cash_up_notes=''):
+    """Record the counted POS/card total for the day.
+
+    Ticket ABI-341953127: the POS panel's Notes box is stored in
+    ``pos_cash_up_notes``, its own column, so it never overwrites the cash-up
+    notes or the day's end of day notes.
+    """
     if branch_id is None:
         branch_id = acting_branch_id()
     if not branch_id:
@@ -617,8 +648,9 @@ def save_pos_cash_up(day, counted_card, branch_id=None, user_id=None):
     db = get_db()
     cash_up_id = _ensure_day(day, branch_id, user_id)
     db.execute(
-        'UPDATE cash_ups SET counted_card = ?, opening_cash = ?, updated_at = ? WHERE id = ?',
-        (counted, opening_cash(day, branch_id), now(), cash_up_id),
+        'UPDATE cash_ups SET counted_card = ?, opening_cash = ?, pos_cash_up_notes = ?, '
+        'updated_at = ? WHERE id = ?',
+        (counted, opening_cash(day, branch_id), str(pos_cash_up_notes or '').strip(), now(), cash_up_id),
     )
     db.commit()
     return cash_up_id
