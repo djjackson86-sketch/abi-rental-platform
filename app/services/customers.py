@@ -1,7 +1,10 @@
 import json
+import math
+
+from flask import has_request_context, session
 
 from app.db import get_db, now
-from app.services.access import current_session_user_id, session_active_branch_id, session_primary_branch_id
+from app.services.access import current_session_user_id, is_main_session, session_active_branch_id, session_primary_branch_id
 from app.services.payments import _active_payment_clause, normalise_payment_date_filter
 from app.services.settings import get_company_settings
 
@@ -43,6 +46,15 @@ CUSTOM_FIELD_FORM_KEYS = list(VISIBLE_CUSTOM_FIELD_ORDER)
 # knows nothing about blocking leaves the stored block state untouched instead of
 # silently unblocking the customer.
 BLOCKING_PANEL_MARKER = "blocking_panel"
+
+# Ticket ABI-341953129: the credit facility (allow buying on account + its
+# limit) is owner-only. Like the blocking panel above, the credit inputs live on
+# the customer form only and are read ONLY when the form carries this marker, so
+# the shared _clean() — also used by the order form's inline customer card and
+# by the public storefront — can never change a stored facility.
+CREDIT_PANEL_MARKER = "credit_panel"
+CREDIT_FIELDS = ("credit_allowed", "credit_limit")
+CREDIT_LIMIT_ERROR = "Credit limit must be a positive amount"
 
 
 def list_customers(query="", customer_type="", marketing="", limit=None, offset=0):
@@ -170,6 +182,56 @@ def blocking_panel_present(form):
     return str(_form_value(form, BLOCKING_PANEL_MARKER) or "").strip() == "1"
 
 
+def can_set_customer_credit():
+    """Ticket ABI-341953129: only the main profile may grant/change credit.
+
+    Reuses the existing main-profile check (role 'owner'), the same boundary the
+    Settings user management uses. Outside a request (background jobs, service
+    unit tests) there is no signed-in main user, so it is False — the safe
+    default, which is what keeps a forged field from ever being honoured.
+    """
+    if not has_request_context():
+        return False
+    return is_main_session(session)
+
+
+def credit_panel_present(form):
+    """True when the customer form's own owner-only credit panel was submitted."""
+    return str(_form_value(form, CREDIT_PANEL_MARKER) or "").strip() == "1"
+
+
+def credit_fields_submitted(form):
+    """True when any credit input (or its panel marker) rode along on the POST.
+
+    Lets the customer route refuse a crafted staff POST outright, while the
+    service still ignores stray fields on every other path (order form card,
+    public storefront) because they are keyed off the panel marker.
+    """
+    if credit_panel_present(form):
+        return True
+    return any(_form_value(form, key) not in (None, "") for key in CREDIT_FIELDS)
+
+
+def _clean_credit(form):
+    """(credit_allowed, credit_limit) for an owner-submitted credit panel.
+
+    Disabled stores 0/0. Enabled requires a positive, finite monetary limit:
+    zero, negative, NaN and infinity are all refused (a limit of R0 would let
+    the customer onto account with no ceiling at all).
+    """
+    raw = str(form.get("credit_allowed") or "").strip().lower()
+    allowed = 1 if raw in ("1", "true", "on", "yes") else 0
+    if not allowed:
+        return 0, 0.0
+    try:
+        limit = float(str(form.get("credit_limit") or "").strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(CREDIT_LIMIT_ERROR) from exc
+    if not math.isfinite(limit) or round(limit, 2) <= 0:
+        raise ValueError(CREDIT_LIMIT_ERROR)
+    return 1, round(limit, 2)
+
+
 def _row_flag(customer, key):
     """1/0 for a nullable integer flag on a customer row, tolerant of absence."""
     try:
@@ -246,6 +308,14 @@ def _clean(form, existing_custom_fields=None):
         # is_blocked alone.
         data["is_blocked"] = 1 if form.get("is_blocked") else 0
         data["blocked_reason"] = (form.get("blocked_reason") or "").strip()
+    if credit_panel_present(form) and can_set_customer_credit():
+        # Ticket ABI-341953129: the credit facility is set ONLY through the
+        # customer form's own panel AND only by the main profile. Any other
+        # caller — a staff customer edit, the order form's inline customer card,
+        # the public storefront — leaves the credit keys out of the payload, so
+        # update_customer never touches the stored columns and a forged field
+        # cannot change (or clear) an existing facility.
+        data["credit_allowed"], data["credit_limit"] = _clean_credit(form)
     return data
 
 
@@ -269,12 +339,17 @@ def create_customer(form):
     # order customer, inline AJAX create) carries no blocking panel, so its new
     # customer starts unblocked.
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, is_blocked, blocked_reason, created_by_user_id, branch_id, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :is_blocked, :blocked_reason, :created_by_user_id, :branch_id, :created_at)""",
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, is_blocked, blocked_reason, credit_allowed, credit_limit, created_by_user_id, branch_id, created_at)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :is_blocked, :blocked_reason, :credit_allowed, :credit_limit, :created_by_user_id, :branch_id, :created_at)""",
         {
             **data,
             "is_blocked": int(data.get("is_blocked") or 0),
             "blocked_reason": data.get("blocked_reason") or "",
+            # Ticket ABI-341953129: only the main profile's customer form carries
+            # the credit keys (see _clean); every other creator — staff customer
+            # form, inline order card, public storefront — starts at 0/0.
+            "credit_allowed": int(data.get("credit_allowed") or 0),
+            "credit_limit": float(data.get("credit_limit") or 0),
             "created_by_user_id": current_session_user_id(),
             "branch_id": customer_branch_id(),
             "created_at": now(),
@@ -299,6 +374,13 @@ def update_customer(customer_id, form):
     sets = """customer_type=:customer_type, name=:name, email=:email, phone=:phone, marketing_opt_in=:marketing_opt_in, address_line1=:address_line1, address_line2=:address_line2, suburb=:suburb, city=:city, province=:province, postal_code=:postal_code, country=:country, custom_fields_json=:custom_fields_json, standard_discount_percent=:standard_discount_percent, client_verified=:client_verified"""
     if blocking_panel_present(form):
         sets += ", is_blocked=:is_blocked, blocked_reason=:blocked_reason"
+    # Ticket ABI-341953129: the credit columns are only written when _clean
+    # actually produced them — i.e. the customer form's own panel was submitted
+    # AND the session is the main profile. Every other writer (staff customer
+    # edit, order form's inline customer card posting through this same service,
+    # public storefront) leaves both columns exactly as they were.
+    if "credit_allowed" in data:
+        sets += ", credit_allowed=:credit_allowed, credit_limit=:credit_limit"
     get_db().execute(f"UPDATE customers SET {sets} WHERE id=:id", data)
     get_db().commit()
 

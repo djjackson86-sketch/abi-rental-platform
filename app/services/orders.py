@@ -5,6 +5,7 @@ import json
 import os
 
 from app.db import get_db, now
+from app.services.credit_limits import execute_credit_checked
 from app.services.numbering import next_in_sequence
 from app.services.access import current_session_user_id, order_branch_clause, product_branch_clause as scoped_product_branch_clause, session_branch_scope_ids
 from app.services.branches import adjusted_pickup_time_for_branch, pickup_hours_error
@@ -1006,9 +1007,11 @@ def _notify_new_order(order_id):
 
 def create_order(form, notify=True):
     payload = _build_order_payload(form)
+    from app.services.credit_limits import ensure_credit_capacity
+    ensure_credit_capacity(payload["customer_id"], payload["total"])
     order_number = next_order_number()
     db = get_db()
-    cur = db.execute(
+    cur = execute_credit_checked(db,
         """INSERT INTO orders (order_number, customer_id, booking_type, collect_branch_id, return_branch_id, status, payment_status, start_at, end_at, subtotal, discount_total, discount_mode, discount_value, coupon_code, tax_total, deposit_total, deposit_option, damage_waiver_amount, total, due_total, notes, created_by_user_id, created_at)
         VALUES (?, ?, ?, ?, ?, 'draft', 'payment_due', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (order_number, payload["customer_id"], payload["booking_type"], payload["collect_branch_id"], payload["return_branch_id"], payload["start_at"], payload["end_at"], payload["subtotal"], payload["discount_total"], payload["discount_mode"], payload["discount_value"], payload["coupon_code"], payload["tax_total"], payload["deposit_total"], payload["deposit_option"], payload["damage_waiver_amount"], payload["total"], payload["total"], payload["notes"], current_session_user_id(), now()),
@@ -1174,6 +1177,8 @@ def update_draft_order(order_id, form):
             payload["total"] = order_total_from_payload(payload)
     from app.services.payments import payment_total
     paid_total = payment_total(order_id)
+    from app.services.credit_limits import ensure_credit_capacity
+    ensure_credit_capacity(payload["customer_id"], payload["total"], order_id)
     due_total = round(max(float(payload["total"] or 0) - paid_total, 0), 2)
     if paid_total <= 0:
         payment_status = "payment_due"
@@ -1183,7 +1188,7 @@ def update_draft_order(order_id, form):
         payment_status = "paid"
     else:
         payment_status = "overpaid"
-    db.execute(
+    execute_credit_checked(db,
         """UPDATE orders SET customer_id = ?, booking_type = ?, collect_branch_id = ?, return_branch_id = ?,
         start_at = ?, end_at = ?, subtotal = ?, discount_total = ?, discount_mode = ?, discount_value = ?, coupon_code = ?, tax_total = ?,
         deposit_total = ?, deposit_option = ?, damage_waiver_amount = ?, total = ?, due_total = ?,
@@ -1231,7 +1236,7 @@ def apply_order_discount(order_id, mode, value):
     if new_total < 0:
         new_total = 0
     db = get_db()
-    db.execute(
+    execute_credit_checked(db,
         "UPDATE orders SET discount_mode = ?, discount_value = ?, discount_total = ?, total = ? WHERE id = ?",
         (mode, value, discount_total, new_total, order_id),
     )
@@ -1791,12 +1796,11 @@ def revise_started_return(order_id, form):
         (order_id,),
     ).fetchall()
     subtotal = tax_total = line_total = 0.0
+    revised_lines = []
+    extra_line = None
     for item in rows:
         line_subtotal, line_tax, total = _line_recalc(item, days, settings["tax_mode"])
-        db.execute(
-            "UPDATE order_items SET line_subtotal = ?, line_tax = ?, line_total = ? WHERE id = ?",
-            (line_subtotal, line_tax, total, item["id"]),
-        )
+        revised_lines.append((line_subtotal, line_tax, total, item["id"]))
         subtotal += line_subtotal
         tax_total += line_tax
         line_total += total
@@ -1805,25 +1809,26 @@ def revise_started_return(order_id, form):
         subtotal += float(row["line_subtotal"] or 0)
         tax_total += float(row["line_tax"] or 0)
         line_total += float(row["line_total"] or 0)
-    db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name = 'Extra hours'", (order_id,))
     hourly_rate = return_charge_defaults(order_id)["hourly_rate"]
     extra_charge = round(extra_hours * hourly_rate, 2)
     if extra_charge > 0:
         extra_subtotal, extra_tax, extra_total = _return_charge_tax(order_id, extra_charge, settings)
-        db.execute(
-            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
-            VALUES (?, NULL, 'Extra hours', ?, ?, ?, ?, ?, 'fixed')""",
-            (order_id, extra_hours, hourly_rate, extra_subtotal, extra_tax, extra_total),
-        )
+        extra_line = (order_id, extra_hours, hourly_rate, extra_subtotal, extra_tax, extra_total)
         subtotal += extra_subtotal
         tax_total += extra_tax
         line_total += extra_total
     discount_total = computed_discount(order["discount_mode"], order["discount_value"], subtotal, tax_total) if (order["discount_mode"] or "") in {"percent", "amount"} else float(order["discount_total"] or 0)
     total = round(line_total - discount_total + float(order["deposit_total"] or 0) + float(order["damage_waiver_amount"] or 0), 2)
-    db.execute(
+    execute_credit_checked(db,
         """UPDATE orders SET end_at = ?, extra_hours = ?, subtotal = ?, tax_total = ?, discount_total = ?, total = ?, no_revision_required = 0, return_revised_at = ? WHERE id = ?""",
         (actual_return_at.isoformat(timespec="minutes"), extra_hours, round(subtotal, 2), round(tax_total, 2), round(discount_total, 2), total, now(), order_id),
     )
+    for revised_line in revised_lines:
+        db.execute("UPDATE order_items SET line_subtotal = ?, line_tax = ?, line_total = ? WHERE id = ?", revised_line)
+    db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name = 'Extra hours'", (order_id,))
+    if extra_line:
+        db.execute("""INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
+            VALUES (?, NULL, 'Extra hours', ?, ?, ?, ?, ?, 'fixed')""", extra_line)
     db.commit()
     from app.services.payments import recalculate_order_payment
     recalculate_order_payment(order_id)
@@ -1863,8 +1868,6 @@ def add_return_charges(order_id, form):
     removed_subtotal = round(sum(float(row["line_subtotal"] or 0) for row in existing_rows), 2)
     removed_tax = round(sum(float(row["line_tax"] or 0) for row in existing_rows), 2)
     removed_total = round(sum(float(row["line_total"] or 0) for row in existing_rows), 2)
-    if existing_rows:
-        db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name = 'Damage charge'", (order_id,))
     if extra_charge > 0:
         db.execute(
             """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
@@ -1875,21 +1878,22 @@ def add_return_charges(order_id, form):
     settings = db.execute("SELECT * FROM company_settings WHERE id = 1").fetchone()
     if damage_charge > 0:
         damage_subtotal, damage_tax, damage_total = _return_charge_tax(order_id, damage_charge, settings)
-        db.execute(
-            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
-            VALUES (?, NULL, 'Damage charge', 1, ?, ?, ?, ?, 'fixed')""",
-            (order_id, damage_charge, damage_subtotal, damage_tax, damage_total),
-        )
+        damage_line = (order_id, damage_charge, damage_subtotal, damage_tax, damage_total)
         added_subtotal += damage_subtotal
         added_tax += damage_tax
         added_line_total += damage_total
     new_subtotal = round(float(order["subtotal"] or 0) - removed_subtotal + added_subtotal, 2)
     new_tax = round(float(order["tax_total"] or 0) - removed_tax + added_tax, 2)
     new_total = round(float(order["total"] or 0) - removed_total + added_line_total, 2)
-    db.execute(
+    execute_credit_checked(db,
         "UPDATE orders SET extra_hours = ?, subtotal = ?, tax_total = ?, total = ?, no_damages = ? WHERE id = ?",
         (extra_hours, new_subtotal, new_tax, new_total, no_damages if no_damages else 0, order_id),
     )
+    if existing_rows:
+        db.execute("DELETE FROM order_items WHERE order_id = ? AND custom_name = 'Damage charge'", (order_id,))
+    if damage_charge > 0:
+        db.execute("""INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
+            VALUES (?, NULL, 'Damage charge', 1, ?, ?, ?, ?, 'fixed')""", damage_line)
     db.commit()
     from app.services.payments import recalculate_order_payment
     recalculate_order_payment(order_id)

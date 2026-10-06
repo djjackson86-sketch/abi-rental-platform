@@ -169,6 +169,10 @@ CREATE TABLE IF NOT EXISTS customers (
     client_verified INTEGER,
     is_blocked INTEGER NOT NULL DEFAULT 0,
     blocked_reason TEXT NOT NULL DEFAULT '',
+    -- Ticket ABI-341953129: an owner-granted "buy on account" facility. Purely
+    -- additive with defaults, so every existing customer stays on cash terms.
+    credit_allowed INTEGER NOT NULL DEFAULT 0,
+    credit_limit REAL NOT NULL DEFAULT 0,
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
@@ -605,6 +609,13 @@ def run_migrations(db):
     # Purely additive with defaults, so every existing customer stays unblocked.
     ensure_column(db, "customers", "is_blocked", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(db, "customers", "blocked_reason", "TEXT NOT NULL DEFAULT ''")
+    # Ticket ABI-341953129: an owner-only credit facility on the customer. Purely
+    # additive with defaults, so every existing customer stays on cash terms and
+    # no order/document figure is touched by these columns.
+    ensure_column(db, "customers", "credit_allowed", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(db, "customers", "credit_limit", "REAL NOT NULL DEFAULT 0")
+    from app.services.credit_limits import install_credit_guards
+    install_credit_guards(db)
     ensure_column(db, "customers", "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
     # The branch a customer was created at, so a depot's "New customers for the
     # day" figure is the customers added by THAT branch (ticket ABI-341952962).

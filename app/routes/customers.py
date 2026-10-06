@@ -5,7 +5,7 @@ from flask import Blueprint, Response, abort, flash, redirect, render_template, 
 
 from app.routes.auth import login_required
 from app.services.access import user_can_module
-from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_statement, delete_customer, get_customer, list_customers, update_customer
+from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
@@ -32,6 +32,25 @@ assert set(LEGACY_PAYMENT_METHODS) <= set(PAYMENT_METHODS)
 def can_settle_legacy_balances():
     """Only the owner or staff with both Orders and Customers may settle old balances."""
     return user_can_module(session, "orders") and user_can_module(session, "customers")
+
+
+def can_manage_customer_credit():
+    """Ticket ABI-341953129: only the main profile may set a customer's credit."""
+    return can_set_customer_credit()
+
+
+def _enforce_owner_only_credit(form):
+    """Refuse a crafted credit payload from anything but the main profile.
+
+    The service already ignores the credit fields for a non-main caller (which is
+    also what protects the order form's inline customer card, a path this route
+    does not own), so a stored facility can never be changed by a forged field.
+    This route-level check makes the refusal explicit instead of silent for the
+    customer form itself: a POST carrying the credit panel from a staff session
+    is a 403, not a quietly-ignored field.
+    """
+    if credit_fields_submitted(form) and not can_manage_customer_credit():
+        abort(403)
 
 
 def _display_limit():
@@ -96,12 +115,13 @@ def export_csv():
 def new():
     if request.method == "POST":
         try:
+            _enforce_owner_only_credit(request.form)
             customer_id = create_customer(request.form)
             flash("Customer created", "success")
             return redirect(url_for("customers.detail", customer_id=customer_id))
         except ValueError as exc:
             flash(str(exc), "error")
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=None, custom_fields={}, custom_field_label=custom_field_label)
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=None, custom_fields={}, custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit())
 
 
 @bp.route("/<int:customer_id>")
@@ -210,10 +230,11 @@ def edit(customer_id):
         return redirect(url_for("customers.index"))
     if request.method == "POST":
         try:
+            _enforce_owner_only_credit(request.form)
             update_customer(customer_id, request.form)
             flash("Customer saved", "success")
             return redirect(url_for("customers.detail", customer_id=customer_id))
         except ValueError as exc:
             flash(str(exc), "error")
     customer = get_customer(customer_id)
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label)
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit())

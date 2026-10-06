@@ -20,6 +20,19 @@
     </div>
     <p class="form-help">A blocked customer cannot be used to create an order. Staff see this reason when they try to book for them.</p>
   </section>
+  {% if can_set_credit %}
+  <section class="form-section" data-credit-facility>
+    <h2>Credit facility</h2>
+    {# Ticket ABI-341953129: owner-only. The marker is only rendered for the main
+       profile, so a staff save never carries it and the route refuses a forged one. #}
+    <input type="hidden" name="credit_panel" value="1">
+    <label class="switch"><input type="checkbox" name="credit_allowed" id="credit-allowed" value="1" {% if customer and customer.credit_allowed %}checked{% endif %}> Credit Allowed</label>
+    <div class="form-grid" id="credit-limit-field" {% if not (customer and customer.credit_allowed) %}hidden{% endif %}>
+      <label>Maximum Credit Allowed (R)<input type="number" name="credit_limit" id="credit-limit" min="0.01" step="0.01" value="{{ '%.2f'|format(customer.credit_limit or 0) if customer else '0.00' }}" placeholder="0.00"></label>
+    </div>
+    <p class="form-help">Only the main profile can set a credit facility. When buying on account is allowed a positive credit limit is required.</p>
+  </section>
+  {% endif %}
   <div class="form-actions"><button class="btn primary">Save customer</button></div>
 </form>
 <script>
@@ -60,6 +73,18 @@
     });
   }
   syncReason();
+})();
+(function(){
+  const box = document.getElementById('credit-allowed');
+  const field = document.getElementById('credit-limit-field');
+  const input = document.getElementById('credit-limit');
+  if(!box || !field){ return; }
+  function sync(){
+    field.hidden = !box.checked;
+    if(input){ input.required = box.checked; input.disabled = !box.checked; }
+  }
+  box.addEventListener('change', sync);
+  sync();
 })();
 </script>
 {% endblock %}

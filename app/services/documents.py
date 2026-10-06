@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.db import get_db, now
+from app.services.credit_limits import execute_credit_checked
 from app.services.settings import get_company_settings
 from app.services.timezone import display_local_date, display_local_datetime, parse_iso_datetime
 from app.services.numbering import next_in_sequence
@@ -98,12 +99,15 @@ def finalize_document(document_id):
         ).fetchone()
         if existing:
             raise ValueError('A finalized invoice already exists for this order')
-        if payment_total(document['order_id']) <= 0:
+        customer = db.execute('SELECT credit_allowed FROM customers WHERE id = ?', (document['customer_id'],)).fetchone()
+        if payment_total(document['order_id']) <= 0 and not (customer and customer['credit_allowed']):
             raise ValueError('Record at least one payment before finalising an invoice')
+        from app.services.credit_limits import ensure_credit_capacity
+        ensure_credit_capacity(document['customer_id'], document['total'], document['order_id'])
     number = (document['number'] or '').strip()
     if document['document_type'] == 'invoice' and not number:
         number = _next_document_number('invoice')
-    db.execute(
+    execute_credit_checked(db,
         "UPDATE documents SET status = 'finalized', number = ? WHERE id = ?",
         (number, document_id),
     )
@@ -179,7 +183,8 @@ def get_document(document_id):
             o.subtotal, o.discount_total, o.discount_mode, o.discount_value, o.tax_total, o.deposit_total, o.deposit_option, o.total, o.due_total, o.notes,
             o.deposit_applied_amount,
             COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'paid' AND COALESCE(p.deleted_at, '') = ''), 0) AS paid_total,
-            c.name AS customer_name, c.customer_type AS customer_type, c.email AS customer_email, c.phone AS customer_phone,
+            c.name AS customer_name, c.credit_allowed AS customer_credit_allowed, c.credit_limit AS customer_credit_limit,
+            c.customer_type AS customer_type, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,
             c.city AS customer_city, c.province AS customer_province, c.postal_code AS customer_postal_code, c.country AS customer_country,
             c.custom_fields_json AS custom_fields_json,
