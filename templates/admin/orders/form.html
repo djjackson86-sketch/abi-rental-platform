@@ -33,7 +33,7 @@
       <div class="stat-card legacy-balance-stat-card" id="legacy-balance-card" aria-live="polite" {% if legacy <= 0 %}hidden{% endif %}>
         <span>Previous Orders Balance (Old System)</span>
         <strong id="legacy-balance-value" class="balance-owing">R{{ '%.2f'|format(legacy) }}</strong>
-        <a class="btn ghost" id="settle-previous-orders" href="{{ legacy_url or '#' }}" {% if not legacy_url %}hidden{% endif %}>Settle Previous Order/s</a>
+        {% if user_can('orders') and user_can('customers') %}<a class="btn ghost" id="settle-previous-orders" href="{{ legacy_url or '#' }}" {% if not legacy_url %}hidden{% endif %}>Settle Previous Order/s</a>{% endif %}
       </div>
       {% if has_credit %}
       <div class="stat-card customer-credit-card" id="customer-credit-card" aria-live="polite"><span>Customer Credit</span>

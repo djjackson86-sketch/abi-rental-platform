@@ -4,6 +4,7 @@ import re
 import tempfile
 
 import pytest
+from werkzeug.security import generate_password_hash
 
 from app import create_app
 from app.db import get_db
@@ -37,6 +38,20 @@ def login(client):
         row = get_db().execute("SELECT id FROM users WHERE role = 'owner' ORDER BY id LIMIT 1").fetchone()
     return client.post('/login', data={'user_id': str(row['id']), 'password': 'admin123'}, follow_redirects=True)
 
+
+
+
+def create_staff_user(db, name, modules):
+    db.execute("""INSERT INTO users (name, email, password_hash, initials, role, branch_id,
+        can_view_all_branches, active, modules_json, created_at)
+        VALUES (?, ?, ?, 'ST', 'staff', 1, 1, 1, ?, ?)""",
+        (name, f"{name.lower().replace(' ', '.')}@example.test", generate_password_hash('staff123'),
+         json.dumps(modules), f'{DAY}T08:00:00'))
+    return db.execute("SELECT id FROM users WHERE name = ?", (name,)).fetchone()['id']
+
+
+def login_staff(client, user_id):
+    return client.post('/login', data={'user_id': str(user_id), 'password': 'staff123'}, follow_redirects=False)
 
 def seed_customer(db, name='Legacy Balance Customer'):
     db.execute("""INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in,
@@ -294,3 +309,77 @@ def test_draft_save_warns_about_unpaid_orders(client, app):
     assert 'unpaidOrdersTotal(currentCustomerSummary)' in body
     # Both debts count toward the warning: R500 legacy + R300 earlier order.
     assert datalist_summary(body, customer_id)['unpaid_orders_total'] == 800.0
+
+
+def test_staff_with_orders_and_customers_can_settle_legacy_balance(client, app):
+    with app.app_context():
+        db = get_db()
+        staff_id = create_staff_user(db, 'Legacy Staff Both', ['orders', 'customers', 'new_order'])
+        customer_id = seed_customer(db, 'Staff Both Legacy')
+        upsert_legacy_balance(customer_id, 'old-cust-1', '3904', 500, 'partially_paid', 'Stopped')
+        db.commit()
+
+    login_staff(client, staff_id)
+    order_form = client.get(f'/orders/new?customer_id={customer_id}').get_data(as_text=True)
+    assert 'Settle Previous Order/s' in order_form
+    assert f'href="/customers/{customer_id}#legacy-balance"' in order_form
+
+    customer_page = client.get(f'/customers/{customer_id}').get_data(as_text=True)
+    assert 'Settle previous order/s' in customer_page
+
+    response = client.post(f'/customers/{customer_id}/legacy-payments',
+                           data={'amount': '125', 'method': 'card', 'reference': 'STAFF-OK'},
+                           follow_redirects=True)
+    assert response.status_code == 200
+    assert 'R125.00 recorded against previous orders' in response.get_data(as_text=True)
+    with app.app_context():
+        summary = legacy_balance_summary(customer_id)
+        assert summary['total'] == 375.0
+        row = get_db().execute("SELECT method, reference FROM legacy_balance_payments WHERE customer_id=?", (customer_id,)).fetchone()
+        assert row['method'] == 'card'
+        assert row['reference'] == 'STAFF-OK'
+
+
+def test_staff_with_customers_only_can_view_but_not_settle_legacy_balance(client, app):
+    with app.app_context():
+        db = get_db()
+        staff_id = create_staff_user(db, 'Legacy Staff Customers', ['customers', 'new_order'])
+        customer_id = seed_customer(db, 'Customers Only Legacy')
+        upsert_legacy_balance(customer_id, 'old-cust-1', '3904', 500, 'partially_paid', 'Stopped')
+        db.commit()
+
+    login_staff(client, staff_id)
+    customer_page = client.get(f'/customers/{customer_id}').get_data(as_text=True)
+    assert 'Legacy balance from old system' in customer_page
+    assert 'Settle previous order/s' not in customer_page
+
+    order_form = client.get(f'/orders/new?customer_id={customer_id}').get_data(as_text=True)
+    assert 'Previous Orders Balance (Old System)' in order_form
+    assert 'Settle Previous Order/s' not in order_form
+
+    response = client.post(f'/customers/{customer_id}/legacy-payments',
+                           data={'amount': '50', 'method': 'cash'},
+                           follow_redirects=True)
+    assert response.status_code == 403
+    with app.app_context():
+        assert legacy_balance_summary(customer_id)['total'] == 500.0
+        assert get_db().execute("SELECT COUNT(*) AS c FROM legacy_balance_payments").fetchone()['c'] == 0
+
+
+def test_staff_with_orders_only_cannot_submit_legacy_balance_payment(client, app):
+    with app.app_context():
+        db = get_db()
+        staff_id = create_staff_user(db, 'Legacy Staff Orders', ['orders'])
+        customer_id = seed_customer(db, 'Orders Only Legacy')
+        upsert_legacy_balance(customer_id, 'old-cust-1', '3904', 500, 'partially_paid', 'Stopped')
+        db.commit()
+
+    login_staff(client, staff_id)
+    assert client.get(f'/customers/{customer_id}').status_code == 403
+    response = client.post(f'/customers/{customer_id}/legacy-payments',
+                           data={'amount': '50', 'method': 'cash'},
+                           follow_redirects=True)
+    assert response.status_code == 403
+    with app.app_context():
+        assert legacy_balance_summary(customer_id)['total'] == 500.0
+        assert get_db().execute("SELECT COUNT(*) AS c FROM legacy_balance_payments").fetchone()['c'] == 0

@@ -119,7 +119,7 @@
       {% endfor %}
     </div>
 
-    {% if legacy_balance.total > 0 %}
+    {% if legacy_balance.total > 0 and can_settle_legacy_balance %}
     <form class="legacy-payment-form" method="post" action="{{ url_for('customers.record_legacy_balance_payment', customer_id=customer.id) }}">
       <h3>Settle previous order/s</h3>
       <div class="form-grid">

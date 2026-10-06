@@ -1,9 +1,10 @@
 import csv
 from io import StringIO
 
-from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, session, url_for
 
 from app.routes.auth import login_required
+from app.services.access import user_can_module
 from app.services.customers import client_verified_label, create_customer, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
@@ -26,6 +27,11 @@ LEGACY_PAYMENT_METHOD_LABELS = {
     "other": "Other",
 }
 assert set(LEGACY_PAYMENT_METHODS) <= set(PAYMENT_METHODS)
+
+
+def can_settle_legacy_balances():
+    """Only the owner or staff with both Orders and Customers may settle old balances."""
+    return user_can_module(session, "orders") and user_can_module(session, "customers")
 
 
 def _display_limit():
@@ -119,6 +125,7 @@ def detail(customer_id):
         customer_credit_entries=customer_credit_entries(customer_id),
         legacy_balance=legacy_balance_summary(customer_id),
         legacy_payment_methods=[(method, LEGACY_PAYMENT_METHOD_LABELS[method]) for method in LEGACY_PAYMENT_METHODS],
+        can_settle_legacy_balance=can_settle_legacy_balances(),
     )
 
 
@@ -130,6 +137,8 @@ def record_legacy_balance_payment(customer_id):
     Ticket follow-up: the balance is only useful if staff can take the money on
     the spot, so the customer page (and the order form's link to it) posts here.
     """
+    if not can_settle_legacy_balances():
+        abort(403)
     customer = get_customer(customer_id)
     if not customer:
         flash("Customer not found", "error")
