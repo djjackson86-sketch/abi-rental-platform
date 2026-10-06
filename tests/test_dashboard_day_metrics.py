@@ -879,3 +879,118 @@ def test_the_branch_and_the_range_survive_each_other(client, app):
     clear_href = re.search(r'<a class="filter-clear" href="([^"]+)"', page)
     assert clear_href, 'the Clear branch link is missing'
     assert 'range=all_time' in clear_href.group(1).replace('&amp;', '&')
+
+
+# --- legacy balance receipts on the "for the day" cards (ABI-341953134) -------
+# Money collected against an imported customer balance is takings for the day
+# but is not a ``payments`` row, so the daily cards must fold it in - by the
+# same method, under the same day/branch rules, and without double counting the
+# card (whose card already uses the net card figure).
+
+def _legacy_customer(db, name, branch_id=None):
+    db.execute('INSERT INTO customers (name, branch_id, created_at) VALUES (?, ?, ?)',
+               (name, branch_id, f'{TODAY}T07:00:00'))
+    return db.execute('SELECT id FROM customers WHERE name = ?', (name,)).fetchone()['id']
+
+
+def _legacy_receipt(db, customer_id, amount, method='cash', day=TODAY, status='active',
+                    deleted_at='', created_at=None, branch_id=None):
+    db.execute(
+        """INSERT INTO legacy_balance_payments
+        (customer_id, amount, method, reference, payment_date, note, status, deleted_at, created_at, branch_id)
+        VALUES (?, ?, ?, '', ?, '', ?, ?, ?, ?)""",
+        (customer_id, amount, method, day, status, deleted_at,
+         created_at or f'{day}T10:00:00', branch_id))
+
+
+def test_legacy_balance_receipts_count_as_money_received_for_the_day(app):
+    """Ticket ABI-341953134: imported-balance receipts are takings for the day.
+
+    Without folding them in, the revenue and method cards would silently omit
+    real money received, and the four cards would still appear to add up.
+    """
+    seed_days(app)
+    with app.app_context():
+        db = get_db()
+        customer = _legacy_customer(db, 'Legacy Depot One', branch_id=1)
+        _legacy_receipt(db, customer, 400.0, 'cash', TODAY)
+        _legacy_receipt(db, customer, 150.0, 'card', TODAY)
+        _legacy_receipt(db, customer, 90.0, 'eft', TODAY)
+        _legacy_receipt(db, customer, 10.0, 'manual', TODAY)   # any other method -> Other
+        db.commit()
+
+    day = metrics(app, user_id=1, user_role='owner')
+    assert day['cash_payments'] == 650.0     # 250 regular + 400 legacy
+    assert day['card_payments'] == 650.0     # 500 regular + 150 legacy (once)
+    assert day['eft_payments'] == 790.0      # 700 regular + 90 legacy
+    assert day['other_payments'] == 10.0     # legacy "manual"
+    assert day['revenue'] == 2100.0          # 1450 regular + 650 legacy
+    assert day['revenue'] == (day['card_payments'] + day['cash_payments']
+                              + day['eft_payments'] + day['other_payments'])
+
+
+def test_legacy_receipt_dates_and_archived_rows_follow_the_day(app):
+    """Active, not-deleted receipts dated the business day (payment date or, when
+    blank, created_at) count; every other day and every archived row does not."""
+    seed_days(app)
+    with app.app_context():
+        db = get_db()
+        customer = _legacy_customer(db, 'Legacy Dates', branch_id=1)
+        _legacy_receipt(db, customer, 100.0, 'cash', TODAY)
+        _legacy_receipt(db, customer, 999.0, 'cash', YESTERDAY)
+        _legacy_receipt(db, customer, 999.0, 'cash', TODAY, status='archived')
+        _legacy_receipt(db, customer, 999.0, 'cash', TODAY, deleted_at=f'{TODAY}T11:00:00')
+        # No payment_date at all: the day comes from created_at.
+        _legacy_receipt(db, customer, 55.0, 'cash', day='', created_at=f'{TODAY}T09:00:00')
+        db.commit()
+
+    day = metrics(app, user_id=1, user_role='owner')
+    assert day['cash_payments'] == 250.0 + 100.0 + 55.0
+
+
+def test_legacy_receipts_follow_the_branch_known_and_unassigned(app):
+    """A depot's takings are its own; unassigned receipts never ride along.
+
+    Ticket ABI-341953134: a receipt scopes by its own branch, falling back to
+    the customer's branch. A receipt with neither is unassigned and only shows
+    in the unrestricted (all-branches) view.
+    """
+    seed_days(app)
+    with app.app_context():
+        db = get_db()
+        one = _legacy_customer(db, 'Legacy One', branch_id=1)
+        two = _legacy_customer(db, 'Legacy Two', branch_id=2)
+        nobody = _legacy_customer(db, 'Legacy Unassigned', branch_id=None)
+        _legacy_receipt(db, one, 400.0, 'cash', TODAY)                # via customer branch
+        _legacy_receipt(db, two, 30.0, 'cash', TODAY, branch_id=2)    # its own branch
+        _legacy_receipt(db, nobody, 77.0, 'cash', TODAY)              # unassigned
+        _legacy_receipt(db, one, 20.0, 'cash', TODAY, branch_id=2)    # own branch wins
+        db.commit()
+
+    everything = day_cards(app, **owner_session())
+    depot_one = day_cards(app, filter_branch=1, **owner_session())
+    depot_two = day_cards(app, filter_branch=2, **owner_session())
+
+    assert depot_one['cash_payments'] == 250.0 + 400.0
+    assert depot_two['cash_payments'] == 30.0 + 20.0
+    assert everything['cash_payments'] == 250.0 + 400.0 + 30.0 + 20.0 + 77.0
+    # The unassigned receipt is real revenue, but it is never guessed onto a
+    # depot card: the two depots add up to everything minus that amount.
+    assert depot_one['cash_payments'] + depot_two['cash_payments'] == everything['cash_payments'] - 77.0
+
+
+def test_legacy_card_receipts_are_not_double_counted(app):
+    """The card card uses cash.card_received (net), which already carries the
+    legacy receipt, so the legacy card money must appear once, not twice."""
+    seed_days(app)
+    with app.app_context():
+        db = get_db()
+        customer = _legacy_customer(db, 'Legacy Card', branch_id=1)
+        _legacy_receipt(db, customer, 200.0, 'card', TODAY)
+        db.commit()
+
+    day = metrics(app, user_id=1, user_role='owner')
+    assert day['card_payments'] == 700.0     # 500 regular + 200 legacy, once
+    assert day['revenue'] == 1450.0 + 200.0
+    assert day['revenue'] == (day['card_payments'] + day['cash_payments']
+                              + day['eft_payments'] + day['other_payments'])

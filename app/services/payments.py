@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from app.db import get_db, now
-from app.services.access import order_branch_clause
+from app.services.access import customer_branch_clause, order_branch_clause
 from app.services.orders import get_order
 
 
@@ -250,7 +250,7 @@ def _payment_order_clause(sort="date", direction="desc"):
     clauses = [f"{expr} {direction.upper()}"]
     if sort != "date":
         clauses.append("COALESCE(NULLIF(payment_date, ''), created_at) DESC")
-    clauses.extend(["created_at DESC", "COALESCE(id, 0) DESC"])
+    clauses.extend(["created_at DESC", "COALESCE(id, 0) DESC", "COALESCE(synthetic_kind, '') ASC", "COALESCE(legacy_receipt_id, 0) DESC"])
     return ", ".join(clauses)
 
 
@@ -296,7 +296,35 @@ def _deposit_refund_where(include_archived=False, branch_id=None, date_from="", 
     return where_parts, params
 
 
-def _payments_ledger_sql(real_where, deposit_where):
+def _legacy_payment_where(include_archived=False, branch_id=None, date_from="", date_to=""):
+    """Receipt depot wins; old rows fall back to customer ownership only.
+
+    Unknown ownership stays unassigned and is visible only without a branch
+    restriction. Never infer a depot from orders, references or the viewer.
+    """
+    where = ["1=1" if include_archived else
+             "COALESCE(lp.status, 'active') = 'active' AND COALESCE(lp.deleted_at, '') = ''"]
+    scope_sql, params = customer_branch_clause("c", branch_id=branch_id)
+    if scope_sql:
+        where.append(scope_sql.removeprefix(" AND ").replace(
+            "c.branch_id", "COALESCE(lp.branch_id, c.branch_id)"))
+    date_parts, date_params = _date_filter_parts(
+        "date(COALESCE(NULLIF(lp.payment_date, ''), lp.created_at))", date_from, date_to)
+    return [*where, *date_parts], [*params, *date_params]
+
+
+def legacy_receipt_totals(branch_id=None, date_from="", date_to="", include_archived=False):
+    """Collected legacy money by method, sharing ledger eligibility and scope."""
+    where, params = _legacy_payment_where(include_archived, branch_id, date_from, date_to)
+    rows = get_db().execute(
+        f"""SELECT LOWER(COALESCE(lp.method, '')) AS method, SUM(lp.amount) AS total
+        FROM legacy_balance_payments lp JOIN customers c ON c.id = lp.customer_id
+        WHERE {' AND '.join(where)} GROUP BY LOWER(COALESCE(lp.method, ''))""", params,
+    ).fetchall()
+    return {row["method"]: round(float(row["total"] or 0), 2) for row in rows}
+
+
+def _payments_ledger_sql(real_where, deposit_where, legacy_where):
     branch_label = """CASE
                     WHEN cb.name IS NOT NULL AND rb.name IS NOT NULL AND cb.id <> rb.id THEN cb.name || ' → ' || rb.name
                     WHEN cb.name IS NOT NULL THEN cb.name
@@ -308,7 +336,7 @@ def _payments_ledger_sql(real_where, deposit_where):
                p.created_at, p.deleted_at, NULL AS synthetic_kind,
                o.order_number, o.collect_branch_id, o.return_branch_id,
                c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
-               {branch_label} AS branch_label
+               {branch_label} AS branch_label, c.id AS customer_id, NULL AS legacy_receipt_id
         FROM payments p
         LEFT JOIN orders o ON o.id = p.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
@@ -324,26 +352,41 @@ def _payments_ledger_sql(real_where, deposit_where):
                '' AS deleted_at, 'deposit_refund' AS synthetic_kind,
                o.order_number, o.collect_branch_id, o.return_branch_id,
                c.name AS customer_name, cb.name AS collect_branch_name, rb.name AS return_branch_name,
-               {branch_label} AS branch_label
+               {branch_label} AS branch_label, c.id AS customer_id, NULL AS legacy_receipt_id
         FROM orders o
         LEFT JOIN customers c ON c.id = o.customer_id
         LEFT JOIN branches cb ON cb.id = o.collect_branch_id
         LEFT JOIN branches rb ON rb.id = o.return_branch_id
         WHERE {' AND '.join(deposit_where)}
+        UNION ALL
+        SELECT NULL AS id, NULL AS order_id, lp.amount, lp.method, lp.reference,
+               CASE WHEN lp.status = 'active' THEN 'paid' ELSE lp.status END AS status,
+               lp.payment_date, lp.created_at, lp.deleted_at, 'legacy_receipt' AS synthetic_kind,
+               'Legacy balance' AS order_number,
+               COALESCE(lp.branch_id, c.branch_id) AS collect_branch_id,
+               NULL AS return_branch_id, c.name AS customer_name,
+               b.name AS collect_branch_name, NULL AS return_branch_name,
+               COALESCE(b.name, 'Unassigned') AS branch_label,
+               c.id AS customer_id, lp.id AS legacy_receipt_id
+        FROM legacy_balance_payments lp
+        JOIN customers c ON c.id = lp.customer_id
+        LEFT JOIN branches b ON b.id = COALESCE(lp.branch_id, c.branch_id)
+        WHERE {' AND '.join(legacy_where)}
     """
 
 
 def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc", date_from="", date_to="", limit=None, offset=0):
     real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
     deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
-    params = [*real_params, *deposit_params]
+    legacy_where, legacy_params = _legacy_payment_where(include_archived, branch_id, date_from, date_to)
+    params = [*real_params, *deposit_params, *legacy_params]
     order_clause = _payment_order_clause(sort, direction)
     limit_sql = ""
     if limit is not None:
         limit_sql = " LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset or 0)])
     return get_db().execute(
-        f"""SELECT * FROM ({_payments_ledger_sql(real_where, deposit_where)}) ledger
+        f"""SELECT * FROM ({_payments_ledger_sql(real_where, deposit_where, legacy_where)}) ledger
         ORDER BY {order_clause}{limit_sql}""",
         params,
     ).fetchall()
@@ -352,9 +395,10 @@ def list_payments(include_archived=False, branch_id=None, sort="date", direction
 def payment_count(include_archived=False, branch_id=None, date_from="", date_to=""):
     real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
     deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
+    legacy_where, legacy_params = _legacy_payment_where(include_archived, branch_id, date_from, date_to)
     row = get_db().execute(
-        f"""SELECT COUNT(*) AS total FROM ({_payments_ledger_sql(real_where, deposit_where)}) ledger""",
-        [*real_params, *deposit_params],
+        f"""SELECT COUNT(*) AS total FROM ({_payments_ledger_sql(real_where, deposit_where, legacy_where)}) ledger""",
+        [*real_params, *deposit_params, *legacy_params],
     ).fetchone()
     return int(row["total"] if row else 0)
 
@@ -390,6 +434,9 @@ def payment_method_totals(include_archived=False, branch_id=None, date_from="", 
     for row in refund_rows:
         method = row["method"]
         totals[method] = round(totals.get(method, 0.0) - float(row["total"] or 0), 2)
+    for method, amount in legacy_receipt_totals(branch_id, date_from, date_to, include_archived).items():
+        if method in totals:
+            totals[method] = round(totals[method] + amount, 2)
     return totals
 
 

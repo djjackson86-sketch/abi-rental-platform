@@ -75,6 +75,24 @@ def seed_order(db, customer_id, number, *, total=400, deposit=0, status='returne
 
 
 
+@pytest.mark.parametrize('method', ['card', 'cash', 'eft'])
+def test_legacy_collection_preserves_import_and_records_customer_depot(app, method):
+    from app.services.legacy_balances import record_legacy_payment
+    with app.app_context():
+        db = get_db()
+        customer_id = seed_customer(db)
+        upsert_legacy_balance(customer_id, 'old-cust-1', 'ticket134', 1174.50)
+        db.commit()
+        record_legacy_payment(customer_id, {'amount': '1174.50', 'method': method, 'payment_date': DAY})
+        receipt = db.execute('SELECT * FROM legacy_balance_payments WHERE customer_id=?', (customer_id,)).fetchone()
+        assert receipt['branch_id'] == 1
+        assert receipt['method'] == method and receipt['amount'] == 1174.50
+        balance = legacy_balance_summary(customer_id)
+        assert balance['imported_total'] == 1174.50
+        assert balance['settled_total'] == 1174.50 and balance['total'] == 0
+        assert db.execute('SELECT COUNT(*) AS c FROM payments').fetchone()['c'] == 0
+
+
 def test_legacy_balance_row_decoration_accepts_libsql_rows():
     class LibsqlLikeRow:
         def __init__(self):

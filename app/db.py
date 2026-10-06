@@ -865,6 +865,9 @@ def run_migrations(db):
         deleted_at TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
     )""")
+    # Historical receipts without a recorded depot remain unassigned; do not
+    # infer their collecting branch from later orders or today's operator.
+    ensure_column(db, "legacy_balance_payments", "branch_id", "INTEGER REFERENCES branches(id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_balance_payments_customer ON legacy_balance_payments(customer_id)")
 
 

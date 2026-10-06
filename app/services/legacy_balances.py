@@ -14,27 +14,17 @@ imported rows, which is why a single receipt can settle several old orders.
 
 from app.db import get_db, now
 
-from app.services.access import customer_branch_clause
+from app.services.access import session_branch_scope_ids, session_primary_branch_id
 
 
 def legacy_payment_totals(day, branch_id=None):
-    """Active receipts by payment day/method, scoped to the customer's depot.
+    """Use the ledger's receipt eligibility and recorded-depot/customer fallback.
 
-    Never join imported balance lines: one receipt can settle several lines.
-    Unassigned customers remain company-wide only, not guessed into a drawer.
-    Collected/closed balances do not invalidate money already received.
+    Import lazily: payments imports orders/reports/cash at module load time.
+    One receipt can settle several balances, but is counted only once here.
     """
-    scope_sql, scope_params = customer_branch_clause('c', branch_id=branch_id)
-    rows = get_db().execute(
-        f"""SELECT LOWER(COALESCE(pay.method, '')) AS method,
-        COALESCE(SUM(pay.amount), 0) AS total
-        FROM legacy_balance_payments pay JOIN customers c ON c.id = pay.customer_id
-        WHERE pay.status = 'active' AND COALESCE(pay.deleted_at, '') = ''
-          AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}
-        GROUP BY LOWER(COALESCE(pay.method, ''))""",
-        [day, *scope_params],
-    ).fetchall()
-    return {row['method']: round(float(row['total'] or 0), 2) for row in rows}
+    from app.services.payments import legacy_receipt_totals
+    return legacy_receipt_totals(branch_id=branch_id, date_from=day, date_to=day)
 
 ACTIVE_STATUS = "active"
 COLLECTED_STATUS = "collected"
@@ -202,11 +192,22 @@ def record_legacy_payment(customer_id, form):
         )
         remaining = round(remaining - applied, 2)
 
+    # New receipts retain their collecting depot independently of customer moves.
+    # Historical receipts use customer ownership only; unknown stays unassigned.
+    scope = session_branch_scope_ids()
+    branch_id = session_primary_branch_id()
+    if scope is not None and branch_id not in scope:
+        branch_id = scope[0] if len(scope) == 1 else None
+    if branch_id is None:
+        customer = db.execute("SELECT branch_id FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        candidate = customer["branch_id"] if customer else None
+        if scope is None or candidate in scope:
+            branch_id = candidate
     db.execute(
         """INSERT INTO legacy_balance_payments
-        (customer_id, amount, method, reference, payment_date, note, status, deleted_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, '', ?)""",
-        (customer_id, amount, method, reference, payment_date, note, PAYMENT_ACTIVE, now()),
+        (customer_id, amount, method, reference, payment_date, note, status, deleted_at, created_at, branch_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)""",
+        (customer_id, amount, method, reference, payment_date, note, PAYMENT_ACTIVE, now(), branch_id),
     )
     db.commit()
     return {"amount": amount, "remaining": round(outstanding - amount, 2)}

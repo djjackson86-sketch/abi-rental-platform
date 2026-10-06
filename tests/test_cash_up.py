@@ -1646,3 +1646,102 @@ def test_previous_balance_label_and_value_are_not_jammed_together(client):
         r'<span>Previous Orders Balance</span>\s+<strong id="previous-balance-value"', body)
     # ... plus the layout rule that keeps the label and the value apart on screen.
     assert '.previous-balance-card{display:flex;align-items:baseline;gap:8px' in body
+
+
+# --- legacy balance receipts in the drawer and on the POS card (ABI-341953134) -
+# Money collected against an imported customer balance is real cash/card for the
+# day but lives outside the ``payments`` table, so the cash-up figures must fold
+# it in - scoped to the depot that earned it and counted once.
+
+def _legacy_customer(app, name, branch_id=None):
+    with app.app_context():
+        db = get_db()
+        db.execute('INSERT INTO customers (name, branch_id, created_at) VALUES (?, ?, ?)',
+                   (name, branch_id, f'{TODAY}T07:00:00'))
+        db.commit()
+        return db.execute('SELECT id FROM customers WHERE name = ?', (name,)).fetchone()['id']
+
+
+def _legacy_receipt(app, customer_id, amount, method='cash', day=TODAY, status='active',
+                    deleted_at='', created_at=None, branch_id=None):
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            """INSERT INTO legacy_balance_payments
+            (customer_id, amount, method, reference, payment_date, note, status, deleted_at, created_at, branch_id)
+            VALUES (?, ?, ?, '', ?, '', ?, ?, ?, ?)""",
+            (customer_id, amount, method, day, status, deleted_at,
+             created_at or f'{day}T10:00:00', branch_id))
+        db.commit()
+
+
+def test_legacy_balance_receipts_fill_the_drawer_and_the_card(app):
+    """Ticket ABI-341953134: legacy receipts are cash/card received for the day."""
+    _seed_payment(app, 100.0, 'cash', branch_id=1)
+    _seed_payment(app, 200.0, 'card', branch_id=1, number='ORD-90002')
+    customer = _legacy_customer(app, 'Legacy Drawer', branch_id=1)
+    _legacy_receipt(app, customer, 40.0, 'cash', branch_id=1)
+    _legacy_receipt(app, customer, 60.0, 'card', branch_id=1)
+
+    summary = _summary(app, day=TODAY, branch_id=1)
+    assert summary['cash_received'] == 140.0     # 100 regular + 40 legacy
+    assert summary['card_received'] == 260.0     # 200 regular + 60 legacy
+    assert summary['expected'] == 140.0          # opening 0, nothing used/dropped/banked
+
+
+def test_legacy_receipts_are_scoped_to_their_branch(app):
+    """A depot only cashes up the legacy receipts filed to it; an unassigned
+    receipt belongs to no depot's drawer."""
+    one = _legacy_customer(app, 'Legacy One', branch_id=1)
+    two = _legacy_customer(app, 'Legacy Two', branch_id=2)
+    nobody = _legacy_customer(app, 'Legacy Unassigned', branch_id=None)
+    _legacy_receipt(app, one, 10.0, 'cash', branch_id=1)
+    _legacy_receipt(app, two, 20.0, 'cash', branch_id=2)
+    _legacy_receipt(app, nobody, 30.0, 'cash')
+
+    assert _summary(app, day=TODAY, branch_id=1)['cash_received'] == 10.0
+    assert _summary(app, day=TODAY, branch_id=2)['cash_received'] == 20.0
+
+
+def test_legacy_receipts_only_count_on_their_day(app):
+    """Active, not-deleted receipts dated the business day count; an earlier day
+    and an archived/deleted row do not."""
+    customer = _legacy_customer(app, 'Legacy Day', branch_id=1)
+    _legacy_receipt(app, customer, 50.0, 'cash', day=TODAY, branch_id=1)
+    _legacy_receipt(app, customer, 500.0, 'cash', day=YESTERDAY, branch_id=1)
+    _legacy_receipt(app, customer, 500.0, 'cash', day=TODAY, status='archived', branch_id=1)
+    _legacy_receipt(app, customer, 500.0, 'cash', day=TODAY,
+                    deleted_at=f'{TODAY}T12:00:00', branch_id=1)
+
+    assert _summary(app, day=TODAY, branch_id=1)['cash_received'] == 50.0
+
+
+def test_legacy_card_receipt_does_not_double_count_a_card_refund(app):
+    """A legacy card receipt adds to the net card figure once; the existing card
+    deposit refund still comes off it."""
+    order_id = _seed_payment(app, 300.0, 'card', branch_id=1)
+    _seed_deposit_refund(app, order_id, 50.0, 'card', day=TODAY)
+    customer = _legacy_customer(app, 'Legacy Card', branch_id=1)
+    _legacy_receipt(app, customer, 100.0, 'card', branch_id=1)
+
+    summary = _summary(app, day=TODAY, branch_id=1)
+    assert summary['card_received'] == 350.0     # (300 + 100) - 50, legacy counted once
+
+
+def test_a_regular_refund_still_nets_off_before_legacy_receipts(app):
+    """A negative paid payment still reduces the day's takings; the legacy
+    collection is added on top, exactly once."""
+    _seed_payment(app, 100.0, 'cash', branch_id=1)
+    with app.app_context():
+        db = get_db()
+        order_id = db.execute(
+            "SELECT id FROM orders WHERE order_number = 'ORD-90001'").fetchone()['id']
+        db.execute(
+            """INSERT INTO payments (order_id, amount, method, reference, status, payment_date,
+            deleted_at, created_at) VALUES (?, -20.0, 'cash', 'refund', 'paid', ?, '', ?)""",
+            (order_id, TODAY, f'{TODAY}T10:00:00'))
+        db.commit()
+    customer = _legacy_customer(app, 'Legacy Refund', branch_id=1)
+    _legacy_receipt(app, customer, 50.0, 'cash', branch_id=1)
+
+    assert _summary(app, day=TODAY, branch_id=1)['cash_received'] == 130.0   # 100 - 20 + 50

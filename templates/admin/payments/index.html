@@ -7,7 +7,7 @@
 {%- endmacro %}
 {% block admin_body %}
 <header class="page-header">
-  <div><p class="eyebrow">Payments</p><h1>Payments & refunds</h1><p>Combined payments and refunds ledger for rental orders.</p></div>
+  <div><p class="eyebrow">Payments</p><h1>Payments & refunds</h1><p>Combined rental payments, refunds and legacy balance receipts.</p></div>
   <div class="header-actions"><a class="btn ghost" href="{{ url_for('payments.index', branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir) }}">Active</a><a class="btn ghost" href="{{ url_for('payments.index', status='archived', branch=filters.branch or None, date_from=filters.date_from or None, date_to=filters.date_to or None, sort=filters.sort, dir=filters.dir) }}">Archived</a></div>
 </header>
 <section class="panel">
@@ -51,12 +51,12 @@
           <td>{{ display_payment_date(payment) }}</td>
           <td>{{ payment.branch_label or '—' }}</td>
           <td>{{ payment.order_number or '—' }}</td>
-          <td>{{ payment.customer_name or '—' }}</td>
+          <td>{% if payment.synthetic_kind == 'legacy_receipt' %}<a href="{{ url_for('customers.detail', customer_id=payment.customer_id) }}">{{ payment.customer_name or '—' }}</a>{% else %}{{ payment.customer_name or '—' }}{% endif %}</td>
           <td><strong{% if is_refund(payment) %} class="text-danger"{% endif %}>{% if is_refund(payment) %}-R{{ '%.2f'|format((payment.amount * -1)) }}{% else %}R{{ '%.2f'|format(payment.amount) }}{% endif %}</strong></td>
           <td>{{ payment.method|title }}</td>
           <td>{{ payment.reference or '—' }}</td>
           <td><span class="pill">{{ 'Refund' if is_refund(payment) else payment.status|title }}</span></td>
-          <td>{% if payment.synthetic_kind == 'deposit_refund' %}<small>Deposit refund</small>{% elif not payment.deleted_at %}{% if not is_refund(payment) %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a>{% else %}<small>Refund row</small>{% endif %}<form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
+          <td>{% if payment.synthetic_kind == 'legacy_receipt' %}<small>Legacy receipt #{{ payment.legacy_receipt_id }}</small>{% elif payment.synthetic_kind == 'deposit_refund' %}<small>Deposit refund</small>{% elif not payment.deleted_at %}{% if not is_refund(payment) %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a>{% else %}<small>Refund row</small>{% endif %}<form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
