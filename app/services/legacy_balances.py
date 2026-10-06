@@ -27,9 +27,19 @@ def _outstanding(row):
     return round(max(float(row["amount_due"] or 0) - float(row["settled_amount"] or 0), 0), 2)
 
 
+def _row_dict(row):
+    """Plain dict copy for sqlite3.Row and libsql rows."""
+    try:
+        return dict(row)
+    except (TypeError, ValueError, KeyError):
+        if hasattr(row, "asdict"):
+            return row.asdict()
+        raise
+
+
 def _decorate(row):
     """A plain dict copy of a legacy row with its outstanding amount resolved."""
-    entry = dict(row)
+    entry = _row_dict(row)
     entry["outstanding"] = _outstanding(row)
     return entry
 

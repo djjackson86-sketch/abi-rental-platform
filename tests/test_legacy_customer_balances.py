@@ -8,7 +8,7 @@ from werkzeug.security import generate_password_hash
 
 from app import create_app
 from app.db import get_db
-from app.services.legacy_balances import legacy_balance_summary, upsert_legacy_balance
+from app.services.legacy_balances import _decorate, legacy_balance_summary, upsert_legacy_balance
 
 DAY = '2026-10-04'
 
@@ -73,6 +73,23 @@ def seed_order(db, customer_id, number, *, total=400, deposit=0, status='returne
          f'{DAY}T09:00:00', f'{DAY}T17:00:00', total - deposit, deposit, total, due, f'{DAY}T09:00:00'))
     return db.execute("SELECT id FROM orders WHERE order_number = ?", (number,)).fetchone()['id']
 
+
+
+def test_legacy_balance_row_decoration_accepts_libsql_rows():
+    class LibsqlLikeRow:
+        def __init__(self):
+            self.data = {'amount_due': 100, 'settled_amount': 25, 'status': 'active'}
+
+        def __getitem__(self, key):
+            return self.data[key]
+
+        def asdict(self):
+            return dict(self.data)
+
+    entry = _decorate(LibsqlLikeRow())
+    assert entry['amount_due'] == 100
+    assert entry['settled_amount'] == 25
+    assert entry['outstanding'] == 75.0
 
 def test_legacy_balance_summary_totals_active_rows_only(app):
     with app.app_context():
