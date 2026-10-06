@@ -44,7 +44,7 @@
       </div>
     </div>
     <div class="profile-stat-row">
-      <div><small>Balance due</small><strong>R{{ '%.2f'|format(customer.balance_due) }}</strong></div>
+      <div><small>Balance due</small><strong>R{{ '%.2f'|format(outstanding_balance) }}</strong></div>
       <div><small>Legacy balance</small><strong class="balance-owing">R{{ '%.2f'|format(legacy_balance.total) }}</strong></div>
       <div><small>Customer credit</small><strong class="balance-credit">R{{ '%.2f'|format(customer_credit_balance) }}</strong></div>
       <div><small>Orders</small><strong>{{ orders|length }}</strong></div>
@@ -71,7 +71,7 @@
       <div class="detail-row"><span>Created</span><b>{{ customer.created_at[:10] }}</b></div>
       <div class="detail-row"><span>Created by</span><b>{{ customer.created_by_name or '—' }}</b></div>
       <div class="detail-row"><span>Branch</span><b>{{ customer.branch_name or 'No branch recorded' }}</b></div>
-      <div class="detail-row"><span>Balance due</span><b>R{{ '%.2f'|format(customer.balance_due) }}</b></div>
+      <div class="detail-row"><span>Balance due</span><b>R{{ '%.2f'|format(outstanding_balance) }}</b></div>
       <div class="detail-row"><span>Legacy balance</span><b class="balance-owing">R{{ '%.2f'|format(legacy_balance.total) }}</b></div>
       <div class="detail-row"><span>Customer credit</span><b class="balance-credit">R{{ '%.2f'|format(customer_credit_balance) }}</b></div>
       {% if customer.customer_type == 'company' and (custom_fields.get('vat_number') or custom_fields.get('company_reg_no')) %}

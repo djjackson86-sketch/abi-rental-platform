@@ -5,7 +5,7 @@ from flask import Blueprint, Response, abort, flash, redirect, render_template, 
 
 from app.routes.auth import login_required
 from app.services.access import user_can_module
-from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_statement, delete_customer, get_customer, list_customers, update_customer
+from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
@@ -104,7 +104,7 @@ def export_csv():
             customer["marketing_opt_in"],
             client_verified_label(customer["client_verified"]),
             customer["order_count"],
-            customer["balance_due"],
+            customer["outstanding_balance"],
             customer["created_at"],
         ])
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=customers.csv"})
@@ -138,6 +138,7 @@ def detail(customer_id):
         customer=customer,
         custom_fields=custom_fields_for(customer),
         orders=orders,
+        outstanding_balance=customer_outstanding_balances([customer_id])[customer_id],
         customer_has_history=bool(orders) or customer_has_history(customer_id),
         custom_field_label=custom_field_label,
         client_verified_label=client_verified_label,

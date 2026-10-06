@@ -79,7 +79,51 @@ def list_customers(query="", customer_type="", marketing="", limit=None, offset=
     if limit is not None:
         sql += " LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset or 0)])
-    return get_db().execute(sql, params).fetchall()
+    rows = get_db().execute(sql, params).fetchall()
+    balances = customer_outstanding_balances([row["id"] for row in rows])
+    from app.services.reports import row_dict
+    return [dict(row_dict(row), outstanding_balance=balances[row["id"]]) for row in rows]
+
+
+def customer_outstanding_balances(customer_ids):
+    """Read-time collectible order debt, separate from legacy and unused credit.
+
+    Rental stages/accepted quotes are collectible. Finalised invoices remain
+    debt even on draft or archived orders; cancelled orders never contribute.
+    Use payment_summary's total-minus-active-payments basis, not cached totals.
+    Refunds, applied deposits and allocated credit are payments counted once.
+    Clamp per order so overpayments cannot hide another order's debt. Aggregate
+    lists in batches rather than making a remote request for every customer.
+    """
+    ids = list(dict.fromkeys(customer_ids))
+    balances = {customer_id: 0.0 for customer_id in ids}
+    for start in range(0, len(ids), 400):
+        batch = ids[start:start + 400]
+        marks = ",".join("?" for _ in batch)
+        rows = get_db().execute(f"""
+            SELECT o.customer_id,
+                   SUM(MAX(ROUND(COALESCE(o.total, 0) - COALESCE(p.paid, 0), 2), 0)) AS balance
+            FROM orders o
+            LEFT JOIN (
+                SELECT p.order_id, SUM(p.amount) AS paid FROM payments p
+                WHERE {_active_payment_clause('p')} GROUP BY p.order_id
+            ) p ON p.order_id = o.id
+            WHERE o.customer_id IN ({marks})
+              AND COALESCE(o.status, '') NOT IN ('canceled', 'cancelled')
+              AND (
+                  EXISTS (SELECT 1 FROM documents d WHERE d.order_id = o.id
+                          AND d.document_type = 'invoice' AND d.status = 'finalized')
+                  OR (COALESCE(o.status, '') NOT IN ('draft', 'archived') AND (
+                      o.status IN ('reserved', 'started', 'returned')
+                      OR EXISTS (SELECT 1 FROM documents d WHERE d.order_id = o.id
+                                 AND d.document_type = 'quote' AND d.status IN ('accepted', 'finalized'))
+                  ))
+              )
+            GROUP BY o.customer_id
+        """, batch).fetchall()
+        for row in rows:
+            balances[row["customer_id"]] = round(float(row["balance"] or 0), 2)
+    return balances
 
 
 def customer_filtered_total(query="", customer_type="", marketing=""):
