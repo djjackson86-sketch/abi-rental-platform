@@ -179,12 +179,13 @@
       <h2>Cash up · {{ cash_day.branch_name }}</h2>
       <span class="pill">{% if cash_day.cashed_up %}Cashed up{% else %}Not cashed up{% endif %}</span>
     </div>
+    {% if cash_day.cash_up_notes|trim %}
+    <div class="cash-note recorded-cashup-note"><strong>Cash up notes</strong><p style="white-space: pre-wrap">{{ cash_day.cash_up_notes }}</p></div>
+    {% endif %}
     {% if cash_day.aggregate %}
     <p class="cash-note">All branch cash-up figures are read-only totals. Select a branch in the top Branch filter to enter counted cash.</p>
-    {% if cash_day.cash_up_notes %}<p class="cash-note">{{ cash_day.cash_up_notes }}</p>{% endif %}
     {% elif not day_is_today %}
     <p class="cash-note">Depot: {{ cash_day.branch_name }} · {{ cash_day.day }} — {{ cash_day.variance_label }}.</p>
-    {% if cash_day.cash_up_notes %}<p class="cash-note">{{ cash_day.cash_up_notes }}</p>{% endif %}
     <p class="cash-note">{{ cash_past_note }}</p>
     {% else %}
     <p class="cash-note">Depot: {{ cash_day.branch_name }}</p>
@@ -208,9 +209,11 @@
       <h2>POS Cashup{% if cash_day.branch_name %} · {{ cash_day.branch_name }}{% endif %}</h2>
       <span class="pill">{% if cash_day.pos_cashed_up %}POS cashed up{% else %}Not POS cashed up{% endif %}</span>
     </div>
+    {% if cash_day.pos_cash_up_notes|trim %}
+    <div class="cash-note recorded-cashup-note"><strong>POS Cashup notes</strong><p style="white-space: pre-wrap">{{ cash_day.pos_cash_up_notes }}</p></div>
+    {% endif %}
     {% if cash_day.aggregate %}
     <p class="cash-note">All branch POS/card cash-up figures are read-only totals. Select a branch in the top Branch filter to enter counted POS/card payments.</p>
-    {% if cash_day.pos_cash_up_notes %}<p class="cash-note">{{ cash_day.pos_cash_up_notes }}</p>{% endif %}
     <div class="metrics dashboard-metrics dashboard-day-metrics">
       <div class="metric-card"><small>Expected card total</small><b>R{{ '%.2f'|format(cash_day.expected_card) }}</b><span>{{ cash_day.branch_name }} · {{ cash_day.day }}</span></div>
       <div class="metric-card"><small>POS/card counted</small><b>{% if cash_day.pos_cashed_up %}R{{ '%.2f'|format(cash_day.counted_card) }}{% else %}—{% endif %}</b><span>{% if cash_day.pos_cashed_up %}Counted{% else %}Not POS cashed up yet{% endif %}</span></div>
@@ -218,7 +221,6 @@
     </div>
     {% elif not day_is_today %}
     <p class="cash-note">Depot: {{ cash_day.branch_name }} · {{ cash_day.day }} — {{ cash_day.pos_variance_label }}.</p>
-    {% if cash_day.pos_cash_up_notes %}<p class="cash-note">{{ cash_day.pos_cash_up_notes }}</p>{% endif %}
     <div class="metrics dashboard-metrics dashboard-day-metrics">
       <div class="metric-card"><small>Expected card total</small><b>R{{ '%.2f'|format(cash_day.expected_card) }}</b><span>Card payments for {{ cash_day.day }}</span></div>
       <div class="metric-card"><small>POS/card counted</small><b>{% if cash_day.pos_cashed_up %}R{{ '%.2f'|format(cash_day.counted_card) }}{% else %}—{% endif %}</b><span>{% if cash_day.pos_cashed_up %}Counted{% else %}Not POS cashed up yet{% endif %}</span></div>

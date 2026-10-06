@@ -37,6 +37,7 @@ from datetime import date
 from app.db import get_db, now
 from app.services.access import order_branch_clause, session_branch_scope_ids, session_primary_branch_id
 from app.services.branches import branch_options
+from app.services.legacy_balances import legacy_payment_totals
 from app.services.timezone import display_local_datetime, local_now_iso
 
 
@@ -229,7 +230,8 @@ def payment_received(day, branch_id, method):
           AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
         [str(method or '').lower(), day, *scope_params],
     ).fetchone()
-    return money(_value(row, 's'))
+    return money(float(_value(row, 's') or 0) +
+                 legacy_payment_totals(day, branch_id).get(str(method or '').lower(), 0))
 
 
 def cash_received(day, branch_id):
@@ -1091,6 +1093,10 @@ def day_report_rows(report):
         ('New client interactions', 'Notes', interactions.get('notes') or 'No interaction notes recorded'),
     ]
     rows = money_rows + cash_rows + pos_rows + interaction_rows
+    for title, key in [('Cash up notes', 'cash_up_notes'),
+                       ('POS Cashup notes', 'pos_cash_up_notes')]:
+        if str(cash.get(key) or '').strip():
+            rows.append((title, 'Notes', cash[key]))
     # Ticket ABI-341953042 ask 1/3: the spare wheel count and the day's trailer
     # service lines are part of the same day report, read from the same figures
     # the dashboard panels show for that business day.
@@ -1193,6 +1199,13 @@ def day_report_pdf_cards(report, user_name='', user_role=''):
         {'kind': 'cards', 'title': 'Cash up', 'cards': cash_cards},
         {'kind': 'cards', 'title': 'POS Cashup', 'cards': pos_cards},
     ]
+    for title in ('Cash up notes', 'POS Cashup notes'):
+        for _item, value in grouped.get(title, []):
+            sections.append({
+                'kind': 'list', 'title': title,
+                'rows': [{'label': line} for line in str(value).splitlines()],
+                'overflow': '... more notes in the CSV export',
+            })
     interaction_values = cash.get('interactions') or {}
     # Ticket ABI-341953030: the interaction notes are free text, so they cannot
     # live in a fixed-height card — a card draws one ellipsised line (10.5pt

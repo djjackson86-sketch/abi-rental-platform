@@ -4,6 +4,7 @@ from app.db import get_db
 from app.services.access import customer_branch_clause, order_branch_clause, product_branch_clause
 from app.services.timezone import local_now, local_now_iso, parse_iso_datetime
 from app.services.cash import card_received as net_card_received
+from app.services.legacy_balances import legacy_payment_totals
 
 
 def money(value):
@@ -338,6 +339,8 @@ def dashboard_day_metrics(day=None, branch_id=None):
         row = db.execute(sql, params).fetchone()
         return money(row["s"])
 
+    legacy_totals = legacy_payment_totals(day, branch_id)
+
     def payment_total(method=None):
         """Money RECEIVED for the day: paid, not archived, by payment date.
 
@@ -356,7 +359,7 @@ def dashboard_day_metrics(day=None, branch_id=None):
               {method_sql}
               AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
             [*method_params, day, *scope_params],
-        )
+        ) + (legacy_totals.get(method, 0) if method else sum(legacy_totals.values()))
 
     def other_payments():
         """Money received for the day by any method other than the three cards.
@@ -376,7 +379,8 @@ def dashboard_day_metrics(day=None, branch_id=None):
               AND LOWER(COALESCE(pay.method, '')) NOT IN (?, ?, ?)
               AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
             ["cash", "eft", "card", day, *scope_params],
-        )
+        ) + sum(value for method, value in legacy_totals.items()
+                if method not in {"cash", "eft", "card"})
 
     new_orders = count(
         f"""SELECT COUNT(*) c FROM orders o

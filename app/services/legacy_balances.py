@@ -13,7 +13,28 @@ imported rows, which is why a single receipt can settle several old orders.
 """
 
 from app.db import get_db, now
-from app.services.payments import normalise_payment_method, parse_payment_date
+
+from app.services.access import customer_branch_clause
+
+
+def legacy_payment_totals(day, branch_id=None):
+    """Active receipts by payment day/method, scoped to the customer's depot.
+
+    Never join imported balance lines: one receipt can settle several lines.
+    Unassigned customers remain company-wide only, not guessed into a drawer.
+    Collected/closed balances do not invalidate money already received.
+    """
+    scope_sql, scope_params = customer_branch_clause('c', branch_id=branch_id)
+    rows = get_db().execute(
+        f"""SELECT LOWER(COALESCE(pay.method, '')) AS method,
+        COALESCE(SUM(pay.amount), 0) AS total
+        FROM legacy_balance_payments pay JOIN customers c ON c.id = pay.customer_id
+        WHERE pay.status = 'active' AND COALESCE(pay.deleted_at, '') = ''
+          AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}
+        GROUP BY LOWER(COALESCE(pay.method, ''))""",
+        [day, *scope_params],
+    ).fetchall()
+    return {row['method']: round(float(row['total'] or 0), 2) for row in rows}
 
 ACTIVE_STATUS = "active"
 COLLECTED_STATUS = "collected"
@@ -149,6 +170,8 @@ def record_legacy_payment(customer_id, form):
     original imported amount on the record while removing it from the
     outstanding total.
     """
+    from app.services.payments import normalise_payment_method, parse_payment_date
+
     if not customer_id:
         raise ValueError("A customer is required before recording a payment")
     summary = legacy_balance_summary(customer_id)
