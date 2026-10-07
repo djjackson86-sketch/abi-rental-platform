@@ -1194,15 +1194,15 @@ STATEMENT_SUMMARY_RIGHT = INVOICE_TABLE_RIGHT_EDGE - 9
 STATEMENT_FOOTER_Y = 40
 STATEMENT_DETAIL_X = 400
 # Column geometry for the merged table: DATE | TYPE | DETAIL | AMOUNT. Date and
-# type are short fixed-width values (10 and 7 characters), so DETAIL is the only
+# type include legacy labels, so DETAIL is the only
 # column that can be clipped, and it is clipped with a visible ellipsis rather
 # than being allowed to run into the right-aligned money. DETAIL ends at 468pt,
 # well left of the widest realistic amount ("R1 234 567.89" right-aligned on
 # STATEMENT_RIGHT starts at ~494pt).
 STATEMENT_DATE_X = STATEMENT_LEFT
 STATEMENT_TYPE_X = 118
-STATEMENT_DETAIL_COLUMN_X = 172
-STATEMENT_DETAIL_COLUMN_WIDTH = 296
+STATEMENT_DETAIL_COLUMN_X = 198
+STATEMENT_DETAIL_COLUMN_WIDTH = 270
 # ACTIVITY is the single table's caption, and it is also the caption used on a
 # continuation page.
 STATEMENT_ACTIVITY_TITLE = 'ACTIVITY'
@@ -1332,6 +1332,8 @@ def _statement_summary_rows(view):
     if ranged:
         rows.append(('Opening balance', view.get('opening_balance_display') or 'R0.00', False))
     rows.append(('Invoices', view.get('invoiced_total_display') or 'R0.00', False))
+    if view.get('legacy_balance_count'):
+        rows.append(('Legacy balances', view.get('legacy_total_display') or 'R0.00', False))
     rows.append(('Payments', view.get('paid_total_display') or 'R0.00', False))
     rows.append(('Closing balance' if ranged else 'Balance outstanding',
                  (view.get('closing_balance_display') if ranged else view.get('outstanding_balance_display')) or 'R0.00',

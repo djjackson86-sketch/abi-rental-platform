@@ -694,18 +694,90 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
             "source_id": row["payment_id"],
         })
 
+    # ABI-341953141: imported debt is amount_due, NOT source_total and NOT
+    # amount_due - settled_amount. Receipts below subtract the settlement once.
+    # Keep collected rows: fully settled history belongs on a statement too.
+    legacy_rows = db.execute("""
+        SELECT id, source_order_number, amount_due, source_started_at,
+               source_created_at, created_at
+        FROM legacy_customer_balances WHERE customer_id = ?
+    """, (customer_id,)).fetchall()
+    legacy_receipts = db.execute("""
+        SELECT id, amount, method, reference,
+               COALESCE(NULLIF(payment_date, ''), created_at) AS paid_at
+        FROM legacy_balance_payments WHERE customer_id = ?
+          AND COALESCE(status, 'active') = 'active'
+          AND COALESCE(deleted_at, '') = ''
+    """, (customer_id,)).fetchall()
+    legacy_balances = []
+    legacy_total = 0.0
+    for row in legacy_rows:
+        # Use the source order date, then source creation date. Undated imports
+        # use their import date, explicitly labelled (never imply an invoice date).
+        source_day = (_statement_day(row['source_started_at'])
+                      or _statement_day(row['source_created_at']))
+        day = source_day or _statement_day(row['created_at'])
+        amount = _statement_money(row['amount_due'])
+        lifetime_invoiced += amount
+        if date_from and day < date_from:
+            opening_invoiced += amount
+            continue
+        if date_to and day > date_to:
+            continue
+        legacy_total += amount
+        entry = {
+            'date': day, 'type': 'Legacy balance',
+            'detail': str(row['source_order_number'] or 'Unnumbered')
+                      + (' (import date)' if not source_day else ''),
+            'amount': amount, 'amount_display': _statement_money_display(amount),
+            'type_rank': STATEMENT_ACTIVITY_INVOICE_RANK,
+            'source_kind': 'legacy_balance', 'source_id': row['id'],
+        }
+        legacy_balances.append(entry)
+        activity.append(entry)
+
+    for row in legacy_receipts:
+        day = _statement_day(row['paid_at'])
+        amount = _statement_money(row['amount'])
+        lifetime_paid += amount
+        if date_from and day < date_from:
+            opening_paid += amount
+            continue
+        if date_to and day > date_to:
+            continue
+        paid_total += amount
+        method = (row['method'] or 'manual').replace('_', ' ').title()
+        reference = (row['reference'] or '').strip()
+        # Customer-level receipt, possibly spanning several orders. There is no
+        # persisted per-order allocation to print; never invent one here.
+        entry = {
+            'date': day, 'method': method, 'reference': reference,
+            'order_number': '—', 'amount': amount,
+            'amount_display': _statement_money_display(amount),
+            'source_kind': 'legacy_payment',
+        }
+        payments.append(entry)
+        activity.append({
+            **entry, 'type': 'Legacy payment',
+            'detail': f"{method} · {reference or 'Receipt #' + str(row['id'])} (customer-level)",
+            'type_rank': STATEMENT_ACTIVITY_PAYMENT_RANK, 'source_id': row['id'],
+        })
+    payments.sort(key=lambda item: (item['date'], item.get('source_kind', 'current')))
+
     # Ticket ABI-341953086: the statement prints ONE chronological activity table
     # instead of separate INVOICES / PAYMENTS tables. The two source lists above
     # stay (the summary block's totals are built from them). Rows sort by date,
     # then invoices before payments on the same date, then the row's own id —
     # a deterministic tie-break so a page break landing mid-date can never
     # shuffle the order.
-    activity.sort(key=lambda item: (item["date"], item["type_rank"], item["source_id"]))
+    activity.sort(key=lambda item: (item["date"], item["type_rank"],
+                                    item.get("source_kind", "current"), item["source_id"]))
 
     opening_balance = round(opening_invoiced - opening_paid, 2)
     invoiced_total = round(invoiced_total, 2)
     paid_total = round(paid_total, 2)
-    closing_balance = round(opening_balance + invoiced_total - paid_total, 2)
+    legacy_total = round(legacy_total, 2)
+    closing_balance = round(opening_balance + invoiced_total + legacy_total - paid_total, 2)
 
     settings = get_company_settings()
     branch = _statement_branch(customer)
@@ -771,6 +843,10 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         "period_label": period_label,
         "generated_at": generated_at or now(),
         "invoices": invoices,
+        "legacy_balances": legacy_balances,
+        "legacy_balance_count": len(legacy_balances),
+        "legacy_total": legacy_total,
+        "legacy_total_display": _statement_money_display(legacy_total),
         "payments": payments,
         "activity": activity,
         "invoice_count": len(invoices),
