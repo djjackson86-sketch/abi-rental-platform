@@ -6,7 +6,7 @@ from app.services.settings import get_company_settings
 from app.services.timezone import display_local_date, display_local_datetime, parse_iso_datetime
 from app.services.numbering import next_in_sequence
 from app.services.orders import billed_rental_days, get_order, line_uses_order_days, order_has_rental_items, order_items
-from app.services.payments import payment_total
+from app.services.payments import payment_total, payment_total_sql
 
 DOCUMENT_TYPES = {
     "quote": {"label": "Quote", "prefix": "QUO"},
@@ -99,11 +99,8 @@ def finalize_document(document_id):
         ).fetchone()
         if existing:
             raise ValueError('A finalized invoice already exists for this order')
-        customer = db.execute('SELECT credit_allowed FROM customers WHERE id = ?', (document['customer_id'],)).fetchone()
-        if payment_total(document['order_id']) <= 0 and not (customer and customer['credit_allowed']):
+        if payment_total(document['order_id']) <= 0:
             raise ValueError('Record at least one payment before finalising an invoice')
-        from app.services.credit_limits import ensure_credit_capacity
-        ensure_credit_capacity(document['customer_id'], document['total'], document['order_id'])
     number = (document['number'] or '').strip()
     if document['document_type'] == 'invoice' and not number:
         number = _next_document_number('invoice')
@@ -178,11 +175,11 @@ def document_filter_counts():
 
 def get_document(document_id):
     return get_db().execute(
-        """SELECT d.*, o.order_number, o.customer_id, o.collect_branch_id, o.return_branch_id, o.status AS order_status, o.payment_status, o.start_at, o.end_at,
+        f"""SELECT d.*, o.order_number, o.customer_id, o.collect_branch_id, o.return_branch_id, o.status AS order_status, o.payment_status, o.start_at, o.end_at,
             o.extra_hours, o.return_revised_at,
             o.subtotal, o.discount_total, o.discount_mode, o.discount_value, o.tax_total, o.deposit_total, o.deposit_option, o.total, o.due_total, o.notes,
             o.deposit_applied_amount,
-            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'paid' AND COALESCE(p.deleted_at, '') = ''), 0) AS paid_total,
+            {payment_total_sql('o')} AS paid_total,
             c.name AS customer_name, c.credit_allowed AS customer_credit_allowed, c.credit_limit AS customer_credit_limit,
             c.customer_type AS customer_type, c.email AS customer_email, c.phone AS customer_phone,
             c.address_line1 AS customer_address_line1, c.address_line2 AS customer_address_line2, c.suburb AS customer_suburb,

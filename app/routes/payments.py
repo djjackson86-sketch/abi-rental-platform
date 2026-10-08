@@ -4,6 +4,8 @@ from app.routes.auth import login_required
 from app.services.access import resolve_branch_filter
 from app.services.payments import archive_payment, display_payment_date, get_payment, is_refund, label_for, list_payments, normalise_payment_date_filter, normalise_payment_sort, payment_count, payment_method_totals, update_payment
 from app.services.settings import get_company_settings
+from app.services.credit_limits import facility_summary
+from app.services.orders import get_order
 
 bp = Blueprint("payments", __name__, url_prefix="/payments")
 PAGE_SIZE = 25
@@ -93,6 +95,7 @@ def edit(payment_id):
         "admin/payments/edit.html",
         settings=get_company_settings(),
         payment=payment,
+        facility=facility_summary(get_order(payment["order_id"])["customer_id"]),
         payment_date=(payment["payment_date"] or payment["created_at"] or "")[:16],
     )
 

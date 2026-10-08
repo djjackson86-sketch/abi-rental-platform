@@ -106,7 +106,7 @@ def customer_outstanding_balances(customer_ids):
             FROM orders o
             LEFT JOIN (
                 SELECT p.order_id, SUM(p.amount) AS paid FROM payments p
-                WHERE {_active_payment_clause('p')} GROUP BY p.order_id
+                WHERE {_active_payment_clause('p')} AND LOWER(COALESCE(p.method, '')) <> 'account' GROUP BY p.order_id
             ) p ON p.order_id = o.id
             WHERE o.customer_id IN ({marks})
               AND COALESCE(o.status, '') NOT IN ('canceled', 'cancelled')
@@ -628,7 +628,7 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
                    o.order_number AS order_number
             FROM payments p
             JOIN orders o ON o.id = p.order_id
-            WHERE o.customer_id = ? AND {_active_payment_clause('p')}
+            WHERE o.customer_id = ? AND {_active_payment_clause('p')} AND LOWER(COALESCE(p.method, '')) <> 'account'
             ORDER BY paid_at, p.id""",
         (customer_id,),
     ).fetchall()

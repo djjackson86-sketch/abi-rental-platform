@@ -614,6 +614,8 @@ def run_migrations(db):
     # no order/document figure is touched by these columns.
     ensure_column(db, "customers", "credit_allowed", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(db, "customers", "credit_limit", "REAL NOT NULL DEFAULT 0")
+    ensure_column(db, "payments", "account_request_id", "TEXT")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_account_request_id ON payments(account_request_id) WHERE account_request_id IS NOT NULL")
     from app.services.credit_limits import install_credit_guards
     install_credit_guards(db)
     ensure_column(db, "customers", "created_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")

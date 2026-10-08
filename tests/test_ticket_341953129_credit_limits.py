@@ -32,6 +32,8 @@ def order(cid, amount=100):
 
 
 def invoice(oid):
+    from app.services.payments import record_payment, payment_summary
+    record_payment(oid, {'method': 'account', 'amount': str(payment_summary(oid)['due_total'])})
     did = create_document(oid, 'invoice')
     finalize_document(did)
     return did
@@ -46,7 +48,7 @@ def test_defaults_and_repeat_migration(client, app):
         run_migrations(db)
         row = db.execute('SELECT credit_allowed, credit_limit FROM customers WHERE id=?', (cid,)).fetchone()
         assert tuple(row) == (0, 0)
-        assert len(db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'customer_credit_%'").fetchall()) == 4
+        assert len(db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'account_%'").fetchall()) == 7
 
 
 @pytest.mark.parametrize('limit', ['0', '-1', 'nan', 'inf', '', 'bad', '0.001'])
@@ -80,13 +82,12 @@ def test_unpaid_finalisation_exact_limit_and_drafts(client, app):
         assert outstanding_debt(cid) == 0
         did = invoice(a)
         assert outstanding_debt(cid) == 115
-        assert get_document(did)['payment_status'] == 'payment_due'
+        assert get_document(did)['payment_status'] == 'paid'
         invoice(b)
         assert outstanding_debt(cid) == 230
         assert finalize_document(did) == did
         assert outstanding_debt(cid) == 230
-        with pytest.raises(ValueError, match='credit limit'):
-            order(cid, 0)
+        assert order(cid, 0)  # no implicit borrowing on creation
         with pytest.raises(ValueError, match='credit limit'):
             invoice(extra_draft)
 
@@ -97,14 +98,12 @@ def test_new_order_over_limit_and_edit_recheck(client, app):
         oid = order(cid)
         form = helpers.order_payload(cid)
         form['custom_unit_price'] = '200'
+        update_draft_order(oid, form)
+        assert order(cid, 200)
+        assert outstanding_debt(cid) == 0
+        from app.services.payments import record_payment
         with pytest.raises(ValueError, match='credit limit'):
-            update_draft_order(oid, form)
-        with pytest.raises(ValueError, match='credit limit'):
-            order(cid, 200)
-        invoice(oid)
-        with pytest.raises(ValueError, match='credit limit'):
-            order(cid, 40)
-        assert get_document(create_document(order(cid, 20), 'invoice'))['status'] == 'draft'
+            record_payment(oid, {'method':'account','amount':'151'})
 
 
 def test_allocated_payments_refunds_archived_and_prepaid(client, app):
@@ -142,14 +141,13 @@ def test_database_atomic_guard_stale_finalisation_and_edits(client, app):
     with app.app_context():
         db = get_db()
         a, b = order(cid), order(cid)
-        da, dbid = create_document(a, 'invoice'), create_document(b, 'invoice')
-        invoice_a = finalize_document(da)
-        with pytest.raises(sqlite3.IntegrityError, match='credit limit'):
+        invoice(a)
+        dbid = create_document(b, 'invoice')
+        with pytest.raises(sqlite3.IntegrityError, match='at least one payment'):
             db.execute("UPDATE documents SET status='finalized' WHERE id=?", (dbid,))
         assert get_document(dbid)['status'] == 'draft'
-        with pytest.raises(sqlite3.IntegrityError, match='credit limit'):
-            db.execute('UPDATE orders SET total=999 WHERE id=?', (a,))
-        assert outstanding_debt(cid) == 115
+        db.execute('UPDATE orders SET total=999 WHERE id=?', (a,))
+        assert outstanding_debt(cid) == 115  # total edits are not borrowing
 
 
 def test_global_debt_not_hidden_by_staff_branch(client, app):
@@ -170,8 +168,7 @@ def test_repayment_restores_capacity(client, app):
         db = get_db()
         oid = order(cid)
         invoice(oid)
-        with pytest.raises(ValueError, match='credit limit'):
-            order(cid, 10)
+        assert order(cid, 10)  # order itself does not use facility
         db.execute("INSERT INTO payments (order_id, amount, method, status, created_at) VALUES (?, 115, 'eft', 'paid', '2026-07-01')", (oid,))
         db.commit()
         assert outstanding_debt(cid) == 0
@@ -196,8 +193,8 @@ def test_additive_upgrade_defaults_existing_customer(client, app):
     cid = helpers.create_customer(client)
     with app.app_context():
         db = get_db()
-        for suffix in ['order_insert', 'order_update', 'invoice_insert', 'invoice_update']:
-            db.execute('DROP TRIGGER customer_credit_' + suffix)
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'account_%'").fetchall():
+            db.execute('DROP TRIGGER ' + row['name'])
         db.execute('ALTER TABLE customers DROP COLUMN credit_allowed')
         db.execute('ALTER TABLE customers DROP COLUMN credit_limit')
         run_migrations(db)
@@ -206,25 +203,25 @@ def test_additive_upgrade_defaults_existing_customer(client, app):
 
 
 def test_concurrent_finalisation_cannot_double_spend(client, app):
+    # Explicit borrowing, not finalisation, is now the concurrency boundary.
     import threading
     cid = setup_customer(client, app, 150)
     with app.app_context():
-        a, b = order(cid), order(cid)
-        ids = [create_document(a, 'invoice'), create_document(b, 'invoice')]
+        ids = [order(cid), order(cid)]
     barrier = threading.Barrier(2)
     outcomes = []
-    def worker(did):
+    def worker(oid):
         db = sqlite3.connect(app.config['DATABASE'], timeout=10)
         try:
             barrier.wait()
-            db.execute("UPDATE documents SET status='finalized' WHERE id=?", (did,))
+            db.execute("INSERT INTO payments(order_id,amount,method,status,created_at) VALUES (?,115,'account','paid','2026-10-08')", (oid,))
             db.commit()
             outcomes.append('ok')
         except sqlite3.IntegrityError:
             outcomes.append('blocked')
         finally:
             db.close()
-    threads = [threading.Thread(target=worker, args=(did,)) for did in ids]
+    threads = [threading.Thread(target=worker, args=(oid,)) for oid in ids]
     for thread in threads: thread.start()
     for thread in threads: thread.join(timeout=15)
     assert sorted(outcomes) == ['blocked', 'ok']
@@ -239,4 +236,4 @@ def test_credit_form_and_invoice_html(client, app):
         did = create_document(order(cid), 'invoice')
     page = client.get(f'/documents/{did}')
     assert page.status_code == 200
-    assert b'can be finalised without payment' in page.data
+    assert b'Record at least one partial or full payment' in page.data

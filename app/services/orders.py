@@ -363,7 +363,7 @@ def order_counts(query="", status: object = "", payment_status: object = "", ret
         FROM payments pay
         JOIN orders o ON o.id = pay.order_id
         LEFT JOIN customers c ON c.id = o.customer_id
-        WHERE {where} AND pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+        WHERE {where} AND pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'
         {payment_window_sql}""",
         [*params, *payment_window_params],
     ).fetchone()

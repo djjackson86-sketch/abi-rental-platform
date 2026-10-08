@@ -1,4 +1,7 @@
 from datetime import date, datetime
+import math
+
+from app.services.credit_limits import execute_credit_checked
 
 from app.db import get_db, now
 from app.services.access import customer_branch_clause, order_branch_clause
@@ -21,8 +24,8 @@ PAYMENT_LABELS = {
 # legacy row's own method (allowed through on edit below) or junk, and is
 # refused: the dashboard and the day report decide which money line a payment
 # lands on from this stored value, so a typo here would drop money from a total.
-PAYMENT_METHODS = ("cash", "eft", "card", "other", "customer_credit", "manual")
-PAYMENT_METHOD_ERROR = "Payment method must be Cash, EFT, Card, Other, Use Customer Credit, or Manual"
+PAYMENT_METHODS = ("cash", "eft", "card", "other", "customer_credit", "account", "manual")
+PAYMENT_METHOD_ERROR = "Payment method must be Cash, EFT, Card, Other, Account, Use Customer Credit, or Manual"
 
 
 def normalise_payment_method(value, fallback="manual"):
@@ -79,9 +82,14 @@ def get_payment(payment_id):
     return get_db().execute("SELECT * FROM payments WHERE id = ?", (payment_id,)).fetchone()
 
 
+def payment_total_sql(alias="o"):
+    from app.services.credit_limits import order_paid_sql
+    return order_paid_sql(alias)
+
+
 def payment_total(order_id):
     row = get_db().execute(
-        f"SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND {_active_payment_clause()}",
+        f"SELECT {payment_total_sql('o')} AS paid FROM orders o WHERE o.id = ?",
         (order_id,),
     ).fetchone()
     return float(row["paid"] or 0)
@@ -131,15 +139,42 @@ def record_payment(order_id, form):
     payment_date = parse_payment_date(form.get("payment_date"))
     if method == "customer_credit":
         return _record_customer_credit_payment(order, amount, reference, payment_date)
+    if method == "account":
+        return _record_account_payment(order, amount, reference, payment_date, form.get("account_request_id"))
     created_at = now()
     db = get_db()
-    db.execute(
+    execute_credit_checked(db,
         """INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
         VALUES (?, ?, ?, ?, 'paid', ?, ?)""",
         (order_id, amount, method, reference, payment_date, created_at),
     )
     db.commit()
     return recalculate_order_payment(order_id)
+
+
+def _record_account_payment(order, amount, reference, payment_date, request_id=None):
+    db = get_db()
+    request_id = (request_id or "").strip() or None
+    if request_id and len(request_id) > 100:
+        raise ValueError("Invalid Account payment request")
+    def existing_request():
+        row = db.execute("SELECT * FROM payments WHERE account_request_id = ?", (request_id,)).fetchone() if request_id else None
+        if row and (row["order_id"] != order["id"] or float(row["amount"]) != amount or row["method"] != "account"):
+            raise ValueError("This Account payment request has already been used")
+        return row
+    if existing_request():
+        return recalculate_order_payment(order["id"])
+    try:
+        execute_credit_checked(db,
+            """INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at, account_request_id)
+            VALUES (?, ?, 'account', ?, 'paid', ?, ?, ?)""",
+            (order["id"], amount, reference, payment_date, now(), request_id))
+        db.commit()
+    except Exception:
+        # A racing identical request may hit balance/limit BEFORE uniqueness.
+        if not existing_request():
+            raise
+    return recalculate_order_payment(order["id"])
 
 
 def _row_get(row, key, default=None):
@@ -192,8 +227,8 @@ def _parse_payment_amount(form):
         amount = float(form.get("amount", 0) or 0)
     except ValueError as exc:
         raise ValueError("Payment amount must be a number") from exc
-    if amount <= 0:
-        raise ValueError("Payment amount must be greater than zero")
+    if not math.isfinite(amount) or round(amount, 2) <= 0:
+        raise ValueError("Payment amount must be greater than zero and finite")
     return round(amount, 2)
 
 
@@ -214,7 +249,7 @@ def update_payment(payment_id, form):
     reference = form.get("reference", "").strip()
     payment_date = parse_payment_date(form.get("payment_date"))
     db = get_db()
-    db.execute(
+    execute_credit_checked(db,
         "UPDATE payments SET amount = ?, method = ?, reference = ?, payment_date = ?, status = 'paid' WHERE id = ?",
         (amount, method, reference, payment_date, payment_id),
     )
@@ -227,7 +262,7 @@ def archive_payment(payment_id):
     if not payment or payment["deleted_at"]:
         raise ValueError("Payment not found")
     db = get_db()
-    db.execute("UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), payment_id))
+    execute_credit_checked(db, "UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), payment_id))
     db.commit()
     return recalculate_order_payment(payment["order_id"])
 
@@ -454,7 +489,11 @@ def record_refund(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
-    paid_total = payment_total(order_id)
+    # Account is borrowing, never money available for cash/prepaid refunds.
+    paid_total = float(get_db().execute(
+        f"SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND {_active_payment_clause()} AND LOWER(COALESCE(method, '')) <> 'account'",
+        (order_id,),
+    ).fetchone()["paid"] or 0)
     credit = round(paid_total - float(order["total"] or 0), 2)
     if credit <= 0:
         raise ValueError("This order does not have a credit to refund")

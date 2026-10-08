@@ -1,6 +1,7 @@
 from datetime import datetime, time
 
 from app.db import get_db
+from app.services.credit_limits import order_paid_sql
 from app.services.access import customer_branch_clause, order_branch_clause, product_branch_clause
 from app.services.timezone import local_now, local_now_iso, parse_iso_datetime
 from app.services.cash import card_received as net_card_received
@@ -169,7 +170,7 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
     payments_sql = """
         SELECT COUNT(*) AS count, COALESCE(SUM(pay.amount), 0) AS paid
         FROM payments pay JOIN orders o ON o.id = pay.order_id
-        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'
     """
     payments_params = []
     window_sql, window_params = _window("pay.created_at", start_date, end_date)
@@ -241,7 +242,7 @@ def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
     # single-day range matches "Revenue for the day" by construction.
     received_sql = f"""SELECT COALESCE(SUM(pay.amount), 0) AS revenue
         FROM payments pay JOIN orders o ON o.id = pay.order_id
-        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''"""
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'"""
     received_params = []
     if start_date:
         received_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) >= ?"
@@ -355,7 +356,7 @@ def dashboard_day_metrics(day=None, branch_id=None):
         return total(
             f"""SELECT COALESCE(SUM(pay.amount), 0) s
             FROM payments pay JOIN orders o ON o.id = pay.order_id
-            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'
               {method_sql}
               AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
             [*method_params, day, *scope_params],
@@ -375,7 +376,7 @@ def dashboard_day_metrics(day=None, branch_id=None):
         return total(
             f"""SELECT COALESCE(SUM(pay.amount), 0) s
             FROM payments pay JOIN orders o ON o.id = pay.order_id
-            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'
               AND LOWER(COALESCE(pay.method, '')) NOT IN (?, ?, ?)
               AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
             ["cash", "eft", "card", day, *scope_params],
@@ -492,7 +493,7 @@ def payments_by_method(start_date=None, end_date=None, branch_id=None):
     sql = """
         SELECT pay.method AS method, COUNT(*) AS count, COALESCE(SUM(pay.amount), 0) AS total
         FROM payments pay JOIN orders o ON o.id = pay.order_id
-        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'
     """
     params = []
     window_sql, window_params = _window("pay.created_at", start_date, end_date)
@@ -730,7 +731,7 @@ def started_orders_report_rows(branch_id=None):
             o.discount_value,
             o.discount_total,
             o.due_total,
-            COALESCE((SELECT SUM(pay.amount) FROM payments pay WHERE pay.order_id = o.id AND COALESCE(pay.deleted_at, '') = '' AND COALESCE(pay.status, 'paid') = 'paid'), 0) AS paid_total,
+            {order_paid_sql('o')} AS paid_total,
             COALESCE(NULLIF(c.name, ''), 'No customer') AS customer_name,
             o.order_number,
             COALESCE(NULLIF(p.sku, ''), NULLIF(oi.custom_name, ''), p.name, '') AS trailer_sku,
