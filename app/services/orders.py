@@ -863,12 +863,18 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
     custom_names = form.getlist("custom_name") if hasattr(form, "getlist") else _form_list(form, "custom_name")
     custom_prices = form.getlist("custom_unit_price") if hasattr(form, "getlist") else _form_list(form, "custom_unit_price")
     custom_modes = form.getlist("custom_billing_mode") if hasattr(form, "getlist") else _form_list(form, "custom_billing_mode")
+    # Ticket ABI-341953151: the per-item description typed in the third box on each
+    # line (below the custom product/service box). It is snapshotted onto the
+    # order_items row; a catalogue line with no typed value falls back to the
+    # inventory product's own description.
+    line_descriptions = form.getlist("item_description") if hasattr(form, "getlist") else _form_list(form, "item_description")
     max_lines = max(len(product_ids), len(quantities), len(custom_names), len(custom_prices), len(custom_modes), 1)
     for index in range(max_lines):
         product_id_value = product_ids[index].strip() if index < len(product_ids) and product_ids[index] else ""
         quantity = quantities[index] if index < len(quantities) and quantities[index] else 1
         custom_name = custom_names[index].strip() if index < len(custom_names) and custom_names[index] else ""
         custom_price = custom_prices[index] if index < len(custom_prices) and custom_prices[index] else ""
+        description = line_descriptions[index].strip() if index < len(line_descriptions) and line_descriptions[index] else ""
         custom_mode = custom_modes[index] if index < len(custom_modes) and custom_modes[index] in {"fixed", "rental_day"} else "fixed"
         if product_id_value:
             product_id = int(product_id_value or 0)
@@ -892,11 +898,12 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
                 raise ValueError("Selected product is not assigned to the collection branch")
             line = calculate_line(product, quantity, days, settings["tax_mode"], custom_price)
             line["billing_mode"] = "catalog"
-            lines.append({"product": product, "custom_name": "", "line": line})
+            snapshot = description or (product["description"] or "").strip()
+            lines.append({"product": product, "custom_name": "", "description": snapshot, "line": line})
         elif custom_name:
             line = calculate_custom_line(custom_name, quantity, custom_price or 0, custom_mode, days,
                                         global_vat_rate(), settings["tax_mode"])
-            lines.append({"product": None, "custom_name": custom_name, "line": line})
+            lines.append({"product": None, "custom_name": custom_name, "description": description, "line": line})
         else:
             continue
         subtotal += line["line_subtotal"]
@@ -968,9 +975,9 @@ def _insert_order_items(order_id, lines):
         product_id = product["id"] if product else None
         unit_price = line.get("unit_price", float(product["price_amount"] or 0) if product else 0)
         db.execute(
-            """INSERT INTO order_items (order_id, product_id, custom_name, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (order_id, product_id, entry["custom_name"], line["quantity"], unit_price, line["line_subtotal"], line["line_tax"], line["line_total"], line["billing_mode"]),
+            """INSERT INTO order_items (order_id, product_id, custom_name, description, quantity, unit_price, line_subtotal, line_tax, line_total, billing_mode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (order_id, product_id, entry["custom_name"], entry.get("description", "") or "", line["quantity"], unit_price, line["line_subtotal"], line["line_tax"], line["line_total"], line["billing_mode"]),
         )
 
 
@@ -1296,12 +1303,13 @@ def draft_order_form(order_id):
             "product_id": item["product_id"] or "",
             "product_display": product_display,
             "custom_name": item["custom_name"] or "",
+            "description": item["description"] or "",
             "custom_billing_mode": item["billing_mode"] if item["billing_mode"] in {"fixed", "rental_day"} else "fixed",
             "custom_unit_price": item["unit_price"] or "",
             "quantity": item["quantity"] or 1,
         })
     if not lines:
-        lines.append({"product_id": "", "product_display": "", "custom_name": "", "custom_billing_mode": "fixed", "custom_unit_price": "", "quantity": 1})
+        lines.append({"product_id": "", "product_display": "", "custom_name": "", "description": "", "custom_billing_mode": "fixed", "custom_unit_price": "", "quantity": 1})
     return {
         "order": order,
         "selected_customer_id": order["customer_id"] or "",

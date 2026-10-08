@@ -125,7 +125,7 @@ def _products():
         params = list(scope_ids)
     return get_db().execute(f"""
         SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
-               p.security_deposit, p.hourly_extra_rate, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
+               p.description, p.security_deposit, p.hourly_extra_rate, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
         FROM products p
         LEFT JOIN branches b ON b.id = p.branch_id
         LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id

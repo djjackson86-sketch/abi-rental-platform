@@ -58,7 +58,7 @@
       <thead><tr><th>Product</th><th>Qty</th><th>Days</th><th>Rate</th><th>Subtotal</th><th>Tax</th><th>Total incl. VAT</th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small></td><td>{{ item.quantity }}</td><td>{% if tax_view.lines[loop.index0].rental_days %}{{ tax_view.lines[loop.index0].rental_days }}{% else %}—{% endif %}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].unit_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].subtotal_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].tax) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].total_incl) }}</td></tr>
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small>{% if item.description %}<span class="line-description">{{ item.description }}</span>{% endif %}</td><td>{{ item.quantity }}</td><td>{% if tax_view.lines[loop.index0].rental_days %}{{ tax_view.lines[loop.index0].rental_days }}{% else %}—{% endif %}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].unit_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].subtotal_excl) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].tax) }}</td><td>R{{ '%.2f'|format(tax_view.lines[loop.index0].total_incl) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

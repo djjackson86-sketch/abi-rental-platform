@@ -290,7 +290,12 @@ CREATE TABLE IF NOT EXISTS order_items (
     line_subtotal REAL NOT NULL DEFAULT 0,
     line_tax REAL NOT NULL DEFAULT 0,
     line_total REAL NOT NULL DEFAULT 0,
-    billing_mode TEXT NOT NULL DEFAULT 'catalog'
+    billing_mode TEXT NOT NULL DEFAULT 'catalog',
+    -- Ticket ABI-341953151: the per-item description snapshot. It is copied
+    -- from the inventory product's description (or typed as a custom line
+    -- description) when the order is saved, and never re-read from the product
+    -- afterwards, so later inventory edits cannot change a saved order/document.
+    description TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -624,6 +629,7 @@ def run_migrations(db):
     # Additive and nullable: imported/legacy rows claim no branch.
     ensure_column(db, "customers", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
     ensure_column(db, "order_items", "billing_mode", "TEXT NOT NULL DEFAULT 'catalog'")
+    ensure_column(db, "order_items", "description", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "payments", "payment_date", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "payments", "deleted_at", "TEXT NOT NULL DEFAULT ''")
 

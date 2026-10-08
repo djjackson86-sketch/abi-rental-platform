@@ -310,6 +310,9 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .document-line-items th:nth-child(7),.document-line-items td:nth-child(7){width:17%}
 .document-line-items td:first-child strong{display:block;line-height:1.25;white-space:normal;overflow:visible}
 .document-line-items td:first-child small{overflow-wrap:anywhere}
+/* Ticket ABI-341953151: per-item description printed beneath the product name in
+   normal (regular) weight so it reads as detail, not a second product title. */
+.line-description{display:block;font-weight:400;color:var(--muted,#667085);line-height:1.35}
 @media(max-width:520px){.document-line-items{min-width:560px}.document-line-items th,.document-line-items td{padding-left:6px;padding-right:6px;font-size:11px}}
 .document-type-invoice .totals{background:#fff;border:1px solid var(--line);border-radius:12px}
 .document-type-invoice .totals .total-row{background:#fff;color:var(--ink);border-radius:0}

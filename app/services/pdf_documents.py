@@ -1056,12 +1056,22 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             line_index = start_index + offset
             name = item['product_name'] or item['custom_name'] or 'Item'
             sku = item['product_sku'] or ''
+            description = (_doc_value(item, 'description', '') or '').strip()
             line_view = tax_view['lines'][line_index] if line_index < len(tax_view['lines']) else {
                 'unit_excl': 0.0, 'subtotal_excl': 0.0, 'tax': 0.0, 'total_incl': 0.0, 'rental_days': None}
             days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
-            product_lines = _wrap_pdf_cell_text(name, max_chars=42, max_lines=3)
+            # Ticket ABI-341953151: the per-item description prints on the rows
+            # beneath the product name (still the product cell, normal weight).
+            # When there is no description the original 3-line name wrap is kept
+            # unchanged; with one, the name gets 2 lines and the description the rest.
+            if description:
+                product_lines = _wrap_pdf_cell_text(name, max_chars=42, max_lines=2)
+                product_lines.extend(_wrap_pdf_cell_text(description, max_chars=42, max_lines=max(1, 3 - len(product_lines))))
+            else:
+                product_lines = _wrap_pdf_cell_text(name, max_chars=42, max_lines=3)
             if sku and len(product_lines) < 3:
                 product_lines.append(str(sku)[:42])
+            product_lines = product_lines[:3]
             _add_pdf_lines(text, INVOICE_TABLE_X, y_pos, product_lines, size=8, leading=10, max_lines=3)
             _add_pdf_lines(text, QTY_COLUMN_X, y_pos, [str(item['quantity'])], size=8)
             _add_pdf_lines(text, DAYS_COLUMN_X, y_pos, [days_text], size=8)
@@ -1491,6 +1501,9 @@ def document_pdf_bytes(document_id):
     lines.append('')
     for item in items:
         lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
+        description = (_doc_value(item, 'description', '') or '').strip()
+        if description:
+            lines.append(f'   {description}')
     lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}'])
     if float(_doc_value(document, 'discount_total') or 0):
         lines.append(f'Discount: -R{float(_doc_value(document, "discount_total") or 0):.2f}')
