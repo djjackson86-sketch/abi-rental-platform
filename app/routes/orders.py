@@ -9,6 +9,7 @@ from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _buil
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.customer_credits import customer_credit_balance
+from app.services.credit_limits import debt_sql
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.branches import adjusted_pickup_time_for_branch, branch_hours_summaries, branch_options, default_branch_id
@@ -57,10 +58,11 @@ def _submitted_customer_values(form):
 
 
 def _customers():
-    rows = get_db().execute("""
+    rows = get_db().execute(f"""
         SELECT id, customer_type, name, email, phone, marketing_opt_in,
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
-               client_verified, is_blocked, blocked_reason,
+               client_verified, is_blocked, blocked_reason, credit_allowed, credit_limit,
+               CASE WHEN credit_allowed = 1 THEN {debt_sql("customers.id")} ELSE 0 END AS account_credit_debt,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
                (SELECT COALESCE(SUM(cc.amount), 0) FROM customer_credits cc WHERE cc.customer_id = customers.id AND cc.status = 'active') AS customer_credit_balance,
@@ -83,10 +85,11 @@ def _selected_customer_summary(customers, selected_customer_id):
 
 
 def _customer_summary_by_id(customer_id):
-    row = get_db().execute("""
+    row = get_db().execute(f"""
         SELECT id, customer_type, name, email, phone, marketing_opt_in,
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
-               client_verified, is_blocked, blocked_reason,
+               client_verified, is_blocked, blocked_reason, credit_allowed, credit_limit,
+               CASE WHEN credit_allowed = 1 THEN {debt_sql("customers.id")} ELSE 0 END AS account_credit_debt,
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')=''), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
                (SELECT COALESCE(SUM(cc.amount), 0) FROM customer_credits cc WHERE cc.customer_id = customers.id AND cc.status = 'active') AS customer_credit_balance,

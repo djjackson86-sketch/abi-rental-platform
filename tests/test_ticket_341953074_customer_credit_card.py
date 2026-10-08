@@ -132,8 +132,8 @@ def test_customer_with_credit_shows_green_customer_credit_card_beside_balance(cl
     assert 'summary_obj.previous_orders_balance_display' not in body
 
 
-def test_customer_without_credit_has_no_credit_card(client, app):
-    """No credit means no card at all ("if available"), and the balance stays honest."""
+def test_customer_without_credit_shows_zero_credit_card(client, app):
+    """ABI-341953144: New order always shows the retained-credit card, including zero."""
     login(client)
     with app.app_context():
         db = get_db()
@@ -143,12 +143,10 @@ def test_customer_without_credit_has_no_credit_card(client, app):
 
     body = client.get(f'/orders/new?customer_id={customer_id}').get_data(as_text=True)
 
-    # No rendered card at all ("if available"). The inline JS still contains the label
-    # text because it can build the card when a credited customer is picked, so assert on
-    # the rendered markup (the element, not the script that can create it).
-    assert not re.search(r'<div class="stat-card customer-credit-card"', body)
-    assert not re.search(r'<strong id="customer-credit-value"', body)
-    assert not re.search(r'<span>Customer Credit</span>', body)
+    # ABI-341953144 supersedes the old conditional display on New order.
+    assert re.search(r'<div class="stat-card customer-credit-card"', body)
+    assert CREDIT_CARD_RE.search(body).group(1) == '0.00'
+    assert re.search(r'<span>Customer Credit</span>', body)
     balance_match = BALANCE_VALUE_RE.search(body)
     assert balance_match and balance_match.group(2) == '400.00'
     assert balance_match.group(1) == 'balance-owing'
@@ -208,7 +206,7 @@ def test_form_js_updates_balance_and_credit_cards_separately(client, app):
     body = client.get(f'/orders/new?customer_id={customer_id}').get_data(as_text=True)
     assert "const value=summary?amount(summary.previous_orders_balance):0" in body
     assert "ensureCreditCard()" in body
-    assert "creditCard.hidden=!(credit>0)" in body
+    assert "creditCard.hidden=!accountCard&&!(credit>0)" in body
 
 
 def test_edit_order_form_still_renders_the_balance_card(client, app):

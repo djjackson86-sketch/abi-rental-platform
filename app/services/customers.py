@@ -483,7 +483,17 @@ def customer_summary_for(customer):
     credit_balance = _customer_credit_balance_value(customer)
     previous_orders_balance = round(float(_customer_row_value(customer, "previous_orders_balance", 0) or 0), 2)
     legacy_balance = round(float(_customer_row_value(customer, "legacy_balance", 0) or 0), 2)
+    credit_allowed = bool(_row_flag(customer, "credit_allowed"))
+    credit_limit = round(float(_customer_row_value(customer, "credit_limit", 0) or 0), 2)
+    account_debt = _customer_row_value(customer, "account_credit_debt", None)
+    if credit_allowed and account_debt is None:
+        from app.services.credit_limits import outstanding_debt
+        account_debt = outstanding_debt(customer["id"])
+    available_account_credit = round(max(credit_limit - float(account_debt or 0), 0), 2) if credit_allowed else 0.0
     return {
+        "credit_allowed": credit_allowed,
+        "credit_limit": credit_limit if credit_allowed else 0.0,
+        "available_account_credit": available_account_credit,
         "id": customer["id"],
         "customer_type": customer["customer_type"] or "individual",
         "name": customer["name"] or "—",
