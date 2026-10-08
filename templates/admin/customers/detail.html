@@ -12,6 +12,7 @@
   </div>
   <div class="header-actions">
     <a class="btn ghost" href="{{ url_for('customers.index') }}">Back</a>
+    <a class="btn ghost" href="{{ url_for('customers.account_statement_pdf', customer_id=customer.id) }}" target="_blank" rel="noopener">Account Statement</a>
     {# Ticket ABI-341953085: statement of account PDF (finalised invoices + payments), with an optional inclusive date range. #}
     <form class="statement-form" method="get" action="{{ url_for('customers.statement', customer_id=customer.id) }}" target="_blank" rel="noopener">
       <label>From <input type="date" name="date_from" value="{{ request.args.get('date_from', '') }}"></label>
@@ -99,6 +100,19 @@
   </article>
   {% endif %}
 
+  {% if can_settle_legacy_balance %}
+  <article class="panel customer-orders-card">
+    <h2>Add prepaid customer credit</h2>
+    <p>Upfront funds are held for future orders, not revenue until used.</p>
+    <form method="post" action="{{ url_for('customers.record_prepaid_funding',customer_id=customer.id) }}">
+      <input type="hidden" name="request_key" value="{{ funding_request_key }}">
+      <div class="form-grid"><label>Amount<input type="number" name="amount" min="0.01" step="0.01" required></label>
+      <label>Method<select name="method" required><option value="">Choose method</option><option value="cash">Cash</option><option value="card">Card</option><option value="eft">EFT</option></select></label>
+      <label>Payment date<input name="payment_date" type="date"></label><label>Reference<input name="reference"></label></div>
+      <button class="btn primary">Store prepaid funds</button>
+    </form>
+  </article>
+  {% endif %}
   {% if legacy_balance.imported_total > 0 %}
   <article class="panel customer-orders-card legacy-balance-card" id="legacy-balance">
     <div class="panel-title"><h2>Legacy balance from old system</h2>
@@ -127,7 +141,7 @@
       <h3>Settle previous order/s</h3>
       <div class="form-grid">
         <label>Amount<input type="number" name="amount" step="0.01" min="0.01" max="{{ '%.2f'|format(legacy_balance.total) }}" value="{{ '%.2f'|format(legacy_balance.total) }}" required></label>
-        <label>Method<select name="method">{% for value, label in legacy_payment_methods %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+        <label>Method<select name="method" required><option value="">Choose method</option>{% for value, label in legacy_payment_methods %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
         <label>Payment date<input type="date" name="payment_date"></label>
         <label>Reference<input name="reference" placeholder="Receipt or EFT reference"></label>
       </div>

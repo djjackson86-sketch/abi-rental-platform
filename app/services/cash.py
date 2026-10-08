@@ -230,7 +230,9 @@ def payment_received(day, branch_id, method):
           AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
         [str(method or '').lower(), day, *scope_params],
     ).fetchone()
-    return money(float(_value(row, 's') or 0) +
+    from app.services.financial_receipts import receipt_totals
+    held = receipt_totals('prepaid_fundings',branch_id,day,day).get(str(method or '').lower(),0)
+    return money(held + float(_value(row, 's') or 0) +
                  legacy_payment_totals(day, branch_id).get(str(method or '').lower(), 0))
 
 

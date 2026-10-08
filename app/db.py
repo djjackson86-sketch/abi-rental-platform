@@ -833,6 +833,8 @@ def run_migrations(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_customer ON customer_credits(customer_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_source_order ON customer_credits(source_order_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_customer_credits_applied_order ON customer_credits(applied_order_id)")
+    from app.services.prepaid_funding import install_guards as install_prepaid_guards
+    install_prepaid_guards(db)
 
     # --- Legacy balances imported from the previous Sano/Booqable system ------
     db.execute("""CREATE TABLE IF NOT EXISTS legacy_customer_balances (

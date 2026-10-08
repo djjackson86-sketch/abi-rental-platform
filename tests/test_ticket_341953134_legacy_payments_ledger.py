@@ -65,7 +65,7 @@ def test_combined_listing_count_pagination_sort_and_overlapping_ids(app):
         assert [identity(r) for r in pages] == [identity(r) for r in rows]
         assert len({identity(r) for r in pages}) == 4
         assert [float(r['amount']) for r in list_payments(sort='amount', direction='asc')] == [25,25,100,1174.5]
-        assert payment_method_totals(date_from=DAY,date_to=DAY) == {'card':1274.5,'cash':25,'eft':25}
+        assert payment_method_totals(date_from=DAY,date_to=DAY) == {'card':1274.5,'cash':25,'eft':25,'other':0.0}
 
 
 def test_day_status_deleted_and_created_fallback(app):

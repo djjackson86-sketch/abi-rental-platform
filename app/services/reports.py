@@ -399,6 +399,8 @@ def dashboard_day_metrics(day=None, branch_id=None):
         WHERE substr(c.created_at, 1, 10) = ?{customer_scope_sql}""",
         [day, *customer_scope_params],
     )
+    from app.services.financial_receipts import receipt_totals
+    held_prepaid = receipt_totals('prepaid_fundings',branch_id,day,day)
     # Revenue for the day = money actually received today (paid payments, by
     # payment date), not the value of the orders raised today.
     revenue = payment_total()
@@ -453,11 +455,11 @@ def dashboard_day_metrics(day=None, branch_id=None):
         "customers": new_customers,
         "revenue": revenue,
         "card_payments": net_card_received(day, branch_id),
-        "cash_payments": payment_total("cash"),
+        "cash_payments": money(payment_total("cash") + held_prepaid.get("cash",0)),
         # EFT deposit payouts live on orders, while ordinary/customer-credit
         # refunds are already negative payment rows. Deduct only the separate
         # deposit payout once, on its payout day, just like the card/POS total.
-        "eft_payments": money(payment_total("eft") - deposit_refunds(day, branch_id, "eft")),
+        "eft_payments": money(payment_total("eft") + held_prepaid.get("eft",0) - deposit_refunds(day, branch_id, "eft")),
         # Everything that is not one of the three named payment methods.
         # Deposit payouts above are separate from the received revenue total.
         "other_payments": other_payments(),

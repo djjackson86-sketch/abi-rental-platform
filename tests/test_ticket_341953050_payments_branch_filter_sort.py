@@ -229,8 +229,8 @@ def test_payment_method_totals_map_methods_and_keep_archived_out_of_active(app):
         active_totals = payment_method_totals()
         archived_branch_totals = payment_method_totals(include_archived=True, branch_id=3)
 
-    assert active_totals == {'card': 200.0, 'cash': 300.0, 'eft': 25.0}
-    assert archived_branch_totals == {'card': 0.0, 'cash': 400.0, 'eft': 0.0}
+    assert active_totals == {'card': 200.0, 'cash': 300.0, 'eft': 25.0, 'other': 0.0}
+    assert archived_branch_totals == {'card': 0.0, 'cash': 400.0, 'eft': 0.0, 'other': 0.0}
 
 
 

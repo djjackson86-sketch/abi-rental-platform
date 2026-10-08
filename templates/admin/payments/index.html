@@ -39,6 +39,7 @@
     <div class="metric-card"><small>Card Payments</small><b>R{{ '%.2f'|format(payment_totals.card) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
     <div class="metric-card"><small>Cash Payments</small><b>R{{ '%.2f'|format(payment_totals.cash) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
     <div class="metric-card"><small>EFT Payments</small><b>R{{ '%.2f'|format(payment_totals.eft) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
+    <div class="metric-card"><small>OTHER PAYMENTS</small><b>R{{ '%.2f'|format(payment_totals.other) }}</b><span title="Excludes Account borrowing and unused prepaid funds">Deposits &amp; customer credit used</span></div>
   </div>
   {% if payments %}
   <div class="table-tools"><span>Showing 1 - {{ payments|length }} of {{ total_payments }}</span></div>
@@ -56,7 +57,7 @@
           <td>{{ payment.method|title }}</td>
           <td>{{ payment.reference or '—' }}</td>
           <td><span class="pill">{{ 'Refund' if is_refund(payment) else payment.status|title }}</span></td>
-          <td>{% if payment.synthetic_kind == 'legacy_receipt' %}<small>Legacy receipt #{{ payment.legacy_receipt_id }}</small>{% elif payment.synthetic_kind == 'deposit_refund' %}<small>Deposit refund</small>{% elif not payment.deleted_at %}{% if not is_refund(payment) %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a>{% else %}<small>Refund row</small>{% endif %}<form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
+          <td>{% if payment.synthetic_kind == 'legacy_receipt' %}<small>Legacy receipt #{{ payment.legacy_receipt_id }}</small>{% elif payment.synthetic_kind == 'prepaid_fundings' %}<small>Prepaid funding · not revenue</small>{% if not payment.deleted_at %}<form method="post" class="inline-form" action="{{ url_for('customers.reverse_prepaid_funding',customer_id=payment.customer_id,funding_id=payment.legacy_receipt_id) }}"><button class="btn danger" type="submit">Reverse</button></form>{% endif %}{% elif payment.synthetic_kind == 'deposit_refund' %}<small>Deposit refund</small>{% elif not payment.deleted_at %}{% if not is_refund(payment) %}<a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a>{% else %}<small>Refund row</small>{% endif %}<form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form>{% else %}<small>Deleted {{ payment.deleted_at[:10] }}</small>{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

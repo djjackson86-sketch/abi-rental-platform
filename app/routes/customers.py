@@ -1,4 +1,5 @@
 import csv
+import uuid
 from io import StringIO
 
 from flask import Blueprint, Response, abort, flash, redirect, render_template, request, session, url_for
@@ -147,7 +148,67 @@ def detail(customer_id):
         legacy_balance=legacy_balance_summary(customer_id),
         legacy_payment_methods=[(method, LEGACY_PAYMENT_METHOD_LABELS[method]) for method in LEGACY_PAYMENT_METHODS],
         can_settle_legacy_balance=can_settle_legacy_balances(),
+        funding_request_key=uuid.uuid4().hex,
     )
+
+
+@bp.get('/<int:customer_id>/account-statement.pdf')
+@login_required
+def account_statement_pdf(customer_id):
+    from app.services.account_statements import account_statement, account_statement_lines
+    from app.services.pdf_documents import simple_lines_pdf_bytes
+    view=account_statement(customer_id,request.args.get('date_from',''),request.args.get('date_to',''))
+    if view is None:
+        abort(404)
+    return Response(simple_lines_pdf_bytes(account_statement_lines(view)),mimetype='application/pdf',
+        headers={'Content-Disposition':f'inline; filename=account-statement-{customer_id}.pdf'})
+
+
+@bp.post('/<int:customer_id>/prepaid-funding')
+@login_required
+def record_prepaid_funding(customer_id):
+    if not can_settle_legacy_balances():
+        abort(403)
+    if not get_customer(customer_id):
+        abort(404)
+    if not request.form.get('request_key'):
+        abort(400)
+    from app.services.prepaid_funding import record_funding
+    try:
+        record_funding(customer_id,request.form)
+        flash('Prepaid funds stored; revenue is recognised when used on an order','success')
+    except ValueError as exc:
+        flash(str(exc),'error')
+    return redirect(url_for('customers.detail',customer_id=customer_id))
+
+
+@bp.post('/<int:customer_id>/prepaid-funding/<int:funding_id>/reverse')
+@login_required
+def reverse_prepaid_funding(customer_id,funding_id):
+    if not user_can_module(session,'payments'):
+        abort(403)
+    customer=get_customer(customer_id)
+    if not customer:
+        abort(404)
+    from app.db import get_db,now
+    from app.services.access import session_branch_scope_ids
+    db=get_db()
+    row=db.execute('SELECT * FROM prepaid_fundings WHERE id=? AND customer_id=?',(funding_id,customer_id)).fetchone()
+    if not row:
+        abort(404)
+    scope=session_branch_scope_ids()
+    if scope is not None and row['branch_id'] not in scope:
+        abort(404)
+    try:
+        db.execute("UPDATE prepaid_fundings SET status='archived',deleted_at=? WHERE id=? AND status='paid'",(now(),funding_id))
+        db.commit()
+        flash('Prepaid funding reversed; original audit record retained','success')
+    except Exception as exc:
+        if 'Cannot reverse prepaid funds already used' not in str(exc):
+            raise
+        db.rollback()
+        flash('Cannot reverse prepaid funds already used on orders; reverse the settlements first','error')
+    return redirect(url_for('customers.detail',customer_id=customer_id))
 
 
 @bp.post("/<int:customer_id>/legacy-payments")

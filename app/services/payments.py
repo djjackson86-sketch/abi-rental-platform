@@ -134,6 +134,8 @@ def record_payment(order_id, form):
     if not order:
         raise ValueError("Order not found")
     amount = _parse_payment_amount(form)
+    if not (form.get("method") or "").strip():
+        raise ValueError("Choose a payment method")
     method = normalise_payment_method(form.get("method"))
     reference = form.get("reference", "").strip()
     payment_date = parse_payment_date(form.get("payment_date"))
@@ -203,21 +205,15 @@ def _record_customer_credit_payment(order, amount, reference, payment_date):
         raise ValueError("This order has no due amount to pay with customer credit")
     if amount > due:
         raise ValueError(f"Customer credit payment cannot be more than the order due R{due:.2f}")
-    from app.services.customer_credits import apply_customer_credit, link_applied_payment
-
+    from app.services.customer_credits import customer_credit_balance
+    if amount > customer_credit_balance(customer_id):
+        raise ValueError("Customer credit cannot exceed the available balance")
     db = get_db()
-    available_entry_id = apply_customer_credit(
-        customer_id,
-        amount,
-        order["id"],
-        note=reference or f"Customer credit used on {order['order_number']}",
-    )
     cur = db.execute(
         """INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
         VALUES (?, ?, 'customer_credit', ?, 'paid', ?, ?)""",
         (order["id"], amount, reference or "Customer credit used", payment_date, now()),
     )
-    link_applied_payment(available_entry_id, cur.lastrowid)
     db.commit()
     return recalculate_order_payment(order["id"])
 
@@ -246,6 +242,8 @@ def update_payment(payment_id, form):
     # its own value is allowed through while anything else unknown is refused.
     if method not in PAYMENT_METHODS and method != existing_method:
         raise ValueError(PAYMENT_METHOD_ERROR)
+    if existing_method == 'customer_credit' or method == 'customer_credit':
+        raise ValueError('Reverse customer-credit settlements before changing them')
     reference = form.get("reference", "").strip()
     payment_date = parse_payment_date(form.get("payment_date"))
     db = get_db()
@@ -410,18 +408,25 @@ def _payments_ledger_sql(real_where, deposit_where, legacy_where):
     """
 
 
+def _prepaid_ledger(include_archived, branch_id, date_from, date_to):
+    from app.services.financial_receipts import receipt_where, receipt_ledger_sql
+    where, params = receipt_where('prepaid_fundings',include_archived,branch_id,date_from,date_to)
+    return ' UNION ALL ' + receipt_ledger_sql('prepaid_fundings',where), params
+
+
 def list_payments(include_archived=False, branch_id=None, sort="date", direction="desc", date_from="", date_to="", limit=None, offset=0):
     real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
     deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
     legacy_where, legacy_params = _legacy_payment_where(include_archived, branch_id, date_from, date_to)
-    params = [*real_params, *deposit_params, *legacy_params]
+    prepaid_sql, prepaid_params = _prepaid_ledger(include_archived,branch_id,date_from,date_to)
+    params = [*real_params, *deposit_params, *legacy_params, *prepaid_params]
     order_clause = _payment_order_clause(sort, direction)
     limit_sql = ""
     if limit is not None:
         limit_sql = " LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset or 0)])
     return get_db().execute(
-        f"""SELECT * FROM ({_payments_ledger_sql(real_where, deposit_where, legacy_where)}) ledger
+        f"""SELECT * FROM ({_payments_ledger_sql(real_where, deposit_where, legacy_where)}{prepaid_sql}) ledger
         ORDER BY {order_clause}{limit_sql}""",
         params,
     ).fetchall()
@@ -431,9 +436,10 @@ def payment_count(include_archived=False, branch_id=None, date_from="", date_to=
     real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
     deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
     legacy_where, legacy_params = _legacy_payment_where(include_archived, branch_id, date_from, date_to)
+    prepaid_sql, prepaid_params = _prepaid_ledger(include_archived,branch_id,date_from,date_to)
     row = get_db().execute(
-        f"""SELECT COUNT(*) AS total FROM ({_payments_ledger_sql(real_where, deposit_where, legacy_where)}) ledger""",
-        [*real_params, *deposit_params, *legacy_params],
+        f"""SELECT COUNT(*) AS total FROM ({_payments_ledger_sql(real_where, deposit_where, legacy_where)}{prepaid_sql}) ledger""",
+        [*real_params, *deposit_params, *legacy_params, *prepaid_params],
     ).fetchone()
     return int(row["total"] if row else 0)
 
@@ -445,18 +451,19 @@ def payment_method_totals(include_archived=False, branch_id=None, date_from="", 
     # order-stored deposit refunds are subtracted here.
     real_where, real_params = _payment_where(include_archived, branch_id, date_from, date_to)
     deposit_where, deposit_params = _deposit_refund_where(include_archived, branch_id, date_from, date_to)
-    totals = {"card": 0.0, "cash": 0.0, "eft": 0.0}
+    totals = {"card": 0.0, "cash": 0.0, "eft": 0.0, "other": 0.0}
     rows = get_db().execute(
         f"""SELECT LOWER(COALESCE(p.method, '')) AS method, COALESCE(SUM(p.amount), 0) AS total
         FROM payments p
         LEFT JOIN orders o ON o.id = p.order_id
         WHERE {' AND '.join(real_where)}
-          AND LOWER(COALESCE(p.method, '')) IN ('card', 'cash', 'eft')
+          AND LOWER(COALESCE(p.method, '')) <> 'account'
         GROUP BY LOWER(COALESCE(p.method, ''))""",
         real_params,
     ).fetchall()
     for row in rows:
-        totals[row["method"]] = round(float(row["total"] or 0), 2)
+        key = row["method"] if row["method"] in ("card", "cash", "eft") else "other"
+        totals[key] = round(totals[key] + float(row["total"] or 0), 2)
     refund_rows = get_db().execute(
         f"""SELECT LOWER(COALESCE(o.deposit_process_method, '')) AS method,
                   COALESCE(SUM(o.deposit_refund_amount), 0) AS total
@@ -472,6 +479,9 @@ def payment_method_totals(include_archived=False, branch_id=None, date_from="", 
     for method, amount in legacy_receipt_totals(branch_id, date_from, date_to, include_archived).items():
         if method in totals:
             totals[method] = round(totals[method] + amount, 2)
+    from app.services.financial_receipts import receipt_totals
+    for method, amount in receipt_totals('prepaid_fundings',branch_id,date_from,date_to,include_archived).items():
+        totals[method] = round(totals[method] + amount, 2)
     return totals
 
 
