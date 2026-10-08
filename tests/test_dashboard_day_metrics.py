@@ -994,3 +994,84 @@ def test_legacy_card_receipts_are_not_double_counted(app):
     assert day['revenue'] == 1450.0 + 200.0
     assert day['revenue'] == (day['card_payments'] + day['cash_payments']
                               + day['eft_payments'] + day['other_payments'])
+
+
+def _eft_refund_order(db, number, amount, day=TODAY, branch_id=1, method='eft'):
+    order_id = _order(db, number, 'returned', YESTERDAY, branch_id=branch_id)
+    db.execute(
+        """UPDATE orders SET deposit_refund_amount=?, deposit_process_method=?,
+        deposit_processed_at=? WHERE id=?""",
+        (amount, method, f'{day}T18:58:00' if day else '', order_id),
+    )
+    return order_id
+
+
+@pytest.mark.parametrize('payment_refund,deposit_refund', [(420, 420), (340, 125.25)])
+def test_eft_card_counts_both_same_order_refunds_once(app, payment_refund, deposit_refund):
+    """ABI-341953148: customer-credit payout + separate security-deposit payout."""
+    seed_days(app)
+    with app.app_context():
+        db = get_db()
+        order_id = _eft_refund_order(db, 'ORD-EFT-BOTH', deposit_refund)
+        _payment(db, order_id, -payment_refund, 'EFT', f'{TODAY}T18:57:00')
+        # These are explicitly reversed records, not additional payouts.
+        _payment(db, order_id, -340, 'eft', TODAY, status='archived', deleted_at=TODAY)
+        _payment(db, order_id, -500, 'eft', TODAY, deleted_at=TODAY)
+        _payment(db, order_id, -900, 'eft', TODAY, status='pending')
+        db.commit()
+
+    day = metrics(app, user_id=1, user_role='owner')
+    assert day['eft_payments'] == round(700 - payment_refund - deposit_refund, 2)
+    assert day['cash_payments'] == 250
+    assert day['card_payments'] == 500
+    assert day['other_payments'] == 0
+    # Preserve the existing received/revenue convention (card is net too):
+    # separate deposit payouts affect their method card, not received revenue.
+    assert day['revenue'] == 1450 - payment_refund
+    assert day['revenue'] == round(sum(day[key] for key in (
+        'eft_payments', 'cash_payments', 'card_payments', 'other_payments'
+    )) + deposit_refund, 2)
+
+
+def test_eft_deposit_payout_date_branch_method_and_reversal_isolation(app):
+    seed_days(app)
+    with app.app_context():
+        db = get_db()
+        _eft_refund_order(db, 'ORD-EFT-ONE', 125.25, method='EFT')
+        _eft_refund_order(db, 'ORD-EFT-TWO', 80, branch_id=2)
+        _eft_refund_order(db, 'ORD-EFT-OLD', 60, day=YESTERDAY)
+        _eft_refund_order(db, 'ORD-EFT-UNPROCESSED', 90, day='')
+        _eft_refund_order(db, 'ORD-EFT-REVERSED', 0, day='')
+        _eft_refund_order(db, 'ORD-CASH-ONLY', 50, method='cash')
+        _eft_refund_order(db, 'ORD-CARD-ONLY', 40, method='card')
+        _eft_refund_order(db, 'ORD-CREDIT-ONLY', 30, method='customer_credit')
+        db.commit()
+
+    all_branches = day_cards(app, **owner_session())
+    one = day_cards(app, filter_branch=1, **owner_session())
+    two = day_cards(app, filter_branch=2, **owner_session())
+    staff = day_cards(app, filter_branch=2, user_id=2, user_role='staff',
+                      branch_id=1, branch_ids=[1], can_view_all_branches=False)
+    assert all_branches['eft_payments'] == 494.75
+    assert one['eft_payments'] == 574.75
+    assert two['eft_payments'] == -80
+    assert staff['eft_payments'] == one['eft_payments']  # forbidden filter stays at own depot
+    assert all_branches['cash_payments'] == 250
+    assert all_branches['card_payments'] == 460
+    with app.test_request_context():
+        session.update(owner_session())
+        assert dashboard_day_metrics(YESTERDAY)['eft_payments'] == -60
+
+
+def test_eft_refunds_render_in_full_and_lazy_dashboard(client, app):
+    with app.app_context():
+        db = get_db()
+        order_id = _eft_refund_order(db, 'ORD-EFT-SMOKE', 420)
+        _payment(db, order_id, -420, 'eft', TODAY)
+        db.commit()
+    login(client)
+    for url in (f'/dashboard?day={TODAY}&branch=1',
+                f'/dashboard/partials/day?day={TODAY}&branch=1'):
+        response = client.get(url)
+        assert response.status_code == 200
+        assert re.search(r'Total EFT payments</small>\s*<b>R-840.00</b>', response.get_data(as_text=True))

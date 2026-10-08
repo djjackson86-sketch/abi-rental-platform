@@ -4,7 +4,7 @@ from app.db import get_db
 from app.services.credit_limits import order_paid_sql
 from app.services.access import customer_branch_clause, order_branch_clause, product_branch_clause
 from app.services.timezone import local_now, local_now_iso, parse_iso_datetime
-from app.services.cash import card_received as net_card_received
+from app.services.cash import card_received as net_card_received, deposit_refunds
 from app.services.legacy_balances import legacy_payment_totals
 
 
@@ -307,10 +307,11 @@ def dashboard_day_metrics(day=None, branch_id=None):
 
     Revenue for the day is money RECEIVED today (paid payments, by payment date),
     not the value of the orders raised today — the client asked for "actual
-    payments received, not just created orders". The three named method cards
-    plus the "Other" card add up to it exactly (ticket ABI-341953066: "Other" is
-    a selectable method, and legacy/imported methods land on that same line
-    rather than showing in no card at all).
+    payments received, not just created orders". Payments (including negative
+    refund rows) by named method plus "Other" reconcile to received revenue.
+    Card and EFT totals additionally deduct separately recorded deposit payouts;
+    those payouts do not change the existing received-revenue convention.
+    Legacy/imported payment methods land on the "Other" line.
 
     The two trailer cards are a snapshot, not a day figure: **out** is what is on
     hire (a ``started`` order), and **in** is the rest of the yard — the active
@@ -453,9 +454,12 @@ def dashboard_day_metrics(day=None, branch_id=None):
         "revenue": revenue,
         "card_payments": net_card_received(day, branch_id),
         "cash_payments": payment_total("cash"),
-        "eft_payments": payment_total("eft"),
-        # Everything that is not one of the three named cards (ticket
-        # ABI-341953066). Kept last so cash + EFT + card + other == revenue.
+        # EFT deposit payouts live on orders, while ordinary/customer-credit
+        # refunds are already negative payment rows. Deduct only the separate
+        # deposit payout once, on its payout day, just like the card/POS total.
+        "eft_payments": money(payment_total("eft") - deposit_refunds(day, branch_id, "eft")),
+        # Everything that is not one of the three named payment methods.
+        # Deposit payouts above are separate from the received revenue total.
         "other_payments": other_payments(),
         "reservations": reservations,
         "reservation_pickups": reservation_pickups,
