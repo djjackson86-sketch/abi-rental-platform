@@ -88,10 +88,11 @@ def install_credit_guards(db):
     for suffix in ('order_insert', 'order_update', 'invoice_insert', 'invoice_update'):
         db.execute('DROP TRIGGER IF EXISTS customer_credit_' + suffix)
     active = "COALESCE(NEW.status, 'paid') = 'paid' AND COALESCE(NEW.deleted_at, '') = ''"
-    for event, suffix, excluded in [('INSERT', 'insert', '-1'), ('UPDATE', 'update', 'OLD.id')]:
+    for event, suffix, excluded in [('INSERT', 'insert', '-1'), ('UPDATE', 'update_v2', 'OLD.id')]:
+        unchanged = "" if event == 'INSERT' else "AND NOT (NEW.order_id = OLD.order_id AND NEW.amount = OLD.amount AND LOWER(COALESCE(OLD.method, '')) = 'account' AND NEW.status IS OLD.status AND NEW.deleted_at IS OLD.deleted_at)"
         paid = f"({_paid_sql('o.id', True, excluded)} + {_paid_sql('o.id', False, excluded)})"
         db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_payment_{suffix}
-            BEFORE {event} ON payments WHEN LOWER(COALESCE(NEW.method, '')) = 'account' AND {active}
+            BEFORE {event} ON payments WHEN LOWER(COALESCE(NEW.method, '')) = 'account' AND {active} {unchanged}
             BEGIN
                 SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM orders o JOIN customers c ON c.id = o.customer_id
                     WHERE o.id = NEW.order_id AND c.credit_allowed = 1 AND NEW.amount > 0
@@ -102,6 +103,7 @@ def install_credit_guards(db):
                     {_exposure_sql(excluded=excluded, extra_account='NEW.amount')}, 2) > ROUND(c.credit_limit, 2))
                     THEN RAISE(ABORT, '{CREDIT_LIMIT_ERROR}') END;
             END""")
+    db.execute('DROP TRIGGER IF EXISTS account_payment_update')
     # Receipt reversals/edits must not restore more borrowing than is available.
     # Compare exposure so repayments still work after an owner lowers the limit.
     for event, suffix in [('UPDATE', 'update'), ('DELETE', 'delete')]:

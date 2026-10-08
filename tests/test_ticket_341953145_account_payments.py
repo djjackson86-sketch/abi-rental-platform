@@ -107,6 +107,9 @@ def test_edits_method_switch_archival_and_repayments(client, app):
         record_payment(oid, {'method':'cash', 'amount':'50'})
         assert outstanding_debt(cid) == 65
         assert payment_total(oid) == 115  # no double counting / false overpayment
+        account_id=db.execute("SELECT id FROM payments WHERE order_id=? AND method='account' AND status='paid'",(oid,)).fetchone()['id']
+        update_payment(account_id, {'amount':'115','method':'account','reference':'Reference after repayment'})
+        assert outstanding_debt(cid)==65
         record_payment(oid, {'method':'eft', 'amount':'65'})
         assert outstanding_debt(cid) == 0 and payment_total(oid) == 115
         with pytest.raises(ValueError, match='credit to refund'):
