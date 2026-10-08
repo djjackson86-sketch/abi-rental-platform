@@ -29,6 +29,19 @@ class TursoConnection:
         if url.startswith("libsql://"):
             url = "https://" + url.removeprefix("libsql://")
         self._client = create_client_sync(url, **kwargs)
+        # Turso can return a flat SQL error with HTTP 200. libsql-client 0.3.x
+        # assumes every 200 contains "result" and otherwise raises KeyError,
+        # losing trigger validation messages. Normalise BEFORE parsing; never
+        # retry a write, since replaying a payment would risk double charging.
+        http_client = self._client._client
+        original_send = http_client._send
+        async def checked_send(*args, **send_kwargs):
+            from libsql_client import LibsqlError
+            response = await original_send(*args, **send_kwargs)
+            if isinstance(response, dict) and "code" in response and "message" in response and "result" not in response:
+                raise LibsqlError(response["message"], response["code"])
+            return response
+        http_client._send = checked_send
         self.total_changes = 0
 
     def execute(self, sql, params=None):
