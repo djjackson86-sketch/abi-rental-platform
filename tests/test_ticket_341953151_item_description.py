@@ -137,6 +137,22 @@ def drawn_pdf_text(pdf_bytes):
     return "\n".join(chunks)
 
 
+def test_long_description_is_not_truncated_in_invoice_or_quote(client, app):
+    login(client)
+    seed_customer(client)
+    product_id = seed_product(client, description='')
+    description = ' '.join('DETAIL%03d' % i for i in range(200))
+    order_id = create_order(client, [{'product_id': product_id, 'description': description}])
+    documents = create_documents(client, app, order_id, ('invoice', 'quote'))
+    for document_id in documents.values():
+        response = client.get(f'/documents/{document_id}/pdf')
+        if response.status_code == 404:
+            response = client.get(f'/documents/{document_id}/download.pdf')
+        text = drawn_pdf_text(response.data)
+        assert 'DETAIL000' in text and 'DETAIL199' in text
+        assert all('DETAIL%03d' % i in text for i in range(200))
+
+
 def test_order_form_has_description_box_and_product_description_data(client):
     login(client)
     seed_product(client, description="Rigid coupling trailer, 750kg GVM.")

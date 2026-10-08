@@ -95,7 +95,7 @@ def seed_customer_and_products(client, count):
         created = client.post('/inventory/new', data={
             'name': item_name(index),
             'sku': f'PAG-{index:03d}',
-            'description': 'Item added after the documents were created.',
+            'description': '',  # This fixture pins the unchanged no-description layout.
             'product_type': 'sale',
             'price_amount': f'{item_price(index):.2f}',
             'price_unit': 'each',

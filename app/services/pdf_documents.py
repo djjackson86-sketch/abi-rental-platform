@@ -1052,34 +1052,27 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 
     def add_item_rows(text, page_items, start_index, first_row_y):
         y_pos = first_row_y
-        for offset, item in enumerate(page_items):
-            line_index = start_index + offset
+        for offset, entry in enumerate(page_items):
+            item = entry['item']
+            line_index = entry['index']
             name = item['product_name'] or item['custom_name'] or 'Item'
             sku = item['product_sku'] or ''
             description = (_doc_value(item, 'description', '') or '').strip()
             line_view = tax_view['lines'][line_index] if line_index < len(tax_view['lines']) else {
                 'unit_excl': 0.0, 'subtotal_excl': 0.0, 'tax': 0.0, 'total_incl': 0.0, 'rental_days': None}
             days_text = str(line_view.get('rental_days')) if line_view.get('rental_days') else '-'
-            # Ticket ABI-341953151: the per-item description prints on the rows
-            # beneath the product name (still the product cell, normal weight).
-            # When there is no description the original 3-line name wrap is kept
-            # unchanged; with one, the name gets 2 lines and the description the rest.
-            if description:
-                product_lines = _wrap_pdf_cell_text(name, max_chars=42, max_lines=2)
-                product_lines.extend(_wrap_pdf_cell_text(description, max_chars=42, max_lines=max(1, 3 - len(product_lines))))
-            else:
-                product_lines = _wrap_pdf_cell_text(name, max_chars=42, max_lines=3)
-            if sku and len(product_lines) < 3:
-                product_lines.append(str(sku)[:42])
-            product_lines = product_lines[:3]
-            _add_pdf_lines(text, INVOICE_TABLE_X, y_pos, product_lines, size=8, leading=10, max_lines=3)
+            product_lines = entry['lines']
+            _add_pdf_lines(text, INVOICE_TABLE_X, y_pos, product_lines, size=8, leading=10, max_lines=len(product_lines))
+            if entry['continued']:
+                y_pos -= entry['height']
+                continue
             _add_pdf_lines(text, QTY_COLUMN_X, y_pos, [str(item['quantity'])], size=8)
             _add_pdf_lines(text, DAYS_COLUMN_X, y_pos, [days_text], size=8)
             text.append(_pdf_right_text(RATE_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['unit_excl']:.2f}", size=8))
             text.append(_pdf_right_text(SUBTOTAL_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['subtotal_excl']:.2f}", size=8))
             text.append(_pdf_right_text(TAX_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['tax']:.2f}", size=8))
             text.append(_pdf_right_text(TOTAL_INCL_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['total_incl']:.2f}", size=8))
-            y_pos -= 43
+            y_pos -= entry['height']
         return y_pos
 
     # Fill page 1 by measured capacity instead of leaving two rows' worth of
@@ -1094,9 +1087,36 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     def rows_that_fit(first_row_y):
         return max(1, int((first_row_y - last_row_y_floor) // 43) + 1)
 
-    first_page_limit = rows_that_fit(table_y - 24)
-    first_page_items = list(items[:first_page_limit])
-    remaining_items = list(items[first_page_limit:])
+    # Variable-height description rows; long descriptions continue on the next
+    # page without dropping text or repeating financial amounts.
+    import textwrap
+    prepared = []
+    for index, item in enumerate(items):
+        description = (_doc_value(item, 'description', '') or '').strip()
+        name = item['product_name'] or item['custom_name'] or 'Item'
+        lines = _wrap_pdf_cell_text(name, max_chars=42, max_lines=3)
+        if description:
+            lines += textwrap.wrap(description, width=42) or ['']
+        sku = item['product_sku'] or ''
+        if sku and (description or len(lines) < 3):
+            lines.append(str(sku)[:42])
+        for offset in range(0, len(lines), 12):
+            chunk = lines[offset:offset + 12]
+            prepared.append({'item': item, 'index': index, 'lines': chunk,
+                'height': max(43, len(chunk) * 10 + 13), 'continued': offset > 0})
+
+    def take_rows(pending, first_y):
+        taken = []
+        remaining_y = first_y
+        floor = summary_floor_y + 12
+        while pending and remaining_y - pending[0]['height'] >= floor:
+            entry = pending.pop(0)
+            taken.append(entry)
+            remaining_y -= entry['height']
+        return taken
+
+    remaining_items = prepared[:]
+    first_page_items = take_rows(remaining_items, table_y - 24)
     add_table_header(draw_commands, text_commands, table_y)
     y = add_item_rows(text_commands, first_page_items, 0, table_y - 24)
 
@@ -1107,8 +1127,9 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         page_number += 1
         text_commands.append('ET')
         streams.append('\n'.join(draw_commands + text_commands).encode('latin-1', 'replace'))
-        page_items = remaining_items[:rows_that_fit(continuation_table_y - 24)]
-        remaining_items = remaining_items[len(page_items):]
+        page_items = take_rows(remaining_items, continuation_table_y - 24)
+        if not page_items:
+            raise ValueError('Description row cannot fit on a document page')
         draw_commands = [logo_draw_command] if logo_draw_command else []
         text_commands = ['BT']
         text_commands.append(_pdf_text_command(455, 760, f'{display_label} {display_number}', size=8.5, font='F2'))
