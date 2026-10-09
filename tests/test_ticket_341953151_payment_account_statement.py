@@ -79,6 +79,17 @@ def test_choose_method_and_other_card(client,app):
         assert db.execute('SELECT method FROM payments WHERE id=?',(pid,)).fetchone()['method']=='cash'
         db.execute("INSERT INTO payments(order_id,amount,method,status,created_at) VALUES(?,20,'deposit_applied','paid',?)",(oid,DAY));db.commit()
         assert payment_method_totals()['other']==20
+        db.execute("UPDATE payments SET method='deposit_applied' WHERE id=?",(pid,));db.commit()
+    # A stored method with no rendered option must stay preserved on the edit page
+    # (no forced re-pick that would rewrite its history); new entries still require a choice.
+    edit=client.get(f'/payments/{pid}/edit').data
+    assert b'<option value="deposit_applied" selected>' in edit
+    assert b'<select name="method" required>' not in edit
+    result=client.post(f'/payments/{pid}/edit',data={'amount':'10','method':'','reference':'unchanged'},follow_redirects=True)
+    assert result.status_code==200
+    with app.app_context():
+        row=get_db().execute('SELECT method,amount,reference FROM payments WHERE id=?',(pid,)).fetchone()
+        assert row['method']=='deposit_applied' and row['amount']==10.0 and row['reference']=='unchanged'
     html=client.get(f'/orders/{oid}').data
     assert b'<option value="">Choose method</option>' in html
     assert b'OTHER PAYMENTS' in client.get('/payments').data
