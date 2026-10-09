@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
+import re
 
 from app.db import get_db, now
 from app.services.credit_limits import execute_credit_checked
@@ -216,6 +217,31 @@ def _parse_document_datetime(value):
         return parse_iso_datetime(value)
     except ValueError:
         return None
+
+
+def effective_document_date(document):
+    """Issue date, with the existing SA-local creation date for legacy rows.
+
+    Listings and financial reports intentionally retain creation-date semantics.
+    """
+    return _row_get(document, 'document_date') or document_date(document['created_at'])
+
+
+def save_document_date(document_id, value):
+    document = get_document(document_id)
+    if not document:
+        raise ValueError('Document not found')
+    if document['document_type'] not in {'invoice', 'quote'}:
+        raise ValueError('Date editing is available for invoices and quotes only')
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
+        raise ValueError('Enter a valid document date (YYYY-MM-DD)')
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        raise ValueError('Enter a valid document date (YYYY-MM-DD)') from None
+    db = get_db()
+    db.execute('UPDATE documents SET document_date = ? WHERE id = ?', (value, document_id))
+    db.commit()
 
 
 def document_date(value):

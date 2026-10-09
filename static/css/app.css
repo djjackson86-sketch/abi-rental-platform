@@ -152,6 +152,7 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 /* Invoice print/PDF-friendly portrait layout */
 @page invoice-portrait{size:A4 portrait;margin:14mm}
 @media print{
+  .document-date-form{display:none!important}
   .document-type-invoice{page:invoice-portrait;width:100%;max-width:190mm;margin:0 auto;padding:0;border:0;box-shadow:none}
   .document-type-invoice .invoice-header-grid{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(34mm,.56fr) minmax(58mm,.98fr);gap:9mm;align-items:start;break-inside:avoid}
   .document-type-invoice .invoice-detail-stack{grid-column:3;gap:8mm;max-width:58mm;justify-self:end;break-inside:avoid}

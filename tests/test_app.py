@@ -3711,7 +3711,9 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     totals_pos = invoice.data.index(b'class="totals"')
     assert customer_pos < table_pos < totals_pos < banking_pos
     assert b'Unnumbered' not in invoice.data
-    assert invoice.data.index(b'Invoice date:') < invoice.data.index(invoice_date.encode())
+    # The editable issue-date input appears before the printed document.
+    printed_document = invoice.data.split(b'class="invoice-number-block"', 1)[1]
+    assert printed_document.index(b'Invoice date:') < printed_document.index(invoice_date.encode())
     assert invoice.data.index(b'ORD-10145') < invoice.data.index(b'Pickup:') < invoice.data.index(b'2026-07-01') < invoice.data.index(b'Return:') < invoice.data.index(b'2026-07-02') < invoice.data.index(b'Rental days 2')
     assert b'+27 12 999 0000 | wonderboom@example.test' not in invoice.data
     assert invoice.data.index(b'Wonderboom') < invoice.data.index(b'+27 12 999 0000') < invoice.data.index(b'wonderboom@example.test') < invoice.data.index(b'22 Wonderboom Avenue')

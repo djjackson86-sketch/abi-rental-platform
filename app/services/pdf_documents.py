@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flask import current_app
 
-from app.services.documents import display_document_label, display_document_number, document_accepted_stamp, document_date, document_datetime, document_has_rental_items, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
+from app.services.documents import display_document_label, display_document_number, document_accepted_stamp, document_date, document_datetime, effective_document_date, document_has_rental_items, document_paid_stamp, document_tax_view, label_for, printable_document, rental_days_label
 from app.services.customers import custom_fields_for
 from app.services.settings import get_company_settings
 from app.services.timezone import display_local_datetime
@@ -944,7 +944,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     invoice_lines = []
     if display_number:
         invoice_lines.append(display_number)
-    invoice_lines.extend([f'{display_label} date:', document_date(document["created_at"])])
+    invoice_lines.extend([f'{display_label} date:', effective_document_date(document)])
     _add_pdf_lines(text_commands, detail_x, 746, invoice_lines, size=8.5, leading=14)
 
     text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
@@ -1458,7 +1458,7 @@ def document_pdf_bytes(document_id):
     ]
     lines = [f'{display_label} {display_number}']
     if document['document_type'] == 'invoice':
-        lines.append(f'Invoice date: {document_date(document["created_at"])}')
+        lines.append(f'Invoice date: {effective_document_date(document)}')
     lines.append(f'Issuer: {issuer_name}')
     if issuer_email:
         lines.append(f'Issuer email: {issuer_email}')

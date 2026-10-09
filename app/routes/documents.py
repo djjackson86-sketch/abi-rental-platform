@@ -11,6 +11,8 @@ from app.services.documents import (
     display_document_number,
     document_date,
     document_datetime,
+    effective_document_date,
+    save_document_date,
     document_filter_counts,
     document_has_rental_items,
     document_paid_stamp,
@@ -215,6 +217,7 @@ def detail(document_id):
         custom_fields=custom_fields_for(document),
         document_date=document_date,
         document_datetime=document_datetime,
+        effective_document_date=effective_document_date,
         rental_days_label=rental_days_label(document),
         email_message=email_message,
         email_signature=email_signature,
@@ -271,6 +274,21 @@ def finalize(document_id):
     except ValueError as exc:
         flash(str(exc), "error")
     return redirect(url_for("documents.detail", document_id=document_id))
+
+
+@bp.post("/<int:document_id>/date")
+@login_required
+def save_date(document_id):
+    document = get_document(document_id)
+    if not document:
+        abort(404)
+    _ensure_document_access(document)
+    try:
+        save_document_date(document_id, request.form.get('document_date'))
+        flash('Document date saved', 'success')
+    except ValueError as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('documents.detail', document_id=document_id))
 
 
 @bp.post("/<int:document_id>/mark-sent")
