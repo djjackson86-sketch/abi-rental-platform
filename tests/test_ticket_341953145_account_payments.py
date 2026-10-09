@@ -172,17 +172,17 @@ def test_opening_exposure_upgrade_preserved_once_and_settled_by_receipts(client,
         db.execute("UPDATE documents SET status='finalized', number='INV-HISTORICAL' WHERE id=?", (did,))
         db.execute("DELETE FROM credit_facility_opening"); db.commit()
         run_migrations(db)
-        assert outstanding_debt(cid) == 115
+        assert outstanding_debt(cid) == 0
         assert get_document(did)['status'] == 'finalized'
         assert finalize_document(did) == did  # no retrospective block
         new = helpers.order(cid); record_payment(new, {'method':'cash','amount':'1'})
         finalize_document(create_document(new,'invoice'))
         run_migrations(db); run_migrations(db)
-        assert outstanding_debt(cid) == 115  # no new implicit exposure
+        assert outstanding_debt(cid) == 0  # no new implicit exposure
         account(oid,30)
-        assert outstanding_debt(cid) == 115  # no double charge on opening
+        assert outstanding_debt(cid) == 30  # only the saved Account allocation counts
         record_payment(oid, {'method':'eft','amount':'50'})
-        assert outstanding_debt(cid) == 65
+        assert outstanding_debt(cid) == 30
         assert get_document(did)['number'] == 'INV-HISTORICAL'
 
 

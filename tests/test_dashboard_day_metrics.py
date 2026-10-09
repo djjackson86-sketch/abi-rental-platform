@@ -1027,10 +1027,10 @@ def test_eft_card_counts_both_same_order_refunds_once(app, payment_refund, depos
     assert day['other_payments'] == 0
     # Preserve the existing received/revenue convention (card is net too):
     # separate deposit payouts affect their method card, not received revenue.
-    assert day['revenue'] == 1450 - payment_refund
+    assert day['revenue'] == round(1450 - payment_refund - deposit_refund, 2)
     assert day['revenue'] == round(sum(day[key] for key in (
         'eft_payments', 'cash_payments', 'card_payments', 'other_payments'
-    )) + deposit_refund, 2)
+    )), 2)
 
 
 def test_eft_deposit_payout_date_branch_method_and_reversal_isolation(app):
@@ -1056,7 +1056,7 @@ def test_eft_deposit_payout_date_branch_method_and_reversal_isolation(app):
     assert one['eft_payments'] == 574.75
     assert two['eft_payments'] == -80
     assert staff['eft_payments'] == one['eft_payments']  # forbidden filter stays at own depot
-    assert all_branches['cash_payments'] == 250
+    assert all_branches['cash_payments'] == 200
     assert all_branches['card_payments'] == 460
     with app.test_request_context():
         session.update(owner_session())

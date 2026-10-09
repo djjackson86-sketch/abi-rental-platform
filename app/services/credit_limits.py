@@ -20,7 +20,7 @@ def _paid_sql(order='o.id', account=False, excluded='-1'):
 
 
 def _opening_sql(order='o.id'):
-    return f"COALESCE((SELECT amount FROM credit_facility_opening WHERE order_id = {order}), 0)"
+    return "0"  # only explicit saved Account allocations consume credit (ABI-341953153)
 
 
 def _exposure_sql(order='o.id', total='o.total', excluded='-1', extra_account='0', extra_cash='0'):
@@ -74,24 +74,14 @@ def install_credit_guards(db):
     db.execute("""CREATE TABLE IF NOT EXISTS credit_facility_opening (
         snapshot_key TEXT PRIMARY KEY, order_id INTEGER UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
         amount REAL NOT NULL DEFAULT 0)""")
-    historical_debt = f"MAX(ROUND(o.total - {_paid_sql()}, 2), 0)"
-    # Sentinel and snapshot in one statement: restarts and concurrent workers
-    # cannot resnapshot or add newly created invoices to opening exposure.
-    db.execute(f"""INSERT OR IGNORE INTO credit_facility_opening (snapshot_key, order_id, amount)
-        SELECT snapshot_key, order_id, amount FROM (
-            SELECT 'complete' AS snapshot_key, NULL AS order_id, 0 AS amount
-            UNION ALL SELECT CAST(o.id AS TEXT), o.id, {historical_debt}
-            FROM orders o JOIN customers c ON c.id = o.customer_id
-            WHERE c.credit_allowed = 1 AND EXISTS (SELECT 1 FROM documents d
-                WHERE d.order_id = o.id AND d.document_type = 'invoice' AND d.status = 'finalized')
-        ) WHERE NOT EXISTS (SELECT 1 FROM credit_facility_opening WHERE snapshot_key = 'complete')""")
+    # Retain any historical snapshot rows for audit; never derive facility use from unpaid invoices.
     for suffix in ('order_insert', 'order_update', 'invoice_insert', 'invoice_update'):
         db.execute('DROP TRIGGER IF EXISTS customer_credit_' + suffix)
     active = "COALESCE(NEW.status, 'paid') = 'paid' AND COALESCE(NEW.deleted_at, '') = ''"
     for event, suffix, excluded in [('INSERT', 'insert', '-1'), ('UPDATE', 'update_v2', 'OLD.id')]:
         unchanged = "" if event == 'INSERT' else "AND NOT (NEW.order_id = OLD.order_id AND NEW.amount = OLD.amount AND LOWER(COALESCE(OLD.method, '')) = 'account' AND NEW.status IS OLD.status AND NEW.deleted_at IS OLD.deleted_at)"
         paid = f"({_paid_sql('o.id', True, excluded)} + {_paid_sql('o.id', False, excluded)})"
-        db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_payment_{suffix}
+        db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_payment_153_{suffix}
             BEFORE {event} ON payments WHEN LOWER(COALESCE(NEW.method, '')) = 'account' AND {active} {unchanged}
             BEGIN
                 SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM orders o JOIN customers c ON c.id = o.customer_id
@@ -111,22 +101,22 @@ def install_credit_guards(db):
         old_account = f"CASE WHEN LOWER(COALESCE(OLD.method, '')) = 'account' AND {old_active} THEN OLD.amount ELSE 0 END"
         old_cash = f"CASE WHEN LOWER(COALESCE(OLD.method, '')) <> 'account' AND {old_active} THEN OLD.amount ELSE 0 END"
         before = _exposure_sql(excluded='OLD.id', extra_account=old_account, extra_cash=old_cash)
-        db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_receipt_{suffix}
+        db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_receipt_153_{suffix}
             AFTER {event} ON payments WHEN EXISTS (SELECT 1 FROM orders o JOIN customers c ON c.id = o.customer_id
                 WHERE o.id = OLD.order_id AND {_exposure_sql()} > {before}
                 AND ROUND({debt_sql('o.customer_id')}, 2) > ROUND(c.credit_limit, 2))
             BEGIN SELECT RAISE(ABORT, '{CREDIT_LIMIT_ERROR}'); END""")
     before_insert = _exposure_sql(excluded='NEW.id')
-    db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_receipt_insert
+    db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_receipt_153_insert
         AFTER INSERT ON payments WHEN EXISTS (SELECT 1 FROM orders o JOIN customers c ON c.id = o.customer_id
             WHERE o.id = NEW.order_id AND {_exposure_sql()} > {before_insert}
             AND ROUND({debt_sql('o.customer_id')}, 2) > ROUND(c.credit_limit, 2))
         BEGIN SELECT RAISE(ABORT, '{CREDIT_LIMIT_ERROR}'); END""")
-    db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_order_total_guard
+    db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_order_total_guard_153
         BEFORE UPDATE OF total ON orders WHEN NEW.total > OLD.total
         AND {_exposure_sql('OLD.id', 'NEW.total')} > {_exposure_sql('OLD.id', 'OLD.total')}
         BEGIN SELECT RAISE(ABORT, 'This total change would restore settled Account borrowing; reverse the Account allocation before increasing the total'); END""")
-    db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_order_customer_guard
+    db.execute(f"""CREATE TRIGGER IF NOT EXISTS account_order_customer_guard_153
         BEFORE UPDATE OF customer_id ON orders WHEN NEW.customer_id IS NOT OLD.customer_id
         AND ({_opening_sql('OLD.id')} > 0 OR {_paid_sql('OLD.id', True)} > 0)
         BEGIN SELECT RAISE(ABORT, 'Reverse Account allocations before changing the customer; historical account orders cannot be reassigned'); END""")
@@ -140,3 +130,6 @@ def install_credit_guards(db):
             AND COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = NEW.order_id
                 AND COALESCE(p.status, 'paid') = 'paid' AND COALESCE(p.deleted_at, '') = ''), 0) <= 0
             BEGIN SELECT RAISE(ABORT, '{PAYMENT_REQUIRED_ERROR}'); END""")
+
+    for name in ('account_payment_insert', 'account_payment_update', 'account_payment_update_v2', 'account_receipt_update', 'account_receipt_delete', 'account_receipt_insert', 'account_order_total_guard', 'account_order_customer_guard'):
+        db.execute('DROP TRIGGER IF EXISTS ' + name)

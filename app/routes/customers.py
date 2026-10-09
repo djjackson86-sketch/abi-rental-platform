@@ -155,13 +155,13 @@ def detail(customer_id):
 @bp.get('/<int:customer_id>/account-statement.pdf')
 @login_required
 def account_statement_pdf(customer_id):
-    from app.services.account_statements import account_statement, account_statement_lines
-    from app.services.pdf_documents import simple_lines_pdf_bytes
+    from app.services.account_statements import account_statement
     view=account_statement(customer_id,request.args.get('date_from',''),request.args.get('date_to',''))
     if view is None:
         abort(404)
-    return Response(simple_lines_pdf_bytes(account_statement_lines(view)),mimetype='application/pdf',
-        headers={'Content-Disposition':f'inline; filename=account-statement-{customer_id}.pdf'})
+    return Response(customer_statement_pdf_bytes(view),mimetype='application/pdf',
+        headers={'Content-Disposition':f'inline; filename=account-statement-{customer_id}.pdf',
+                 'Cache-Control':'no-store, no-cache, max-age=0, must-revalidate'})
 
 
 @bp.post('/<int:customer_id>/prepaid-funding')

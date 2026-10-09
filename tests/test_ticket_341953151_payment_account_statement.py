@@ -56,14 +56,14 @@ def test_account_repaid_without_double_payment_and_statement(client,app):
         record_payment(oid,{'amount':'40','method':'eft','payment_date':USE_DAY})
         view=account_statement(cid)
         assert view['facility']['used']==75 and view['facility']['available']==425
-        assert view['orders'][0]['outstanding']==75
-        assert any(row['type']=='Order receipt / repayment' and row['amount']==40 for row in view['activity'])
+        assert view['summary_rows'][3][1]=='R75.00'
+        assert any(row['type']=='Repayment' and row['amount']==-40 for row in view['activity'])
         assert dashboard_day_metrics(USE_DAY)['revenue']==40
         assert dashboard_period_metrics(start_date=USE_DAY,end_date=USE_DAY)['revenue']==40
         assert payment_method_totals(date_from=DAY,date_to=DAY)['other']==0
     response=client.get(f'/customers/{cid}/account-statement.pdf')
     assert response.status_code==200 and response.data.startswith(b'%PDF')
-    assert b'ACCOUNT STATEMENT' in response.data and b'Credit usage: R75.00' in response.data
+    assert b'ACCOUNT STATEMENT' in response.data and b'Closing balance' in response.data and b'R75.00' in response.data
     assert b'Account Statement' in client.get(f'/customers/{cid}').data
 
 

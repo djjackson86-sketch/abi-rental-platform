@@ -253,6 +253,18 @@ def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
     received_sql += scope_sql
     received_params.extend(scope_params)
     received = row_dict(db.execute(received_sql, received_params).fetchone())
+    refund_sql = "SELECT COALESCE(SUM(o.deposit_refund_amount), 0) AS total FROM orders o WHERE COALESCE(o.deposit_refund_amount, 0) > 0"
+    refund_params = []
+    for bound, op in ((start_date, ">="), (end_date, "<=")):
+        if bound:
+            refund_sql += f" AND substr(o.deposit_processed_at, 1, 10) {op} ?"
+            refund_params.append(bound)
+    refund_sql += scope_sql
+    refund_params.extend(scope_params)
+    refunds = db.execute(refund_sql, refund_params).fetchone()["total"]
+    from app.services.payments import legacy_receipt_totals
+    legacy = sum(legacy_receipt_totals(branch_id, start_date or "", end_date or "").values())
+    received["revenue"] = money(float(received.get("revenue") or 0) + legacy - float(refunds or 0))
 
     product_sql = "SELECT COUNT(*) AS count FROM products p WHERE 1=1"
     product_params = []
@@ -403,7 +415,7 @@ def dashboard_day_metrics(day=None, branch_id=None):
     held_prepaid = receipt_totals('prepaid_fundings',branch_id,day,day)
     # Revenue for the day = money actually received today (paid payments, by
     # payment date), not the value of the orders raised today.
-    revenue = payment_total()
+    revenue = money(payment_total() - sum(deposit_refunds(day, branch_id, method) for method in ("cash", "card", "eft", "customer_credit", "other", "manual")))
     reservations = count(
         f"""SELECT COUNT(*) c FROM orders o
         WHERE substr(o.created_at, 1, 10) = ? AND o.status = 'reserved'{scope_sql}""",
@@ -455,14 +467,14 @@ def dashboard_day_metrics(day=None, branch_id=None):
         "customers": new_customers,
         "revenue": revenue,
         "card_payments": net_card_received(day, branch_id),
-        "cash_payments": money(payment_total("cash") + held_prepaid.get("cash",0)),
+        "cash_payments": money(payment_total("cash") + held_prepaid.get("cash",0) - deposit_refunds(day, branch_id, "cash")),
         # EFT deposit payouts live on orders, while ordinary/customer-credit
         # refunds are already negative payment rows. Deduct only the separate
         # deposit payout once, on its payout day, just like the card/POS total.
         "eft_payments": money(payment_total("eft") + held_prepaid.get("eft",0) - deposit_refunds(day, branch_id, "eft")),
         # Everything that is not one of the three named payment methods.
         # Deposit payouts above are separate from the received revenue total.
-        "other_payments": other_payments(),
+        "other_payments": money(other_payments() - sum(deposit_refunds(day, branch_id, method) for method in ("customer_credit", "other", "manual"))),
         "reservations": reservations,
         "reservation_pickups": reservation_pickups,
         "trailers_out": on_hire,

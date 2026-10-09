@@ -1358,6 +1358,8 @@ def _statement_first_page(view, logo_command):
 
 def _statement_summary_rows(view):
     """Opening/closing only make sense when the statement covers a range."""
+    if 'summary_rows' in view:
+        return view['summary_rows']
     rows = []
     ranged = bool(view.get('date_from') or view.get('date_to'))
     if ranged:
@@ -1428,7 +1430,10 @@ def customer_statement_pdf_bytes(view):
         statement_page['text'].append(_pdf_right_text(
             STATEMENT_RIGHT, STATEMENT_FOOTER_Y, f'Page {page_index} of {total_pages}', size=7.5))
         statement_page['text'].append('ET')
-        streams.append('\n'.join(statement_page['draw'] + statement_page['text']).encode('latin-1', 'replace'))
+        content = '\n'.join(statement_page['draw'] + statement_page['text'])
+        if view.get('title'):
+            content = content.replace(STATEMENT_TITLE, view['title'])
+        streams.append(content.encode('latin-1', 'replace'))
     return _pdf_objects(streams, image_object=image_object)
 
 
