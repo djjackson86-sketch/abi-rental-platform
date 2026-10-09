@@ -489,11 +489,17 @@ def customer_summary_for(customer):
     if credit_allowed and account_debt is None:
         from app.services.credit_limits import outstanding_debt
         account_debt = outstanding_debt(customer["id"])
+    # Ticket ABI-341953166: surface the facility's used figure beside the limit
+    # and the available credit. It rides on the same credit_limits basis the
+    # enforcement uses, and both callers precompute account_credit_debt, so this
+    # adds no query (the one-SQL-query customer picker stays intact).
+    account_credit_used = round(max(float(account_debt or 0), 0), 2) if credit_allowed else 0.0
     available_account_credit = round(max(credit_limit - float(account_debt or 0), 0), 2) if credit_allowed else 0.0
     return {
         "credit_allowed": credit_allowed,
         "credit_limit": credit_limit if credit_allowed else 0.0,
         "available_account_credit": available_account_credit,
+        "account_credit_used": account_credit_used,
         "id": customer["id"],
         "customer_type": customer["customer_type"] or "individual",
         "name": customer["name"] or "—",
@@ -837,6 +843,13 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
     else:
         period_label = "Full history"
 
+    # Ticket ABI-341953166: the customer-facing statement reports the shared
+    # credit facility summary (used / available). The definition lives in
+    # app.services.credit_limits.facility_summary so every surface — statement,
+    # customer page, new order, order detail — shows one consistent figure.
+    from app.services.credit_limits import facility_summary
+    facility = facility_summary(customer_id)
+
     return {
         "customer_id": customer["id"],
         "customer_name": customer["name"] or "-",
@@ -872,6 +885,11 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         "paid_total_display": _statement_money_display(paid_total),
         "closing_balance_display": _statement_money_display(closing_balance),
         "outstanding_balance_display": _statement_money_display(lifetime_invoiced - lifetime_paid),
+        "facility": facility,
+        "facility_enabled": facility["enabled"],
+        "facility_limit_display": _statement_money_display(facility["limit"]),
+        "facility_used_display": _statement_money_display(facility["used"]),
+        "facility_available_display": _statement_money_display(facility["available"]),
     }
 
 

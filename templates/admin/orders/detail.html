@@ -86,6 +86,8 @@
     <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>
     <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
     <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
+    {# Ticket ABI-341953166: used/available credit facility, beside the prepaid Customer Credit that stays on the payment method below. #}
+    {% if facility.enabled %}<div class="list-row"><span>Credit facility</span><b>R{{ '%.2f'|format(facility.used) }} used · R{{ '%.2f'|format(facility.available) }} available</b></div>{% endif %}
     {% if payment_summary.due_total < 0 %}
     <form method="post" action="{{ url_for('orders.refund_order', order_id=order.id) }}" class="payment-form refund-form">
       <h3>Refund credit</h3>
@@ -96,9 +98,8 @@
     {% endif %}
     <form method="post" action="{{ url_for('orders.record_order_payment', order_id=order.id) }}" class="payment-form">
       <h3>Record payment</h3>
-      <input type="hidden" name="account_request_id" value="{{ account_request_id }}">
-      {% if facility.enabled %}<p class="form-help">Account uses the credit facility, not prepaid customer credit. Facility available: R{{ '%.2f'|format(facility.available) }}. Cash/EFT/card received against this order settles its account debt.</p>{% endif %}
-      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method" required><option value="">Choose method</option><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option>{% if facility.enabled %}<option value="account">Account (facility available R{{ '%.2f'|format(facility.available) }})</option>{% endif %}{% if customer_credit_balance > 0 %}<option value="customer_credit">Use Customer Credit (R{{ '%.2f'|format(customer_credit_balance) }})</option>{% endif %}</select></label><label>Payment date<input type="datetime-local" name="payment_date" value="{{ default_payment_date }}" required></label></div>
+      {% if facility.enabled %}<p class="form-help">Unpaid orders reserve the credit facility, separate from prepaid Customer Credit. Available credit: R{{ '%.2f'|format(facility.available) }}. Repayments restore available credit.</p>{% endif %}
+      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method" required><option value="">Choose method</option><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option>{% if customer_credit_balance > 0 %}<option value="customer_credit">Use Customer Credit (R{{ '%.2f'|format(customer_credit_balance) }})</option>{% endif %}</select></label><label>Payment date<input type="datetime-local" name="payment_date" value="{{ default_payment_date }}" required></label></div>
       <label>Reference<input name="reference" placeholder="Payment reference or note"></label>
       <button class="btn primary" type="submit">Record payment</button>
     </form>

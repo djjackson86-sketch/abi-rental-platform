@@ -1371,6 +1371,14 @@ def _statement_summary_rows(view):
     rows.append(('Closing balance' if ranged else 'Balance outstanding',
                  (view.get('closing_balance_display') if ranged else view.get('outstanding_balance_display')) or 'R0.00',
                  True))
+    # Ticket ABI-341953166: the customer statement reports the shared credit
+    # facility summary (used / available) so a customer-facing statement carries
+    # the same facility figures as the customer page and the order screens.
+    facility = view.get('facility') or {}
+    if facility.get('enabled'):
+        rows.append(('Credit limit', view.get('facility_limit_display') or 'R0.00', False))
+        rows.append(('Credit used', view.get('facility_used_display') or 'R0.00', False))
+        rows.append(('Credit available', view.get('facility_available_display') or 'R0.00', True))
     return rows
 
 

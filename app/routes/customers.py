@@ -10,6 +10,7 @@ from app.services.customers import can_set_customer_credit, client_verified_labe
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
+from app.services.credit_limits import facility_summary
 from app.services.customer_credits import customer_credit_balance, customer_credit_entries
 from app.services.legacy_balances import legacy_balance_summary, record_legacy_payment
 
@@ -148,20 +149,11 @@ def detail(customer_id):
         legacy_balance=legacy_balance_summary(customer_id),
         legacy_payment_methods=[(method, LEGACY_PAYMENT_METHOD_LABELS[method]) for method in LEGACY_PAYMENT_METHODS],
         can_settle_legacy_balance=can_settle_legacy_balances(),
+        # Ticket ABI-341953166: the customer page shows the same used/available
+        # facility figures as the statement and the order screens.
+        facility=facility_summary(customer_id),
         funding_request_key=uuid.uuid4().hex,
     )
-
-
-@bp.get('/<int:customer_id>/account-statement.pdf')
-@login_required
-def account_statement_pdf(customer_id):
-    from app.services.account_statements import account_statement
-    view=account_statement(customer_id,request.args.get('date_from',''),request.args.get('date_to',''))
-    if view is None:
-        abort(404)
-    return Response(customer_statement_pdf_bytes(view),mimetype='application/pdf',
-        headers={'Content-Disposition':f'inline; filename=account-statement-{customer_id}.pdf',
-                 'Cache-Control':'no-store, no-cache, max-age=0, must-revalidate'})
 
 
 @bp.post('/<int:customer_id>/prepaid-funding')

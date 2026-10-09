@@ -25,7 +25,6 @@ def seed(app, debt=400, limit=1000, prepaid=250):
         db.execute('UPDATE customers SET credit_allowed=1, credit_limit=? WHERE id=?', (limit, active))
         if debt:
             oid = helpers.seed_order(db, active, 'CARD-INVOICE', total=debt)
-            db.execute("INSERT INTO payments(order_id,amount,method,status,created_at) VALUES (?,?,'account','paid','2026-10-01')", (oid,debt))
             db.execute("INSERT INTO documents(order_id,document_type,number,status,created_at) VALUES (?,'invoice','CARD-INV','finalized','2026-10-01')", (oid,))
         helpers.seed_credit(db, active, prepaid)
         db.commit()
@@ -43,14 +42,10 @@ def test_capacity_matches_enforcement_and_prepaid_is_independent(app, client, de
         assert summary['available_account_credit'] == available
         assert summary['customer_credit_balance'] == 250
         assert outstanding_debt(cid) == debt
-        from app.services.payments import record_payment
-        oid = helpers.seed_order(get_db(), cid, 'CAPACITY-CHECK', total=limit+1)
         with pytest.raises(ValueError, match='credit limit'):
-            record_payment(oid, {'method':'account','amount':str(available + .01)})
+            ensure_credit_capacity(cid, available + .01)
         if available:
-            record_payment(oid, {'method':'account','amount':str(available)})
-            from app.services.payments import archive_payment
-            archive_payment(get_db().execute('SELECT id FROM payments WHERE order_id=?',(oid,)).fetchone()['id'])
+            ensure_credit_capacity(cid, available)
         plain = _customer_summary_by_id(inactive)
         assert plain['credit_allowed'] is False
         assert plain['available_account_credit'] == plain['customer_credit_balance'] == 0
@@ -94,8 +89,8 @@ def test_payment_rules_retained_credit_and_single_query(app, client):
         db.set_trace_callback(None)
         assert len(queries) == 1
         summary = next(s for s in summaries if s['id'] == cid)
-        assert summary['available_account_credit'] == 680
-        assert outstanding_debt(cid) == 320
+        assert summary['available_account_credit'] == 180
+        assert outstanding_debt(cid) == 820
         assert summary['customer_credit_balance'] == 200
         print(f'Customer summaries: one SQL query, {elapsed:.4f}s')
 

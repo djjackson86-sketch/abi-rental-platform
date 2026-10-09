@@ -24,8 +24,8 @@ PAYMENT_LABELS = {
 # legacy row's own method (allowed through on edit below) or junk, and is
 # refused: the dashboard and the day report decide which money line a payment
 # lands on from this stored value, so a typo here would drop money from a total.
-PAYMENT_METHODS = ("cash", "eft", "card", "other", "customer_credit", "account", "manual")
-PAYMENT_METHOD_ERROR = "Payment method must be Cash, EFT, Card, Other, Account, Use Customer Credit, or Manual"
+PAYMENT_METHODS = ("cash", "eft", "card", "other", "customer_credit", "manual")
+PAYMENT_METHOD_ERROR = "Payment method must be Cash, EFT, Card, Other, Use Customer Credit, or Manual"
 
 
 def normalise_payment_method(value, fallback="manual"):
@@ -242,6 +242,8 @@ def update_payment(payment_id, form):
     # its own value is allowed through while anything else unknown is refused.
     if method not in PAYMENT_METHODS and method != existing_method:
         raise ValueError(PAYMENT_METHOD_ERROR)
+    if existing_method == 'account' and (method != existing_method or amount != float(payment['amount'])):
+        raise ValueError('Historical Account records cannot be changed into receipts')
     if existing_method == 'customer_credit' or method == 'customer_credit':
         raise ValueError('Reverse customer-credit settlements before changing them')
     reference = form.get("reference", "").strip()

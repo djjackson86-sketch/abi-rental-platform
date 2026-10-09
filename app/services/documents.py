@@ -100,8 +100,8 @@ def finalize_document(document_id):
         ).fetchone()
         if existing:
             raise ValueError('A finalized invoice already exists for this order')
-        if payment_total(document['order_id']) <= 0:
-            raise ValueError('Record at least one payment before finalising an invoice')
+        from app.services.credit_limits import ensure_invoice_finalisation
+        ensure_invoice_finalisation(document['order_id'])
     number = (document['number'] or '').strip()
     if document['document_type'] == 'invoice' and not number:
         number = _next_document_number('invoice')

@@ -51,7 +51,8 @@ def test_account_repaid_without_double_payment_and_statement(client,app):
     cid=helpers.setup_customer(client,app,500)
     with app.app_context():
         db=get_db(); oid=helpers.order(cid)
-        record_payment(oid,{'amount':'115','method':'account','payment_date':DAY})
+        from test_ticket_341953145_account_payments import account
+        account(oid,115,payment_date=DAY)
         assert dashboard_day_metrics(DAY)['revenue']==0
         record_payment(oid,{'amount':'40','method':'eft','payment_date':USE_DAY})
         view=account_statement(cid)
@@ -61,10 +62,12 @@ def test_account_repaid_without_double_payment_and_statement(client,app):
         assert dashboard_day_metrics(USE_DAY)['revenue']==40
         assert dashboard_period_metrics(start_date=USE_DAY,end_date=USE_DAY)['revenue']==40
         assert payment_method_totals(date_from=DAY,date_to=DAY)['other']==0
-    response=client.get(f'/customers/{cid}/account-statement.pdf')
-    assert response.status_code==200 and response.data.startswith(b'%PDF')
-    assert b'ACCOUNT STATEMENT' in response.data and b'Closing balance' in response.data and b'R75.00' in response.data
-    assert b'Account Statement' in client.get(f'/customers/{cid}').data
+    # Ticket ABI-341953166: the dedicated Account Statement route and the customer
+    # page's Account Statement action are retired (404 / absent); the Customer
+    # Statement is retained.
+    assert client.get(f'/customers/{cid}/account-statement.pdf').status_code==404
+    assert b'Account Statement' not in client.get(f'/customers/{cid}').data
+    assert client.get(f'/customers/{cid}/statement').status_code==200
 
 
 def test_choose_method_and_other_card(client,app):

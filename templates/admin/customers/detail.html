@@ -12,7 +12,6 @@
   </div>
   <div class="header-actions">
     <a class="btn ghost" href="{{ url_for('customers.index') }}">Back</a>
-    {% if customer.credit_allowed %}<a class="btn ghost" href="{{ url_for('customers.account_statement_pdf', customer_id=customer.id) }}" target="_blank" rel="noopener">Account Statement</a>{% endif %}
     {# Ticket ABI-341953085: statement of account PDF (finalised invoices + payments), with an optional inclusive date range. #}
     <form class="statement-form" method="get" action="{{ url_for('customers.statement', customer_id=customer.id) }}" target="_blank" rel="noopener">
       <label>From <input type="date" name="date_from" value="{{ request.args.get('date_from', '') }}"></label>
@@ -68,7 +67,10 @@
       {% if customer.is_blocked %}<div class="detail-row"><span>Blocked reason</span><b>{{ customer.blocked_reason or 'No reason recorded' }}</b></div>{% endif %}
       {# Ticket ABI-341953129: the owner-only credit facility, shown read-only to everyone. #}
       <div class="detail-row"><span>Credit allowed</span><b>{% if customer.credit_allowed %}Yes{% else %}No{% endif %}</b></div>
-      {% if customer.credit_allowed %}<div class="detail-row"><span>Credit limit</span><b>R{{ '%.2f'|format(customer.credit_limit or 0) }}</b></div>{% endif %}
+      {% if customer.credit_allowed %}<div class="detail-row"><span>Credit limit</span><b>R{{ '%.2f'|format(customer.credit_limit or 0) }}</b></div>
+      {# Ticket ABI-341953166: the shared facility summary, read-only. Customer credit (prepaid) stays shown below and is a separate pot. #}
+      <div class="detail-row"><span>Credit used</span><b class="balance-owing">R{{ '%.2f'|format(facility.used if facility else 0) }}</b></div>
+      <div class="detail-row"><span>Credit available</span><b class="balance-credit">R{{ '%.2f'|format(facility.available if facility else 0) }}</b></div>{% endif %}
       <div class="detail-row"><span>Created</span><b>{{ customer.created_at[:10] }}</b></div>
       <div class="detail-row"><span>Created by</span><b>{{ customer.created_by_name or '—' }}</b></div>
       <div class="detail-row"><span>Branch</span><b>{{ customer.branch_name or 'No branch recorded' }}</b></div>

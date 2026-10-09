@@ -1988,7 +1988,7 @@ def _non_deposit_paid_total(order_id):
     row = get_db().execute(
         """SELECT COALESCE(SUM(amount), 0) AS paid FROM payments
         WHERE order_id = ? AND status = 'paid' AND COALESCE(deleted_at, '') = ''
-        AND method != 'deposit_applied'""",
+        AND method != 'deposit_applied' AND LOWER(COALESCE(method,'')) <> 'account'""",
         (order_id,),
     ).fetchone()
     return float(row["paid"] or 0) if row else 0.0
