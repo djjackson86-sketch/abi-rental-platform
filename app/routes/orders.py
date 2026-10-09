@@ -6,7 +6,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import ReservationConfirmationRequired, SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
 from app.services.customer_credits import customer_credit_balance
@@ -800,8 +800,14 @@ def change_status(order_id, action):
             )
             return redirect(url_for("orders.detail", order_id=order_id))
     try:
-        message = transition_order(order_id, action)
+        message = transition_order(order_id, action, reservation_confirm=request.form.get("reservation_confirm", ""))
         flash(message, "success")
+    except ReservationConfirmationRequired as exc:
+        return render_template(
+            "admin/orders/reservation_confirm.html", settings=get_company_settings(),
+            order=order, action=action, warnings=exc.warnings, confirmation_token=exc.token,
+            pickup_critical_confirm=request.form.get("pickup_critical_confirm", ""),
+        )
     except ValueError as exc:
         flash(str(exc), "error")
     return redirect(url_for("orders.detail", order_id=order_id))

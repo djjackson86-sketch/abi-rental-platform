@@ -1,0 +1,15 @@
+{% extends "admin/layout.html" %}
+{% set title = 'Confirm reservation' %}
+{% block admin_body %}
+<section class="panel settings-form">
+  <h1>Confirm {{ 'pickup' if action == 'start' else 'reservation' }}</h1>
+  {% for warning in warnings %}<p class="reservation-warning">{{ warning }}</p>{% endfor %}
+  <p>Are you sure you want to book this item for another customer?</p>
+  <form method="post" action="{{ url_for('orders.change_status', order_id=order.id, action=action) }}">
+    <input type="hidden" name="reservation_confirm" value="{{ confirmation_token }}">
+    <input type="hidden" name="pickup_critical_confirm" value="{{ pickup_critical_confirm }}">
+    <button type="submit" class="btn primary">Proceed with {{ 'pickup' if action == 'start' else 'reservation' }}</button>
+    <a class="btn ghost" href="{{ url_for('orders.detail', order_id=order.id) }}">Cancel</a>
+  </form>
+</section>
+{% endblock %}

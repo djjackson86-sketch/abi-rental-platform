@@ -2,6 +2,7 @@ from datetime import datetime, date, time, timedelta
 from math import ceil
 import calendar as _month_calendar
 import json
+import hashlib
 import os
 
 from app.db import get_db, now
@@ -1368,6 +1369,63 @@ TRANSITIONS = {
 }
 
 
+class ReservationConfirmationRequired(ValueError):
+    def __init__(self, warnings, token):
+        self.warnings = warnings
+        self.token = token
+        super().__init__("\n".join(warnings))
+
+
+def reservation_notices(order_id, overlapping=False, product_id=None):
+    """Physical single-unit reservations; pooled stock retains capacity rules."""
+    order = get_order(order_id)
+    if not order:
+        return []
+    db = get_db()
+    notices = []
+    seen = set()
+    for item in order_items(order_id):
+        if not item["product_id"] or item["product_id"] in seen:
+            continue
+        if product_id is not None and item["product_id"] != product_id:
+            continue
+        seen.add(item["product_id"])
+        product = db.execute("SELECT * FROM products WHERE id = ?", (item["product_id"],)).fetchone()
+        if not product or product["product_type"] != "rental" or product["tracking_method"] == "none":
+            continue
+        stock = product_branch_stock(item["product_id"])
+        capacity = float(stock.get(int(order["collect_branch_id"] or 0), 0) if stock else product["quantity"] or 0)
+        if not overlapping and capacity != 1:
+            continue
+        branch_scoped = product["branch_id"] is not None or bool(stock)
+        branch_clause = "AND COALESCE(o.collect_branch_id, 0) = COALESCE(?, 0)" if branch_scoped else ""
+        params = [item["product_id"], order_id]
+        if branch_scoped:
+            params.append(order["collect_branch_id"])
+        rows = db.execute(f"""SELECT DISTINCT o.id, o.order_number, o.start_at, o.end_at, c.name AS customer_name
+            FROM orders o JOIN order_items oi ON oi.order_id = o.id
+            LEFT JOIN customers c ON c.id = o.customer_id
+            WHERE oi.product_id = ? AND o.id != ? AND o.status = 'reserved'
+            {branch_clause} ORDER BY o.id""", params).fetchall()
+        for row in rows:
+            overlap = bool(row["start_at"] and row["end_at"] and order["start_at"] and order["end_at"]
+                           and row["start_at"] < order["end_at"] and row["end_at"] > order["start_at"])
+            if overlap != overlapping:
+                continue
+            message = (f'{product["sku"] or product["name"]} is Reserved by '
+                       f'{row["customer_name"] or "No customer"} - {row["order_number"]} '
+                       f'from {(row["start_at"] or "").replace("T", " ")} '
+                       f'to {(row["end_at"] or "").replace("T", " ")}')
+            notices.append(("Error: " if overlapping else "Warning: ") + message)
+    return notices
+
+
+def reservation_confirmation_token(order_id, action, warnings):
+    order = get_order(order_id)
+    payload = [order_id, action, order["customer_id"], order["start_at"], order["end_at"], warnings]
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
+
+
 def availability_errors(order_id):
     order = get_order(order_id)
     if not order or not order["start_at"] or not order["end_at"]:
@@ -1471,10 +1529,12 @@ def availability_errors(order_id):
             stock_total = float(branch_stock.get(int(order["collect_branch_id"] or 0), 0))
             available = stock_total - busy
             if item["quantity"] > available:
+                errors.extend(reservation_notices(order_id, overlapping=True, product_id=item["product_id"]))
                 errors.append(shortage_message(product["name"]))
         else:
             available = float(product["quantity"] or 0) - busy
             if item["quantity"] > available:
+                errors.extend(reservation_notices(order_id, overlapping=True, product_id=item["product_id"]))
                 errors.append(shortage_message(product["name"]))
     return errors
 
@@ -1499,7 +1559,7 @@ def unarchive_target_status(order):
     return "returned"
 
 
-def transition_order(order_id, action):
+def transition_order(order_id, action, reservation_confirm=""):
     if action not in TRANSITIONS:
         raise ValueError("Unknown order action")
     order = get_order(order_id)
@@ -1539,7 +1599,11 @@ def transition_order(order_id, action):
             raise ValueError("Add customer details before reserving or pickup")
         errors = availability_errors(order_id)
         if errors:
-            raise ValueError(errors[0])
+            raise ValueError("\n".join(errors))
+        warnings = reservation_notices(order_id)
+        token = reservation_confirmation_token(order_id, action, warnings)
+        if warnings and reservation_confirm != token:
+            raise ReservationConfirmationRequired(warnings, token)
     db = get_db()
     previous_status = order["status"]
     if action == "start":
