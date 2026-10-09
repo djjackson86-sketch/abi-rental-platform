@@ -19,7 +19,7 @@ def test_flat_turso_trigger_error_is_validation_error_and_not_retried(monkeypatc
             return asyncio.run(self._client._send('POST','v1/execute',{}))['result']
     monkeypatch.setattr('libsql_client.create_client_sync',lambda *a,**k:Client())
     db=TursoConnection('https://test.invalid')
-    with pytest.raises(ValueError,match='enabled customer credit facility'):
+    with pytest.raises(ValueError,match='no longer a payment option'):
         execute_credit_checked(db,'INSERT INTO payments VALUES (?)',(1,))
     assert len(calls)==1
 
