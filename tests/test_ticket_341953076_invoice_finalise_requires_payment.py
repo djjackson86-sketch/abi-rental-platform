@@ -81,7 +81,7 @@ def test_draft_invoice_without_payment_cannot_be_finalised_and_stays_unnumbered(
     response = client.post(f'/documents/{invoice_id}/finalize', follow_redirects=True)
 
     assert response.status_code == 200
-    assert b'Record at least one payment before finalising an invoice' in response.data
+    assert b'Pay the invoice balance in full before finalising an invoice without an active credit facility' in response.data
     assert b'Proforma Invoice' in response.data
     with app.app_context():
         row = document_row(get_db(), invoice_id)
@@ -102,6 +102,11 @@ def test_invoice_with_positive_payment_can_be_finalised(amount, total, app):
         seed_payment(db, order_id, amount)
         db.commit()
 
+        if amount < total:
+            with pytest.raises(ValueError,match='in full'):
+                finalize_document(invoice_id)
+            assert document_row(db,invoice_id)['status']=='draft'
+            return
         finalize_document(invoice_id)
 
         row = document_row(db, invoice_id)
@@ -141,7 +146,7 @@ def test_archived_deleted_refund_only_or_zero_net_payments_do_not_satisfy_invoic
             seed_payment(db, order_id, payment['amount'], status=payment.get('status', 'paid'), deleted_at=payment.get('deleted_at', ''))
         db.commit()
 
-        with pytest.raises(ValueError, match='Record at least one payment before finalising an invoice'):
+        with pytest.raises(ValueError, match='Pay the invoice balance in full before finalising an invoice without an active credit facility'):
             finalize_document(invoice_id)
 
         row = document_row(db, invoice_id)

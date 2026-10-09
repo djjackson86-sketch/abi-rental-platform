@@ -66,7 +66,7 @@ def ensure_credit_capacity(customer_id, total, order_id=None):
 
 
 def ensure_invoice_finalisation(order_id):
-    row = get_db().execute('SELECT o.total, o.customer_id, c.credit_allowed FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=?', (order_id,)).fetchone()
+    row = get_db().execute('SELECT o.total, o.customer_id, COALESCE(c.credit_allowed,0) credit_allowed FROM orders o LEFT JOIN customers c ON c.id=o.customer_id WHERE o.id=?', (order_id,)).fetchone()
     if not row:
         raise ValueError('Order not found')
     from app.services.payments import payment_total
@@ -140,8 +140,8 @@ def install_credit_guards(db):
         WHEN NEW.document_type='invoice' AND NEW.status='finalized' AND
         (OLD.status IS NOT 'finalized' OR OLD.order_id IS NOT NEW.order_id OR OLD.document_type IS NOT 'invoice')
         BEGIN
-        SELECT CASE WHEN EXISTS (SELECT 1 FROM orders o JOIN customers c ON c.id=o.customer_id
-            WHERE o.id=NEW.order_id AND {unpaid} AND c.credit_allowed<>1)
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
+            WHERE o.id=NEW.order_id AND {unpaid} AND COALESCE(c.credit_allowed,0)<>1)
             THEN RAISE(ABORT, '{PAYMENT_REQUIRED_ERROR}') END;
         SELECT CASE WHEN EXISTS (SELECT 1 FROM orders o JOIN customers c ON c.id=o.customer_id
             WHERE o.id=NEW.order_id AND {unpaid} AND c.credit_allowed=1
