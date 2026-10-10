@@ -339,7 +339,8 @@ def _sync_customer_main(customer_id, vehicle_row):
         for key in MAIN_VEHICLE_CUSTOM_KEYS:
             fields.pop(key, None)
     else:
-        row = dict(vehicle_row)
+        from app.services.reports import row_dict
+        row = row_dict(vehicle_row)
         fields[MAIN_VEHICLE_ID_KEY] = int(row["id"])
         for column, key in MAIN_VEHICLE_FIELD_MAP.items():
             value = _text(row.get(column))

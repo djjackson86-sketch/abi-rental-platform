@@ -39,6 +39,7 @@ import re
 from flask import current_app
 
 from app.db import get_db
+from app.services.reports import row_dict
 from app.services import branches as branches_service
 from app.services import settings as settings_service
 from app.services.timezone import local_now, local_now_iso
@@ -118,11 +119,10 @@ def _sval(row, key):
     """A safe read of one column off a ``sqlite3.Row`` or dict, stripped."""
     if row is None:
         return ""
-    if hasattr(row, "keys"):
-        return _clean(row[key]) if key in row.keys() else ""
-    if isinstance(row, dict):
-        return _clean(row.get(key))
-    return ""
+    try:
+        return _clean(row[key])
+    except (KeyError, IndexError, TypeError):
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +214,7 @@ def _ensure_row(db):
 def _row_to_state(row):
     if row is None:
         return _blank_state()
-    state = {key: row[key] for key in row.keys()}
+    state = row_dict(row)
     state["published"] = bool(state.get("published"))
     return state
 

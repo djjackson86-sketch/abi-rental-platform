@@ -27,7 +27,7 @@ import qrcode
 from qrcode.constants import ERROR_CORRECT_M
 
 from app.db import get_db, now
-from app.services.settings import get_company_settings
+from app.services.settings import get_company_settings, _row_value
 
 #: The public URL shape (decision D5). One place, so the route, the QR and the admin page (B3)
 #: cannot disagree about it.
@@ -181,9 +181,7 @@ def portal_url(branch, base_url=None):
     page it is rendered on.
     """
     settings = get_company_settings()
-    base = ""
-    if settings is not None and "public_base_url" in settings.keys():
-        base = (settings["public_base_url"] or "").strip()
+    base = (_row_value(settings, "public_base_url", "") or "").strip()
     if not base:
         base = (base_url or "").strip()
     path = portal_path(branch["public_slug"])
@@ -193,9 +191,7 @@ def portal_url(branch, base_url=None):
 def universal_portal_url(base_url=None):
     """The one customer portal link: ``/portal``."""
     settings = get_company_settings()
-    base = ""
-    if settings is not None and "public_base_url" in settings.keys():
-        base = (settings["public_base_url"] or "").strip()
+    base = (_row_value(settings, "public_base_url", "") or "").strip()
     if not base:
         base = (base_url or "").strip()
     return f"{base.rstrip('/')}{UNIVERSAL_PORTAL_PATH}" if base else UNIVERSAL_PORTAL_PATH

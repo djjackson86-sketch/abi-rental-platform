@@ -372,7 +372,8 @@ def delete_vehicle(vehicle_id):
 @login_required
 def customer_vehicles(customer_id):
     """The client page's vehicles panel feed (A4 renders it; A3 proves the data is there)."""
-    rows = [dict(row) for row in vehicles.list_vehicles(customer_id)]
+    from app.services.reports import row_dict
+    rows = [row_dict(row) for row in vehicles.list_vehicles(customer_id)]
     return jsonify({"customer_id": customer_id, "count": len(rows), "vehicles": rows})
 
 
