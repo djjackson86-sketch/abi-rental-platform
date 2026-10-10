@@ -4,11 +4,12 @@ Programme phase 1 (feature A / A1) of the 2026-09-23 ABI programme.
 
 Two jobs live here:
 
-1. **image -> barcode payload(s)** — :func:`decode_disc_image`. The NaTIS vehicle licence
-   disc barcode is a plain-text PDF417 (master plan decision D1: *not* RSA-encrypted, unlike
-   a driver's licence card). Decoding is server-side so there is one code path for camera,
-   file upload and paste; the engine choice is measured, not assumed — see
-   ``docs/plans/disc-decode-findings.md``.
+1. **image -> barcode payload(s)** — :func:`decode_disc_image`. The camera now decodes the PDF417
+   **in the browser** and posts the text, so this server-side image path is no longer reachable
+   from any route (see ``app/routes/vehicles.py::scan_request_rejection``); it is retained as a
+   tested capability and **hardened** so that if any future caller uses it, a 12 MP phone photo can
+   no longer exhaust a 512 Mi instance — the variant ladder is built one image at a time, within a
+   pixel budget, and every buffer is released as soon as its decode attempt is done.
 2. **payload text -> fields** — :func:`parse_disc_text`, a **faithful Python port of the
    already-shipping TrailerPro parser**
    (``/mnt/d/Claude/trailer-rental-app/src/lib/saDiscParser.ts``, 379 lines). Do not invent a
@@ -47,7 +48,7 @@ from __future__ import annotations
 import io
 import re
 from datetime import datetime
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 __all__ = [
     "DISC_FIELD_KEYS",
@@ -813,32 +814,83 @@ VARIANT_NAMES: tuple[str, ...] = (
     "rotate270",
 )
 
+#: A phone camera tops out around 50 Mpx; anything larger is not a disc photo. The header is read
+#: (``Image.open`` populates ``.size`` without decoding pixels) before the buffers are allocated, so
+#: an absurdly large image is refused *before* its pixels ever reach memory. PIL's own
+#: decompression-bomb guard sits far higher; this is the tighter, honest bound.
+MAX_SOURCE_PIXELS = 60_000_000
 
-def image_variants(image: Any) -> list[tuple[str, Any]]:
-    """Decode attempts from least to most destructive (ported from the proven decoder)."""
+#: The most pixels any single *derived* variant (crop / rotate / upscale) may allocate. The 3x
+#: upscale of a 12 MP photo is ~108 Mpx — ~325 MB for one RGB buffer — and the old code built all
+#: eleven variants up front, keeping several such buffers alive at once: that is the Render OOM.
+#: A variant whose size would exceed this budget is skipped rather than allocated, and the smaller
+#: images (which are the ones that actually need upscaling) keep the full ladder.
+MAX_VARIANT_PIXELS = 16_000_000
+
+
+def _within_pixel_budget(size: tuple[int, int]) -> bool:
+    return size[0] * size[1] <= MAX_VARIANT_PIXELS
+
+
+def _release(image: Any) -> None:
+    """Free a PIL image's buffers as soon as its decode attempt is done (peak = one variant).
+
+    Cleanup must never mask the decode result, so any error from ``close()`` is swallowed.
+    """
+    close = getattr(image, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 - cleanup is best-effort
+            pass
+
+
+def _close_candidates(candidates: Any) -> None:
+    """Close a variant generator (or ignore a plain iterable with no ``close``)."""
+    close = getattr(candidates, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def image_variants(image: Any) -> Iterator[tuple[str, Any]]:
+    """Decode attempts from least to most destructive, built **one at a time**.
+
+    A generator, not a list: the previous implementation materialised all eleven variants
+    (including a 3x upscale of the whole photo) *before* the first decode ran, so a 12 MP phone
+    photo allocated hundreds of megabytes up front. Each variant is now produced, offered to the
+    decoder and released before the next is built (:func:`decode_disc_image` closes it), and each
+    derived transform is bounded by :data:`MAX_VARIANT_PIXELS` so a variant that would blow the
+    budget is skipped instead of allocated.
+    """
     from PIL import ImageEnhance, ImageOps
 
     rgb = image.convert("RGB")
-    gray = ImageOps.grayscale(rgb)
     width, height = rgb.size
-    return [
-        ("original", rgb.copy()),
-        ("grayscale", gray.copy()),
-        ("contrast-1.8", ImageEnhance.Contrast(gray.copy()).enhance(1.8)),
-        ("contrast-2.5", ImageEnhance.Contrast(gray.copy()).enhance(2.5)),
-        ("upscale-150", rgb.resize((round(width * 1.5), round(height * 1.5)))),
-        ("upscale-2x", rgb.resize((width * 2, height * 2))),
-        (
-            "upscale-3x-gray-contrast",
-            ImageEnhance.Contrast(
-                ImageOps.grayscale(rgb.resize((width * 3, height * 3)))
-            ).enhance(2.0),
-        ),
-        ("topcrop-40", rgb.crop((0, 0, width, round(height * 0.40)))),
-        ("middlecrop-70", rgb.crop((0, round(height * 0.15), width, round(height * 0.85)))),
-        ("rotate90", rgb.rotate(90, expand=True)),
-        ("rotate270", rgb.rotate(270, expand=True)),
-    ]
+    gray = ImageOps.grayscale(rgb)
+    try:
+        yield "original", rgb.copy()
+        yield "grayscale", gray.copy()
+        yield "contrast-1.8", ImageEnhance.Contrast(gray).enhance(1.8)
+        yield "contrast-2.5", ImageEnhance.Contrast(gray).enhance(2.5)
+        if _within_pixel_budget((round(width * 1.5), round(height * 1.5))):
+            yield "upscale-150", rgb.resize((round(width * 1.5), round(height * 1.5)))
+        if _within_pixel_budget((width * 2, height * 2)):
+            yield "upscale-2x", rgb.resize((width * 2, height * 2))
+        if _within_pixel_budget((width * 3, height * 3)):
+            yield (
+                "upscale-3x-gray-contrast",
+                ImageEnhance.Contrast(ImageOps.grayscale(rgb.resize((width * 3, height * 3)))).enhance(2.0),
+            )
+        yield "topcrop-40", rgb.crop((0, 0, width, round(height * 0.40)))
+        yield "middlecrop-70", rgb.crop((0, round(height * 0.15), width, round(height * 0.85)))
+        yield "rotate90", rgb.rotate(90, expand=True)
+        yield "rotate270", rgb.rotate(270, expand=True)
+    finally:
+        _release(gray)
+        _release(rgb)
 
 
 def _load_image(data: bytes) -> Any:
@@ -846,14 +898,33 @@ def _load_image(data: bytes) -> Any:
 
     try:
         image = Image.open(io.BytesIO(data))
-        image.load()
-        return image
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        # ``.size`` is known from the header, before any pixel buffer is allocated: refuse an
+        # absurdly large image here rather than after decompressing it into memory.
+        width, height = image.size
+        oversize = width * height > MAX_SOURCE_PIXELS
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise DiscDecodeError(
             DiscErrorKind.IMAGE_UNREADABLE,
             "That file is not a readable image. Try a JPEG or PNG photo of the disc.",
             detail=str(exc),
         ) from exc
+
+    if oversize:
+        raise DiscDecodeError(
+            DiscErrorKind.IMAGE_UNREADABLE,
+            "That image is far larger than a phone photo. Take it again at a smaller size.",
+            detail=f"{width}x{height} px exceeds the {MAX_SOURCE_PIXELS} px bound",
+        )
+
+    try:
+        image.load()
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise DiscDecodeError(
+            DiscErrorKind.IMAGE_UNREADABLE,
+            "That file is not a readable image. Try a JPEG or PNG photo of the disc.",
+            detail=str(exc),
+        ) from exc
+    return image
 
 
 def decode_disc_image(
@@ -864,6 +935,11 @@ def decode_disc_image(
 ) -> list[str]:
     """Decode the PDF417 barcode(s) on a licence-disc photo.
 
+    The variant ladder is evaluated **lazily**: :func:`image_variants` is a generator, so each image
+    is built, offered to an engine and released (``_release``) before the next is created — peak
+    memory is one variant, not eleven. The source image is released once decoding finishes, however
+    it finishes.
+
     Returns the raw payload strings (usually one). Raises :class:`DiscDecodeError` with
     ``kind == DiscErrorKind.NO_BARCODE`` when no engine finds a barcode in any variant — the UI
     must show a *different* message for that than for a payload that decoded but held no fields
@@ -872,25 +948,36 @@ def decode_disc_image(
     image = _load_image(data)
     engine_names = tuple(engines) if engines else DEFAULT_ENGINE_ORDER
     attempted: list[str] = []
+    owns_variants = variants is None
 
-    for engine_name in engine_names:
-        engine = _ENGINES.get(engine_name)
-        if engine is None:
-            attempted.append(f"{engine_name}: unknown engine")
-            continue
-        candidates = list(variants) if variants is not None else image_variants(image)
-        for variant_name, variant_image in candidates:
-            try:
-                payloads = engine(variant_image)
-            except ImportError as exc:
-                attempted.append(f"{engine_name}: not installed ({exc})")
-                break
-            except Exception as exc:  # noqa: BLE001 - a bad variant must not kill the scan
-                attempted.append(f"{engine_name}/{variant_name}: {type(exc).__name__}: {exc}")
+    try:
+        for engine_name in engine_names:
+            engine = _ENGINES.get(engine_name)
+            if engine is None:
+                attempted.append(f"{engine_name}: unknown engine")
                 continue
-            found = [payload for payload in payloads if payload and payload.strip()]
-            if found:
-                return _dedupe(found)
+            candidates = image_variants(image) if owns_variants else variants
+            try:
+                for variant_name, variant_image in candidates:
+                    try:
+                        payloads = engine(variant_image)
+                    except ImportError as exc:
+                        attempted.append(f"{engine_name}: not installed ({exc})")
+                        break
+                    except Exception as exc:  # noqa: BLE001 - a bad variant must not kill the scan
+                        attempted.append(f"{engine_name}/{variant_name}: {type(exc).__name__}: {exc}")
+                        continue
+                    finally:
+                        if owns_variants:
+                            _release(variant_image)
+                    found = [payload for payload in payloads if payload and payload.strip()]
+                    if found:
+                        return _dedupe(found)
+            finally:
+                if owns_variants:
+                    _close_candidates(candidates)
+    finally:
+        _release(image)
 
     raise DiscDecodeError(
         DiscErrorKind.NO_BARCODE,

@@ -286,8 +286,13 @@ def test_consent_block_is_unticked_and_required(app):
     assert "required" in html
     assert "checked" not in html
     assert "in accordance with POPIA" in html
-    assert "I have read the customer privacy notice" in html
-    assert "This does not subscribe me to marketing" in html
+    # The adapted TrailerPro statement: a plain sentence about what the acceptance
+    # permits, with the notice link beside it. The box is unticked here and the
+    # acceptance is refused server-side when it is missing (decision D10) — the tick
+    # is never pre-set, and the wording is not duplicated into a marketing promise.
+    assert "I agree that" in html
+    assert "may use my personal information" in html
+    assert "generate invoices" in html
 
 
 def test_consent_block_links_the_notice_in_a_new_tab(app):

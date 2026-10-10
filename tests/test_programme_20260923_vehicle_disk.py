@@ -321,6 +321,62 @@ def test_variant_ladder_covers_the_plan_minimum():
         assert name in vd.VARIANT_NAMES
 
 
+# ── OOM hardening: the ladder is lazy and pixel-bounded ─────────────────────
+
+
+def test_image_variants_is_a_lazy_generator_not_a_prebuilt_list():
+    """The old list built all eleven variants (incl. a 3x upscale) before the first decode."""
+    import inspect
+
+    assert inspect.isgeneratorfunction(vd.image_variants)
+
+    from PIL import Image
+
+    gen = vd.image_variants(Image.new("RGB", (640, 480), "white"))
+    name, variant = next(gen)
+    assert name == "original"
+    variant.close()
+    gen.close()  # the generator's own rgb/gray buffers are released in its finally
+
+
+def test_image_variants_skip_transforms_over_the_pixel_budget():
+    from PIL import Image
+
+    # A 12 MP phone photo: 2x -> 48 Mpx and 3x -> 108 Mpx are both over the 16 Mpx budget, so they
+    # are skipped rather than allocated — the transforms that used to exhaust the instance.
+    names = []
+    for name, variant in vd.image_variants(Image.new("RGB", (4000, 3000), "white")):
+        names.append(name)
+        variant.close()
+    assert "original" in names
+    assert "upscale-2x" not in names
+    assert "upscale-3x-gray-contrast" not in names
+
+
+def test_image_variants_never_allocate_over_the_pixel_budget():
+    from PIL import Image
+
+    for name, variant in vd.image_variants(Image.new("RGB", (3000, 3000), "white")):
+        assert variant.size[0] * variant.size[1] <= vd.MAX_VARIANT_PIXELS, name
+        variant.close()
+
+
+def test_load_image_refuses_an_image_over_the_source_pixel_bound(monkeypatch):
+    """The header is inspected before the pixels are decoded, so an oversized image never loads."""
+    import io as _io
+
+    from PIL import Image
+
+    buffer = _io.BytesIO()
+    Image.new("RGB", (40, 40), "white").save(buffer, format="PNG")
+    monkeypatch.setattr(vd, "MAX_SOURCE_PIXELS", 100)  # 40x40 = 1600 px > 100
+
+    with pytest.raises(vd.DiscDecodeError) as excinfo:
+        vd.decode_disc_image(buffer.getvalue())
+    assert excinfo.value.kind == vd.DiscErrorKind.IMAGE_UNREADABLE
+    assert "larger than a phone photo" in str(excinfo.value)
+
+
 def _synthetic_disc_png(payload: str) -> bytes:
     """A real PDF417 of *our* payload, generated locally.
 

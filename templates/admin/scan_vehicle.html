@@ -15,9 +15,8 @@
 </header>
 
 <section class="panel scan-capture-panel">
-  <form method="post" enctype="multipart/form-data" class="scan-capture-form">
+  <form method="post" class="scan-capture-form">
     <input type="hidden" name="customer_id" value="{{ preselected_customer.id if preselected_customer else '' }}">
-    <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment">
 
     <div class="scan-actions-simple">
       <button class="btn primary scan-big" type="button" id="scan-camera-start">Scan licence disk</button>
@@ -29,16 +28,15 @@
   </form>
 </section>
 
-<script src="{{ url_for('static', filename='js/scan-camera.js') }}?v=scan-fs-1"></script>
+<script src="{{ url_for('static', filename='js/scan-camera.js') }}?v=scan-live-2"></script>
 <script>
 (function () {
   if (!window.AbiScanCamera) { return; }
   var manual = document.getElementById('scan-manual');
   AbiScanCamera.init({
     form: '.scan-capture-form',
-    fileInput: 'scan-disk-image',
     start: 'scan-camera-start',
-    filename: 'vehicle-disk-scan.jpg',
+    manual: 'scan-manual',
     readingMessage: 'Reading disk…',
     onOpen: function () { if (manual) { manual.hidden = true; } },
     onClose: function () { if (manual) { manual.hidden = false; } }
@@ -90,7 +88,7 @@
     <fieldset class="span-2 scan-main-choice">
       <legend>Is this the main client vehicle?</legend>
       <p class="form-help">Yes fills the main vehicle fields under Custom customer details and uses this vehicle on invoices. No keeps it as an additional vehicle at the bottom of the customer edit page.</p>
-      <label class="choice-card"><input type="radio" name="make_main" value="yes" required{% if request.values.get('vehicle_role') == 'main' %} checked{% endif %}> Yes — use as the main vehicle</label>
+      <label class="choice-card"><input type="radio" name="make_main" value="yes" required{% if vehicle_role == 'main' %} checked{% endif %}> Yes — use as the main vehicle</label>
       <label class="choice-card"><input type="radio" name="make_main" value="no" required> No — keep as an additional vehicle</label>
     </fieldset>
 

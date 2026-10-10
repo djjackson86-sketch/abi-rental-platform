@@ -3,11 +3,13 @@
 Mirrors the house scan-screen pattern (``app/routes/admin.py::scan_barcode``): a GET form, a POST
 that reads something, a flash and a redirect. Three deliberate differences, all from the plan:
 
-* the subject is a NaTIS **licence disc**, so the POST decodes a photo (or accepts pasted barcode
-  text) and then shows a **review form** instead of jumping straight to a record — staff eyeball
-  every parsed field, correct what is wrong, and choose the client;
-* the upload never touches the filesystem (Render's disk is ephemeral and the only artefact worth
-  keeping is the vehicle row), so the image is read in memory with a size and type guard;
+* the subject is a NaTIS **licence disc**, so the POST takes the barcode text the browser decoded
+  (or a typed-in fallback) and then shows a **review form** instead of jumping straight to a record
+  — staff eyeball every parsed field, correct what is wrong, and choose the client;
+* the camera decodes the PDF417 barcode **in the browser** and posts the text, so the server never
+  sees an image at all. The old in-memory photo path — an eleven-variant image ladder that expanded
+  a 12 MP phone photo to hundreds of megabytes — is retired along with the Render OOM it caused, and
+  it is actively refused from the request headers (see :func:`scan_request_rejection`);
 * a registration already recorded for another client is **refused with the owner named**, with an
   explicit "Transfer to this client" action — never a silent re-own (decision D3, rule from A2).
 
@@ -26,44 +28,63 @@ from app.services.settings import get_company_settings
 
 bp = Blueprint("vehicles", __name__)
 
-#: A phone photo is a few hundred KB; 8 MB is generous for the modern 12 MP camera at full size.
-MAX_DISK_UPLOAD_BYTES = 8 * 1024 * 1024
+#: A licence-disc barcode payload is a few hundred bytes — the modern positional record is 148
+#: characters and the longest legacy label-value disc stays well under ~2 KB. This cap is generous
+#: by an order of magnitude, so a genuine disk is never refused, yet a crafted POST can never make
+#: the parser chew on a megabyte of "barcode text".
+MAX_DISC_TEXT_CHARS = 4000
 
-#: Phones are inconsistent about the MIME type they send for a photo, so anything that announces
-#: itself as ``image/…`` is accepted, plus these when the type arrives stripped.
-ALLOWED_IMAGE_TYPES = frozenset(
-    {
-        "application/octet-stream",
-        "",
-        "image/jpeg",
-        "image/jpg",
-        "image/png",
-        "image/webp",
-        "image/heic",
-        "image/heif",
-        "image/bmp",
-        "image/tiff",
-    }
+#: The largest scan-screen POST body these routes will parse at all. A real submission (one hidden
+#: text field carrying the browser-decoded barcode, plus a couple of ids) is well under a kilobyte;
+#: anything approaching this is not a scan. Checked against the declared ``Content-Length`` header so
+#: nothing larger is ever read into memory.
+MAX_SCAN_REQUEST_BYTES = 64 * 1024
+
+#: The photo-upload path is retired: the camera now decodes the PDF417 **in the browser** and posts
+#: the decoded text, so any multipart scan POST is a stale client or a hand-crafted upload. It is
+#: refused from the headers alone, *before* Werkzeug reads a byte of the body — the old server path
+#: fed a 12 MP phone photo through an eleven-variant image ladder (including a 3x upscale, ~325 MB
+#: for one buffer), which is what exhausted the 512 Mi Render instance. There is deliberately **no**
+#: photo fallback: manual entry is the only fallback.
+IMAGE_UPLOAD_REJECTED_MESSAGE = (
+    "Photo uploads are not accepted on this screen any more — the camera reads the barcode in the "
+    "browser. Scan the disk again, or type the details below."
 )
 
-#: One distinct sentence per failure kind — A1 flagged that the UI must tell "no barcode on the
-#: photo" and "barcode read but nothing in it" apart, and "that file is not an image at all" apart
-#: from both. Staff are never blocked: every one of these still renders a form to type the fields.
+#: A "barcode text" that is absurdly long is refused rather than parsed (see ``MAX_DISC_TEXT_CHARS``).
+SCAN_TEXT_TOO_LARGE_MESSAGE = (
+    "That scan text is far too long to be a licence disk. Scan again, or type the details below."
+)
+
+#: The one *parse* failure kind still reachable from the text path. A payload that decoded but holds
+#: no vehicle fields must read differently from an empty submission, and staff are never blocked:
+#: the sentence always comes with a form to type the fields.
 DECODE_ERROR_MESSAGES = {
-    disk.DiscErrorKind.IMAGE_UNREADABLE: (
-        "That file is not a readable image. Upload a JPEG or PNG photo of the disc, or type the "
-        "details below."
-    ),
-    disk.DiscErrorKind.NO_BARCODE: (
-        "No barcode found on that photo. Get the whole disc face in frame, flat and in focus, or "
-        "type the details below."
-    ),
     disk.DiscErrorKind.UNPARSEABLE: (
         "The barcode was read but it holds no vehicle fields. Type the details below."
     ),
 }
 
-NO_INPUT_MESSAGE = "Photograph the disc, or paste the barcode text, or type the details below."
+NO_INPUT_MESSAGE = "Scan the licence disk with the camera, or type the details below."
+
+
+def scan_request_rejection(req):
+    """Why a scan-screen POST must be refused before its body is parsed, or ``None`` to continue.
+
+    Header-only by design: ``req.mimetype`` and ``req.content_length`` come from the request line
+    and the request headers, so a multipart body (the retired photo upload) is never buffered,
+    parsed or handed to an image library. This is the guard that removes the decode-OOM surface
+    entirely; the caller must invoke it *before* touching ``req.form`` / ``req.files``.
+    """
+    if (req.mimetype or "").lower() == "multipart/form-data":
+        return IMAGE_UPLOAD_REJECTED_MESSAGE
+    length = req.content_length
+    if length is None or length <= 0 or length > MAX_SCAN_REQUEST_BYTES:
+        # Unknown-length/chunked submissions cannot be bounded from headers.
+        # Browser form submissions declare their length; reject everything else
+        # before Werkzeug is allowed to read an unbounded request stream.
+        return SCAN_TEXT_TOO_LARGE_MESSAGE
+    return None
 
 
 def _to_int(value):
@@ -126,60 +147,21 @@ def _render(review=None, *, customer_id=None, vehicle_role=None):
     )
 
 
-def _read_scan(upload, pasted):
+def _read_scan(pasted):
     """Read one scan submission: ``(values, raw_text, unparsed, message, category)``.
 
-    Never raises. Every failure ends in a message for staff **and** a review form they can fill in
-    by hand: a disc the camera could not read must not stop a trailer going out.
+    The camera decodes the barcode in the browser and posts the text (``disc_text``); there is no
+    server-side image path any more. Never raises. Every failure ends in a message for staff **and**
+    a review form they can fill in by hand: a disc the camera could not read must not stop a
+    trailer going out.
     """
     blank, no_unparsed = _blank_values(), {}
-
-    if upload is not None and (getattr(upload, "filename", "") or "").strip():
-        data = upload.read(MAX_DISK_UPLOAD_BYTES + 1)
-        if not data:
-            return blank, "", no_unparsed, "That image file was empty — take the photo again.", "error"
-        if len(data) > MAX_DISK_UPLOAD_BYTES:
-            return (
-                blank,
-                "",
-                no_unparsed,
-                "That photo is larger than 8 MB — take it again at a smaller size.",
-                "error",
-            )
-        content_type = (getattr(upload, "mimetype", "") or "").lower()
-        if content_type and content_type not in ALLOWED_IMAGE_TYPES and not content_type.startswith("image/"):
-            return (
-                blank,
-                "",
-                no_unparsed,
-                f"That file is a {content_type} file, not an image. Upload a JPEG or PNG photo of the disc.",
-                "error",
-            )
-        try:
-            payloads = disk.decode_disc_image(data)
-        except disk.DiscDecodeError as exc:
-            message = DECODE_ERROR_MESSAGES.get(exc.kind, str(exc))
-            return blank, "", no_unparsed, message, "error"
-        parsed = _parse_payloads(payloads)
-        return _scan_result(parsed)
-
-    if pasted:
-        return _scan_result(disk.parse_disc_text(pasted))
-
-    return blank, "", no_unparsed, NO_INPUT_MESSAGE, "error"
-
-
-def _parse_payloads(payloads):
-    """The best parse of the decoded payloads, without raising when none of them holds fields.
-
-    ``decode_payloads`` prefers the high-confidence payload and raises ``UNPARSEABLE`` when nothing
-    is parseable; A3 wants that payload's text kept for display, so the raise is caught and the
-    payload still parsed (to ``confidence: low``, empty fields) here.
-    """
-    try:
-        return disk.decode_payloads(payloads)
-    except disk.DiscDecodeError:
-        return disk.parse_disc_text(payloads[0] if payloads else "")
+    text = (pasted or "").strip()
+    if not text:
+        return blank, "", no_unparsed, NO_INPUT_MESSAGE, "error"
+    if len(text) > MAX_DISC_TEXT_CHARS:
+        return blank, "", no_unparsed, SCAN_TEXT_TOO_LARGE_MESSAGE, "error"
+    return _scan_result(disk.parse_disc_text(text))
 
 
 def _scan_result(parsed):
@@ -195,7 +177,25 @@ def _scan_result(parsed):
 @bp.route("/scan-vehicle", methods=["GET", "POST"])
 @login_required
 def scan_vehicle():
-    """Capture screen: photograph/paste a disc, then review and allocate it to a client."""
+    """Capture screen: read a disc in the browser, then review and allocate it to a client.
+
+    The photo-upload path is retired. A multipart POST (or an oversized body) is refused from the
+    request headers *before* the body is parsed, so no image is ever decoded server-side; staff get
+    the manual review form instead. The camera posts the decoded barcode text urlencoded.
+    """
+    if request.method == "POST":
+        rejection = scan_request_rejection(request)
+        if rejection:
+            # Refused from the headers alone: the body is deliberately left unparsed, so only the
+            # query string is read for the redirect context. Staff still get the manual review form.
+            customer_id = _to_int(request.args.get("customer_id"))
+            flash(rejection, "error")
+            return _render(
+                _review(_blank_values(), customer_id),
+                customer_id=customer_id,
+                vehicle_role=(request.args.get("vehicle_role") or "").strip() or None,
+            )
+
     customer_id = _to_int(request.values.get("customer_id"))
     # ``main`` (the customer form's main-vehicle link) or ``additional`` (the vehicles panel's
     # "Add another vehicle"). It decides what the "make this the main vehicle?" choice defaults to.
@@ -205,13 +205,11 @@ def scan_vehicle():
         return _render(None, customer_id=customer_id, vehicle_role=vehicle_role)
 
     if (request.form.get("action") or "").strip() == "manual":
-        # The plan's second fallback: no scan at all, just type the fields.
+        # The manual fallback: no scan at all, just type the fields.
         flash("Type the vehicle details and choose the client.", "info")
         return _render(_review(_blank_values(), customer_id), customer_id=customer_id, vehicle_role=vehicle_role)
 
-    values, raw_text, unparsed, message, category = _read_scan(
-        request.files.get("disk_image"), (request.form.get("disc_text") or "").strip()
-    )
+    values, raw_text, unparsed, message, category = _read_scan(request.form.get("disc_text"))
     if message:
         flash(message, category or "error")
     else:

@@ -7,10 +7,11 @@ This is the screen over :mod:`app.services.returns` (phase 5's matcher). It is
 deliberately shaped like the scan-a-vehicle screen next to it
 (``app/routes/vehicles.py``), so staff learn one screen and get the other free:
 
-* **Capture** — photograph the disc, paste the decoded barcode text, or type the
-  plate. All three reach the same matcher; a wet, damaged or missing disc never
-  blocks a return. The photo is read in memory and never stored (Render's disk is
-  ephemeral and there is nothing worth keeping but the order's audit line).
+* **Capture** — the camera reads the disc's PDF417 barcode **in the browser** and posts the decoded
+  text, or staff type the plate. Both reach the same matcher; a wet, damaged or missing disc never
+  blocks a return. The server never sees an image: the retired photo-upload path is refused from
+  the request headers before its body is parsed (`app/routes/vehicles.py::scan_request_rejection`),
+  so the image ladder that expanded a phone photo to hundreds of megabytes can no longer run.
 * **Review** — the matcher's candidates are shown with the evidence that produced
   them. **One** candidate gets one "Mark returned" button; **two or more** get one
   each, and nothing happens until staff pick one; **none** says so and links to
@@ -31,7 +32,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.routes.vehicles import ALLOWED_IMAGE_TYPES, DECODE_ERROR_MESSAGES, MAX_DISK_UPLOAD_BYTES
+from app.routes.vehicles import MAX_DISC_TEXT_CHARS, SCAN_TEXT_TOO_LARGE_MESSAGE, scan_request_rejection
 from app.services import returns
 from app.services.orders import add_return_charges, update_return_checklist
 from app.services import vehicle_disk as disk
@@ -219,44 +220,25 @@ def _save_damage_note(order_id, payload):
     get_db().commit()
 
 
-def _read_scan(upload, pasted, typed_plate):
+def _read_scan(pasted, typed_plate):
     """Read one submission and return ``(parsed, raw_text, message, category)``.
 
-    Never raises beyond the decode guard: every failure ends in a message for
-    staff plus the capture form they can use again, because a disc the camera
-    could not read must not stop a trailer coming back.
+    The camera decodes the barcode in the browser and posts the text; there is no server-side image
+    path any more. Never raises beyond the decode guard: every failure ends in a message for staff
+    plus the capture form they can use again, because a disc the camera could not read must not stop
+    a trailer coming back.
     """
-    if upload is not None and (getattr(upload, "filename", "") or "").strip():
-        data = upload.read(MAX_DISK_UPLOAD_BYTES + 1)
-        if not data:
-            return {}, "", "That image file was empty — take the photo again.", "error"
-        if len(data) > MAX_DISK_UPLOAD_BYTES:
-            return {}, "", "That photo is larger than 8 MB — take it again at a smaller size.", "error"
-        content_type = (getattr(upload, "mimetype", "") or "").lower()
-        if content_type and content_type not in ALLOWED_IMAGE_TYPES and not content_type.startswith("image/"):
-            return {}, "", f"That file is a {content_type} file, not an image.", "error"
-        try:
-            payloads = disk.decode_disc_image(data)
-        except disk.DiscDecodeError as exc:
-            return {}, "", DECODE_ERROR_MESSAGES.get(exc.kind, str(exc)), "error"
-        try:
-            parsed = disk.decode_payloads(payloads)
-        except disk.DiscDecodeError:
-            # The barcode was read but holds no vehicle fields: keep the payload's
-            # text for display (the A3 screen does the same) and let staff type the
-            # plate instead of showing them an error page.
-            text = payloads[0] if payloads else ""
-            return {}, text, UNREADABLE_TEXT_MESSAGE, "error"
-        return parsed, str(parsed.get("raw_text") or ""), None, None
-
-    if (pasted or "").strip():
-        parsed = disk.parse_disc_text(pasted)
+    text = (pasted or "").strip()
+    if text:
+        if len(text) > MAX_DISC_TEXT_CHARS:
+            return {}, "", SCAN_TEXT_TOO_LARGE_MESSAGE, "error"
+        parsed = disk.parse_disc_text(text)
         if not disk.is_disc_parseable(parsed):
-            return {}, str(parsed.get("raw_text") or pasted), UNREADABLE_TEXT_MESSAGE, "error"
-        return parsed, str(parsed.get("raw_text") or pasted), None, None
+            return {}, str(parsed.get("raw_text") or text), UNREADABLE_TEXT_MESSAGE, "error"
+        return parsed, str(parsed.get("raw_text") or text), None, None
 
     if (typed_plate or "").strip():
-        # The plan's fallback: no disc at all. Handed over in the parser's shape,
+        # The manual fallback: no disc at all. Handed over in the parser's shape,
         # never in a shape of its own.
         return {"licence_number": typed_plate.strip()}, "", None, None
 
@@ -266,8 +248,14 @@ def _read_scan(upload, pasted, typed_plate):
 @bp.route("/scan-return", methods=["GET", "POST"])
 @login_required
 def scan_return():
-    """Capture screen: read a disc (or a typed plate) and show what it matches."""
+    """Capture screen: read a disc in the browser (or type a plate) and show what it matches."""
     if request.method == "GET":
+        return _render()
+
+    rejection = scan_request_rejection(request)
+    if rejection:
+        # Refused from the request headers alone: no multipart body is parsed, no image decoded.
+        flash(rejection, "error")
         return _render()
 
     if (request.form.get("action") or "") == "manual":
@@ -276,7 +264,6 @@ def scan_return():
         return _render({"manual_open": True})
 
     parsed, raw_text, message, category = _read_scan(
-        request.files.get("disk_image"),
         request.form.get("disc_text") or "",
         request.form.get("plate") or "",
     )

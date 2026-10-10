@@ -4,8 +4,22 @@
    refuse the submission server-side when `popia_consent` is absent — the `required`
    attribute here is only the browser's hint, never the control (decision D10).
    Unticked by default is the point: consent that is pre-ticked is not consent.
-   The wording mirrors the TrailerPro booking page the brief points at. #}
-<label class="consent-block" for="popia-consent">
+
+   The card is styled like the TrailerPro booking page the brief points at: a light,
+   bordered, rounded panel with the box aligned left, the statement beside it and the
+   notice link opening in a new tab. The link sits *outside* the <label> (as it does on
+   TrailerPro) so tapping "View Privacy Notice" opens the notice instead of also
+   toggling the box. The sentence is the one shared widget for both capture points, so
+   the wording follows `consent_purpose` ("booking" by default, "registration" on the
+   portal) and never shows the booking label on the registration page. #}
+<style>
+.consent-block{display:flex;align-items:flex-start;gap:12px;margin-top:14px;padding:12px 16px;border:1px solid var(--line-soft);border-radius:12px;background:var(--surface-soft);min-width:0}
+.consent-block>input{width:16px;height:16px;min-width:16px;flex:0 0 auto;margin:2px 0 0;padding:0;accent-color:var(--brand);cursor:pointer}
+.consent-block-text{min-width:0;font-size:13px;line-height:1.55;color:var(--ink-2);overflow-wrap:anywhere}
+.consent-block-text label{display:inline;cursor:pointer;font-weight:650}
+.consent-block-text a{color:var(--brand);font-weight:650}
+</style>
+<div class="consent-block">
   <input type="checkbox" name="popia_consent" id="popia-consent" value="1" required>
-  <span class="consent-block-text">I have read the customer privacy notice and agree that {{ (settings|default({})).company_name|default('Sano Trailers', true) }} may use my details to process this {{ consent_purpose|default('booking') }} and manage the rental relationship as explained in the notice, in accordance with POPIA. This does not subscribe me to marketing. <a href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View Privacy Notice</a>.</span>
-</label>
+  <div class="consent-block-text"><label for="popia-consent">I agree that {{ (settings|default({})).company_name|default('Sano Trailers', true) }} may use my personal information to process this {{ consent_purpose|default('booking') }} and generate invoices, in accordance with POPIA.</label> <a href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View Privacy Notice</a></div>
+</div>

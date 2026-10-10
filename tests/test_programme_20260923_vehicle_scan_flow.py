@@ -3,14 +3,19 @@
 The acceptance list from ``docs/plans/2026-09-23-staff-vehicle-scan.md`` §A3, one test per line:
 
 * staff without the ``scan_vehicle`` module gets 403;
-* a good decode plus a chosen client creates the vehicle and it is on that client's record;
-* a decode that fails to find a barcode flashes the distinct message (and still offers the form);
-* a decoded-but-unparseable payload still lets staff type the fields;
+* a decoded barcode text plus a chosen client creates the vehicle and it is on that client's record;
+* a retired photo-upload POST is refused from the request headers (no image decoded) and still
+  offers the manual review form;
+* a text payload that holds no vehicle fields still lets staff type the fields;
 * a registration already owned by another client is refused **with the transfer option**;
 * deleting the client still leaves no orphan vehicle rows.
 
 Every fixture payload is the *synthetic* one from A1 (``tests/fixtures/disc/``) — the real disk photo
 stays outside the repo (POPIA: it carries a real plate/VIN/engine number).
+
+The server-side image-upload path this screen used to have is retired (the camera decodes the
+PDF417 in the browser and posts the text); the OOM hardening that removes it — and the tests proving
+no route touches an image decoder — live in ``test_scan_upload_oom_hardening.py``.
 """
 
 import io
@@ -86,28 +91,6 @@ def make_staff(app, name="Sipho Nkosi", modules=("dashboard", "customers", "scan
 
 def login_staff(client, user_id, password="staff1234"):
     return client.post("/login", data={"user_id": str(user_id), "password": password}, follow_redirects=True)
-
-
-def synthetic_disc_png(payload: str) -> bytes:
-    """A real PDF417 of *our* text, generated locally — an image, not a stand-in for a photo."""
-    zxingcpp = pytest.importorskip("zxingcpp")
-    from PIL import Image
-
-    barcode = zxingcpp.create_barcode(payload, zxingcpp.BarcodeFormat.PDF417)
-    zxing_image = zxingcpp.write_barcode_to_image(barcode)
-    height, width = zxing_image.shape
-    pil = Image.frombuffer("L", (width, height), zxing_image, "raw", "L", 0, 1)
-    buffer = io.BytesIO()
-    pil.convert("RGB").resize((width * 2, height * 2)).save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def blank_png() -> bytes:
-    from PIL import Image
-
-    buffer = io.BytesIO()
-    Image.new("RGB", (400, 300), "white").save(buffer, format="PNG")
-    return buffer.getvalue()
 
 
 def scan_text(client, text, **extra):
@@ -188,50 +171,36 @@ def test_pasting_the_decoded_text_fills_the_review_form(app, client):
         assert dropped not in response.data, dropped
 
 
-def test_a_photographed_disk_is_read_in_memory_and_fills_the_form(app, client):
+def test_the_browser_decoded_barcode_text_fills_the_review_form(app, client):
+    """The live path: the camera decodes the PDF417 in the browser and posts ``disc_text``."""
     login_owner(client)
-    response = client.post(
-        "/scan-vehicle",
-        data={"action": "decode", "disk_image": (io.BytesIO(synthetic_disc_png(disc_text("labelvalue"))), "disc.png")},
-        content_type="multipart/form-data",
-        follow_redirects=True,
-    )
+    response = scan_text(client, disc_text("natis_positional"))
     assert response.status_code == 200
     assert b"Disc read" in response.data
-    assert b'value="ABC 123 GP"' in response.data
-    assert b'value="2GD1234567"' in response.data           # engine number off the barcode
+    assert b'value="ABC123GP"' in response.data       # the number plate
+    assert b'value="ZZ1234Z"' in response.data        # the NaTIS registration number
+    assert b'value="T9876543210X"' in response.data   # the disc's own licence number
 
 
-def test_a_photo_without_a_barcode_flashes_the_distinct_message_and_still_offers_the_form(app, client):
+def test_a_legacy_photo_upload_is_refused_from_the_headers_and_offers_manual_entry(app, client):
+    """The retired photo-upload path is refused before its body is parsed; no image is decoded."""
     login_owner(client)
     response = client.post(
         "/scan-vehicle",
-        data={"action": "decode", "disk_image": (io.BytesIO(blank_png()), "disc.png")},
+        data={"action": "decode", "disk_image": (io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"0" * 4096), "disc.png")},
         content_type="multipart/form-data",
         follow_redirects=True,
     )
+    body = response.data
     assert response.status_code == 200
-    assert b"No barcode found on that photo" in response.data
-    assert b"Add details manually" in response.data         # the manual action is offered
-    assert b"Number plate" in response.data                 # ... and the review form is offered
+    assert b"Photo uploads are not accepted" in body
+    # ... and the manual review form is offered, never an error page.
+    assert b'name="registration"' in body
+    assert b'name="customer_pick"' in body
+    assert b"Add details manually" in body
 
 
-def test_a_barcode_with_no_vehicle_fields_still_lets_staff_type_the_fields(app, client):
-    login_owner(client)
-    payload = "THIS IS NOT A LICENCE DISK - please rescan @@##$$"
-    response = client.post(
-        "/scan-vehicle",
-        data={"action": "decode", "disk_image": (io.BytesIO(synthetic_disc_png(payload)), "disc.png")},
-        content_type="multipart/form-data",
-        follow_redirects=True,
-    )
-    assert response.status_code == 200
-    assert b"holds no vehicle fields" in response.data
-    assert b'name="registration"' in response.data          # the fields are offered for typing
-    assert b'name="customer_pick"' in response.data         # and the client is chosen in the same step
-
-
-def test_a_file_that_is_not_an_image_is_named_as_such(app, client):
+def test_a_multipart_scan_post_is_refused_whether_or_not_it_is_an_image(app, client):
     login_owner(client)
     response = client.post(
         "/scan-vehicle",
@@ -240,25 +209,59 @@ def test_a_file_that_is_not_an_image_is_named_as_such(app, client):
         follow_redirects=True,
     )
     assert response.status_code == 200
-    assert b"not an image" in response.data
+    assert b"Photo uploads are not accepted" in response.data
 
 
-def test_an_oversize_photo_is_refused_without_reading_it(app, client):
+def test_the_refused_photo_post_creates_no_vehicle(app, client, customer_id):
     login_owner(client)
-    response = client.post(
+    client.post(
         "/scan-vehicle",
-        data={"action": "decode", "disk_image": (io.BytesIO(b"x" * (9 * 1024 * 1024)), "huge.png")},
+        data={
+            "action": "decode",
+            "customer_id": str(customer_id),
+            "disk_image": (io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"0" * 128), "disc.png"),
+        },
         content_type="multipart/form-data",
         follow_redirects=True,
     )
+    with app.app_context():
+        assert vehicles.list_vehicles(customer_id) == []
+
+
+def test_a_barcode_with_no_vehicle_fields_still_lets_staff_type_the_fields(app, client):
+    """A decoded barcode that holds no disc fields is a message, not a block."""
+    login_owner(client)
+    response = scan_text(client, "THIS IS NOT A LICENCE DISK - please rescan @@##$$")
     assert response.status_code == 200
-    assert b"larger than 8 MB" in response.data
+    assert b"holds no vehicle fields" in response.data
+    assert b'name="registration"' in response.data          # the fields are offered for typing
+    assert b'name="customer_pick"' in response.data         # and the client is chosen in the same step
+
+
+def test_an_oversize_scan_body_is_refused_without_being_read(app, client):
+    login_owner(client)
+    # A 9 MB urlencoded body: refused from the declared Content-Length, never handed to the parser.
+    response = client.post(
+        "/scan-vehicle",
+        data={"action": "decode", "disc_text": "x" * (9 * 1024 * 1024)},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"far too long to be a licence disk" in response.data
+
+
+def test_oversize_barcode_text_below_the_body_cap_is_still_refused(app, client):
+    from app.routes.vehicles import MAX_DISC_TEXT_CHARS
+
+    login_owner(client)
+    response = scan_text(client, "8" * (MAX_DISC_TEXT_CHARS + 1))
+    assert b"far too long to be a licence disk" in response.data
 
 
 def test_submitting_nothing_asks_for_a_scan_or_the_fields(app, client):
     login_owner(client)
     response = scan_text(client, "")
-    assert b"Photograph the disc, or paste the barcode text" in response.data
+    assert b"Scan the licence disk with the camera" in response.data
 
 
 def test_the_manual_button_opens_an_empty_review_form(app, client):

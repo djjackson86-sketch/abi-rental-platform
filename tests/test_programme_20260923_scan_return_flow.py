@@ -8,10 +8,12 @@ What these tests pin, one per line of the plan's §D2 acceptance:
 
 * the screen is gated by the ``scan_return`` module — a sign-in without it gets
   403 on every route, and the module is what puts the nav link on the page;
-* a trailer disc (photo **or** pasted text, or just a typed plate) resolves to the
-  started order holding that trailer, with the evidence shown, and one press of
-  "Mark returned" moves it to ``returned`` through the existing return flow and
+* a trailer disc (the browser-decoded barcode text, or just a typed plate) resolves
+  to the started order holding that trailer, with the evidence shown, and one press
+  of "Mark returned" moves it to ``returned`` through the existing return flow and
   lands staff on the order page;
+* a retired photo-upload POST is refused from the request headers before its body is
+  parsed, and the manual plate box is still offered;
 * the towing car's disc works the same way and records the vehicle source;
 * an ambiguous scan lists every candidate and **returns nothing until a choice is
   posted** — never an auto-pick;
@@ -256,20 +258,6 @@ def _text(response) -> str:
     return " ".join(html.split())
 
 
-def synthetic_disc_png(payload: str) -> bytes:
-    """A real PDF417 of *our* text, generated locally — an image, not a stand-in."""
-    zxingcpp = pytest.importorskip("zxingcpp")
-    from PIL import Image
-
-    barcode = zxingcpp.create_barcode(payload, zxingcpp.BarcodeFormat.PDF417)
-    image = zxingcpp.write_barcode_to_image(barcode)
-    height, width = image.shape
-    pil = Image.frombuffer("L", (width, height), image, "raw", "L", 0, 1)
-    buffer = io.BytesIO()
-    pil.convert("RGB").resize((width * 2, height * 2)).save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
 # ── module gating and the screen itself ─────────────────────────────────────
 
 
@@ -288,10 +276,11 @@ def test_the_module_grants_the_screen_and_the_nav_link(app, client):
     response = client.get("/scan-return")
     body = _body(response)
     assert response.status_code == 200
-    assert 'name="disk_image"' in body and 'capture="environment"' in body
+    assert 'name="disk_image"' not in body
+    assert 'capture="environment"' not in body and 'type="file"' not in body
     assert "js/scan-camera.js" in body and "scan-camera-live" in body
     assert "Return" in body and "Manual entry" in body and 'name="plate"' in body
-    assert 'name="disc_text"' not in body
+    assert 'name="disc_text"' in body
 
     _login_staff(client, without)
     assert "Scan to return" not in _body(client.get("/dashboard"))
@@ -316,22 +305,25 @@ def test_a_pasted_trailer_disc_offers_the_started_order_with_its_evidence(app, c
     assert f'name="order_id" value="{order_id}"' in body
 
 
-def test_a_trailer_disc_photograph_is_read_and_offered(app, client):
+def test_a_retired_trailer_disc_photograph_is_refused_and_offers_manual_entry(app, client):
+    """The photo-upload path is retired: the POST is refused from the headers, no image decoded."""
     customer_id = _customer(app)
     product_id = _product(app)
     order_id = _started(app, customer_id, product_id)
-    expected = _order_row(app, order_id)["order_number"]
     _login_owner(client)
 
     response = client.post(
         "/scan-return",
-        data={"disk_image": (io.BytesIO(synthetic_disc_png(trailer_disc_text())), "disc.png")},
+        data={"disk_image": (io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"0" * 2048), "disc.png")},
         content_type="multipart/form-data",
         follow_redirects=True,
     )
     body = _body(response)
     assert response.status_code == 200
-    assert expected in body and "Mark returned" in body
+    assert "Photo uploads are not accepted" in body
+    # The manual plate box is still offered, and nothing was returned by the refused upload.
+    assert 'name="plate"' in body
+    assert _order_row(app, order_id)["status"] == "started"
 
 
 def test_a_typed_plate_finds_the_rental_without_any_disc(app, client):
@@ -546,7 +538,9 @@ def test_junk_text_is_a_message_not_a_crash(app, client):
     response = _scan(client, disc_text="THIS IS NOT A LICENCE DISK")
     assert response.status_code == 200
     body = _body(response)
-    assert 'name="disc_text"' not in body
+    # The capture form still carries the hidden decoded-text field the camera fills, so staff can
+    # scan again; the junk is reported as a message, never a crash.
+    assert 'name="disc_text"' in body
     assert "could not" in body.lower() or "no vehicle fields" in body.lower()
     assert "Return" in body and "Manual entry" in body
 

@@ -12,9 +12,7 @@
 </header>
 
 <section class="panel scan-capture-panel">
-  <form method="post" enctype="multipart/form-data" action="{{ url_for('returns.scan_return') }}" class="scan-capture-form">
-    <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment">
-
+  <form method="post" action="{{ url_for('returns.scan_return') }}" class="scan-capture-form">
     <div class="scan-actions-simple">
       <button class="btn primary scan-big" type="button" id="scan-camera-start">Return</button>
       <button class="btn ghost scan-big" type="button" id="scan-manual">Manual entry</button>
@@ -36,7 +34,7 @@
   </form>
 </section>
 
-<script src="{{ url_for('static', filename='js/scan-camera.js') }}?v=scan-fs-1"></script>
+<script src="{{ url_for('static', filename='js/scan-camera.js') }}?v=scan-live-2"></script>
 <script>
 (function () {
   var manual = document.getElementById('scan-manual');
@@ -69,9 +67,8 @@
   if (!window.AbiScanCamera) { return; }
   AbiScanCamera.init({
     form: '.scan-capture-form',
-    fileInput: 'scan-disk-image',
     start: 'scan-camera-start',
-    filename: 'return-disk-scan.jpg',
+    manual: 'scan-manual',
     readingMessage: 'Finding order…',
     onOpen: function () {
       if (manualPanel) { manualPanel.hidden = true; }

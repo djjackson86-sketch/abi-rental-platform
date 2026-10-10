@@ -1,20 +1,17 @@
-"""The scan-camera capture path must open, fill the screen, and degrade safely.
+"""The scan-camera path must open, fill the screen, and degrade safely.
 
-The phone failure this file guards against was NOT a JS error, a missing script
-block, or a CSP/Permissions-Policy header: the inline script ran and
-``getUserMedia`` worked in every desktop/mobile-emulated browser. The break was
-iOS-only and shared by both scan pages:
+The phone failures this file guards against were never a JS error or a missing
+script block:
 
-  * the ``<input type=file capture="environment">`` carried the ``hidden``
+  * an ``<input type=file capture="environment">`` carried the ``hidden``
     attribute -> ``[hidden]{display:none!important}`` -> ``display:none``, and
     iOS Safari refuses to open a file picker from ``.click()`` on a display:none
-    input. That input is the camera path whenever ``getUserMedia`` is missing or
-    blocked (in-app browsers, denied permission), so on an iPhone both the live
-    camera and the photo fallback were dead;
+    input. That photo path is now RETIRED entirely — the camera decodes the
+    PDF417 in the browser and there is no photo fallback at all;
   * the ``<video>`` relied on the ``muted``/``playsinline`` *attributes* only,
     and the frame was made visible *after* ``srcObject`` was attached.
 
-The scanner is now a SHARED full-screen overlay (markup in
+The scanner is a SHARED full-screen overlay (markup in
 ``templates/admin/_scan_camera.html``, behaviour in ``static/js/scan-camera.js``)
 used by both pages. These tests pin the behaviour at the level that matters: the
 rendered markup, the shared partial, and the shipped module.
@@ -46,16 +43,20 @@ def _owner_client(app):
 # ── rendered page (the real route + template) ───────────────────────────────
 
 
-def test_the_camera_file_input_is_not_display_none(tmp_path):
-    """A display:none file input cannot be opened by .click() on iOS Safari."""
+def test_the_scan_pages_have_no_photo_path_at_all(tmp_path):
+    """The camera reads the barcode live; there is no file input and no photo fallback."""
     app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "scan-camera.db")})
     client = _owner_client(app)
     for url in ("/scan-vehicle", "/scan-return"):
         html = client.get(url).get_data(as_text=True)
-        tag = re.search(r'<input[^>]*name="disk_image"[^>]*>', html)
-        assert tag, url
-        assert " hidden" not in tag.group(0), f"{url}: disk_image must not be display:none"
-        assert 'capture="environment"' in tag.group(0)
+        assert 'name="disk_image"' not in html, url
+        assert 'type="file"' not in html, url
+        assert 'capture="environment"' not in html, url
+        assert 'multipart/form-data' not in html, url
+        assert 'id="scan-camera-capture"' not in html, url
+        assert 'id="scan-camera-fallback"' not in html, url
+        # The decoded text is posted through the page's own form.
+        assert 'name="disc_text"' in html, url
 
 
 def test_both_pages_render_the_full_screen_scanner(tmp_path):
@@ -68,12 +69,14 @@ def test_both_pages_render_the_full_screen_scanner(tmp_path):
         assert 'role="dialog"' in html and 'aria-modal="true"' in html, url
         assert 'id="scan-camera-video"' in html, url
         assert 'class="scan-barcode-guide"' in html, url
-        assert 'id="scan-camera-capture"' in html and 'id="scan-camera-cancel"' in html, url
+        assert 'id="scan-camera-cancel"' in html, url
         assert 'id="scan-camera-playstart"' in html, url
         assert 'id="scan-camera-status" aria-live="polite"' in html, url
-        assert 'id="scan-camera-fallback" hidden' in html, url
         assert 'id="scan-camera-blocked"' in html, url
+        # The manual fallback button and the local decoder are both shipped.
+        assert 'id="scan-camera-manual"' in html, url
         assert "js/scan-camera.js" in html, url
+        assert "vendor/zxing/zxing-library-0.21.3.min.js" in html, url
 
 
 # ── shared module source ─────────────────────────────────────────────────────
@@ -114,10 +117,12 @@ def test_camera_and_playback_failures_are_reported_separately():
     assert "{video: {facingMode: 'environment'}, audio: false}" in module
     assert "{video: true, audio: false}" in module
     # A blocked permission gets its own message/branch; a playback refusal gets a
-    # visible retry ("Start preview") rather than being reported as a block.
+    # visible retry ("Start preview") rather than being reported as a block. Every
+    # failure goes to MANUAL entry — never a photo.
     assert "NotAllowedError" in module
     assert "scan-camera-playstart" in module or "playStart" in module
-    assert "fallBackToPhoto" in module
+    assert "fallBackToManual" in module
+    assert "fallBackToPhoto" not in module
 
 
 def test_the_status_region_and_pagehide_stop_survive():

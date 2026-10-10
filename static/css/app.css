@@ -564,9 +564,7 @@ body.scan-fs-open{overflow:hidden}
 .scan-camera-bottom{display:grid;gap:8px;justify-items:center;padding-top:12px}
 .scan-camera-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
 .scan-camera-actions .btn{width:auto}
-.scan-camera-shutter{min-height:52px;min-width:170px;font-size:16px}
 .scan-camera-status{margin:10px 0 0}
-.scan-camera-fallback{justify-self:start}
 .scan-camera-blocked{display:grid;gap:6px;margin:0 0 14px;padding:12px 14px;border:1px solid #fecaca;border-radius:var(--radius,12px);background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318);font-weight:650;overflow-wrap:anywhere}
 .scan-camera-blocked p{margin:0;font-weight:600;color:#7a271a}
 /* Short landscape phones: drop the guidance line and pull the controls to the
