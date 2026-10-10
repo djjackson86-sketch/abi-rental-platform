@@ -1,3 +1,4 @@
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -52,15 +53,22 @@ def test_staff_main_fields_and_additional_vehicle_prompt(tmp_path):
         assert f'name="{name}"' not in scan
 
 
-def test_both_scan_pages_share_the_153_by_13_guide():
+def test_both_scan_pages_share_the_forgiving_barcode_guide():
     root = Path(__file__).resolve().parents[1]
     css = (root / 'static/css/app.css').read_text(encoding='utf-8')
-    assert 'aspect-ratio:153/13' in css
+    # A forgiving alignment area, not the exact 153/13 silhouette: shorter
+    # end-to-end (narrower) and roughly twice as tall, so a barcode is easier
+    # to fit. The guide is a screen overlay only; it never crops the capture.
+    assert 'aspect-ratio:6/1' in css
+    assert 'aspect-ratio:153/13' not in css
+    guide = re.search(r'\.scan-barcode-guide\{[^}]*\}', css).group(0)
+    assert 'left:9%' in guide and 'width:82%' in guide
     # The guide + hint now live in the shared scanner partial, and the constraint
     # ladder in the shared module — both pages include/reference them.
     partial = (root / 'templates/admin' / '_scan_camera.html').read_text(encoding='utf-8')
     assert 'class="scan-barcode-guide"' in partial
-    assert '153 mm × 13 mm' in partial
+    assert 'Fit the whole barcode inside the guide' in partial
+    assert '153 mm × 13 mm' not in partial
     for name in ('scan_vehicle.html', 'scan_return.html'):
         template = (root / 'templates/admin' / name).read_text(encoding='utf-8')
         assert 'admin/_scan_camera.html' in template

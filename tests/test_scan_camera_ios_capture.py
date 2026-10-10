@@ -133,7 +133,7 @@ def test_the_blocked_permission_message_is_present_and_honest():
     assert "cannot switch the camera on" in partial
 
 
-# ── shared CSS: full-screen, safe-area, contain, 153/13 guide ─────────────────
+# ── shared CSS: full-screen, safe-area, contain, forgiving guide ──────────────
 
 
 def test_the_overlay_css_is_fixed_full_screen_with_safe_areas():
@@ -143,7 +143,7 @@ def test_the_overlay_css_is_fixed_full_screen_with_safe_areas():
     assert "safe-area-inset-top" in css and "safe-area-inset-bottom" in css
     # Keep the FULL camera image: contain, never cover.
     assert re.search(r"\.scan-camera-stage video\{[^}]*object-fit:contain", css)
-    assert "aspect-ratio:153/13" in css
+    assert "aspect-ratio:6/1" in css  # forgiving area, not the exact 153/13 silhouette
 
 
 def test_the_guide_and_measurements_are_shared_by_both_pages():
@@ -152,4 +152,7 @@ def test_the_guide_and_measurements_are_shared_by_both_pages():
         assert "_scan_camera.html" in src, template.name
     partial = PARTIAL.read_text(encoding="utf-8")
     assert 'class="scan-barcode-guide"' in partial
-    assert "153 mm × 13 mm" in partial
+    # A simple "fit it inside the guide" instruction, not a demand for the exact
+    # physical barcode size (which no screen can guarantee).
+    assert "Fit the whole barcode inside the guide" in partial
+    assert "153 mm × 13 mm" not in partial

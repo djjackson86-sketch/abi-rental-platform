@@ -430,7 +430,7 @@ body.scan-fs-open{overflow:hidden}
 .scan-camera-close:focus-visible{outline:3px solid #fff;outline-offset:2px}
 .scan-camera-stage{position:relative;overflow:hidden;border-radius:14px;background:#0f172a;border:1px solid #111827;min-height:0}
 .scan-camera-stage video{width:100%;height:100%;object-fit:contain;display:block}
-.scan-barcode-guide{position:absolute;box-sizing:border-box;left:5%;width:90%;right:auto;top:50%;height:auto;aspect-ratio:153/13;transform:translateY(-50%);border:2px solid rgba(255,255,255,.95);border-radius:2px;box-shadow:0 0 0 999px rgba(15,23,42,.42);pointer-events:none}
+.scan-barcode-guide{position:absolute;box-sizing:border-box;left:9%;width:82%;right:auto;top:50%;height:auto;aspect-ratio:6/1;max-height:52%;transform:translateY(-50%);border:2px solid rgba(255,255,255,.95);border-radius:3px;box-shadow:0 0 0 999px rgba(15,23,42,.42);pointer-events:none}
 .scan-camera-hint{position:absolute;left:0;right:0;top:8px;margin:0;padding:0 12px;text-align:center;color:#f1f5f9;font-weight:650;font-size:12px;line-height:1.35;text-shadow:0 1px 3px rgba(0,0,0,.9)}
 .scan-camera-playstart{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-height:52px;min-width:170px;padding:0 22px;border-radius:999px;border:0;background:var(--brand,#0ea5e9);color:#fff;font-weight:750;font-size:15px;cursor:pointer}
 .scan-camera-bottom{display:grid;gap:8px;justify-items:center;padding-top:12px}
