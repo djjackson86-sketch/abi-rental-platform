@@ -280,7 +280,8 @@ def test_date_filters_are_preserved_in_links(client, app):
     assert 'date_from=2026-07-02' in html
     assert 'date_to=2026-07-03' in html
     assert 'branch=2' in html
-    assert 'status=archived' in html
+    assert '>Active</a>' not in html
+    assert '>Archived</a>' not in html
     assert 'sort=customer' in html
 
 

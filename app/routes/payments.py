@@ -27,12 +27,15 @@ def index():
     sort, direction = normalise_payment_sort(request.args.get("sort", "date"), request.args.get("dir", "desc"))
     date_from = normalise_payment_date_filter(request.args.get("date_from", ""))
     date_to = normalise_payment_date_filter(request.args.get("date_to", ""))
+    day = normalise_payment_date_filter(request.args.get("day", ""))
+    # Keep the range in the form so clearing the day restores it.
+    effective_from, effective_to = (day, day) if day else (date_from, date_to)
     display_limit = _display_limit()
     total_payments = payment_count(
         include_archived=include_archived,
         branch_id=branch_id,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=effective_from,
+        date_to=effective_to,
     )
     return render_template(
         "admin/payments/index.html",
@@ -42,16 +45,16 @@ def index():
             branch_id=branch_id,
             sort=sort,
             direction=direction,
-            date_from=date_from,
-            date_to=date_to,
+            date_from=effective_from,
+            date_to=effective_to,
             limit=display_limit,
         ),
         total_payments=total_payments,
         payment_totals=payment_method_totals(
             include_archived=include_archived,
             branch_id=branch_id,
-            date_from=date_from,
-            date_to=date_to,
+            date_from=effective_from,
+            date_to=effective_to,
         ),
         display_limit=display_limit,
         previous_limit=max(display_limit - PAGE_SIZE, 0),
@@ -68,6 +71,7 @@ def index():
             "branch": selected_branch,
             "sort": sort,
             "dir": direction,
+            "day": day,
             "date_from": date_from,
             "date_to": date_to,
         },
