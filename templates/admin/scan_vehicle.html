@@ -17,7 +17,7 @@
 <section class="panel scan-capture-panel">
   <form method="post" enctype="multipart/form-data" class="scan-capture-form">
     <input type="hidden" name="customer_id" value="{{ preselected_customer.id if preselected_customer else '' }}">
-    <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment" hidden>
+    <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment">
 
     <div class="scan-actions-simple">
       <button class="btn primary scan-big" type="button" id="scan-camera-start">Scan licence disk</button>
@@ -26,7 +26,7 @@
 
     <div class="scan-camera-live" id="scan-camera-live" hidden>
       <div class="scan-camera-frame">
-        <video id="scan-camera-video" playsinline muted></video>
+        <video id="scan-camera-video" playsinline webkit-playsinline muted autoplay></video>
         <div class="scan-barcode-guide" aria-hidden="true"></div>
       </div>
       <p class="scan-camera-hint">Fit the full 153 mm × 13 mm barcode inside the thin guide. Hold the phone landscape for a larger view; keep the barcode sharp and free of glare.</p>
@@ -56,6 +56,13 @@
   var stream = null;
   if (!form || !fileInput || !start || !live || !video || !capture || !cancel) { return; }
 
+  // iOS Safari only honours muted/playsinline on a srcObject-fed <video> as DOM
+  // properties; the content attributes alone are not enough. Set both.
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+
   function say(message) { if (status) { status.textContent = message || ''; } }
   function stopCamera() {
     if (stream) { stream.getTracks().forEach(function (track) { track.stop(); }); }
@@ -66,9 +73,13 @@
     if (manual) { manual.hidden = false; }
   }
   function offerFallback(message) {
+    stopCamera();
     say(message);
     if (fallback) { fallback.hidden = false; }
   }
+  // The file input is deliberately NOT display:none: iOS Safari refuses to open a
+  // file picker from .click() on a display:none input, which is exactly how staff
+  // reach the camera when getUserMedia is unavailable or blocked.
   if (fallback) {
     fallback.addEventListener('click', function () { fileInput.click(); });
   }
@@ -79,23 +90,52 @@
     form.submit();
   });
 
+  // Some phones reject the ideal-constraint object outright (OverconstrainedError);
+  // step down to a plain rear-camera request, then to any camera, before giving up.
+  var cameraOptions = [
+    {video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false},
+    {video: {facingMode: 'environment'}, audio: false},
+    {video: true, audio: false}
+  ];
+  function requestCamera(index) {
+    return navigator.mediaDevices.getUserMedia(cameraOptions[index]).catch(function (err) {
+      var retryable = err && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError' || err.name === 'TypeError');
+      if (retryable && index + 1 < cameraOptions.length) { return requestCamera(index + 1); }
+      throw err;
+    });
+  }
+
   start.addEventListener('click', function () {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      offerFallback('This browser cannot open the live camera.');
+      offerFallback('This browser cannot open the live camera — use the photo button below.');
       return;
     }
     say('Opening camera…');
-    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false})
-      .then(function (mediaStream) {
-        stream = mediaStream;
-        video.srcObject = stream;
-        live.hidden = false;
-        start.hidden = true;
-        if (manual) { manual.hidden = true; }
-        say('');
-        return video.play();
-      })
-      .catch(function () { offerFallback('Camera blocked or unavailable.'); });
+    // Reveal the frame BEFORE the stream is attached: iOS Safari will not paint a
+    // MediaStream into a <video> that is still inside a display:none container.
+    live.hidden = false;
+    start.hidden = true;
+    if (manual) { manual.hidden = true; }
+    requestCamera(0).then(function (mediaStream) {
+      stream = mediaStream;
+      video.srcObject = mediaStream;
+      var playing = video.play();
+      if (playing && playing.catch) {
+        playing.catch(function () {
+          // A muted stream can still be refused on the first attempt; retry when the
+          // user taps the live view instead of reporting the camera as broken.
+          live.addEventListener('click', function retryPlay() {
+            live.removeEventListener('click', retryPlay);
+            var again = video.play();
+            if (again && again.catch) { again.catch(function () {}); }
+          });
+        });
+      }
+      say('Align the barcode in the guide, then tap Capture.');
+    }).catch(function (err) {
+      var denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+      offerFallback(denied ? 'Camera permission was blocked — use the photo button below.' : 'Camera unavailable — use the photo button below.');
+    });
   });
 
   capture.addEventListener('click', function () {
