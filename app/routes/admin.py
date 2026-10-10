@@ -3,13 +3,11 @@ import csv
 from datetime import date, timedelta
 from io import StringIO
 from app.routes.auth import login_required
-from app.db import get_db
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services import group_images
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, scheduled_events
 from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
-from app.services.app_store import list_app_store_items, update_app_store_item, seed_app_store_items
 from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 from app.services import spare_wheels
@@ -294,42 +292,6 @@ def dashboard_spare_wheels():
 def coupons(coupon_id=None):
     abort(404)
 
-
-@bp.route("/app-store", methods=["GET", "POST"])
-@login_required
-def app_store():
-    # Seed default items if none exist
-    seed_app_store_items()
-    if request.method == "POST":
-        item_id = request.form.get("item_id")
-        if item_id:
-            is_active = 1 if request.form.get("is_active") else 0
-            try:
-                update_app_store_item(item_id, is_active=is_active)
-                flash("App store item updated", "success")
-            except Exception as exc:
-                flash(str(exc), "error")
-        return redirect(url_for("admin.app_store"))
-    items = list_app_store_items()
-    return render_template("admin/app_store.html", items=items)
-
-
-@bp.route("/scan-barcode", methods=["GET", "POST"])
-@login_required
-def scan_barcode():
-    if request.method == "POST":
-        barcode = (request.form.get("barcode") or "").strip()
-        if not barcode:
-            flash("Barcode is required", "error")
-            return redirect(url_for("admin.scan_barcode"))
-        # Look for product by SKU (barcode)
-        product = get_db().execute("SELECT id FROM products WHERE sku = ? AND active = 1", (barcode,)).fetchone()
-        if product:
-            return redirect(url_for("inventory.edit", product_id=product["id"]))
-        else:
-            flash(f"No active product found with barcode '{barcode}'", "error")
-            return redirect(url_for("admin.scan_barcode"))
-    return render_template("admin/scan_barcode.html", settings=get_company_settings())
 
 @bp.route("/calendar")
 @login_required

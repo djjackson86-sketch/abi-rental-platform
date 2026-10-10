@@ -88,7 +88,8 @@ CREDIT_LIMIT_ERROR = "Credit limit must be a positive amount"
 
 
 def list_customers(query="", customer_type="", marketing="", limit=None, offset=0):
-    sql = """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email,
+    sql = """SELECT c.*, CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL
+            THEN 'Public' ELSE u.name END AS created_by_name, u.email AS created_by_email,
         (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count
         FROM customers c
         LEFT JOIN users u ON u.id = c.created_by_user_id
@@ -270,7 +271,8 @@ def customer_filter_counts():
 
 def get_customer(customer_id):
     return get_db().execute(
-        """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email, b.name AS branch_name
+        """SELECT c.*, CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL
+            THEN 'Public' ELSE u.name END AS created_by_name, u.email AS created_by_email, b.name AS branch_name
         FROM customers c
         LEFT JOIN users u ON u.id = c.created_by_user_id
         LEFT JOIN branches b ON b.id = c.branch_id
