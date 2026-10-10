@@ -29,7 +29,7 @@
         <video id="scan-camera-video" playsinline muted></video>
         <div class="scan-barcode-guide" aria-hidden="true"></div>
       </div>
-      <p class="scan-camera-hint">Line the barcode up inside the box.</p>
+      <p class="scan-camera-hint">Fit the full 153 mm × 13 mm barcode inside the thin guide. Hold the phone landscape for a larger view; keep the barcode sharp and free of glare.</p>
       <div class="form-actions scan-camera-actions">
         <button class="btn primary" type="button" id="scan-camera-capture">Capture</button>
         <button class="btn ghost" type="button" id="scan-camera-cancel">Cancel</button>
@@ -85,7 +85,7 @@
       return;
     }
     say('Opening camera…');
-    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}}, audio: false})
+    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false})
       .then(function (mediaStream) {
         stream = mediaStream;
         video.srcObject = stream;
@@ -130,6 +130,7 @@
 {% set owner_is_somebody_else = owner and (not review.customer or owner.id != review.customer.id) %}
 <section class="panel scan-review-panel">
   <h2>Check the details &amp; allocate the vehicle</h2>
+  {% if review.fields.get('licence_disk_expiry') and review.fields.get('licence_disk_expiry') < business_today %}<p class="scan-expiry-warning" role="alert">Warning: this vehicle licence disk expired on {{ review.fields.get('licence_disk_expiry') }}.</p>{% endif %}
 
   {% if owner_is_somebody_else %}
   <div class="scan-warning" role="alert">
@@ -163,6 +164,13 @@
       <input type="hidden" name="customer_id" id="scan-customer-id" value="{{ review.customer.id if review.customer else '' }}">
       <datalist id="scan-customer-options"></datalist>
     </label>
+
+    <fieldset class="span-2 scan-main-choice">
+      <legend>Is this the main client vehicle?</legend>
+      <p class="form-help">Yes fills the main vehicle fields under Custom customer details and uses this vehicle on invoices. No keeps it as an additional vehicle at the bottom of the customer edit page.</p>
+      <label class="choice-card"><input type="radio" name="make_main" value="yes" required{% if request.values.get('vehicle_role') == 'main' %} checked{% endif %}> Yes — use as the main vehicle</label>
+      <label class="choice-card"><input type="radio" name="make_main" value="no" required> No — keep as an additional vehicle</label>
+    </fieldset>
 
     {% if owner_is_somebody_else %}
     <label class="span-2 scan-transfer-line">

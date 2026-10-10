@@ -61,7 +61,7 @@ S18_ELEMENTS = [
     ("(h) the right to correct or delete", "correct or delete"),
     ("(h) the right to object", "object to our use"),
     ("(h) complain to the Regulator", "complain to the Information Regulator"),
-    ("(h) the Regulator's contact details", "complaints.IR@justice.gov.za"),
+    ("(h) the Regulator's contact details", "POPIAComplaints@inforegulator.org.za"),
 ]
 
 #: The marker that proves each Step-3 paragraph is switched on, one per question.

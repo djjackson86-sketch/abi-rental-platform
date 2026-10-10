@@ -25,7 +25,7 @@
         <video id="scan-camera-video" playsinline muted></video>
         <div class="scan-barcode-guide" aria-hidden="true"></div>
       </div>
-      <p class="scan-camera-hint">Line the licence disk barcode up inside the box.</p>
+      <p class="scan-camera-hint">Fit the full 153 mm × 13 mm barcode inside the thin guide. Hold the phone landscape for a larger view; keep the barcode sharp and free of glare.</p>
       <div class="form-actions scan-camera-actions">
         <button class="btn primary" type="button" id="scan-camera-capture">Capture</button>
         <button class="btn ghost" type="button" id="scan-camera-cancel">Cancel</button>
@@ -115,7 +115,7 @@
     }
     say('Opening camera…');
     if (manualPanel) { manualPanel.hidden = true; }
-    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}}, audio: false})
+    navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false})
       .then(function (mediaStream) {
         stream = mediaStream;
         video.srcObject = stream;

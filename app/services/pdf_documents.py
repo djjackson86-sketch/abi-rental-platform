@@ -719,6 +719,43 @@ def _pdf_objects(stream, image_object=None):
     return bytes(out)
 
 
+# Main-vehicle details captured on the customer record (custom_fields_json). The
+# invoice/quote PDF shows the vehicle the CUSTOMER supplied; the per-client
+# ``vehicles`` table holds additional/other vehicles and must never leak in here.
+# Labels match the customer form's wording where the field already existed
+# (make / color / reg); the rest follow the vehicle form's own field names.
+MAIN_VEHICLE_FIELDS = (
+    ('vehicle_make', 'Vehicle Make'),
+    ('vehicle_model', 'Vehicle Model'),
+    ('vehicle_color', 'Vehicle Color'),
+    ('vehicle_type', 'Vehicle Type'),
+    ('vehicle_reg_no', 'Veh Reg No'),
+    ('vehicle_registration_number', 'NaTIS registration number'),
+    ('vehicle_vin', 'VIN'),
+    ('vehicle_engine_number', 'Engine number'),
+    ('vehicle_licence_number', 'Disk licence number'),
+    ('vehicle_licence_disk_expiry', 'Licence disk expiry'),
+    ('vehicle_registering_authority', 'Registering authority'),
+    ('vehicle_control_number', 'Control number'),
+)
+
+
+def _main_vehicle_lines(custom_fields):
+    """Labelled main-vehicle detail lines from the customer's decoded custom fields.
+
+    Reads ONLY the customer's own ``custom_fields_json`` (already decoded by
+    ``custom_fields_for``), so a document shows the vehicle recorded against the
+    client and never an arbitrary row from the separate ``vehicles`` table. Blank
+    values are skipped -- nothing is invented to pad the block.
+    """
+    lines = []
+    for key, label in MAIN_VEHICLE_FIELDS:
+        value = str(custom_fields.get(key) or '').strip()
+        if value:
+            lines.append(f'{label}: {value}')
+    return lines
+
+
 def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     display_label = display_document_label(document)
     display_number = display_document_number(document)
@@ -816,13 +853,11 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     if customer_company_reg_no:
         customer_lines.append(f'Company Reg No: {customer_company_reg_no}')
     customer_lines.extend([line for line in customer_address if line])
-    vehicle_lines = []
-    if custom_fields.get('vehicle_make'):
-        vehicle_lines.append(f'Vehicle Make: {custom_fields["vehicle_make"]}')
-    if custom_fields.get('vehicle_color'):
-        vehicle_lines.append(f'Vehicle Color: {custom_fields["vehicle_color"]}')
-    if custom_fields.get('vehicle_reg_no'):
-        vehicle_lines.append(f'Veh Reg No: {custom_fields["vehicle_reg_no"]}')
+    # Every non-blank main-vehicle detail captured on the customer record, read from
+    # the customer's own custom_fields_json (via custom_fields_for). A document shows
+    # the vehicle recorded against the client -- never a row from the separate
+    # ``vehicles`` table, which is where additional/other vehicles live.
+    vehicle_lines = _main_vehicle_lines(custom_fields)
     if vehicle_lines:
         customer_lines.extend(['', *vehicle_lines])
     alt_lines = []
@@ -834,23 +869,6 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         alt_lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
     if alt_lines:
         customer_lines.extend(['', *alt_lines])
-    visible_customer_lines = customer_lines[:18]
-    # Bill To block, aligned under the logo/brand on the left.
-    if visible_customer_lines:
-        text_commands.append(_pdf_text_command(LEFT_BLOCK_X, 625, visible_customer_lines[0], size=8.5, font='F2'))
-        _add_pdf_lines(text_commands, LEFT_BLOCK_X, 612, visible_customer_lines[1:], size=8.5, leading=13)
-    customer_bottom_y = 625 - ((len(visible_customer_lines) - 1) * 13 if visible_customer_lines else 0)
-
-    # Invoice table and totals.
-    # Move the table up under the address blocks. Page 1 takes as many rows as
-    # genuinely fit above the summary/banking floor (instead of the earlier
-    # hard six-row cap that left a large blank area and jumped to page 2). Any
-    # remaining rows continue on following pages - each with the same column
-    # headings and a page number - before the summary/banking block. Every item
-    # is always printed
-    # (ticket ABI-341953022: the table used to stop after eight rows, so items
-    # added by an order edit never reached the invoice/quote PDF).
-    table_y = min(545, customer_bottom_y - 28)
     tax_view = document_tax_view(document, items)
 
     # Summary: total without VAT, the VAT itself, then the total with VAT.
@@ -884,6 +902,32 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
         ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
     ])
+
+    # Bill To block, aligned under the logo/brand on the left. It must never run
+    # into the item table or push the last item row below the summary floor, and it
+    # must never drop the tail of a customer's detail: a full main-vehicle record
+    # (12 fields) plus three alternative contacts is ~25 lines, so the block is
+    # measured against that floor instead of the old fixed 18-line slice (which
+    # silently cut everything past the third vehicle line).
+    summary_min_y = 58 + ((len(totals) - 1) * 14)
+    last_row_y_floor = summary_min_y + 12 + 43
+    customer_lines_cap = max(1, int((625 - (last_row_y_floor + 52)) // 13) + 1)
+    visible_customer_lines = customer_lines[:customer_lines_cap]
+    if visible_customer_lines:
+        text_commands.append(_pdf_text_command(LEFT_BLOCK_X, 625, visible_customer_lines[0], size=8.5, font='F2'))
+        _add_pdf_lines(text_commands, LEFT_BLOCK_X, 612, visible_customer_lines[1:], size=8.5, leading=13)
+    customer_bottom_y = 625 - ((len(visible_customer_lines) - 1) * 13 if visible_customer_lines else 0)
+
+    # Invoice table and totals.
+    # Move the table up under the address blocks. Page 1 takes as many rows as
+    # genuinely fit above the summary/banking floor (instead of the earlier
+    # hard six-row cap that left a large blank area and jumped to page 2). Any
+    # remaining rows continue on following pages - each with the same column
+    # headings and a page number - before the summary/banking block. Every item
+    # is always printed
+    # (ticket ABI-341953022: the table used to stop after eight rows, so items
+    # added by an order edit never reached the invoice/quote PDF).
+    table_y = min(545, customer_bottom_y - 28)
 
     def add_table_header(draw, text, header_y):
         draw.append(_pdf_rect(INVOICE_TABLE_X, header_y - 5, INVOICE_TABLE_RIGHT_EDGE - INVOICE_TABLE_X, 18, fill='0 0 0'))
@@ -1082,12 +1126,8 @@ def document_pdf_bytes(document_id):
         compact_address = ', '.join(line for line in customer_address if line)
         if compact_address:
             lines.append(f'Customer address: {compact_address}')
-        if custom_fields.get('vehicle_make'):
-            lines.append(f'Vehicle Make: {custom_fields["vehicle_make"]}')
-        if custom_fields.get('vehicle_color'):
-            lines.append(f'Vehicle Color: {custom_fields["vehicle_color"]}')
-        if custom_fields.get('vehicle_reg_no'):
-            lines.append(f'Veh Reg No: {custom_fields["vehicle_reg_no"]}')
+        for vehicle_line in _main_vehicle_lines(custom_fields):
+            lines.append(vehicle_line)
         if custom_fields.get('alternative_contact_name'):
             lines.append(f'Alternative Contact Name: {custom_fields["alternative_contact_name"]}')
         if custom_fields.get('alternative_contact_number'):

@@ -1,6 +1,25 @@
 import re
 
 
+class TursoRow:
+    """sqlite3.Row-compatible access, including keys() used by templates/services."""
+
+    def __init__(self, row):
+        self._row = row
+
+    def keys(self):
+        return list(self._row._fields)
+
+    def __getitem__(self, key):
+        return self._row[key]
+
+    def __iter__(self):
+        return iter(self._row)
+
+    def __len__(self):
+        return len(self._row)
+
+
 class TursoCursor:
     def __init__(self, result):
         self._result = result
@@ -8,10 +27,10 @@ class TursoCursor:
         self.rowcount = result.rows_affected
 
     def fetchone(self):
-        return self._result.rows[0] if self._result.rows else None
+        return TursoRow(self._result.rows[0]) if self._result.rows else None
 
     def fetchall(self):
-        return list(self._result.rows)
+        return [TursoRow(row) for row in self._result.rows]
 
 
 class TursoConnection:

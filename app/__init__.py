@@ -119,12 +119,14 @@ def create_app(test_config=None):
         # hash per already-adopted document, so the bar stays cheap on every page.
         popia_notification = pack_notification() if is_main_session(session) else None
         from app.services.settings import get_company_settings
+        from app.services.cash import today_iso
         try:
             company_settings = get_company_settings()
         except Exception:
             company_settings = None
         return {
             "settings": company_settings,
+            "business_today": today_iso(),
             "current_user_is_main": is_main_session(session),
             "user_can": lambda module: user_can_module(session, module),
             # Who is signed in, for the dashboard's greeting. Both fall back to

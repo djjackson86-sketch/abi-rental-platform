@@ -202,7 +202,7 @@ def test_privacy_page_is_the_interim_page_while_the_notice_is_unfinished(client)
     assert "Sano Trailers" in body
     assert "229 Summit Road, Midrand" in body
     assert "info@sanotrailers.co.za" in body
-    assert "complaints.IR@justice.gov.za" in body
+    assert "POPIAComplaints@inforegulator.org.za" in body
 
 
 def test_privacy_page_reports_the_gate_state_the_document_is_actually_in(client):
@@ -252,7 +252,8 @@ def test_privacy_notice_version_matches_the_document():
 def test_the_page_carries_the_documents_confirmed_contact_details():
     """Drift guard: the published page and the reviewed document agree on the facts we do have."""
     doc = NOTICE_PATH.read_text(encoding="utf-8")
-    for line in (NOTICE_TEMPLATE_PATH.read_text(encoding="utf-8"), INTERIM_TEMPLATE_PATH.read_text(encoding="utf-8")):
+    shared = (ROOT / "templates/public/_customer_privacy_notice.html").read_text(encoding="utf-8")
+    for line in (NOTICE_TEMPLATE_PATH.read_text(encoding="utf-8"), INTERIM_TEMPLATE_PATH.read_text(encoding="utf-8") + shared):
         for fact in ("229 Summit Road, Midrand", "010 221 1723", "info@sanotrailers.co.za"):
             if fact in doc:
                 assert fact in line, f"{fact} is in the document but not on the published page"
@@ -285,7 +286,8 @@ def test_consent_block_is_unticked_and_required(app):
     assert "required" in html
     assert "checked" not in html
     assert "in accordance with POPIA" in html
-    assert "name, contact details and address" in html
+    assert "I have read the customer privacy notice" in html
+    assert "This does not subscribe me to marketing" in html
 
 
 def test_consent_block_links_the_notice_in_a_new_tab(app):

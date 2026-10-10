@@ -27,12 +27,19 @@
    QR opens); `form_values` is read with `.get(...)` everywhere, because a bare `.name`/`.values`
    on a mapping resolves to a dict method in Jinja rather than to the field. #}
 {% block body %}
+<style>
+@media(max-width:360px){
+  .portal-panel .customer-form{min-width:0;overflow-wrap:anywhere}
+  .portal-panel .customer-form .form-grid,.portal-panel .customer-form .option-grid{grid-template-columns:minmax(0,1fr)}
+}
+</style>
 <header class="store-header">
   <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
 </header>
 <main class="store-main">
   <article class="panel portal-panel">
     <p class="eyebrow">{{ 'Universal portal' if universal else branch.name }}</p>
+    {% if not intake_closed %}{% include "public/_portal_lookup.html" %}{% endif %}
     <h1>Customer registration</h1>
     {% if branch.portal_intro and not universal %}<p>{{ branch.portal_intro }}</p>{% endif %}
     <p class="muted">Complete this once so staff can find your customer record from any branch.</p>
@@ -101,32 +108,11 @@
       </div>
 
       {% set consent_purpose = "registration" %}
-      <section class="portal-privacy-template">
-        <h2>Privacy agreement</h2>
-        <p>By submitting this form, I agree that {{ settings.company_name }} may capture and use my personal information to create or update my customer record, contact me about rentals/bookings, prepare quotes/invoices, keep required business records, and manage the rental relationship. I understand I can ask to access or correct my information.</p>
-      </section>
       {% include "public/_consent_block.html" %}
 
       <div class="form-actions"><button class="btn primary" type="submit">Send my details</button></div>
     </form>
 
-    <section class="portal-lookup">
-      <h2>Are you already registered with us?</h2>
-      <p class="muted">Enter your name and cellphone number and we will tell you whether we already
-      have your details. We only ever show your first name and the last four digits of your number.</p>
-      {% if lookup_error %}<div class="flash error" role="alert">{{ lookup_error }}</div>{% endif %}
-      <form method="post" action="{{ url_for('public.customer_portal_check') if universal else url_for('public.branch_portal_check', slug=branch.public_slug) }}" class="portal-form">
-        <label class="portal-field" for="lookup-name">
-          <span>Full name</span>
-          <input id="lookup-name" name="name" type="text" required>
-        </label>
-        <label class="portal-field" for="lookup-phone">
-          <span>Cellphone number</span>
-          <input id="lookup-phone" name="phone" type="tel" inputmode="tel" required>
-        </label>
-        <button class="btn ghost" type="submit">Check</button>
-      </form>
-    </section>
     {% endif %}
 
     <div class="portal-actions">
@@ -155,6 +141,6 @@
 <footer class="store-footer">
   © 2026, {{ settings.company_name }}
   {% if settings.store_contact_email or settings.store_contact_phone %}<span>{{ settings.store_contact_email }}{% if settings.store_contact_email and settings.store_contact_phone %} · {% endif %}{{ settings.store_contact_phone }}</span>{% endif %}
-  <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+
 </footer>
 {% endblock %}

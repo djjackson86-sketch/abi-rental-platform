@@ -310,7 +310,7 @@ def test_removing_a_vehicle_leaves_the_client_intact(app, client, charmaine):
     response = client.post(f"/vehicles/{vehicle_id}/delete", follow_redirects=True)
     assert response.status_code == 200
     page = html_of(response)
-    assert "Vehicle removed — the client record is untouched." in page
+    assert "Vehicle removed. If it was the main vehicle, its main vehicle details were cleared." in page
     assert "No vehicles recorded" in panel_html(page)
     assert "Charmaine Mokoena" in page  # still the client's own record
     with app.app_context():

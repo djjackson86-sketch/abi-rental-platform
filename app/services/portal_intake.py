@@ -454,7 +454,7 @@ def create_or_link_customer(form, branch_id, decision, slug=None):
             reference = new_reference(slug)
             source_id = f"{slug}:{reference}" if slug else reference
         db.execute(
-            "UPDATE customers SET branch_id = ?, source_system = ?, source_id = ? WHERE id = ?",
+            "UPDATE customers SET branch_id = ?, source_system = ?, source_id = ?, created_by_user_id = NULL WHERE id = ?",
             (branch_id, PORTAL_SOURCE_SYSTEM, source_id, customer_id),
         )
         db.commit()

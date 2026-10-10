@@ -7,5 +7,5 @@
    The wording mirrors the TrailerPro booking page the brief points at. #}
 <label class="consent-block" for="popia-consent">
   <input type="checkbox" name="popia_consent" id="popia-consent" value="1" required>
-  <span class="consent-block-text">I agree that my personal information (name, contact details and address) may be used to process this {{ consent_purpose|default('booking') }} and generate an invoice, in accordance with POPIA. <a href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View Privacy Notice</a>.</span>
+  <span class="consent-block-text">I have read the customer privacy notice and agree that {{ (settings|default({})).company_name|default('Sano Trailers', true) }} may use my details to process this {{ consent_purpose|default('booking') }} and manage the rental relationship as explained in the notice, in accordance with POPIA. This does not subscribe me to marketing. <a href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View Privacy Notice</a>.</span>
 </label>

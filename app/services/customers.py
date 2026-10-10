@@ -12,11 +12,34 @@ HIDDEN_CUSTOM_FIELD_KEYS = {
     "booqable_deposit_type", "booqable_deposit_value", "booqable_client_verification",
     "booqable_latest_order_at", "booqable_your_reference", "booqable_tags",
     "booqable_updated_at", "booqable_address_raw",
+    # The internal pointer to the client's chosen main vehicle (feature 2026-10-10): it ties the
+    # mirrored vehicle fields to a vehicle row and is never shown or edited as a custom field.
+    "main_vehicle_id",
 }
+#: The custom-field keys the client's main vehicle is shown under. This is deliberately the seven
+#: fields staff type on the scan screen's manual entry — number plate, disc licence number, NaTIS
+#: registration number, VIN, engine number, make and disk expiry. The rest of a decoded disk (model,
+#: colour, category, registering authority, control number) is kept on the vehicle row only; any
+#: legacy value already stored against a client is preserved but not offered on the form. Alternative
+#: contacts follow straight after, on request. ``app.services.vehicles`` owns the column↔key mapping;
+#: a test pins these keys to ``vehicles.MAIN_VEHICLE_CUSTOM_KEYS``.
+VEHICLE_CUSTOM_FIELD_KEYS = (
+    "vehicle_reg_no",
+    "vehicle_licence_number",
+    "vehicle_registration_number",
+    "vehicle_vin",
+    "vehicle_engine_number",
+    "vehicle_make",
+    "vehicle_licence_disk_expiry",
+)
 VISIBLE_CUSTOM_FIELD_LABELS = {
-    "vehicle_make": "Vehicle Make",
-    "vehicle_color": "Vehicle Color",
     "vehicle_reg_no": "Veh Reg No",
+    "vehicle_licence_number": "Disk licence number",
+    "vehicle_registration_number": "NaTIS registration number",
+    "vehicle_vin": "VIN",
+    "vehicle_engine_number": "Engine number",
+    "vehicle_make": "Vehicle Make",
+    "vehicle_licence_disk_expiry": "Licence disk expiry",
     "alternative_contact_name": "Alternative Contact Name",
     "alternative_contact_number": "Alternative Contact Number",
     "alternative_contact_relationship": "Alternative Contact Relationship",
@@ -24,9 +47,13 @@ VISIBLE_CUSTOM_FIELD_LABELS = {
     "company_reg_no": "Company Reg No",
 }
 VISIBLE_CUSTOM_FIELD_ORDER = [
-    "vehicle_make",
-    "vehicle_color",
     "vehicle_reg_no",
+    "vehicle_licence_number",
+    "vehicle_registration_number",
+    "vehicle_vin",
+    "vehicle_engine_number",
+    "vehicle_make",
+    "vehicle_licence_disk_expiry",
     "alternative_contact_name",
     "alternative_contact_number",
     "alternative_contact_relationship",
@@ -45,7 +72,8 @@ BLOCKING_PANEL_MARKER = "blocking_panel"
 
 
 def list_customers(query="", customer_type="", marketing=""):
-    sql = """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email,
+    sql = """SELECT c.*, CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL
+            THEN 'Public' ELSE u.name END AS created_by_name, u.email AS created_by_email,
         (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count
         FROM customers c
         LEFT JOIN users u ON u.id = c.created_by_user_id
@@ -171,7 +199,8 @@ def customer_filter_counts():
 
 def get_customer(customer_id):
     return get_db().execute(
-        """SELECT c.*, u.name AS created_by_name, u.email AS created_by_email, b.name AS branch_name
+        """SELECT c.*, CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL
+            THEN 'Public' ELSE u.name END AS created_by_name, u.email AS created_by_email, b.name AS branch_name
         FROM customers c
         LEFT JOIN users u ON u.id = c.created_by_user_id
         LEFT JOIN branches b ON b.id = c.branch_id
@@ -237,6 +266,19 @@ def _form_value(form, key):
         return None
 
 
+def _form_has(form, key):
+    """True when the submitted form actually carries this key (a MultiDict or a dict).
+
+    The custom-field block is shared by the customer form, the public portal and the order screen's
+    attached-customer card. The latter two post only a few of the vehicle fields, so their save must
+    leave the fields they do not carry alone instead of blanking them.
+    """
+    try:
+        return key in form
+    except TypeError:
+        return False
+
+
 def blocking_panel_present(form):
     """True when the submitted form is the customer form's own blocking panel."""
     return str(_form_value(form, BLOCKING_PANEL_MARKER) or "").strip() == "1"
@@ -275,8 +317,17 @@ def _clean(form, existing_custom_fields=None):
     custom_fields = dict(existing_custom_fields or {})
     submitted_custom_fields = {
         "vehicle_make": form.get("vehicle_make", "").strip() or form.get("vehicle_details", "").strip(),
+        "vehicle_model": form.get("vehicle_model", "").strip(),
         "vehicle_color": form.get("vehicle_color", "").strip(),
         "vehicle_reg_no": form.get("vehicle_reg_no", "").strip(),
+        "vehicle_registration_number": form.get("vehicle_registration_number", "").strip(),
+        "vehicle_licence_number": form.get("vehicle_licence_number", "").strip(),
+        "vehicle_type": form.get("vehicle_type", "").strip(),
+        "vehicle_vin": form.get("vehicle_vin", "").strip(),
+        "vehicle_engine_number": form.get("vehicle_engine_number", "").strip(),
+        "vehicle_licence_disk_expiry": form.get("vehicle_licence_disk_expiry", "").strip(),
+        "vehicle_registering_authority": form.get("vehicle_registering_authority", "").strip(),
+        "vehicle_control_number": form.get("vehicle_control_number", "").strip(),
         "alternative_contact_name": form.get("alternative_contact_name", "").strip() or form.get("alternative_contact", "").strip(),
         "alternative_contact_number": form.get("alternative_contact_number", "").strip(),
         "alternative_contact_relationship": form.get("alternative_contact_relationship", "").strip(),
@@ -284,6 +335,13 @@ def _clean(form, existing_custom_fields=None):
         "company_reg_no": form.get("company_reg_no", "").strip(),
     }
     for key, value in submitted_custom_fields.items():
+        if key.startswith("vehicle_") and not _form_has(form, key):
+            # A partial post (the public portal, or the order card's cached snapshot) omits the
+            # main-vehicle fields it does not show. Leaving the stored value alone is what keeps a
+            # later partial save from wiping the vehicle details a scan just captured — and it
+            # preserves any legacy decoded field (e.g. vehicle_color) a document still prints.
+            if not (key == "vehicle_make" and _form_has(form, "vehicle_details")):
+                continue
         if value:
             custom_fields[key] = value
         else:
@@ -365,6 +423,13 @@ def create_customer(form):
 def update_customer(customer_id, form):
     data = _clean(form, existing_custom_fields=raw_custom_fields_for(get_customer(customer_id)))
     data["id"] = customer_id
+    # Feature 2026-10-10: the "Main client vehicle" fields are mirrored from a vehicle row. When
+    # this client has one linked, a save from the customer form is authoritative over that row
+    # (a plate another client owns is refused, never swapped in) and the row's stored values are
+    # mirrored back. A partial post from the portal/order card is not authoritative and is ignored
+    # here, so a stale snapshot can never overwrite the vehicle that a scan captured.
+    from app.services.vehicles import apply_main_vehicle_form_sync
+    data["custom_fields_json"] = apply_main_vehicle_form_sync(customer_id, form, data["custom_fields_json"])
     # Ticket ABI-341953028: the block columns are only written when the customer
     # form's own blocking panel was submitted, so the order form's attached
     # customer card can never clear a block by saving other details.

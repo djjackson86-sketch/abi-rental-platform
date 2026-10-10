@@ -1,0 +1,29 @@
+<section class="form-section customer-main-vehicle">
+  <h2>Custom customer details</h2>
+  <h3>Main client vehicle</h3>
+  {% if custom_fields.get('vehicle_licence_disk_expiry') and custom_fields.get('vehicle_licence_disk_expiry') < business_today %}<p class="scan-expiry-warning" role="alert">Warning: the main vehicle licence disk expired on {{ custom_fields.get('vehicle_licence_disk_expiry') }}. Scan the renewed disk to update its expiry date.</p>{% endif %}
+  <p class="form-help">This is the client's main vehicle and the vehicle shown on invoices. Scan its licence disk to fill these details, or enter them manually.</p>
+  {% if customer and user_can('scan_vehicle') %}
+    <p><a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id, vehicle_role='main') }}">Scan main vehicle disk</a></p>
+  {% endif %}
+  {% set main_vehicle_fields = [
+    ('vehicle_make', 'Vehicle Make', 'text'),
+    ('vehicle_reg_no', 'Veh Reg No', 'text'),
+    ('vehicle_registration_number', 'NaTIS registration number', 'text'),
+    ('vehicle_licence_number', 'Disk licence number', 'text'),
+    ('vehicle_vin', 'VIN', 'text'),
+    ('vehicle_engine_number', 'Engine number', 'text'),
+    ('vehicle_licence_disk_expiry', 'Licence disk expiry', 'date'),
+  ] %}
+  <div class="form-grid">
+    {% for name, label, kind in main_vehicle_fields %}
+      <label>{{ label }}<input type="{{ kind }}" name="{{ name }}" value="{{ custom_fields.get(name,'') }}" autocomplete="off"></label>
+    {% endfor %}
+  </div>
+  <h3>Alternative contact</h3>
+  <div class="form-grid">
+    <label>Alternative Contact Name<input name="alternative_contact_name" value="{{ custom_fields.get('alternative_contact_name','') }}" placeholder="Jane Smith"></label>
+    <label>Alternative Contact Number<input name="alternative_contact_number" value="{{ custom_fields.get('alternative_contact_number','') }}" placeholder="+27..."></label>
+    <label>Alternative Contact Relationship<input name="alternative_contact_relationship" value="{{ custom_fields.get('alternative_contact_relationship','') }}" placeholder="Sister"></label>
+  </div>
+</section>

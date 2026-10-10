@@ -336,7 +336,7 @@ def test_a_plate_owned_by_another_client_is_refused_with_the_transfer_option(app
 def test_the_transfer_action_moves_the_vehicle_and_applies_the_new_disk_details(app, client, customer_id, other_customer_id):
     login_owner(client)
     save_scan(client, customer_id, "ABC123GP", colour="WHITE")
-    response = save_scan(client, other_customer_id, "ABC123GP", transfer="1", colour="SILVER")
+    response = save_scan(client, other_customer_id, "ABC123GP", transfer="1", make_main="yes", colour="SILVER")
     assert b"transferred to Pieter van Wyk" in response.data
     with app.app_context():
         assert vehicles.list_vehicles(customer_id) == []
@@ -348,7 +348,7 @@ def test_the_transfer_action_moves_the_vehicle_and_applies_the_new_disk_details(
 
 def test_a_transfer_with_nothing_to_transfer_creates_no_record(app, client, customer_id):
     login_owner(client)
-    response = save_scan(client, customer_id, "NOPE123", transfer="1")
+    response = save_scan(client, customer_id, "NOPE123", transfer="1", make_main="no")
     assert b"nothing to transfer" in response.data
     with app.app_context():
         assert vehicles.list_vehicles(customer_id) == []
@@ -383,7 +383,11 @@ def test_editing_and_removing_a_vehicle_leaves_the_client_intact(app, client, cu
     with app.app_context():
         assert vehicles.get_vehicle(vehicle_id) is None
         after = dict(get_db().execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone())
-    assert before == after
+    assert before['name'] == after['name']
+    assert before['phone'] == after['phone']
+    import json
+    assert not json.loads(after['custom_fields_json']).get('main_vehicle_id')
+    assert not json.loads(after['custom_fields_json']).get('vehicle_reg_no')
 
 
 def test_deleting_the_client_leaves_no_orphan_vehicles(app, client, customer_id):

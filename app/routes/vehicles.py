@@ -88,11 +88,13 @@ def _posted_values(form):
     return values
 
 
-def _review(values, customer_id=None, *, raw_text="", unparsed=None):
+def _review(values, customer_id=None, *, raw_text="", unparsed=None, needs_main_choice=False):
     """The context for the review panel, including the "already somebody else's" warning.
 
     The warning is computed *before* the save as well as after a refusal, so staff see it while
-    they pick the client instead of only when the save fails.
+    they pick the client instead of only when the save fails. ``needs_main_choice`` is set when a
+    save was refused because the client already has a main vehicle and staff did not say whether
+    the vehicle being saved should replace it — the form highlights the choice.
     """
     return {
         "fields": values,
@@ -100,10 +102,14 @@ def _review(values, customer_id=None, *, raw_text="", unparsed=None):
         "owner": vehicles.customer_for_vehicle_registration(values.get("registration") or ""),
         "raw_text": raw_text or values.get("raw_scan_text") or "",
         "unparsed": unparsed or {},
+        "needs_main_choice": needs_main_choice,
+        # "Licence disk expired on …" when the scanned/typed expiry is in the past — the review form
+        # (and the customer form) can show the warning without recomputing the date rules.
+        "expiry_state": vehicles.licence_disk_expiry_state(values.get("licence_disk_expiry")),
     }
 
 
-def _render(review=None, *, customer_id=None):
+def _render(review=None, *, customer_id=None, vehicle_role=None):
     preselected = get_customer(customer_id) if customer_id else None
     if review is not None and review.get("customer") is None and preselected is not None:
         review["customer"] = preselected
@@ -113,6 +119,10 @@ def _render(review=None, *, customer_id=None):
         review=review,
         preselected_customer=preselected,
         field_labels=disk.FIELD_LABELS,
+        # The customer form's "Scan main vehicle disk" link passes vehicle_role=main; the
+        # panel's "Add another vehicle" link passes vehicle_role=additional. The review form uses
+        # it to default the "make this the main vehicle?" choice (yes for a main-vehicle scan).
+        vehicle_role=vehicle_role,
     )
 
 
@@ -187,14 +197,17 @@ def _scan_result(parsed):
 def scan_vehicle():
     """Capture screen: photograph/paste a disc, then review and allocate it to a client."""
     customer_id = _to_int(request.values.get("customer_id"))
+    # ``main`` (the customer form's main-vehicle link) or ``additional`` (the vehicles panel's
+    # "Add another vehicle"). It decides what the "make this the main vehicle?" choice defaults to.
+    vehicle_role = (request.values.get("vehicle_role") or "").strip() or None
 
     if request.method == "GET":
-        return _render(None, customer_id=customer_id)
+        return _render(None, customer_id=customer_id, vehicle_role=vehicle_role)
 
     if (request.form.get("action") or "").strip() == "manual":
         # The plan's second fallback: no scan at all, just type the fields.
         flash("Type the vehicle details and choose the client.", "info")
-        return _render(_review(_blank_values(), customer_id), customer_id=customer_id)
+        return _render(_review(_blank_values(), customer_id), customer_id=customer_id, vehicle_role=vehicle_role)
 
     values, raw_text, unparsed, message, category = _read_scan(
         request.files.get("disk_image"), (request.form.get("disc_text") or "").strip()
@@ -203,16 +216,27 @@ def scan_vehicle():
         flash(message, category or "error")
     else:
         flash("Disc read — check every field before saving.", "success")
-    return _render(_review(values, customer_id, raw_text=raw_text, unparsed=unparsed), customer_id=customer_id)
+    return _render(
+        _review(values, customer_id, raw_text=raw_text, unparsed=unparsed),
+        customer_id=customer_id,
+        vehicle_role=vehicle_role,
+    )
 
 
 @bp.post("/scan-vehicle/save")
 @login_required
 def save_scan_vehicle():
-    """Save the reviewed scan against the chosen client (or transfer it, explicitly)."""
+    """Save the reviewed scan against the chosen client (or transfer it, explicitly).
+
+    The review form also posts ``make_main`` (``yes``/``no``): the vehicle captured becomes the
+    client's main (invoiced) vehicle only when staff choose so. A different vehicle may not
+    silently replace the current main one — when the client already has a main vehicle and no
+    choice is posted, the save is refused with the choice highlighted.
+    """
     values = _posted_values(request.form)
     customer_id = _to_int(request.form.get("customer_id"))
     transfer = str(request.form.get("transfer") or "").strip().lower() in {"1", "on", "yes", "true"}
+    make_main = vehicles.parse_main_choice(request.form.get("make_main"))
 
     # The picker's hidden id is a convenience, not the source of truth: staff routinely type the
     # name (or pick the typeahead label) without the id landing in the form, which used to refuse a
@@ -233,8 +257,13 @@ def save_scan_vehicle():
         flash("That client is no longer on file — search for them again.", "error")
         return _render(_review(values, None, raw_text=values["raw_scan_text"]))
 
+    registration = values["registration"]
+
     if transfer:
-        owner = vehicles.customer_for_vehicle_registration(values["registration"])
+        if make_main is None:
+            flash("Choose whether this vehicle becomes the client's main vehicle before transferring it.", "error")
+            return _render(_review(values, customer_id, needs_main_choice=True))
+        owner = vehicles.customer_for_vehicle_registration(registration)
         if owner is None:
             flash(
                 "That registration is not recorded for another client, so there is nothing to transfer.",
@@ -242,25 +271,67 @@ def save_scan_vehicle():
             )
             return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
         # Explicit action: MOVE the existing row (never copy), then apply the freshly scanned
-        # fields to it, so the record keeps one owner and gains the new disc details.
+        # fields to it, so the record keeps one owner and gains the new disc details. If staff
+        # chose "yes", the moved vehicle also becomes the new owner's main vehicle; otherwise the
+        # new owner's main vehicle is left exactly as it was.
         vehicles.transfer_vehicle(owner["vehicle_id"], customer_id)
         try:
             vehicles.update_vehicle(owner["vehicle_id"], values)
         except ValueError as exc:
             flash(str(exc), "error")
-        else:
-            flash(f"Vehicle {values['registration']} transferred to {customer['name']}.", "success")
-        return redirect(url_for("customers.detail", customer_id=customer_id))
+            return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
+        if make_main is True:
+            vehicles.promote_main_vehicle(customer_id, owner["vehicle_id"])
+        flash(f"Vehicle {registration} transferred to {customer['name']}.", "success")
+        return redirect(url_for("customers.edit", customer_id=customer_id))
+
+    # Re-scanning a plate this client already holds is a correction, not a second vehicle: update
+    # that record in place (the duplicate guard in create_vehicle still stands for everything else).
+    existing_same = vehicles.get_customer_vehicle_by_registration(customer_id, registration)
+    if existing_same is not None:
+        try:
+            vehicles.update_vehicle(existing_same["id"], values)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
+        if make_main is True:
+            vehicles.promote_main_vehicle(customer_id, existing_same["id"])
+        flash(
+            f"Registration {registration} is already recorded for {customer['name']} — "
+            "updated the existing vehicle instead of adding a second one.",
+            "success",
+        )
+        return redirect(url_for("customers.edit", customer_id=customer_id))
+
+    # A brand-new vehicle. The main vehicle is the one the client's invoices print, so a different
+    # vehicle may only take that place when staff say so.
+    if make_main is None:
+        has_main = vehicles.get_main_vehicle_id(customer_id) is not None
+        custom_plate = vehicles.customer_custom_vehicle_plate(customer_id)
+        if has_main or custom_plate:
+            flash(
+                "This client already has a main vehicle on file. Choose whether this vehicle becomes "
+                "their main vehicle, then save again.",
+                "error",
+            )
+            return _render(
+                _review(values, customer_id, raw_text=values["raw_scan_text"], needs_main_choice=True)
+            )
+        # First vehicle for the client, and no choice was posted (an older caller): keep the old
+        # behaviour of making it the main one so nothing regresses.
+        make_main = True
 
     try:
-        vehicles.create_vehicle(request.form, customer_id=customer_id)
+        vehicle_id = vehicles.create_vehicle(request.form, customer_id=customer_id)
     except ValueError as exc:
         # A2's message names the current owner; surface it verbatim (never a silent second row).
         flash(str(exc), "error")
         return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
 
-    flash(f"Vehicle {values['registration'] or 'saved'} allocated to {customer['name']}.", "success")
-    return redirect(url_for("customers.detail", customer_id=customer_id))
+    if make_main:
+        vehicles.promote_main_vehicle(customer_id, vehicle_id)
+    flash(f"Vehicle {registration or 'saved'} allocated to {customer['name']}.", "success")
+    return redirect(url_for("customers.edit", customer_id=customer_id))
 
 
 @bp.post("/vehicles/<int:vehicle_id>/edit")
@@ -275,6 +346,10 @@ def edit_vehicle(vehicle_id):
     except ValueError as exc:
         flash(str(exc), "error")
     else:
+        # The edit form's "make this the main vehicle" box: ticking it promotes the vehicle so the
+        # client's invoices print it. Leaving it unticked leaves the current main vehicle alone.
+        if vehicles.parse_main_choice(request.form.get("make_main")) is True:
+            vehicles.promote_main_vehicle(vehicle["customer_id"], vehicle_id)
         flash("Vehicle saved.", "success")
     # Vehicle details live on the customer edit screen now, so keep the user there.
     return redirect(url_for("customers.edit", customer_id=vehicle["customer_id"]))
@@ -288,7 +363,7 @@ def delete_vehicle(vehicle_id):
         flash("That vehicle is no longer on file.", "error")
         return redirect(url_for("customers.index"))
     vehicles.delete_vehicle(vehicle_id)
-    flash("Vehicle removed — the client record is untouched.", "success")
+    flash("Vehicle removed. If it was the main vehicle, its main vehicle details were cleared.", "success")
     # Vehicle details live on the customer edit screen now, so keep the user there.
     return redirect(url_for("customers.edit", customer_id=vehicle["customer_id"]))
 

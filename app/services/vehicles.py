@@ -19,6 +19,7 @@ House rules that this module is responsible for:
   the Turso connection does not guarantee ``PRAGMA foreign_keys=ON``.
 """
 
+import json
 import re
 
 from app.db import get_db, now
@@ -28,6 +29,31 @@ SOURCE_MANUAL = "manual"
 SOURCE_SCAN = "scan"
 SOURCE_IMPORT = "import"
 VALID_SOURCES = (SOURCE_MANUAL, SOURCE_SCAN, SOURCE_IMPORT)
+
+#: A client's **main vehicle** — the one their invoices print — is mirrored into the client's
+#: ``custom_fields_json`` under these canonical keys. Scanning/linking a vehicle can make it the
+#: main one; the customer form edits the same fields. The set is deliberately the seven fields staff
+#: capture on the scan screen's manual entry (registration, disc licence number, NaTIS registration
+#: number, VIN, engine number, make, disk expiry) — the rest of a decoded disk (model, colour,
+#: category, registering authority, control number) stays on the vehicle row only, and any legacy
+#: value already stored against a client is left exactly as it is. The mapping is declared once,
+#: here, and the label/order metadata in ``app.services.customers`` follows it (a test pins them).
+MAIN_VEHICLE_FIELD_MAP = {
+    "registration": "vehicle_reg_no",
+    "licence_number": "vehicle_licence_number",
+    "registration_number": "vehicle_registration_number",
+    "vin": "vehicle_vin",
+    "engine_number": "vehicle_engine_number",
+    "make": "vehicle_make",
+    "licence_disk_expiry": "vehicle_licence_disk_expiry",
+}
+#: The custom-field keys that carry the main vehicle (the seven above). A **customer form** posts all
+#: of them and is therefore authoritative over the vehicle row; a partial post (public portal, order
+#: card's cached snapshot) carries only some, so it must never push stale values onto the main row.
+MAIN_VEHICLE_CUSTOM_KEYS = tuple(MAIN_VEHICLE_FIELD_MAP.values())
+#: The internal pointer to the chosen main vehicle, kept inside ``custom_fields_json``. It is never
+#: rendered (``customers.HIDDEN_CUSTOM_FIELD_KEYS`` hides it) — it only ties the mirror to the row.
+MAIN_VEHICLE_ID_KEY = "main_vehicle_id"
 
 #: Every column a form/scan may set, in the order the vehicle form shows them.
 TEXT_FIELDS = (
@@ -132,6 +158,43 @@ def normalise_expiry(value):
     raise ValueError("Licence disk expiry must be a date (for example 2027-03-31)")
 
 
+def licence_disk_expiry_state(value, today=None):
+    """A small status dict for the licence-disk-expiry warning, keyed off the stored/typed value.
+
+    ``expired`` is ``True``/``False`` only when there is a real date to judge (the value normalises
+    to ISO); anything blank or unparseable gives ``expired: None`` so the UI shows no verdict rather
+    than guessing. ``warning`` is the ready-made sentence for an expired disk, or ``None``.
+    """
+    from datetime import date, datetime
+
+    raw = _text(value)
+    if not raw:
+        return {"expiry": "", "expired": None, "days_left": None, "warning": None}
+    try:
+        iso = normalise_expiry(raw)
+        expiry = datetime.strptime(iso, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return {"expiry": raw, "expired": None, "days_left": None, "warning": None}
+    if today is None:
+        current = date.today()
+    elif isinstance(today, str):
+        try:
+            current = datetime.strptime(today[:10], "%Y-%m-%d").date()
+        except ValueError:
+            current = date.today()
+    else:
+        current = today
+    days_left = (expiry - current).days
+    if days_left < 0:
+        return {
+            "expiry": iso,
+            "expired": True,
+            "days_left": days_left,
+            "warning": f"Licence disk expired on {iso}",
+        }
+    return {"expiry": iso, "expired": False, "days_left": days_left, "warning": None}
+
+
 def _clean_source(value):
     source = _text(value) or SOURCE_MANUAL
     if source not in VALID_SOURCES:
@@ -204,6 +267,262 @@ def customer_for_vehicle_registration(registration):
     return _registration_owner(registration)
 
 
+def get_customer_vehicle_by_registration(customer_id, registration):
+    """The vehicle row this *client* already holds for a plate, if any.
+
+    A staff member re-scanning a disc usually has a correction, not a second vehicle, so the save
+    route looks here first: when the plate is already this client's, the record is updated in place
+    rather than refused as a duplicate (``create_vehicle`` keeps its own duplicate guard).
+    """
+    key = registration_key(registration)
+    if not key:
+        return None
+    try:
+        customer_id = int(customer_id)
+    except (TypeError, ValueError):
+        return None
+    return get_db().execute(
+        "SELECT * FROM vehicles WHERE customer_id = ? AND REPLACE(UPPER(registration), ' ', '') = ? "
+        "ORDER BY id LIMIT 1",
+        (customer_id, key),
+    ).fetchone()
+
+
+# ── the main vehicle mirror (the client's "Custom customer details") ─────────
+
+
+def _form_has(form, key):
+    """True when the submitted form actually carries this key (a MultiDict or a dict)."""
+    try:
+        return key in form
+    except TypeError:
+        return False
+
+
+def _raw_custom_fields(customer_id):
+    """The client's ``custom_fields_json`` as a dict, or ``None`` when there is no such client."""
+    try:
+        customer_id = int(customer_id)
+    except (TypeError, ValueError):
+        return None
+    row = get_db().execute("SELECT custom_fields_json FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if row is None:
+        return None
+    try:
+        data = json.loads(row["custom_fields_json"] or "{}")
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_custom_fields(customer_id, custom_fields):
+    get_db().execute(
+        "UPDATE customers SET custom_fields_json = ? WHERE id = ?",
+        (json.dumps(custom_fields, ensure_ascii=False), int(customer_id)),
+    )
+    get_db().commit()
+
+
+def _sync_customer_main(customer_id, vehicle_row):
+    """Write a vehicle row (or its absence) into the client's mirrored ``vehicle_*`` fields.
+
+    Only the mirrored keys and the internal pointer are touched — every other custom field the
+    client carries (VAT, company reg, alternative contacts, anything imported) is preserved exactly
+    as it was. Replacing the main vehicle therefore clears the mirrored fields the new vehicle does
+    not have, so nothing of the previous main vehicle survives (no stale detail, no orphan key).
+    """
+    fields = _raw_custom_fields(customer_id)
+    if fields is None:
+        return False
+    if vehicle_row is None:
+        fields.pop(MAIN_VEHICLE_ID_KEY, None)
+        for key in MAIN_VEHICLE_CUSTOM_KEYS:
+            fields.pop(key, None)
+    else:
+        row = dict(vehicle_row)
+        fields[MAIN_VEHICLE_ID_KEY] = int(row["id"])
+        for column, key in MAIN_VEHICLE_FIELD_MAP.items():
+            value = _text(row.get(column))
+            if value:
+                fields[key] = value
+            else:
+                fields.pop(key, None)
+    _write_custom_fields(customer_id, fields)
+    return True
+
+
+def get_main_vehicle_id(customer_id):
+    """The id of the client's chosen main vehicle, or ``None``.
+
+    A pointer left behind by a vehicle that has since been removed is dropped here (together with
+    the stale mirrored fields), so no page can show a main vehicle that no longer exists.
+    """
+    fields = _raw_custom_fields(customer_id)
+    if not fields:
+        return None
+    raw = fields.get(MAIN_VEHICLE_ID_KEY)
+    if raw is None or raw == "":
+        return None
+    try:
+        main_id = int(raw)
+    except (TypeError, ValueError):
+        return None
+    row = get_db().execute(
+        "SELECT id FROM vehicles WHERE id = ? AND customer_id = ?", (main_id, int(customer_id))
+    ).fetchone()
+    if row is None:
+        _sync_customer_main(int(customer_id), None)
+        return None
+    return main_id
+
+
+def get_main_vehicle(customer_id):
+    """The client's main vehicle row, or ``None`` when none is chosen."""
+    main_id = get_main_vehicle_id(customer_id)
+    if main_id is None:
+        return None
+    return get_db().execute(
+        "SELECT * FROM vehicles WHERE id = ? AND customer_id = ?", (main_id, int(customer_id))
+    ).fetchone()
+
+
+def customer_custom_vehicle_plate(customer_id):
+    """The plate typed straight into the client's Custom vehicle fields (no vehicle row at all)."""
+    fields = _raw_custom_fields(customer_id) or {}
+    return _text(fields.get("vehicle_reg_no"))
+
+
+def promote_main_vehicle(customer_id, vehicle_id):
+    """Make one recorded vehicle the client's main (invoiced) vehicle.
+
+    The vehicle must already belong to the client. The mirrored ``vehicle_*`` fields become this
+    vehicle's own values and any field it does not carry is cleared, so the pointer and the mirror
+    can never point at different vehicles.
+    """
+    row = get_vehicle(vehicle_id)
+    if row is None:
+        raise ValueError("That vehicle is no longer on file")
+    try:
+        customer = int(customer_id)
+    except (TypeError, ValueError):
+        raise ValueError("Choose the client this vehicle belongs to")
+    if int(row["customer_id"]) != customer:
+        raise ValueError("That vehicle is not recorded for this client")
+    return _sync_customer_main(customer, row)
+
+
+def clear_main_vehicle(customer_id):
+    """Forget the client's main vehicle (used when it is deleted, or transferred away)."""
+    return _sync_customer_main(customer_id, None)
+
+
+def sync_main_vehicle_to_customer(customer_id, vehicle_id=None):
+    """Re-mirror the client's main vehicle after it changed.
+
+    Called after a vehicle edit so the invoiced details keep up. When ``vehicle_id`` is given the
+    mirror is only touched if that vehicle really is the client's main — editing an *additional*
+    vehicle never rewrites the main one.
+    """
+    main_id = get_main_vehicle_id(customer_id)
+    if main_id is None:
+        return False
+    if vehicle_id is not None and int(vehicle_id) != main_id:
+        return False
+    row = get_db().execute(
+        "SELECT * FROM vehicles WHERE id = ? AND customer_id = ?", (main_id, int(customer_id))
+    ).fetchone()
+    return _sync_customer_main(int(customer_id), row)
+
+
+def parse_main_choice(value):
+    """'yes'/'no' (or 1/0, on/off) as ``True``/``False``; anything else — including absent — None."""
+    text = _text(value).lower()
+    if text in ("yes", "1", "true", "on", "y"):
+        return True
+    if text in ("no", "0", "false", "off", "n"):
+        return False
+    return None
+
+
+def _registration_conflict_error(customer_id, registration, vehicle_id):
+    """Raise the right 'that plate is taken' error for a mirrored plate change, or return None."""
+    if not registration_key(registration):
+        return None
+    owner = _registration_owner(registration, exclude_vehicle_id=vehicle_id)
+    if owner is None:
+        return None
+    if int(owner["id"]) == int(customer_id):
+        raise ValueError(
+            f"Registration {registration} is already recorded on another vehicle for this client — "
+            "open that vehicle and make it the main one instead of changing the plate here"
+        )
+    raise ValueError(
+        f"Registration {registration} is already recorded for {owner['name']} — transfer it "
+        "explicitly if it is now this client's vehicle"
+    )
+
+
+def apply_main_vehicle_form_sync(customer_id, form, custom_fields_json):
+    """Reconcile a customer save with the client's linked main vehicle.
+
+    When the client has a main vehicle, the mirrored ``vehicle_*`` fields are always re-written from
+    that vehicle row, so the on-screen card, the customer record and the invoice can never drift —
+    and a partial post from the public portal or the order screen's cached snapshot can neither
+    blank those fields nor push a stale value into the row.
+
+    Only the **customer form** (which carries all 12 mirrored fields) is authoritative over the
+    vehicle row: an edit there saves to the row, with a plate another client owns refused rather
+    than swapped in. Any other caller's vehicle fields are ignored (the row wins).
+
+    ``custom_fields_json`` is the value ``_clean`` produced; the (possibly re-mirrored) JSON string
+    is returned for the caller to save. With no linked main vehicle, nothing is touched and the
+    client's plain custom fields (the legacy hand-typed vehicle fields included) are left as-is.
+    """
+    main_id = get_main_vehicle_id(customer_id)
+    if main_id is None:
+        return custom_fields_json
+    vehicle = get_vehicle(main_id)
+    if vehicle is None:
+        return custom_fields_json
+
+    if all(_form_has(form, key) for key in MAIN_VEHICLE_CUSTOM_KEYS):
+        updates = {}
+        for column, key in MAIN_VEHICLE_FIELD_MAP.items():
+            value = _text(_field(form, key))
+            if column == "registration":
+                value = normalise_registration(value)
+            elif column == "licence_disk_expiry":
+                value = normalise_expiry(value)
+            if value != _text(vehicle[column]):
+                updates[column] = value
+        if updates:
+            _registration_conflict_error(customer_id, updates.get("registration"), main_id)
+            assignments = ", ".join(f"{column} = :{column}" for column in updates)
+            get_db().execute(
+                f"UPDATE vehicles SET {assignments}, updated_at = :updated_at WHERE id = :id",
+                {**updates, "id": int(main_id), "updated_at": now()},
+            )
+            get_db().commit()
+            refreshed = get_vehicle(main_id)
+            if refreshed is not None:
+                vehicle = refreshed
+
+    try:
+        fields = json.loads(custom_fields_json or "{}")
+    except Exception:
+        fields = {}
+    if not isinstance(fields, dict):
+        fields = {}
+    fields[MAIN_VEHICLE_ID_KEY] = int(main_id)
+    for column, key in MAIN_VEHICLE_FIELD_MAP.items():
+        value = _text(vehicle[column])
+        if value:
+            fields[key] = value
+        else:
+            fields.pop(key, None)
+    return json.dumps(fields, ensure_ascii=False)
+
+
 def fields_from_disc(parsed):
     """Map a ``parse_disc_text()`` result onto this module's form field names.
 
@@ -257,12 +576,18 @@ def transfer_vehicle(vehicle_id, customer_id):
         raise ValueError("Choose the client this vehicle belongs to")
     if int(existing["customer_id"]) == target:
         return True
+    former = int(existing["customer_id"])
+    was_main = get_main_vehicle_id(former) == int(existing["id"])
     db = get_db()
     db.execute(
         "UPDATE vehicles SET customer_id = ?, updated_at = ? WHERE id = ?",
         (target, now(), int(existing["id"])),
     )
     db.commit()
+    # A transferred vehicle is no longer the former owner's, so if it was their main vehicle the
+    # mirror is cleared — their invoice can never keep printing a vehicle they have given up.
+    if was_main:
+        _sync_customer_main(former, None)
     return True
 
 
@@ -393,6 +718,9 @@ def update_vehicle(vehicle_id, form):
     db = get_db()
     db.execute(f"UPDATE vehicles SET {assignments}, updated_at = :updated_at WHERE id = :id", params)
     db.commit()
+    # If this is the client's main vehicle, the mirrored invoice fields follow the edit. An edit to
+    # an additional vehicle leaves the main one (and the mirror) untouched.
+    sync_main_vehicle_to_customer(int(existing["customer_id"]), int(existing["id"]))
     return True
 
 
@@ -401,9 +729,18 @@ def delete_vehicle(vehicle_id):
         vehicle_id = int(vehicle_id)
     except (TypeError, ValueError):
         return False
+    existing = get_vehicle(vehicle_id)
+    if existing is None:
+        return False
+    customer_id = int(existing["customer_id"])
+    was_main = get_main_vehicle_id(customer_id) == vehicle_id
     db = get_db()
     cur = db.execute("DELETE FROM vehicles WHERE id = ?", (vehicle_id,))
     db.commit()
+    # Removing the main vehicle clears its mirrored fields, so the client's invoice can never print
+    # a vehicle that is no longer recorded (no stale detail left behind).
+    if was_main:
+        _sync_customer_main(customer_id, None)
     return cur.rowcount > 0
 
 
