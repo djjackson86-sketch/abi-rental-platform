@@ -1,0 +1,220 @@
+{% extends "admin/layout.html" %}
+{% set title='Scan a vehicle licence disk' %}
+{% block admin_body %}
+<header class="page-header scan-vehicle-header">
+  <div class="module-title">
+    <span class="module-icon">▦</span>
+    <div>
+      <h1>Scan vehicle licence disk</h1>
+      <p>Scan the disk, check the plate, and allocate the vehicle to a client.</p>
+    </div>
+  </div>
+  {% if preselected_customer %}
+  <div class="header-actions"><a class="btn ghost" href="{{ url_for('customers.detail', customer_id=preselected_customer.id) }}">Back to {{ preselected_customer.name }}</a></div>
+  {% endif %}
+</header>
+
+<section class="panel scan-capture-panel">
+  <form method="post" enctype="multipart/form-data" class="scan-capture-form">
+    <input type="hidden" name="customer_id" value="{{ preselected_customer.id if preselected_customer else '' }}">
+    <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment">
+
+    <div class="scan-actions-simple">
+      <button class="btn primary scan-big" type="button" id="scan-camera-start">Scan licence disk</button>
+      <button class="btn ghost scan-big" type="submit" name="action" value="manual" id="scan-manual">Add details manually</button>
+    </div>
+
+    {% set scan_camera_title = 'Scan the licence disk' %}
+    {% include "admin/_scan_camera.html" %}
+  </form>
+</section>
+
+<script src="{{ url_for('static', filename='js/scan-camera.js') }}?v=scan-fs-1"></script>
+<script>
+(function () {
+  if (!window.AbiScanCamera) { return; }
+  var manual = document.getElementById('scan-manual');
+  AbiScanCamera.init({
+    form: '.scan-capture-form',
+    fileInput: 'scan-disk-image',
+    start: 'scan-camera-start',
+    filename: 'vehicle-disk-scan.jpg',
+    readingMessage: 'Reading disk…',
+    onOpen: function () { if (manual) { manual.hidden = true; } },
+    onClose: function () { if (manual) { manual.hidden = false; } }
+  });
+})();
+</script>
+
+{% if review %}
+{% set values = review.fields %}
+{% set owner = review.owner %}
+{% set owner_is_somebody_else = owner and (not review.customer or owner.id != review.customer.id) %}
+<section class="panel scan-review-panel">
+  <h2>Check the details &amp; allocate the vehicle</h2>
+  {% if review.fields.get('licence_disk_expiry') and review.fields.get('licence_disk_expiry') < business_today %}<p class="scan-expiry-warning" role="alert">Warning: this vehicle licence disk expired on {{ review.fields.get('licence_disk_expiry') }}.</p>{% endif %}
+
+  {% if owner_is_somebody_else %}
+  <div class="scan-warning" role="alert">
+    <strong>{{ values.registration }} is already recorded for {{ owner.name }}{% if owner.phone %} ({{ owner.phone }}){% endif %}.</strong>
+    <p>Saving it for another client is refused while it belongs to {{ owner.name }}. If it really is now this client's vehicle, tick the box below and save — that <b>moves</b> the vehicle record across.</p>
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('vehicles.save_scan_vehicle') }}" class="form-grid scan-review-form">
+    <input type="hidden" name="source" value="{{ values.source or 'scan' }}">
+
+    {% set scan_fields = [
+      ('registration', 'Number plate', 'text'),
+      ('registration_number', 'NaTIS registration number', 'text'),
+      ('licence_number', 'Disk licence number', 'text'),
+      ('vin', 'VIN', 'text'),
+      ('engine_number', 'Engine number', 'text'),
+      ('make', 'Make', 'text'),
+      ('licence_disk_expiry', 'Licence disk expiry', 'date'),
+    ] %}
+    {% for name, label, kind in scan_fields %}
+    <label>{{ label }}
+      <input type="{{ kind }}" name="{{ name }}" value="{{ values[name] or '' }}"{% if name == 'registration' %} required{% endif %} autocomplete="off">
+    </label>
+    {% endfor %}
+
+    <label class="span-2">Allocate to client
+      <input name="customer_pick" id="scan-customer-pick" list="scan-customer-options" autocomplete="off"
+             placeholder="Client name or phone number" required
+             value="{{ (review.customer.name ~ ' · ' ~ review.customer.phone) if (review.customer and review.customer.phone) else (review.customer.name if review.customer else '') }}">
+      <input type="hidden" name="customer_id" id="scan-customer-id" value="{{ review.customer.id if review.customer else '' }}">
+      <datalist id="scan-customer-options"></datalist>
+    </label>
+
+    <fieldset class="span-2 scan-main-choice">
+      <legend>Is this the main client vehicle?</legend>
+      <p class="form-help">Yes fills the main vehicle fields under Custom customer details and uses this vehicle on invoices. No keeps it as an additional vehicle at the bottom of the customer edit page.</p>
+      <label class="choice-card"><input type="radio" name="make_main" value="yes" required{% if request.values.get('vehicle_role') == 'main' %} checked{% endif %}> Yes — use as the main vehicle</label>
+      <label class="choice-card"><input type="radio" name="make_main" value="no" required> No — keep as an additional vehicle</label>
+    </fieldset>
+
+    {% if owner_is_somebody_else %}
+    <label class="span-2 scan-transfer-line">
+      <span class="scan-transfer-check">
+        <input type="checkbox" name="transfer" value="1">
+        <b>Transfer {{ values.registration }} to the client above</b>
+      </span>
+    </label>
+    {% endif %}
+
+    <div class="form-actions span-2">
+      <button class="btn primary" type="submit">Save vehicle</button>
+      <a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle') }}">Start a new scan</a>
+    </div>
+  </form>
+</section>
+
+<script>
+(function () {
+  var pick = document.getElementById('scan-customer-pick');
+  if (!pick) { return; }
+  var list = document.getElementById('scan-customer-options');
+  var hidden = document.getElementById('scan-customer-id');
+  var results = [];
+  var timer = null;
+  // What the server rendered into the box. On a re-render after a refusal the client is already
+  // resolved (and its id already sits in the hidden field) while this page has fetched nothing, so
+  // an untouched box must never clear it.
+  var initial = pick.value;
+
+  function labelFor(client) {
+    return client.name + (client.phone ? ' · ' + client.phone : '');
+  }
+
+  function digits(value) { return (value || '').replace(/\D/g, ''); }
+
+  // Tolerant on purpose: staff type a name, a number, or pick the typeahead label. An exact-label
+  // match is the normal path; the looser steps stop a chosen client from being thrown away when
+  // the text in the box is not byte-for-byte the option string.
+  function resolve(typed) {
+    var want = typed.trim();
+    if (!want) { return null; }
+    var lower = want.toLowerCase();
+    var wanted = digits(want);
+    var i, found;
+    for (i = 0; i < results.length; i++) {
+      if (labelFor(results[i]) === want) { return results[i]; }
+    }
+    for (i = 0; i < results.length; i++) {                       // bare name
+      if ((results[i].name || '').trim().toLowerCase() === lower) { return results[i]; }
+    }
+    if (wanted.length >= 9) {                                    // bare phone number
+      for (i = 0; i < results.length; i++) {
+        if (digits(results[i].phone).slice(-9) === wanted.slice(-9)) { return results[i]; }
+      }
+    }
+    for (i = 0; i < results.length; i++) {                       // unique partial name
+      if (lower.length >= 3 && (results[i].name || '').toLowerCase().indexOf(lower) !== -1) {
+        found = results[i];
+        break;
+      }
+    }
+    if (found) {
+      var matches = results.filter(function (client) {
+        return (client.name || '').toLowerCase().indexOf(lower) !== -1;
+      });
+      if (matches.length === 1) { return found; }
+    }
+    return null;
+  }
+
+  function syncId() {
+    if (pick.value === initial) { return; }
+    var found = resolve(pick.value);
+    if (found) {
+      hidden.value = found.id;
+      if (labelFor(found) !== pick.value) { pick.value = labelFor(found); }
+    } else if (/^\d+$/.test(pick.value.trim())) {
+      hidden.value = pick.value.trim();
+    } else {
+      hidden.value = '';
+    }
+  }
+
+  function load() {
+    var query = pick.value.trim();
+    if (query.length < 2) { list.innerHTML = ''; return; }
+    return fetch('{{ url_for("vehicles.customer_search") }}?q=' + encodeURIComponent(query), {headers: {'Accept': 'application/json'}})
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        results = data.customers || [];
+        list.innerHTML = '';
+        results.forEach(function (client) {
+          var option = document.createElement('option');
+          option.value = labelFor(client);
+          list.appendChild(option);
+        });
+      })
+      .catch(function () { /* the picker is a convenience; the server also resolves the typed name */ });
+  }
+
+  pick.addEventListener('input', function () {
+    syncId();
+    if (timer) { clearTimeout(timer); }
+    timer = setTimeout(load, 200);
+  });
+  pick.addEventListener('change', syncId);
+
+  // Last line of defence: if the box holds a name but no id was resolved yet, look the name up
+  // once more before letting the save go, so "I selected a client" cannot become a refusal.
+  var submitting = false;
+  pick.form.addEventListener('submit', function (event) {
+    syncId();
+    if (submitting || hidden.value || !pick.value.trim()) { return; }
+    event.preventDefault();
+    load().then(function () {
+      syncId();
+      submitting = true;
+      pick.form.submit();
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

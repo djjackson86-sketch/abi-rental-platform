@@ -2,6 +2,14 @@ from app.db import get_db, now
 from app.services.access import order_branch_clause, product_branch_clause, session_branch_scope_ids
 from app.services.settings import global_tax_profile_id
 
+# Trailer identity is stored exactly like a scanned customer vehicle's, so the two
+# sides of a disc scan agree on one shape: the same plate typed on the inventory
+# form and read off a disc must compare equal ("NB 72 XMGP" == "NB72XMGP"). The
+# normalisers live with the vehicles model (feature A) and are reused here rather
+# than copied, because two spellings of "same plate" is how a plate ends up on two
+# trailers — which would make every scan ambiguous.
+from app.services.vehicles import normalise_registration, registration_key
+
 VALID_TYPES = {"rental", "sale", "service"}
 VALID_UNITS = {"hour", "day", "week", "month", "fixed"}
 VALID_TRACKING_METHODS = {"bulk", "individual", "none"}
@@ -434,7 +442,70 @@ def set_product_branch_stock(product_id, counts, restrict_branch_id=None):
     return dict(cleaned)
 
 
-def _clean(form, existing_quantity=None, existing_wheel_size=None, existing_under_maintenance=None):
+TRAILER_IDENTITY_FIELDS = ("registration", "licence_number", "registration_number")
+
+#: Hidden marker the identification panel posts (the ``maintenance_panel`` trick).
+#: It tells a real inventory post from a caller that never carried the fields, so
+#: a sale/service save, an import or a legacy post can never blank a trailer's plate.
+TRAILER_IDENTITY_MARKER = "trailer_identity_panel"
+
+
+def _stored(value, field):
+    """Read ``field`` from a stored product row/dict, or '' when absent."""
+    try:
+        return value[field]
+    except (KeyError, IndexError, TypeError):
+        return ""
+
+
+def trailer_identity_from_form(form, existing=None):
+    """The disc identifiers a post carries, or the ones already stored.
+
+    Normalised on the way in so one plate has exactly one stored shape and the
+    partial unique index is a real constraint. A post that never carried the panel
+    keeps every stored value.
+    """
+    try:
+        keys = {str(key) for key in form.keys()}
+    except AttributeError:
+        keys = set()
+    panel_posted = TRAILER_IDENTITY_MARKER in keys
+    identity = {}
+    for field in TRAILER_IDENTITY_FIELDS:
+        if field in keys:
+            identity[field] = normalise_registration(form.get(field))
+        elif panel_posted:
+            identity[field] = ""
+        else:
+            identity[field] = normalise_registration(_stored(existing, field))
+    return identity
+
+
+def trailer_registration_owner(registration, exclude_product_id=None):
+    """The OTHER product already carrying this plate, or None when it is free."""
+    key = registration_key(registration)
+    if not key:
+        return None
+    sql = "SELECT * FROM products WHERE REPLACE(UPPER(registration), ' ', '') = ?"
+    params = [key]
+    if exclude_product_id is not None:
+        sql += " AND id <> ?"
+        params.append(exclude_product_id)
+    return get_db().execute(sql + " ORDER BY id LIMIT 1", params).fetchone()
+
+
+def _assert_trailer_registration_is_free(registration, exclude_product_id=None):
+    owner = trailer_registration_owner(registration, exclude_product_id)
+    if owner is not None:
+        plate = normalise_registration(registration)
+        raise ValueError(
+            f"Trailer {plate} is already recorded on {owner['name']} — open that "
+            "trailer and edit it instead of adding the same plate a second time"
+        )
+
+
+def _clean(form, existing_quantity=None, existing_wheel_size=None, existing_under_maintenance=None,
+           existing_trailer_identity=None):
     name = form.get("name", "").strip()
     if not name:
         raise ValueError("Product name is required")
@@ -473,6 +544,12 @@ def _clean(form, existing_quantity=None, existing_wheel_size=None, existing_unde
     else:
         under_maintenance = 1 if existing_under_maintenance else 0
 
+    # Trailer identity (feature D): the plate / licence number / NaTIS number a
+    # scanned licence disc is matched against when staff return a rental. Rental
+    # trailers only, and its marker decides whether a post may change those three
+    # fields, so a sale/service save or a legacy caller can never blank a plate.
+    identity = trailer_identity_from_form(form, existing_trailer_identity)
+
     # Services and untracked products keep no stock count at all.
     untracked = product_type == "service" or tracking_method == "none"
     branch_counts, branch_form_present = _branch_counts_from_form(form)
@@ -496,6 +573,9 @@ def _clean(form, existing_quantity=None, existing_wheel_size=None, existing_unde
         "tracking_method": tracking_method,
         "wheel_size": wheel_size,
         "under_maintenance": under_maintenance,
+        "registration": identity["registration"],
+        "licence_number": identity["licence_number"],
+        "registration_number": identity["registration_number"],
         "description": form.get("description", "").strip(),
         "sku": form.get("sku", "").strip(),
         "active": 1 if form.get("active") else 0,
@@ -520,11 +600,15 @@ def create_product(form):
     branch_counts = data.pop("branch_counts")
     data.pop("branch_form_present")
     data.pop("untracked")
+    # One plate belongs to one trailer (feature D): a second product claiming it
+    # would make every disc scan ambiguous, so it is refused with the owning
+    # trailer named — the partial unique index is the backstop.
+    _assert_trailer_registration_is_free(data["registration"])
     db = get_db()
     cur = db.execute(
         """INSERT INTO products
-        (name, product_type, tracking_method, wheel_size, under_maintenance, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
-        VALUES (:name, :product_type, :tracking_method, :wheel_size, :under_maintenance, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
+        (name, product_type, tracking_method, wheel_size, under_maintenance, registration, licence_number, registration_number, description, sku, active, public_visible, price_amount, price_unit, security_deposit, hourly_extra_rate, tax_profile_id, product_group_id, quantity, branch_id, created_at)
+        VALUES (:name, :product_type, :tracking_method, :wheel_size, :under_maintenance, :registration, :licence_number, :registration_number, :description, :sku, :active, :public_visible, :price_amount, :price_unit, :security_deposit, :hourly_extra_rate, :tax_profile_id, :product_group_id, :quantity, :branch_id, :created_at)""",
         {**data, "created_at": now()},
     )
     db.commit()
@@ -553,7 +637,12 @@ def update_product(product_id, form):
         existing_quantity=(existing["quantity"] if existing else None),
         existing_wheel_size=(existing["wheel_size"] if existing else None),
         existing_under_maintenance=(existing["under_maintenance"] if existing else None),
+        existing_trailer_identity=existing,
     )
+    # A plate moved onto a second trailer is refused (and the trailer that holds it
+    # is named) — excluding this row, so re-saving a trailer is never a clash with
+    # itself.
+    _assert_trailer_registration_is_free(data["registration"], exclude_product_id=product_id)
     branch_counts = data.pop("branch_counts")
     branch_form_present = data.pop("branch_form_present")
     untracked = data.pop("untracked")
@@ -598,7 +687,7 @@ def update_product(product_id, form):
     data["id"] = product_id
     get_db().execute(
         """UPDATE products SET
-        name=:name, product_type=:product_type, tracking_method=:tracking_method, wheel_size=:wheel_size, under_maintenance=:under_maintenance, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
+        name=:name, product_type=:product_type, tracking_method=:tracking_method, wheel_size=:wheel_size, under_maintenance=:under_maintenance, registration=:registration, licence_number=:licence_number, registration_number=:registration_number, description=:description, sku=:sku, active=:active, public_visible=:public_visible,
         price_amount=:price_amount, price_unit=:price_unit, security_deposit=:security_deposit, hourly_extra_rate=:hourly_extra_rate, tax_profile_id=:tax_profile_id, product_group_id=:product_group_id, quantity=:quantity, branch_id=:branch_id
         WHERE id=:id""",
         data,

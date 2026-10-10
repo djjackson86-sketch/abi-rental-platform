@@ -977,7 +977,30 @@ def test_customer_crud_search_and_detail(client, app):
     assert b'4123456789' not in res.data
     assert b'Company Reg No' not in res.data
     assert b'2024/123456/07' not in res.data
-    assert b'Toyota Hilux' not in res.data
+    # An omitted vehicle panel is a partial update, not a request to erase it.
+    assert b'Toyota Hilux' in res.data
+    with app.app_context():
+        fields = json.loads(get_db().execute(
+            'SELECT custom_fields_json FROM customers WHERE id = 1'
+        ).fetchone()['custom_fields_json'])
+        assert fields['vehicle_make'] == 'Toyota Hilux'
+        assert fields['vehicle_color'] == 'White'
+        assert fields['vehicle_reg_no'] == 'CA 123'
+
+    # Explicit blanks on the customer form still clear the submitted fields.
+    cleared = client.post(detail_url, data={
+        'customer_type': 'individual', 'name': 'Don Customer',
+        'vehicle_make': '', 'vehicle_color': '', 'vehicle_reg_no': '',
+    }, follow_redirects=True)
+    assert b'Customer saved' in cleared.data
+    assert b'Toyota Hilux' not in cleared.data
+    with app.app_context():
+        fields = json.loads(get_db().execute(
+            'SELECT custom_fields_json FROM customers WHERE id = 1'
+        ).fetchone()['custom_fields_json'])
+        assert not any(key in fields for key in (
+            'vehicle_make', 'vehicle_color', 'vehicle_reg_no'
+        ))
 
 
 def seed_customer_and_product(client):

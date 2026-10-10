@@ -8,6 +8,8 @@ from .routes.settings import bp as settings_bp
 from .routes.public import bp as public_bp
 from .routes.inventory import bp as inventory_bp
 from .routes.customers import bp as customers_bp
+from .routes.vehicles import bp as vehicles_bp
+from .routes.returns import bp as returns_bp
 from .routes.orders import bp as orders_bp
 from .routes.documents import bp as documents_bp
 from .routes.payments import bp as payments_bp
@@ -88,6 +90,8 @@ def create_app(test_config=None):
     app.register_blueprint(settings_bp)
     app.register_blueprint(inventory_bp)
     app.register_blueprint(customers_bp)
+    app.register_blueprint(vehicles_bp)
+    app.register_blueprint(returns_bp)
     app.register_blueprint(orders_bp)
     app.register_blueprint(documents_bp)
     app.register_blueprint(payments_bp)
@@ -117,7 +121,17 @@ def create_app(test_config=None):
 
     @app.context_processor
     def inject_access_helpers():
+        # ``business_today`` and ``settings`` are used by the scan screens (disk-expiry
+        # warning) and several panels; resolved once per render.
+        from app.services.settings import get_company_settings
+        from app.services.cash import today_iso
+        try:
+            company_settings = get_company_settings()
+        except Exception:
+            company_settings = None
         return {
+            "settings": company_settings,
+            "business_today": today_iso(),
             "current_user_is_main": is_main_session(session),
             "user_can": lambda module: user_can_module(session, module),
             # Who is signed in, for the dashboard's greeting. Both fall back to

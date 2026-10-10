@@ -192,6 +192,39 @@ CREATE TABLE IF NOT EXISTS product_groups (
     updated_at TEXT NOT NULL
 );
 
+-- Vehicles recorded against a client (integrated 2026-10-10 from the side
+-- programme feature A). Mostly scanned from a NaTIS licence disc (see
+-- app/services/vehicle_disk.py). ``registration`` is the NUMBER PLATE,
+-- ``registration_number`` the NaTIS number and ``licence_number`` the disc's own
+-- licence number. No towing-capacity column: the modern disc payload carries none.
+CREATE TABLE IF NOT EXISTS vehicles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    registration TEXT NOT NULL DEFAULT '',
+    make TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    year TEXT NOT NULL DEFAULT '',
+    vin TEXT NOT NULL DEFAULT '',
+    engine_number TEXT NOT NULL DEFAULT '',
+    colour TEXT NOT NULL DEFAULT '',
+    licence_number TEXT NOT NULL DEFAULT '',
+    registration_number TEXT NOT NULL DEFAULT '',
+    control_number TEXT NOT NULL DEFAULT '',
+    registering_authority TEXT NOT NULL DEFAULT '',
+    vehicle_type TEXT NOT NULL DEFAULT '',
+    tare_kg REAL,
+    gvm_kg REAL,
+    licence_disk_expiry TEXT NOT NULL DEFAULT '',
+    raw_scan_text TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration ON vehicles(registration) WHERE registration <> '';
+
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -277,6 +310,12 @@ CREATE TABLE IF NOT EXISTS orders (
     -- before it was archived, so the main profile can unarchive it back to where
     -- it was. Blank on rows archived before this column existed.
     status_before_archive TEXT NOT NULL DEFAULT '',
+    -- Return-by-disc-scan audit (integrated feature D). Written only by
+    -- returns.mark_returned_via_scan(); blank on every order returned normally.
+    return_scan_at TEXT NOT NULL DEFAULT '',
+    return_scan_registration TEXT NOT NULL DEFAULT '',
+    return_scan_source TEXT NOT NULL DEFAULT '',
+    return_scan_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
 
@@ -601,6 +640,51 @@ def run_migrations(db):
     # Additive with a blank default, so an order archived before this column
     # existed simply has no remembered status (unarchive falls back to Returned).
     ensure_column(db, "orders", "status_before_archive", "TEXT NOT NULL DEFAULT ''")
+    # --- Vehicles recorded against a client (additive, integrated feature A) ---
+    # On an existing database this only adds an empty table: no customer, order or
+    # product row is touched.
+    db.execute("""CREATE TABLE IF NOT EXISTS vehicles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        registration TEXT NOT NULL DEFAULT '',
+        make TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        year TEXT NOT NULL DEFAULT '',
+        vin TEXT NOT NULL DEFAULT '',
+        engine_number TEXT NOT NULL DEFAULT '',
+        colour TEXT NOT NULL DEFAULT '',
+        licence_number TEXT NOT NULL DEFAULT '',
+        registration_number TEXT NOT NULL DEFAULT '',
+        control_number TEXT NOT NULL DEFAULT '',
+        registering_authority TEXT NOT NULL DEFAULT '',
+        vehicle_type TEXT NOT NULL DEFAULT '',
+        tare_kg REAL,
+        gvm_kg REAL,
+        licence_disk_expiry TEXT NOT NULL DEFAULT '',
+        raw_scan_text TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'manual',
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id)")
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration "
+        "ON vehicles(registration) WHERE registration <> ''"
+    )
+    # --- Trailer identity on a rental product (additive, integrated feature D) ---
+    ensure_column(db, "products", "registration", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "products", "licence_number", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "products", "registration_number", "TEXT NOT NULL DEFAULT ''")
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_registration "
+        "ON products(registration) WHERE registration <> ''"
+    )
+    # --- Return-by-disc-scan audit on an order (additive, integrated feature D) ---
+    ensure_column(db, "orders", "return_scan_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "return_scan_registration", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "return_scan_source", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "return_scan_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
     ensure_column(db, "customers", "address_line1", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "address_line2", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "customers", "suburb", "TEXT NOT NULL DEFAULT ''")

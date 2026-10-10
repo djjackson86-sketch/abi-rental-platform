@@ -13,6 +13,7 @@ from app.services.settings import get_company_settings
 from app.services.credit_limits import facility_summary
 from app.services.customer_credits import customer_credit_balance, customer_credit_entries
 from app.services.legacy_balances import legacy_balance_summary, record_legacy_payment
+from app.services.vehicles import list_vehicles
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
 
@@ -291,4 +292,4 @@ def edit(customer_id):
         except ValueError as exc:
             flash(str(exc), "error")
     customer = get_customer(customer_id)
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit())
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit(), vehicles=list_vehicles(customer_id))

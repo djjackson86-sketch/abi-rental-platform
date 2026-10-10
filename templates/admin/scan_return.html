@@ -1,0 +1,182 @@
+{% extends "admin/layout.html" %}
+{% set title='Return trailer' %}
+{% block admin_body %}
+<header class="page-header scan-vehicle-header">
+  <div class="module-title">
+    <span class="module-icon">▩</span>
+    <div>
+      <h1>Return trailer</h1>
+      <p>Scan the hired trailer disk or the client's vehicle disk. Pick the matching order, record damage if needed, then mark it returned.</p>
+    </div>
+  </div>
+</header>
+
+<section class="panel scan-capture-panel">
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('returns.scan_return') }}" class="scan-capture-form">
+    <input class="scan-file-input" id="scan-disk-image" type="file" name="disk_image" accept="image/*" capture="environment">
+
+    <div class="scan-actions-simple">
+      <button class="btn primary scan-big" type="button" id="scan-camera-start">Return</button>
+      <button class="btn ghost scan-big" type="button" id="scan-manual">Manual entry</button>
+    </div>
+
+    {% set scan_camera_title = 'Scan the trailer or vehicle disk' %}
+    {% include "admin/_scan_camera.html" %}
+
+    <div class="scan-manual-panel" id="scan-manual-panel" {% if not (review and review.manual_open) %}hidden{% endif %}>
+      <label>Plate / NaTIS / VIN / engine number
+        <input name="plate" autocomplete="off" placeholder="e.g. ABC 123 GP">
+      </label>
+      <div class="form-actions">
+        <button class="btn primary" type="submit">Find order</button>
+        <button class="btn ghost" type="button" id="scan-manual-cancel">Cancel</button>
+      </div>
+    </div>
+
+  </form>
+</section>
+
+<script src="{{ url_for('static', filename='js/scan-camera.js') }}?v=scan-fs-1"></script>
+<script>
+(function () {
+  var manual = document.getElementById('scan-manual');
+  var manualPanel = document.getElementById('scan-manual-panel');
+  var manualCancel = document.getElementById('scan-manual-cancel');
+  var start = document.getElementById('scan-camera-start');
+  var status = document.getElementById('scan-camera-status');
+
+  // Manual entry stays a plain, camera-free path — the mandatory escape when a disk
+  // photo cannot be read.
+  if (manual) {
+    manual.addEventListener('click', function () {
+      if (manualPanel) { manualPanel.hidden = false; }
+      if (start) { start.hidden = true; }
+      manual.hidden = true;
+      if (status) { status.textContent = ''; }
+      var input = manualPanel && manualPanel.querySelector('input[name="plate"]');
+      if (input) { input.focus(); }
+    });
+  }
+  if (manualCancel) {
+    manualCancel.addEventListener('click', function () {
+      if (manualPanel) { manualPanel.hidden = true; }
+      if (start) { start.hidden = false; }
+      if (manual) { manual.hidden = false; }
+      if (status) { status.textContent = ''; }
+    });
+  }
+
+  if (!window.AbiScanCamera) { return; }
+  AbiScanCamera.init({
+    form: '.scan-capture-form',
+    fileInput: 'scan-disk-image',
+    start: 'scan-camera-start',
+    filename: 'return-disk-scan.jpg',
+    readingMessage: 'Finding order…',
+    onOpen: function () {
+      if (manualPanel) { manualPanel.hidden = true; }
+      if (manual) { manual.hidden = true; }
+    },
+    onClose: function () {
+      if (manual) { manual.hidden = false; }
+    }
+  });
+})();
+</script>
+
+{% if review and review.summary is defined %}
+<section class="panel scan-review-panel">
+  <h2>{% if review.candidates %}Order found{% else %}No order found{% endif %}</h2>
+
+  {% if review.message %}<div class="flash {{ review.category or 'error' }}" role="alert">{{ review.message }}</div>{% endif %}
+
+  {% if review.summary %}
+  <div class="scan-identifiers">
+    <small class="scan-identifiers-label">Read off the disk</small>
+    {% for item in review.summary %}
+    <span class="scan-chip"><small>{{ item.label }}</small><b>{{ item.value }}</b></span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if review.returnable|length > 1 %}
+  <div class="scan-warning" role="alert">
+    <strong>{{ review.returnable|length }} rentals match this disk.</strong>
+    <p>Check the order number and customer before marking anything returned.</p>
+  </div>
+  {% endif %}
+
+  {% if review.candidates %}
+  <div class="scan-candidates">
+    {% for candidate in review.candidates %}
+    <article class="scan-candidate" data-order-id="{{ candidate.order_id }}" data-returnable="{{ '1' if candidate.returnable else '0' }}">
+      <header class="scan-candidate-head">
+        <h3>{{ candidate.order_number }}{% if candidate.customer_name %} · {{ candidate.customer_name }}{% endif %}</h3>
+        <span class="badge status-{{ candidate.status }}">{{ candidate.status_label }}</span>
+      </header>
+      <p class="scan-candidate-evidence">Matched on {{ candidate.match_label }}{% if candidate.evidence %} — <code>{{ candidate.evidence }}</code>{% endif %}{% if candidate.product_name %} · {{ candidate.product_name }}{% endif %}</p>
+      {% if candidate.also_labels %}
+      <p class="form-help">Also matched:
+        {% for other in candidate.also_labels %}{{ other.label }} <code>{{ other.evidence }}</code>{{ ', ' if not loop.last }}{% endfor %}
+      </p>
+      {% endif %}
+
+      {% if candidate.returnable %}
+      <form method="post" action="{{ url_for('returns.confirm_return') }}" class="scan-candidate-action return-one-step-form">
+        <input type="hidden" name="order_id" value="{{ candidate.order_id }}">
+        <input type="hidden" name="scan_plate" value="{{ review.identifiers.scan_plate }}">
+        <input type="hidden" name="scan_natis" value="{{ review.identifiers.scan_natis }}">
+        <input type="hidden" name="scan_disc_licence" value="{{ review.identifiers.scan_disc_licence }}">
+        <input type="hidden" name="scan_vin" value="{{ review.identifiers.scan_vin }}">
+        <input type="hidden" name="scan_engine" value="{{ review.identifiers.scan_engine }}">
+
+        <section class="return-damage-card">
+          <h4>Damage report</h4>
+          <label class="switch"><input type="checkbox" name="no_damages" value="1" checked> No damage</label>
+          <label>Description<input name="damage_description" placeholder="Describe the damage if any"></label>
+          <div class="form-grid compact">
+            <label>Severity<select name="damage_severity"><option value="minor">Minor</option><option value="moderate">Moderate</option><option value="severe">Severe</option></select></label>
+            <label>Damage charge<input type="number" step="0.01" min="0" name="damage_charge" placeholder="0.00"></label>
+          </div>
+          <p class="form-help">Leave No damage ticked for a clean return. If there is damage, type the report and charge; it is saved as the order's damage settlement.</p>
+        </section>
+
+        <button class="btn primary" type="submit">Mark returned</button>
+      </form>
+      {% else %}
+      <p class="scan-candidate-blocked">{{ candidate.reason }}</p>
+      <div class="form-actions">
+        <a class="btn ghost" href="{{ url_for('orders.detail', order_id=candidate.order_id) }}">Open the order</a>
+      </div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="scan-nothing">
+    <p class="empty">No open rental matches that disk{% if review.summary %} — read off it: {% for item in review.summary %}{{ item.label|lower }} <b>{{ item.value }}</b>{{ ', ' if not loop.last }}{% endfor %}{% endif %}. Nothing has been changed.</p>
+    {% if review.returned %}
+    <div class="scan-returned-hint">
+      <strong>This disk already came back:</strong>
+      <ul>
+        {% for hint in review.returned %}
+        <li>
+          <a href="{{ url_for('orders.detail', order_id=hint.order_id) }}">{{ hint.order_number }}</a>
+          {% if hint.customer_name %}· {{ hint.customer_name }}{% endif %}
+          — {% if hint.scanned %}already returned via disc scan{% if hint.returned_at %} on {{ display_local_datetime(hint.returned_at) }}{% endif %}{% else %}already returned{% endif %}{% if hint.registration %} ({{ hint.registration }}){% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+    <p class="form-help">Check the plate/NaTIS/VIN/engine number, or open <a href="{{ url_for('orders.index', status='started') }}">orders out on hire</a>.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="form-actions">
+    <a class="btn ghost" href="{{ url_for('returns.scan_return') }}">Start another return</a>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

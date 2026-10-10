@@ -1,5 +1,6 @@
 import json
 import math
+import re
 
 from flask import has_request_context, session
 
@@ -16,11 +17,35 @@ HIDDEN_CUSTOM_FIELD_KEYS = {
     "booqable_deposit_type", "booqable_deposit_value", "booqable_client_verification",
     "booqable_latest_order_at", "booqable_your_reference", "booqable_tags",
     "booqable_updated_at", "booqable_address_raw",
+    # The internal pointer to the client's chosen main vehicle (feature 2026-10-10): it ties the
+    # mirrored vehicle fields to a vehicle row and is never shown or edited as a custom field.
+    "main_vehicle_id",
 }
+#: The custom-field keys the client's main vehicle is shown under. Deliberately the seven fields
+#: staff type on the scan screen's manual entry — number plate, disc licence number, NaTIS
+#: registration number, VIN, engine number, make and disk expiry. Other decoded disk data (model,
+#: colour, category, registering authority, control number) lives on the vehicle row; a legacy
+#: value already stored against a client is preserved but not offered on the form.
+#: ``app.services.vehicles`` owns the column↔key mapping; a test pins these keys to
+#: ``vehicles.MAIN_VEHICLE_CUSTOM_KEYS``.
+VEHICLE_CUSTOM_FIELD_KEYS = (
+    "vehicle_reg_no",
+    "vehicle_licence_number",
+    "vehicle_registration_number",
+    "vehicle_vin",
+    "vehicle_engine_number",
+    "vehicle_make",
+    "vehicle_licence_disk_expiry",
+)
 VISIBLE_CUSTOM_FIELD_LABELS = {
     "vehicle_make": "Vehicle Make",
-    "vehicle_color": "Vehicle Color",
     "vehicle_reg_no": "Veh Reg No",
+    "vehicle_registration_number": "NaTIS registration number",
+    "vehicle_licence_number": "Disk licence number",
+    "vehicle_vin": "VIN",
+    "vehicle_engine_number": "Engine number",
+    "vehicle_licence_disk_expiry": "Licence disk expiry",
+    "vehicle_color": "Vehicle Color",
     "alternative_contact_name": "Alternative Contact Name",
     "alternative_contact_number": "Alternative Contact Number",
     "alternative_contact_relationship": "Alternative Contact Relationship",
@@ -29,8 +54,13 @@ VISIBLE_CUSTOM_FIELD_LABELS = {
 }
 VISIBLE_CUSTOM_FIELD_ORDER = [
     "vehicle_make",
-    "vehicle_color",
     "vehicle_reg_no",
+    "vehicle_registration_number",
+    "vehicle_licence_number",
+    "vehicle_vin",
+    "vehicle_engine_number",
+    "vehicle_licence_disk_expiry",
+    "vehicle_color",
     "alternative_contact_name",
     "alternative_contact_number",
     "alternative_contact_relationship",
@@ -142,6 +172,79 @@ def customer_filtered_total(query="", customer_type="", marketing=""):
         sql += " AND c.marketing_opt_in = 0"
     row = get_db().execute(sql, params).fetchone()
     return int(row["total"] if row else 0)
+
+
+def search_customers(query, limit=8):
+    """Typeahead for the scan screen's "allocate to client" step: id, name and phone only.
+
+    Deliberately narrow: the picker has to identify a client, so it gets the two things a
+    staff member says out loud on the phone — never email, address, ID, balance or order
+    history. A blank query returns nothing rather than the whole book.
+    """
+    needle = (query or "").strip()
+    if not needle:
+        return []
+    like = f"%{needle.lower()}%"
+    try:
+        limit = max(1, min(25, int(limit)))
+    except (TypeError, ValueError):
+        limit = 8
+    rows = get_db().execute(
+        """SELECT id, name, phone FROM customers
+        WHERE LOWER(name) LIKE ? OR LOWER(phone) LIKE ?
+        ORDER BY CASE WHEN LOWER(name) LIKE ? THEN 0 ELSE 1 END, LOWER(name), id
+        LIMIT ?""",
+        (like, like, f"{needle.lower()}%", limit),
+    ).fetchall()
+    return [{"id": row["id"], "name": row["name"] or "", "phone": row["phone"] or ""} for row in rows]
+
+
+def _phone_digits(value):
+    """Digits only, with the SA trunk/country prefix folded away, so ``+27 82…`` == ``082…``."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("27") and len(digits) > 10:
+        digits = "0" + digits[2:]
+    return digits
+
+
+def find_customer_id_by_text(text):
+    """Resolve the scan screen's "Allocate to client" text to a customer id, or ``None``.
+
+    Staff type a name, a cellphone number, or pick the typeahead's own label
+    (``Name · 082 123 4567``). Only an **unambiguous** match is accepted; two clients with
+    the same number, or a name that matches more than one record, return ``None`` so the
+    caller keeps its refusal rather than allocating a vehicle to the wrong person.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    label_name, _, label_phone = raw.partition("·")
+    label_name = label_name.strip()
+    label_phone = label_phone.strip()
+    if not label_phone and re.fullmatch(r"[\d\s()+\-]{9,}", raw):
+        label_phone, label_name = raw, ""
+    rows = get_db().execute("SELECT id, name, phone FROM customers").fetchall()
+
+    phone_hits = []
+    if label_phone:
+        wanted = _phone_digits(label_phone)[-9:]
+        if len(wanted) == 9:
+            phone_hits = [row["id"] for row in rows if _phone_digits(row["phone"])[-9:] == wanted]
+    name_hits = []
+    if label_name:
+        key = " ".join(label_name.lower().split())
+        name_hits = [row["id"] for row in rows if " ".join(str(row["name"] or "").lower().split()) == key]
+
+    if len(phone_hits) == 1:
+        return phone_hits[0]
+    if len(phone_hits) > 1:
+        narrowed = [customer_id for customer_id in name_hits if customer_id in phone_hits]
+        return narrowed[0] if len(narrowed) == 1 else None
+    if len(name_hits) == 1:
+        return name_hits[0]
+    return None
 
 
 def customer_counts():
@@ -299,6 +402,14 @@ def blocked_reason_for(customer):
     return (_customer_row_value(customer, "blocked_reason", "") or "").strip()
 
 
+def _form_has(form, key):
+    """True when the submitted form actually carries this key (a MultiDict or a dict)."""
+    try:
+        return key in form
+    except TypeError:
+        return False
+
+
 def _clean(form, existing_custom_fields=None):
     name = form.get("name", "").strip()
     if not name:
@@ -309,8 +420,17 @@ def _clean(form, existing_custom_fields=None):
     custom_fields = dict(existing_custom_fields or {})
     submitted_custom_fields = {
         "vehicle_make": form.get("vehicle_make", "").strip() or form.get("vehicle_details", "").strip(),
+        "vehicle_model": form.get("vehicle_model", "").strip(),
         "vehicle_color": form.get("vehicle_color", "").strip(),
         "vehicle_reg_no": form.get("vehicle_reg_no", "").strip(),
+        "vehicle_registration_number": form.get("vehicle_registration_number", "").strip(),
+        "vehicle_licence_number": form.get("vehicle_licence_number", "").strip(),
+        "vehicle_type": form.get("vehicle_type", "").strip(),
+        "vehicle_vin": form.get("vehicle_vin", "").strip(),
+        "vehicle_engine_number": form.get("vehicle_engine_number", "").strip(),
+        "vehicle_licence_disk_expiry": form.get("vehicle_licence_disk_expiry", "").strip(),
+        "vehicle_registering_authority": form.get("vehicle_registering_authority", "").strip(),
+        "vehicle_control_number": form.get("vehicle_control_number", "").strip(),
         "alternative_contact_name": form.get("alternative_contact_name", "").strip() or form.get("alternative_contact", "").strip(),
         "alternative_contact_number": form.get("alternative_contact_number", "").strip(),
         "alternative_contact_relationship": form.get("alternative_contact_relationship", "").strip(),
@@ -318,6 +438,13 @@ def _clean(form, existing_custom_fields=None):
         "company_reg_no": form.get("company_reg_no", "").strip(),
     }
     for key, value in submitted_custom_fields.items():
+        if key.startswith("vehicle_") and not _form_has(form, key):
+            # A partial post (the public portal, or the order card's cached snapshot) omits the
+            # main-vehicle fields it does not show. Leaving the stored value alone keeps a later
+            # partial save from wiping the vehicle details a scan just captured — and it preserves
+            # any legacy decoded field (e.g. vehicle_color) a document still prints.
+            if not (key == "vehicle_make" and _form_has(form, "vehicle_details")):
+                continue
         if value:
             custom_fields[key] = value
         else:
@@ -412,6 +539,13 @@ def create_customer(form):
 def update_customer(customer_id, form):
     data = _clean(form, existing_custom_fields=raw_custom_fields_for(get_customer(customer_id)))
     data["id"] = customer_id
+    # Feature 2026-10-10: the "Main client vehicle" fields are mirrored from a vehicle row. When
+    # this client has one linked, a save from the customer form is authoritative over that row (a
+    # plate another client owns is refused, never swapped in) and the row's stored values are
+    # mirrored back. A partial post from the portal/order card is not authoritative and is ignored
+    # here, so a stale snapshot can never overwrite the vehicle that a scan captured.
+    from app.services.vehicles import apply_main_vehicle_form_sync
+    data["custom_fields_json"] = apply_main_vehicle_form_sync(customer_id, form, data["custom_fields_json"])
     # Ticket ABI-341953028: the block columns are only written when the customer
     # form's own blocking panel was submitted, so the order form's attached
     # customer card can never clear a block by saving other details.

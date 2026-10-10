@@ -61,6 +61,8 @@ MODULES = [
     ("app_store", "App store"),
     ("reports", "Reports"),
     ("scan_barcode", "Scan a barcode"),
+    ("scan_vehicle", "Scan a vehicle licence disk"),
+    ("scan_return", "Scan to return a trailer"),
     ("settings", "Settings"),
 ]
 
@@ -100,6 +102,14 @@ _ENDPOINT_MODULE_RULES = [
     # cannot pull the figures out through the print route.
     ("admin.reports_pdf", "reports"),
     ("admin.scan_barcode", "scan_barcode"),
+    # Integrated feature A: the licence-disc scan screen and the vehicle actions it
+    # owns. The client page's read-only vehicles feed shows what is already on the
+    # client's record, so the accounts that may open the client page may read it.
+    ("vehicles.customer_vehicles", "customers"),
+    ("vehicles.", "scan_vehicle"),
+    # Integrated feature D: scanning a disk to bring a rental back. Like scan_vehicle
+    # it stays out of the shared staff default set; the routes 403 without it.
+    ("returns.", "scan_return"),
     # The dashboard's cash-up / end of day panel. Same module as the screen it
     # lives on, so an account that may see the dashboard may cash its drawer up.
     ("cash.", "dashboard"),

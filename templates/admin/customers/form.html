@@ -8,7 +8,7 @@
   <section class="form-section company-details-section" data-company-details {% if not customer or customer.customer_type != 'company' %}hidden{% endif %}><h2>Company details</h2><div class="form-grid"><label>VAT No<input name="vat_number" value="{{ custom_fields.get('vat_number','') }}" placeholder="e.g. 4123456789"></label><label>Company Reg No<input name="company_reg_no" value="{{ custom_fields.get('company_reg_no','') }}" placeholder="e.g. 2024/123456/07"></label></div></section>
   <section class="form-section"><h2>Address</h2><div class="form-grid"><label class="span-2">Address line 1<input name="address_line1" value="{{ customer.address_line1 if customer else '' }}" placeholder="Street address"></label><label class="span-2">Address line 2<input name="address_line2" value="{{ customer.address_line2 if customer else '' }}" placeholder="Unit, complex or building"></label><label>Suburb<input name="suburb" value="{{ customer.suburb if customer else '' }}"></label><label>City<input name="city" value="{{ customer.city if customer else '' }}"></label><label>Province<input name="province" value="{{ customer.province if customer else '' }}"></label><label>Postal code<input name="postal_code" value="{{ customer.postal_code if customer else '' }}"></label><label class="span-2">Country<input name="country" value="{{ customer.country if customer else 'South Africa' }}"></label></div></section>
   <section class="form-section"><h2>Standard discount</h2><div class="form-grid"><label>Discount percentage<input type="number" name="standard_discount_percent" min="0" max="100" step="0.01" value="{{ '%.2f'|format(customer.standard_discount_percent or 0) if customer else '0.00' }}" placeholder="0.00"></label></div><p class="form-help">This percentage applies automatically to new orders for this customer.</p></section>
-  <section class="form-section"><h2>Custom customer details</h2><div class="form-grid"><label>Vehicle Make<input name="vehicle_make" value="{{ custom_fields.get('vehicle_make','') }}" placeholder="Toyota Hilux"></label><label>Vehicle Color<input name="vehicle_color" value="{{ custom_fields.get('vehicle_color','') }}" placeholder="White"></label><label>Veh Reg No<input name="vehicle_reg_no" value="{{ custom_fields.get('vehicle_reg_no','') }}" placeholder="CA 123-456"></label><label>Alternative Contact Name<input name="alternative_contact_name" value="{{ custom_fields.get('alternative_contact_name','') }}" placeholder="Jane Smith"></label><label>Alternative Contact Number<input name="alternative_contact_number" value="{{ custom_fields.get('alternative_contact_number','') }}" placeholder="+27..."></label><label>Alternative Contact Relationship<input name="alternative_contact_relationship" value="{{ custom_fields.get('alternative_contact_relationship','') }}" placeholder="Sister"></label></div></section>
+  {% include "admin/customers/_main_vehicle_fields.html" %}
   <section class="form-section"><h2>Client Verified</h2><div class="option-grid two-options"><label class="choice-card"><input type="radio" name="client_verified" value="1" {% if customer and customer.client_verified == 1 %}checked{% endif %}><strong>Yes</strong><span>The client's details have been checked and verified.</span></label><label class="choice-card"><input type="radio" name="client_verified" value="0" {% if customer and customer.client_verified == 0 %}checked{% endif %}><strong>No</strong><span>The client is not verified yet.</span></label></div><p class="form-help">Tick Yes or No once the client has been verified. A record nobody has answered for shows “Not set”.</p></section>
   <section class="form-section"><div class="form-grid"><label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" {% if customer and customer.marketing_opt_in %}checked{% endif %}> Subscribed to marketing emails</label></div></section>
   <section class="form-section" data-block-customer>
@@ -35,6 +35,92 @@
   {% endif %}
   <div class="form-actions"><button class="btn primary">Save customer</button></div>
 </form>
+{% if customer %}
+{# Vehicle details live with the customer record, right where the client is edited — the old
+   separate Vehicles panel on the customer page is gone. These forms sit OUTSIDE the customer
+   form above because HTML must never nest one form inside another. #}
+<article class="panel customer-vehicles-card" id="vehicle-details">
+  <div class="panel-title">
+    <h2>Vehicle details</h2>
+    {% if user_can('scan_vehicle') %}
+      <a href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id, vehicle_role='additional') }}">Add another vehicle</a>
+    {% endif %}
+  </div>
+  {% if vehicles %}
+    <p class="form-help">Read off a NaTIS licence disk or typed in by staff. A number plate belongs to one client, and a blank field is shown as a dash — nothing is guessed.</p>
+    <div class="table-wrap vehicles-table-wrap">
+      <table class="data-table vehicles-table">
+        <thead>
+          <tr>
+            <th>Number plate</th>
+            <th>Make</th>
+            <th>VIN</th>
+            <th>Engine number</th>
+            <th>Disk expiry</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for vehicle in vehicles %}
+            <tr>
+              <td>
+                <strong>{{ vehicle.registration or 'No plate recorded' }}</strong>
+                {% if custom_fields.get('vehicle_reg_no','')|replace(' ','')|upper == vehicle.registration|replace(' ','')|upper and vehicle.registration %}<small class="vehicle-sub">Main client vehicle · used on invoices</small>{% else %}<small class="vehicle-sub">Additional vehicle</small>{% endif %}
+                {% if vehicle.registration_number %}<small class="vehicle-sub">NaTIS {{ vehicle.registration_number }}</small>{% endif %}
+                {% if vehicle.licence_number %}<small class="vehicle-sub">Disk {{ vehicle.licence_number }}</small>{% endif %}
+              </td>
+              <td>{{ vehicle.make or '—' }}</td>
+              <td>{{ vehicle.vin or '—' }}</td>
+              <td>{{ vehicle.engine_number or '—' }}</td>
+              <td>{{ vehicle.licence_disk_expiry or '—' }}{% if vehicle.licence_disk_expiry and vehicle.licence_disk_expiry < business_today %}<small class="scan-expiry-warning" role="alert">Licence disk expired</small>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if user_can('scan_vehicle') %}
+      <div class="vehicle-manage">
+        {% set vehicle_edit_fields = [
+          ('registration', 'Number plate'),
+          ('registration_number', 'NaTIS registration number'),
+          ('licence_number', 'Disk licence number'),
+          ('make', 'Make'),
+          ('vin', 'VIN'),
+          ('engine_number', 'Engine number'),
+          ('licence_disk_expiry', 'Licence disk expiry'),
+        ] %}
+        {% for vehicle in vehicles %}
+          <details class="vehicle-manage-item">
+            <summary>Edit or remove {{ vehicle.registration or ('vehicle #' ~ vehicle.id) }}</summary>
+            <form method="post" action="{{ url_for('vehicles.edit_vehicle', vehicle_id=vehicle.id) }}" class="form-grid vehicle-edit-form">
+              {% for name, label in vehicle_edit_fields %}
+                <label>{{ label }}
+                  <input type="text" name="{{ name }}" value="{{ vehicle[name] or '' }}" autocomplete="off">
+                </label>
+              {% endfor %}
+              <label class="switch span-2"><input type="checkbox" name="make_main" value="yes"> Use this as the main client vehicle shown on invoices</label>
+              <div class="form-actions span-2">
+                <button class="btn primary" type="submit">Save vehicle</button>
+              </div>
+            </form>
+            <form method="post" action="{{ url_for('vehicles.delete_vehicle', vehicle_id=vehicle.id) }}" class="vehicle-remove-form" onsubmit="return confirm('Remove {{ vehicle.registration or 'this vehicle' }} from this client?');">
+              <button class="btn danger" type="submit">Remove vehicle</button>
+              <span class="form-help">Removing deletes only this vehicle — the client and their orders stay exactly as they are.</span>
+            </form>
+          </details>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="soft-empty">
+      <h3>No vehicles recorded</h3>
+      <p>Scan the client's licence disk to capture the number plate, VIN, engine number and disk expiry on their record.</p>
+      {% if user_can('scan_vehicle') %}
+        <a class="btn primary" href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id, vehicle_role='additional') }}">Scan a vehicle disk</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</article>
+{% endif %}
 <script>
 (function(){
   const companySection = document.querySelector('[data-company-details]');
