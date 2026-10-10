@@ -62,6 +62,7 @@
       <div class="detail-row"><span>Email</span><b>{{ customer.email or '—' }}</b></div>
       <div class="detail-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div>
       <div class="detail-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div>
+      <div class="detail-row"><span>POPIA consent</span>{% if consent_summary %}<b class="consent-recorded">{{ consent_summary }}</b>{% else %}<b class="muted">No POPIA consent recorded</b>{% endif %}</div>
       <div class="detail-row"><span>Client Verified</span><b>{{ client_verified_label(customer.client_verified) }}</b></div>
       <div class="detail-row"><span>Blocked</span><b>{% if customer.is_blocked %}<span class="badge blocked">Blocked</span>{% else %}No{% endif %}</b></div>
       {% if customer.is_blocked %}<div class="detail-row"><span>Blocked reason</span><b>{{ customer.blocked_reason or 'No reason recorded' }}</b></div>{% endif %}

@@ -121,11 +121,16 @@ def test_every_phone_chip_renders_with_one_shape(client, app):
 
     chips = _chips(_mobile_nav_markup(dashboard.data))
     labels = [label for _, label in chips]
-    assert labels == ['Dashboard', 'Orders', 'Customers', 'Inventory', 'Payments', 'Reports', 'Settings',
+    # Reports -> Online store -> Customer portal is the pinned module order (nav
+    # retirement ticket): the App store / Scan a barcode chips are gone and the
+    # Customer portal chip is gated on the settings module, exactly like the sidebar.
+    # The two surviving scanner chips (Scan vehicle, Returns) sit before Settings.
+    assert labels == ['Dashboard', 'Orders', 'Customers', 'Inventory', 'Payments', 'Reports',
+                      'Online store', 'Customer portal', 'Scan vehicle', 'Returns', 'Settings',
                       'Branch: %s \u00b7 Change' % _branch_name(app)], labels
     assert [_href(attrs) for attrs, _ in chips] == [
-        '/dashboard', '/orders', '/customers', '/inventory', '/payments', '/reports', '/settings/general',
-        '/select-branch',
+        '/dashboard', '/orders', '/customers', '/inventory', '/payments', '/reports', '/online-store',
+        '/settings/portal', '/scan-vehicle', '/scan-return', '/settings/general', '/select-branch',
     ]
 
     # Every chip is one and the same element type/label style: no chip carries an
@@ -165,10 +170,17 @@ def test_a_chip_can_only_appear_where_the_module_gate_allows_it(client, app):
 
     nav = _mobile_nav_markup(client.get('/dashboard').data)
     labels = [label for _, label in _chips(nav)]
-    assert labels == ['Dashboard', 'Orders', 'Inventory', 'Settings',
+    # This account may open settings, so the Customer portal chip shows even with
+    # no reports/online-store module; the retired App store / Scan a barcode chips
+    # never render anywhere.
+    assert labels == ['Dashboard', 'Orders', 'Inventory', 'Customer portal', 'Settings',
                       'Branch: %s \u00b7 Change' % _branch_name(app)]
     assert b'/customers' not in nav
     assert b'/payments' not in nav
+    assert b'/reports' not in nav
+    assert b'/online-store' not in nav
+    assert b'/app-store' not in nav
+    assert b'/scan-barcode' not in nav
     assert client.get('/customers').status_code == 403
     assert client.get('/payments').status_code == 403
     # The depot chip still points at the picker, and both halves still agree.
@@ -195,6 +207,10 @@ def test_phone_payments_chip_follows_payments_module_gate(client, app):
 
     assert (' href="/payments"', 'Payments') in chips
     assert b'href="/reports"' not in nav
+    assert b'href="/online-store"' not in nav
+    assert b'href="/settings/portal"' not in nav
+    assert b'href="/app-store"' not in nav
+    assert b'href="/scan-barcode"' not in nav
     assert client.get('/payments').status_code == 200
 
 

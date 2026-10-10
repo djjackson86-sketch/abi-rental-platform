@@ -225,6 +225,90 @@ CREATE TABLE IF NOT EXISTS vehicles (
 CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration ON vehicles(registration) WHERE registration <> '';
 
+-- POPIA consent records (programme phase 7 / feature P, §P1). Decision D10: every
+-- client-facing capture point shows a required, unticked-by-default acceptance, and the
+-- acceptance is *recorded* so Sano can evidence it. The columns are deliberately the
+-- minimum: who, which notice version, which channel, when. There is **no IP address, no
+-- user agent and no device fingerprint** — POPIA data minimisation, and a test asserts
+-- this column set so it cannot creep back.
+CREATE TABLE IF NOT EXISTS consent_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    consent_type TEXT NOT NULL DEFAULT 'popia_privacy',
+    notice_version TEXT NOT NULL DEFAULT '',
+    channel TEXT NOT NULL DEFAULT '',
+    accepted_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_consent_records_customer ON consent_records(customer_id);
+
+-- POPIA document acceptances (programme phase 14 / feature Q, §Q1). One row per
+-- acceptance, newest wins; accepting twice is allowed (it is an audit trail). The
+-- columns are deliberately the minimum — document identity/version/hash, who, when,
+-- note — with **no IP address and no user agent**.
+CREATE TABLE IF NOT EXISTS document_acceptances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_key TEXT NOT NULL DEFAULT '',
+    document_version TEXT NOT NULL DEFAULT '',
+    document_hash TEXT NOT NULL DEFAULT '',
+    accepted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    accepted_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_acceptances_key ON document_acceptances(document_key);
+
+-- POPIA setup wizard (programme phase W1 / feature P). A single-row state table
+-- (id = 1) holding the wizard's confirmed facts, the Information Officer, and the
+-- nine Step-3 answers, plus the publish flag. Each Step-3 answer is tri-state:
+-- 'yes', 'no', or '' (not answered / not sure). There is **no IP address and no
+-- user agent**.
+CREATE TABLE IF NOT EXISTS popia_wizard_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    business_name TEXT NOT NULL DEFAULT '',
+    registration_number TEXT NOT NULL DEFAULT '',
+    vat_number TEXT NOT NULL DEFAULT '',
+    trading_name TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    telephone TEXT NOT NULL DEFAULT '',
+    contact_email TEXT NOT NULL DEFAULT '',
+    officer_name TEXT NOT NULL DEFAULT '',
+    officer_position TEXT NOT NULL DEFAULT '',
+    officer_email TEXT NOT NULL DEFAULT '',
+    officer_telephone TEXT NOT NULL DEFAULT '',
+    officer_registered TEXT NOT NULL DEFAULT '',
+    officer_registration_date TEXT NOT NULL DEFAULT '',
+    officer_registration_ref TEXT NOT NULL DEFAULT '',
+    cctv TEXT NOT NULL DEFAULT '',
+    cctv_branches_json TEXT NOT NULL DEFAULT '[]',
+    cctv_signage TEXT NOT NULL DEFAULT '',
+    marketing TEXT NOT NULL DEFAULT '',
+    id_documents TEXT NOT NULL DEFAULT '',
+    share_info TEXT NOT NULL DEFAULT '',
+    service_providers TEXT NOT NULL DEFAULT '',
+    card_payments TEXT NOT NULL DEFAULT '',
+    under_18 TEXT NOT NULL DEFAULT '',
+    vehicle_registration TEXT NOT NULL DEFAULT 'yes',
+    credit_checks TEXT NOT NULL DEFAULT '',
+    published INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+-- Published notices (programme phase W1). The generated text lives in the
+-- database, never on disk (decision D4 — Render's filesystem is ephemeral). One
+-- row per publish; the version is date-stamped (YYYY-MM-DD.N) and the content
+-- hash ties a customer's consent back to the exact wording they saw.
+CREATE TABLE IF NOT EXISTS popia_notice_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notice_version TEXT NOT NULL UNIQUE,
+    notice_content_hash TEXT NOT NULL DEFAULT '',
+    notice_text TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL,
+    published_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_popia_notice_versions_version ON popia_notice_versions(notice_version);
+
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -520,6 +604,35 @@ def rename_column(db, table, old_name, new_name):
     existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
     if old_name in existing and new_name not in existing:
         db.execute(f"ALTER TABLE {table} RENAME COLUMN {old_name} TO {new_name}")
+
+
+def _backfill_branch_slugs(db):
+    """Give every branch a public slug, once, deterministically (programme phase 8 / §B1).
+
+    Only BLANK slugs are filled, so this is a no-op on every later app start — a slug that staff
+    have already printed on an A4 sheet is never silently re-derived from a renamed branch.
+    Collisions take the first free ``-2``, ``-3`` … suffix in branch-id order, so two machines
+    running the same migration on the same data end up with the same links.
+
+    ``app.services.portal`` is imported inside the function on purpose: it reads ``app.db``, so a
+    module-level import here would be circular.
+    """
+    from app.services.portal import slugify
+
+    taken = {
+        row["public_slug"]
+        for row in db.execute("SELECT public_slug FROM branches WHERE public_slug <> ''").fetchall()
+    }
+    for row in db.execute("SELECT id, name, public_slug FROM branches ORDER BY id").fetchall():
+        if (row["public_slug"] or "").strip():
+            continue
+        base = slugify(row["name"]) or f"branch-{row['id']}"
+        candidate, suffix = base, 2
+        while candidate in taken:
+            candidate = f"{base}-{suffix}"
+            suffix += 1
+        db.execute("UPDATE branches SET public_slug = ? WHERE id = ?", (candidate, row["id"]))
+        taken.add(candidate)
 
 
 def run_migrations(db):
@@ -965,6 +1078,110 @@ def run_migrations(db):
     ensure_column(db, "legacy_balance_payments", "branch_id", "INTEGER REFERENCES branches(id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_balance_payments_customer ON legacy_balance_payments(customer_id)")
 
+    # --- POPIA consent records (additive) ------------------------------------
+    # A new, empty table on an existing database: every client simply has no consent
+    # recorded yet, which is what the admin customer page reports ("No POPIA consent
+    # recorded"). Nothing existing changes. The column set is deliberately minimal — who /
+    # which notice version / which channel / when, and no IP or user agent.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS consent_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+            consent_type TEXT NOT NULL DEFAULT 'popia_privacy',
+            notice_version TEXT NOT NULL DEFAULT '',
+            channel TEXT NOT NULL DEFAULT '',
+            accepted_at TEXT NOT NULL
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_consent_records_customer ON consent_records(customer_id)"
+    )
+
+    # --- POPIA document acceptances (additive, feature Q §Q1) ----------------
+    # A new, empty table on an existing database: no document has been adopted yet.
+    # Accepting twice is allowed (audit trail), the newest row wins, and the columns are
+    # minimal — no IP address, no user agent.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS document_acceptances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_key TEXT NOT NULL DEFAULT '',
+            document_version TEXT NOT NULL DEFAULT '',
+            document_hash TEXT NOT NULL DEFAULT '',
+            accepted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            accepted_at TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT ''
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_acceptances_key ON document_acceptances(document_key)"
+    )
+
+    # --- POPIA setup wizard + published notices (additive) -------------------
+    # Two new, empty tables on an existing database: the single-row wizard state
+    # (nothing confirmed yet, so the wizard starts at prefill) and the published notice
+    # history (nothing published yet, so /privacy stays interim). The generated notice
+    # text lives in the database, never on disk.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS popia_wizard_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            business_name TEXT NOT NULL DEFAULT '',
+            registration_number TEXT NOT NULL DEFAULT '',
+            vat_number TEXT NOT NULL DEFAULT '',
+            trading_name TEXT NOT NULL DEFAULT '',
+            address TEXT NOT NULL DEFAULT '',
+            telephone TEXT NOT NULL DEFAULT '',
+            contact_email TEXT NOT NULL DEFAULT '',
+            officer_name TEXT NOT NULL DEFAULT '',
+            officer_position TEXT NOT NULL DEFAULT '',
+            officer_email TEXT NOT NULL DEFAULT '',
+            officer_telephone TEXT NOT NULL DEFAULT '',
+            officer_registered TEXT NOT NULL DEFAULT '',
+            officer_registration_date TEXT NOT NULL DEFAULT '',
+            officer_registration_ref TEXT NOT NULL DEFAULT '',
+            cctv TEXT NOT NULL DEFAULT '',
+            cctv_branches_json TEXT NOT NULL DEFAULT '[]',
+            cctv_signage TEXT NOT NULL DEFAULT '',
+            marketing TEXT NOT NULL DEFAULT '',
+            id_documents TEXT NOT NULL DEFAULT '',
+            share_info TEXT NOT NULL DEFAULT '',
+            service_providers TEXT NOT NULL DEFAULT '',
+            card_payments TEXT NOT NULL DEFAULT '',
+            under_18 TEXT NOT NULL DEFAULT '',
+            vehicle_registration TEXT NOT NULL DEFAULT 'yes',
+            credit_checks TEXT NOT NULL DEFAULT '',
+            published INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS popia_notice_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            notice_version TEXT NOT NULL UNIQUE,
+            notice_content_hash TEXT NOT NULL DEFAULT '',
+            notice_text TEXT NOT NULL DEFAULT '',
+            published_at TEXT NOT NULL,
+            published_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_popia_notice_versions_version ON popia_notice_versions(notice_version)"
+    )
+
+    # --- Per-branch public portal (additive, feature B §B1) ------------------
+    # Every branch gets a stable public link of the shape /portal/<slug> and a QR that encodes
+    # the absolute URL. All columns are additive with defaults, so on an existing database every
+    # branch keeps behaving exactly as it does today; the backfill fills only the blank slugs,
+    # once. The partial unique index is the database-level half of "one slug, one branch".
+    ensure_column(db, "branches", "public_slug", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "branches", "portal_enabled", "INTEGER NOT NULL DEFAULT 1")
+    ensure_column(db, "branches", "portal_intro", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "company_settings", "public_base_url", "TEXT NOT NULL DEFAULT ''")
+    _backfill_branch_slugs(db)
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_slug "
+        "ON branches(public_slug) WHERE public_slug <> ''"
+    )
+
 
 def init_db():
     db = get_db()
@@ -977,6 +1194,10 @@ def init_db():
     if branch_count and branch_count["c"] == 0:
         for branch_name, code in [('Branch 1', 'BR1'), ('Branch 2', 'BR2'), ('Branch 3', 'BR3')]:
             db.execute("INSERT INTO branches (name, code, created_at, updated_at) VALUES (?, ?, ?, ?)", (branch_name, code, ts, ts))
+        # These three starter branches are created *after* run_migrations(), so the migration's
+        # slug backfill never sees them: fill them here as well, so a brand-new install has working
+        # portal links from the first start (feature B §B1). Idempotent — it only fills blank slugs.
+        _backfill_branch_slugs(db)
     default_branch = db.execute("SELECT id FROM branches ORDER BY id LIMIT 1").fetchone()
     for day in range(7):
         db.execute("INSERT OR IGNORE INTO operating_hours (day_of_week, open_time, close_time, closed) VALUES (?, '09:00', '17:00', ?)", (day, 1 if day in (0,6) else 0))

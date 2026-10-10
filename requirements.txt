@@ -6,3 +6,5 @@ libsql-client==0.3.1
 tzdata==2026.5
 # Category photo upload/resize for online-store inventory categories.
 Pillow==12.3.0
+# Customer-portal QR codes (per-branch links and the universal intake page).
+qrcode==7.4.2
