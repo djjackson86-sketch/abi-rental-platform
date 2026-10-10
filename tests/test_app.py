@@ -94,11 +94,13 @@ def test_admin_navigation_excludes_removed_pages(client):
     assert b'href="/help"' not in dashboard.data
     assert b'>Help<' not in dashboard.data
     assert b'href="/dashboard">Dashboard</a>' in dashboard.data
-    # App store and Scan a barcode are retired: the routes and their page
-    # templates are gone, so both answer 404 for main and staff alike.
-    for path in ['/app-store', '/scan-barcode']:
-        assert client.get(path).status_code == 404, path
-        assert client.post(path, data={}).status_code == 404, path
+    for path, expected in [
+        ('/app-store', b'App store'),
+        ('/scan-barcode', b'Scan a barcode'),
+    ]:
+        res = client.get(path)
+        assert res.status_code == 200
+        assert expected in res.data
 
 
 def test_removed_setup_ask_bo_and_help_routes_are_disabled(client):
@@ -190,17 +192,47 @@ def test_submitted_coupon_codes_are_ignored_but_historical_display_remains(clien
         assert recalculated['total'] == 200
 
 
-def test_barcode_lookup_route_is_retired(client):
-    """The Scan a barcode screen and its SKU->product lookup were retired.
-
-    The route (and with it the inline SKU lookup) is gone, so the form GET and the
-    lookup POST both answer 404. The scanner screens that survive it - the
-    vehicle-disk scan and scan-to-return - are covered in their own test files.
-    """
+def test_barcode_lookup(client):
     login(client)
-    assert client.get('/scan-barcode').status_code == 404
-    assert client.post('/scan-barcode', data={'barcode': 'BARCODE-TEST'}).status_code == 404
-    assert client.post('/scan-barcode', data={'barcode': ''}).status_code == 404
+    # GET the page
+    res = client.get('/scan-barcode')
+    assert res.status_code == 200
+    assert b'Scan a barcode' in res.data
+    assert b'Barcode (SKU)' in res.data
+
+    # Create a product to test with
+    product_data = {
+        'name': 'Barcode Test Product',
+        'sku': 'BARCODE-TEST',
+        'quantity': '1',
+        'description': 'Product for barcode test',
+        'product_type': 'rental',
+        'price_amount': '100',
+        'price_unit': 'day',
+        'security_deposit': '0',
+        'tax_profile_id': '1',
+        'active': '1',
+        'public_visible': '1',
+    }
+    # Create the product via the inventory route
+    resp = client.post('/inventory/new', data=product_data, follow_redirects=False)
+    assert resp.status_code == 302  # redirect to edit page
+
+    # Test valid barcode
+    res = client.post('/scan-barcode', data={'barcode': 'BARCODE-TEST'}, follow_redirects=False)
+    assert res.status_code == 302
+    assert '/inventory/' in res.location
+    assert '/edit' in res.location
+
+    # Test blank barcode
+    res = client.post('/scan-barcode', data={'barcode': ''}, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'Barcode is required' in res.data
+
+    # Test invalid barcode
+    res = client.post('/scan-barcode', data={'barcode': 'NON-EXISTENT'}, follow_redirects=True)
+    assert res.status_code == 200
+    assert b'No active product found with barcode' in res.data
 
 
 def test_vat_is_one_global_setting_not_a_per_product_choice(client, app):
@@ -4235,16 +4267,46 @@ def test_reports_orders_csv_export(client):
     assert 'ORD-10145,Order Customer,draft,payment_due,1350.00,1350.00' in body
 
 
-def test_app_store_page_is_retired(client):
-    """The App store screen was retired: its route and page template are gone.
-
-    Both the page GET and the toggle POST answer 404 (for main and staff alike).
-    The ``app_store_items`` table and its rows are deliberately preserved (DB
-    records kept), so nothing here deletes integration data.
-    """
+def test_app_store_functionality(client):
     login(client)
-    assert client.get('/app-store').status_code == 404
-    assert client.post('/app-store', data={'item_id': '1', 'is_active': 'on'}).status_code == 404
+    # GET the app store page
+    resp = client.get('/app-store')
+    assert resp.status_code == 200
+    assert b'App store' in resp.data
+    # Check that we have at least one item (from seeding)
+    assert b'ShipStation' in resp.data or b'Mailchimp' in resp.data  # one of the seeded items
+    # We'll get the item id from the database for a known item.
+    with client.application.app_context():
+        from app.db import get_db
+        db = get_db()
+        item = db.execute('SELECT id FROM app_store_items WHERE name = ?', ('ShipStation',)).fetchone()
+        # If ShipStation is not found (maybe the order is different), try the first item.
+        if item is None:
+            item = db.execute('SELECT id FROM app_store_items LIMIT 1').fetchone()
+        assert item is not None, 'No app store items found'
+        item_id = item['id']
+    # Now test toggling the item's active status.
+    # First, deactivate it: we do not send the 'is_active' key (unchecked checkbox).
+    resp = client.post('/app-store', data={'item_id': str(item_id)}, follow_redirects=True)
+    assert resp.status_code == 200
+    assert b'App store item updated' in resp.data
+    # Check that the item is now inactive in the database.
+    with client.application.app_context():
+        from app.db import get_db
+        db = get_db()
+        item = db.execute('SELECT is_active FROM app_store_items WHERE id = ?', (item_id,)).fetchone()
+        assert item is not None
+        assert item['is_active'] == 0
+    # Now activate it again: we send 'is_active': 'on' (checked checkbox).
+    resp = client.post('/app-store', data={'item_id': str(item_id), 'is_active': 'on'}, follow_redirects=True)
+    assert resp.status_code == 200
+    assert b'App store item updated' in resp.data
+    with client.application.app_context():
+        from app.db import get_db
+        db = get_db()
+        item = db.execute('SELECT is_active FROM app_store_items WHERE id = ?', (item_id,)).fetchone()
+        assert item is not None
+        assert item['is_active'] == 1
 
 
 def test_internal_telegram_requires_secret(client):
@@ -5163,7 +5225,7 @@ def test_main_can_manage_users_and_staff_have_restricted_access(client, app):
     customers = client.get('/customers')
     assert customers.status_code == 200
 
-    for path in ['/inventory', '/branches', '/documents', '/payments', '/online-store', '/reports', '/settings/general', '/settings/users']:
+    for path in ['/inventory', '/branches', '/documents', '/payments', '/online-store', '/app-store', '/reports', '/scan-barcode', '/settings/general', '/settings/users']:
         blocked = client.get(path)
         assert blocked.status_code == 403, path
 

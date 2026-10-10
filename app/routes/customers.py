@@ -135,17 +135,12 @@ def detail(customer_id):
         flash("Customer not found", "error")
         return redirect(url_for("customers.index"))
     orders = customer_orders(customer_id)
-    # Programme phase 7 (feature P §P1): the POPIA evidence line. Read-only, no extra
-    # permission — it is one line of the client's own contact card, and a client with no
-    # acceptance recorded says so rather than showing nothing.
-    from app.services.consent import consent_summary
     return render_template(
         "admin/customers/detail.html",
         settings=get_company_settings(),
         customer=customer,
         custom_fields=custom_fields_for(customer),
         orders=orders,
-        consent_summary=consent_summary(customer_id),
         outstanding_balance=customer_outstanding_balances([customer_id])[customer_id],
         customer_has_history=bool(orders) or customer_has_history(customer_id),
         custom_field_label=custom_field_label,

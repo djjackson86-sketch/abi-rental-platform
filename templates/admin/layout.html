@@ -23,9 +23,10 @@
     {% if user_can('branches') %}<a href="{{ url_for('branches.index') }}"><span>⌘</span><span>Branches</span></a>{% endif %}
     {% if user_can('documents') %}<a href="{{ url_for('documents.index') }}"><span>◴</span><span>Documents</span></a>{% endif %}
     {% if user_can('payments') %}<a href="{{ url_for('payments.index') }}"><span>▤</span><span>Payments</span></a>{% endif %}
-    {% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}"><span>≋</span><span>Reports</span></a>{% endif %}
     {% if user_can('online_store') %}<a href="{{ url_for('admin.online_store') }}"><span>⌂</span><span>Online store</span></a>{% endif %}
-    {% if user_can('settings') %}<a href="{{ url_for('settings.portal_index') }}"><span>▤</span><span>Customer portal</span></a>{% endif %}
+    {% if user_can('app_store') %}<a href="{{ url_for('admin.app_store') }}"><span>▧</span><span>App store</span></a>{% endif %}
+    {% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}"><span>≋</span><span>Reports</span></a>{% endif %}
+    {% if user_can('scan_barcode') %}<a href="{{ url_for('admin.scan_barcode') }}"><span>▥</span><span>Scan a barcode</span></a>{% endif %}
     {% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}"><span>▦</span><span>Scan a vehicle disk</span></a>{% endif %}
     {% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}"><span>▩</span><span>Scan to return</span></a>{% endif %}
     {% if user_can('settings') %}<a href="{{ url_for('settings.general') }}"><span>⚙</span><span>Settings</span></a>{% endif %}
@@ -36,7 +37,7 @@
     {# Phone navigation: one uniform chip shape per module; the depot chip is
        placed last and spans the full row so a long depot name stays readable. #}
     <nav class="mobile-nav">
-      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('customers') %}<a href="{{ url_for('customers.index') }}">Customers</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if user_can('payments') %}<a href="{{ url_for('payments.index') }}">Payments</a>{% endif %}{% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}">Reports</a>{% endif %}{% if user_can('online_store') %}<a href="{{ url_for('admin.online_store') }}">Online store</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.portal_index') }}">Customer portal</a>{% endif %}{% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}">Scan vehicle</a>{% endif %}{% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}">Returns</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}
+      {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('customers') %}<a href="{{ url_for('customers.index') }}">Customers</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if user_can('payments') %}<a href="{{ url_for('payments.index') }}">Payments</a>{% endif %}{% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}">Reports</a>{% endif %}{% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}">Scan vehicle</a>{% endif %}{% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}">Returns</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}
     </nav>
     {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}

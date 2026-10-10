@@ -1,0 +1,19 @@
+{% extends "admin/layout.html" %}
+{% set title='Scan a barcode' %}
+{% block admin_body %}
+<header class="page-header inventory-header">
+  <div class="module-title">
+    <span class="module-icon">▥</span>
+    <div><p class="eyebrow">Barcode scanner</p><h1>Scan a barcode</h1><p>Scan or type a product barcode (SKU) to find the product.</p></div>
+  </div>
+</header>
+
+<section class="panel settings-form">
+  <h2>Scan barcode</h2>
+  <form method="post" class="form-grid">
+    <label>Barcode (SKU)<input name="barcode" required placeholder="CTW-TRL-750U" autocomplete="off" autofocus></label>
+    <div class="form-actions span-2"><button class="btn primary" type="submit">Look up product</button></div>
+  </form>
+  <p class="form-hint">Tip: Use a barcode scanner that acts as a keyboard scanner. After scanning, press Enter to submit.</p>
+</section>
+{% endblock %}
