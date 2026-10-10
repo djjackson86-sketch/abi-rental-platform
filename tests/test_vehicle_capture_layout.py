@@ -56,8 +56,13 @@ def test_both_scan_pages_share_the_153_by_13_guide():
     root = Path(__file__).resolve().parents[1]
     css = (root / 'static/css/app.css').read_text(encoding='utf-8')
     assert 'aspect-ratio:153/13' in css
+    # The guide + hint now live in the shared scanner partial, and the constraint
+    # ladder in the shared module — both pages include/reference them.
+    partial = (root / 'templates/admin' / '_scan_camera.html').read_text(encoding='utf-8')
+    assert 'class="scan-barcode-guide"' in partial
+    assert '153 mm × 13 mm' in partial
     for name in ('scan_vehicle.html', 'scan_return.html'):
         template = (root / 'templates/admin' / name).read_text(encoding='utf-8')
-        assert 'class="scan-barcode-guide"' in template
-        assert '153 mm × 13 mm' in template
-        assert 'width: {ideal: 1920}' in template
+        assert 'admin/_scan_camera.html' in template
+    module = (root / 'static/js' / 'scan-camera.js').read_text(encoding='utf-8')
+    assert 'width: {ideal: 1920}' in module

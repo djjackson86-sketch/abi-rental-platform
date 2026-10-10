@@ -281,7 +281,7 @@ def test_the_module_grants_the_screen_and_the_nav_link(app, client):
     body = _body(response)
     assert response.status_code == 200
     assert 'name="disk_image"' in body and 'capture="environment"' in body
-    assert "getUserMedia" in body and "scan-camera-live" in body
+    assert "js/scan-camera.js" in body and "scan-camera-live" in body
     assert "Return" in body and "Manual entry" in body and 'name="plate"' in body
     assert 'name="disc_text"' not in body
 

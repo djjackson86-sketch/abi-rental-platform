@@ -24,143 +24,25 @@
       <button class="btn ghost scan-big" type="submit" name="action" value="manual" id="scan-manual">Add details manually</button>
     </div>
 
-    <div class="scan-camera-live" id="scan-camera-live" hidden>
-      <div class="scan-camera-frame">
-        <video id="scan-camera-video" playsinline webkit-playsinline muted autoplay></video>
-        <div class="scan-barcode-guide" aria-hidden="true"></div>
-      </div>
-      <p class="scan-camera-hint">Fit the full 153 mm × 13 mm barcode inside the thin guide. Hold the phone landscape for a larger view; keep the barcode sharp and free of glare.</p>
-      <div class="form-actions scan-camera-actions">
-        <button class="btn primary" type="button" id="scan-camera-capture">Capture</button>
-        <button class="btn ghost" type="button" id="scan-camera-cancel">Cancel</button>
-      </div>
-    </div>
-
-    <p class="form-help scan-camera-status" id="scan-camera-status" aria-live="polite"></p>
-    <button class="btn ghost scan-camera-fallback" type="button" id="scan-camera-fallback" hidden>Choose a photo instead</button>
+    {% set scan_camera_title = 'Scan the licence disk' %}
+    {% include "admin/_scan_camera.html" %}
   </form>
 </section>
 
+<script src="{{ url_for('static', filename='js/scan-camera.js') }}?v=scan-fs-1"></script>
 <script>
 (function () {
-  var form = document.querySelector('.scan-capture-form');
-  var fileInput = document.getElementById('scan-disk-image');
-  var start = document.getElementById('scan-camera-start');
+  if (!window.AbiScanCamera) { return; }
   var manual = document.getElementById('scan-manual');
-  var live = document.getElementById('scan-camera-live');
-  var video = document.getElementById('scan-camera-video');
-  var capture = document.getElementById('scan-camera-capture');
-  var cancel = document.getElementById('scan-camera-cancel');
-  var status = document.getElementById('scan-camera-status');
-  var fallback = document.getElementById('scan-camera-fallback');
-  var stream = null;
-  if (!form || !fileInput || !start || !live || !video || !capture || !cancel) { return; }
-
-  // iOS Safari only honours muted/playsinline on a srcObject-fed <video> as DOM
-  // properties; the content attributes alone are not enough. Set both.
-  video.muted = true;
-  video.playsInline = true;
-  video.setAttribute('playsinline', '');
-  video.setAttribute('webkit-playsinline', '');
-
-  function say(message) { if (status) { status.textContent = message || ''; } }
-  function stopCamera() {
-    if (stream) { stream.getTracks().forEach(function (track) { track.stop(); }); }
-    stream = null;
-    video.srcObject = null;
-    live.hidden = true;
-    start.hidden = false;
-    if (manual) { manual.hidden = false; }
-  }
-  function offerFallback(message) {
-    stopCamera();
-    say(message);
-    if (fallback) { fallback.hidden = false; }
-  }
-  // The file input is deliberately NOT display:none: iOS Safari refuses to open a
-  // file picker from .click() on a display:none input, which is exactly how staff
-  // reach the camera when getUserMedia is unavailable or blocked.
-  if (fallback) {
-    fallback.addEventListener('click', function () { fileInput.click(); });
-  }
-  fileInput.addEventListener('change', function () {
-    if (!fileInput.files || !fileInput.files.length) { return; }
-    say('Reading disk…');
-    stopCamera();
-    form.submit();
+  AbiScanCamera.init({
+    form: '.scan-capture-form',
+    fileInput: 'scan-disk-image',
+    start: 'scan-camera-start',
+    filename: 'vehicle-disk-scan.jpg',
+    readingMessage: 'Reading disk…',
+    onOpen: function () { if (manual) { manual.hidden = true; } },
+    onClose: function () { if (manual) { manual.hidden = false; } }
   });
-
-  // Some phones reject the ideal-constraint object outright (OverconstrainedError);
-  // step down to a plain rear-camera request, then to any camera, before giving up.
-  var cameraOptions = [
-    {video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false},
-    {video: {facingMode: 'environment'}, audio: false},
-    {video: true, audio: false}
-  ];
-  function requestCamera(index) {
-    return navigator.mediaDevices.getUserMedia(cameraOptions[index]).catch(function (err) {
-      var retryable = err && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError' || err.name === 'TypeError');
-      if (retryable && index + 1 < cameraOptions.length) { return requestCamera(index + 1); }
-      throw err;
-    });
-  }
-
-  start.addEventListener('click', function () {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      offerFallback('This browser cannot open the live camera — use the photo button below.');
-      return;
-    }
-    say('Opening camera…');
-    // Reveal the frame BEFORE the stream is attached: iOS Safari will not paint a
-    // MediaStream into a <video> that is still inside a display:none container.
-    live.hidden = false;
-    start.hidden = true;
-    if (manual) { manual.hidden = true; }
-    requestCamera(0).then(function (mediaStream) {
-      stream = mediaStream;
-      video.srcObject = mediaStream;
-      var playing = video.play();
-      if (playing && playing.catch) {
-        playing.catch(function () {
-          // A muted stream can still be refused on the first attempt; retry when the
-          // user taps the live view instead of reporting the camera as broken.
-          live.addEventListener('click', function retryPlay() {
-            live.removeEventListener('click', retryPlay);
-            var again = video.play();
-            if (again && again.catch) { again.catch(function () {}); }
-          });
-        });
-      }
-      say('Align the barcode in the guide, then tap Capture.');
-    }).catch(function (err) {
-      var denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
-      offerFallback(denied ? 'Camera permission was blocked — use the photo button below.' : 'Camera unavailable — use the photo button below.');
-    });
-  });
-
-  capture.addEventListener('click', function () {
-    if (!video.videoWidth || !video.videoHeight) { say('Camera is still starting.'); return; }
-    var canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(function (blob) {
-      if (!blob) { offerFallback('Could not use the camera capture.'); return; }
-      try {
-        var transfer = new DataTransfer();
-        transfer.items.add(new File([blob], 'vehicle-disk-scan.jpg', {type: 'image/jpeg'}));
-        fileInput.files = transfer.files;
-        say('Reading disk…');
-        stopCamera();
-        form.submit();
-      } catch (err) {
-        offerFallback('This browser cannot attach the capture.');
-      }
-    }, 'image/jpeg', 0.92);
-  });
-
-  cancel.addEventListener('click', function () { stopCamera(); say('Cancelled.'); });
-  window.addEventListener('pagehide', stopCamera);
 })();
 </script>
 

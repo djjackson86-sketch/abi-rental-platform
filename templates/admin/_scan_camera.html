@@ -1,0 +1,35 @@
+{# Shared full-screen licence-disk camera scanner.
+   Include this INSIDE the page's capture <form>, which supplies the file input
+   (visually hidden, never display:none) and then wires AbiScanCamera.init().
+
+   Why a fixed overlay and not the Fullscreen API: iOS Safari does not implement
+   requestFullscreen for a <div>, so position:fixed; inset:0 is what actually
+   fills the screen everywhere. The page cannot force a blocked camera permission,
+   so on refusal the blocked banner + photo fallback below are revealed instead. #}
+<div class="scan-camera-live" id="scan-camera-live" hidden role="dialog" aria-modal="true" aria-label="Licence-disk camera scanner">
+  <div class="scan-camera-top">
+    <span class="scan-camera-title">{{ scan_camera_title|default('Scan the licence disk') }}</span>
+    <button class="scan-camera-close" type="button" id="scan-camera-cancel" aria-label="Close the camera">✕</button>
+  </div>
+
+  <div class="scan-camera-stage">
+    <video id="scan-camera-video" playsinline webkit-playsinline muted autoplay></video>
+    <div class="scan-barcode-guide" aria-hidden="true"></div>
+    <p class="scan-camera-hint">Fit the full 153 mm × 13 mm barcode inside the thin guide. Hold the phone landscape for a larger view; keep the barcode sharp and free of glare.</p>
+    <button class="scan-camera-playstart" type="button" id="scan-camera-playstart" hidden>Start preview</button>
+  </div>
+
+  <div class="scan-camera-bottom">
+    <div class="scan-camera-actions">
+      <button class="btn primary scan-camera-shutter" type="button" id="scan-camera-capture">Capture</button>
+    </div>
+  </div>
+</div>
+
+{# Results live on the page, so they are visible once the scanner closes. #}
+<p class="form-help scan-camera-status" id="scan-camera-status" aria-live="polite"></p>
+<button class="btn ghost scan-camera-fallback" type="button" id="scan-camera-fallback" hidden>Choose a photo instead</button>
+<div class="scan-camera-blocked" id="scan-camera-blocked" role="alert" hidden>
+  <strong>Camera permission is blocked.</strong>
+  <p>A web page cannot switch the camera on for you — the block comes from the browser or your phone settings. Tap the lock or “aA” icon in the address bar, allow <b>Camera</b>, then reload. You can also attach a photo of the disk with the button below.</p>
+</div>

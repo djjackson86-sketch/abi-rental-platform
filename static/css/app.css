@@ -417,15 +417,33 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .scan-big{min-height:52px;font-size:15px}
 .scan-actions-simple .btn{width:auto}
 .scan-file-input{position:absolute;width:1px;height:1px;opacity:0}
-.scan-camera-live{display:grid;gap:10px;margin-top:12px}
-.scan-camera-frame{position:relative;overflow:hidden;border-radius:14px;background:#0f172a;aspect-ratio:16/9;border:1px solid #111827;box-shadow:var(--shadow-sm)}
-.scan-camera-frame video{width:100%;height:100%;object-fit:contain;display:block}
+/* Licence-disk scanner overlay (programme scan-camera work). A fixed, full-screen
+   overlay — NOT the Fullscreen API, which iOS Safari does not implement for a <div>.
+   Safe-area padding keeps the controls clear of the notch and the home bar in both
+   orientations; the video uses object-fit:contain so the FULL camera image is kept
+   and the 153/13 guide never crops the barcode ends. ---------------------------- */
+body.scan-fs-open{overflow:hidden}
+.scan-camera-live{position:fixed;inset:0;z-index:1200;display:grid;grid-template-rows:auto 1fr auto;background:#000;color:#fff;padding:calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 12px) calc(env(safe-area-inset-bottom) + 12px) calc(env(safe-area-inset-left) + 12px)}
+.scan-camera-top{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px}
+.scan-camera-title{font-weight:750;font-size:15px}
+.scan-camera-close{width:44px;height:44px;flex:0 0 auto;border-radius:50%;border:1px solid rgba(255,255,255,.35);background:rgba(15,23,42,.6);color:#fff;font-size:18px;line-height:1;cursor:pointer}
+.scan-camera-close:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.scan-camera-stage{position:relative;overflow:hidden;border-radius:14px;background:#0f172a;border:1px solid #111827;min-height:0}
+.scan-camera-stage video{width:100%;height:100%;object-fit:contain;display:block}
 .scan-barcode-guide{position:absolute;box-sizing:border-box;left:5%;width:90%;right:auto;top:50%;height:auto;aspect-ratio:153/13;transform:translateY(-50%);border:2px solid rgba(255,255,255,.95);border-radius:2px;box-shadow:0 0 0 999px rgba(15,23,42,.42);pointer-events:none}
-.scan-expiry-warning{display:block;padding:10px 12px;border:1px solid #dc2626;border-radius:8px;background:#fef2f2;color:#991b1b;font-weight:650;overflow-wrap:anywhere}
-.scan-camera-hint{margin:0;color:var(--ink-2);font-weight:650;font-size:13px}
-.scan-camera-actions{gap:8px}
+.scan-camera-hint{position:absolute;left:0;right:0;top:8px;margin:0;padding:0 12px;text-align:center;color:#f1f5f9;font-weight:650;font-size:12px;line-height:1.35;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+.scan-camera-playstart{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-height:52px;min-width:170px;padding:0 22px;border-radius:999px;border:0;background:var(--brand,#0ea5e9);color:#fff;font-weight:750;font-size:15px;cursor:pointer}
+.scan-camera-bottom{display:grid;gap:8px;justify-items:center;padding-top:12px}
+.scan-camera-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center}
+.scan-camera-actions .btn{width:auto}
+.scan-camera-shutter{min-height:52px;min-width:170px;font-size:16px}
 .scan-camera-status{margin:10px 0 0}
 .scan-camera-fallback{justify-self:start}
+.scan-camera-blocked{display:grid;gap:6px;margin:0 0 14px;padding:12px 14px;border:1px solid #fecaca;border-radius:var(--radius,12px);background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318);font-weight:650;overflow-wrap:anywhere}
+.scan-camera-blocked p{margin:0;font-weight:600;color:#7a271a}
+/* Short landscape phones: drop the guidance line and pull the controls to the
+   bottom bar so the guide keeps as much of the (short) screen as possible. ---- */
+@media (orientation:landscape) and (max-height:520px){.scan-camera-hint{display:none}.scan-camera-bottom{padding-top:8px}}
 .scan-capture-form textarea{min-height:88px}
 .scan-capture-actions{margin-bottom:10px}
 .portal-privacy-template,.portal-template-privacy{padding:14px;border:1px solid var(--line-soft);border-radius:14px;background:var(--surface-soft);margin:10px 0}
