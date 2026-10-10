@@ -101,9 +101,7 @@ _PHONE_DIGITS_MIN = 9
 _PHONE_DIGITS_MAX = 13
 
 INTAKE_CLOSED_MESSAGE = (
-    "Online registration for this branch is not open yet — our privacy notice is still being "
-    "finalised. Please give your details to the counter staff at this branch and they will load "
-    "you onto the system for you."
+    "Online registration is currently unavailable. Please contact the counter staff for assistance."
 )
 
 BLOCKED_MESSAGE = (

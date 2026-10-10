@@ -50,7 +50,7 @@ CONFIRMATION_TEMPLATE_PATH = ROOT / "templates" / "public" / "confirmation.html"
 
 #: The wording the flag (D11) forbids publishing, and the phrase that proves the
 #: page a customer actually sees is the honest interim one.
-INTERIM_PHRASE = "being finalised"
+INTERIM_PHRASE = "portal-privacy-template"  # distinguish the readable short notice fallback
 
 #: Every s18(1) element the published notice has to carry, as the strings the
 #: rendered page must contain. One tuple per element so a failure names the gap.

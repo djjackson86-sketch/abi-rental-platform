@@ -43,7 +43,7 @@
   <img class="sheet-qr" src="{{ url_for('public.branch_portal_qr', slug=branch.public_slug, box=qr_box) }}" alt="QR code that opens the {{ branch.name }} registration page" width="492" height="492">
   <p class="sheet-url">{{ portal_url }}</p>
   {% if not registration_open %}
-  <p class="sheet-note"><strong>Online registration is not open yet.</strong> The code works, but the form asks customers to give their details to the counter staff until our privacy notice is published.{% if outstanding_count %} {{ outstanding_count }} facts on the notice are still open.{% endif %}</p>
+  <p class="sheet-note">Online registration is currently unavailable. Please contact branch staff.</p>
   {% endif %}
   <p class="sheet-foot">Sano Trailers · Customer registration</p>
 </article>

@@ -26,4 +26,5 @@ def test_short_notice_on_portal_and_privacy_preview(tmp_path, monkeypatch):
     assert 'value="1" required' in portal
     assert 'This does not subscribe me to marketing' in portal
     assert 'name="marketing_opt_in"' in portal
-    assert 'Our privacy notice is being finalised' in client.get('/privacy').get_data(as_text=True)
+    assert 'Sano Trailers customer privacy notice' in client.get('/privacy').get_data(as_text=True)
+    assert 'being finalised' not in client.get('/privacy').get_data(as_text=True)

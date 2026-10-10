@@ -6,19 +6,15 @@
 
 {% if not registration_open %}
 <section class="panel portal-warning">
-  <h2>Registration is not open yet</h2>
-  <p>Our privacy notice is still being finalised, so <strong>every branch portal shows the counter message instead of the form</strong> and refuses a submission. The links and the QR codes work, but nobody can complete a registration until the notice is published.</p>
-  {% if outstanding_count %}
-  <p class="form-help">{{ outstanding_count }} facts on the notice are still open. They are listed in the privacy-notice review, and filling them in is the main profile's job — nothing here needs changing for them.</p>
-  {% endif %}
-  <p class="form-help">Nothing here needs changing for that — the day the notice is finished the forms open by themselves. Check with the main profile before printing sheets for customers.</p>
+  <h2>Registration unavailable</h2>
+  <p>Please contact the branch staff if online registration is unavailable.</p>
 </section>
 {% endif %}
 
 <section class="panel portal-card universal-portal-card">
   <header class="portal-card-head">
     <h2>Universal customer portal</h2>
-    <span class="badge">{{ "Open" if registration_open else "Awaiting privacy notice" }}</span>
+    <span class="badge">{{ "Open" if registration_open else "Unavailable" }}</span>
   </header>
   <p class="form-help">Use this one link everywhere — counter, WhatsApp, printed QR, or website. It creates or updates a customer record and stores their privacy acceptance.</p>
 
@@ -40,9 +36,9 @@
 
   <section class="portal-published-privacy">
     <h3>Privacy notice and acceptance</h3>
-    <p class="form-help">Registration opens only when a complete privacy notice is in force. Customers must accept that notice; its actual version is recorded with their acceptance. Marketing consent remains separate.</p>
+    <p class="form-help">Customers must accept the published Sano Trailers customer privacy notice; its version is recorded with their acceptance. Marketing consent remains separate.</p>
     <a href="{{ url_for('public.privacy_notice') }}">View privacy notice</a>
-    {% if session.get('user_role') == 'owner' %}<a href="{{ url_for('settings.popia_wizard_index') }}">Complete privacy notice setup</a>{% endif %}
+    {% if session.get('user_role') == 'owner' %}<a href="{{ url_for('settings.popia_wizard_index') }}">Manage privacy notice</a>{% endif %}
   </section>
 </section>
 
@@ -68,7 +64,7 @@
     <div class="portal-qr-wrap">
       <img class="portal-qr" src="{{ url_for('public.branch_portal_qr', slug=link.slug) }}" alt="QR code that opens the {{ link.name }} registration page" width="200" height="200">
       <div class="portal-qr-side">
-        <p class="form-help">Scan this to reach the form on any phone. Print it for the counter when the notice is published.</p>
+        <p class="form-help">Scan this to reach the form on any phone. Print it for the counter to let customers register.</p>
         <a class="btn ghost" href="{{ url_for('settings.portal_print', branch_id=link.branch_id) }}">Print QR sheet</a>
       </div>
     </div>

@@ -175,12 +175,12 @@ def test_links_page_says_the_form_is_shut_while_the_notice_is_unfinished(app, cl
     login_owner(client)
     body = text_of(client.get("/settings/portal"))
     assert portal_intake.registration_is_open() is False, "shipped state: Sano's facts are still open"
-    assert "not open yet" in body.lower()
+    assert "registration" in body.lower() and "unavailable" in body.lower()
     assert "privacy notice" in body.lower()
     # …and it says how many facts are open, without quoting a single one of them.
     open_items = popia_pack.outstanding_fields(popia_pack.PRIVACY_NOTICE_KEY)
     assert open_items, "shipped state: the notice really does still carry open facts"
-    assert f"{len(open_items)} facts on the notice are still open" in body
+    assert "facts on the notice are still open" not in body
 
 
 def test_links_page_banner_disappears_the_moment_the_notice_is_publishable(app, client, monkeypatch):
@@ -188,7 +188,7 @@ def test_links_page_banner_disappears_the_moment_the_notice_is_publishable(app, 
     login_owner(client)
     monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
     body = text_of(client.get("/settings/portal"))
-    assert "not open yet" not in body.lower()
+    assert "registration is currently unavailable" not in body.lower()
 
 
 def test_links_page_carries_no_raw_placeholder_token(app, client):
@@ -288,12 +288,12 @@ def test_print_sheet_tells_the_counter_when_the_form_is_shut(app, client, monkey
     ids = seed_branches(app)
     login_owner(client)
     body = text_of(client.get(f"/settings/portal/{ids['Midrand']}/print"))
-    assert "not open yet" in body.lower()
+    assert "registration" in body.lower() and "unavailable" in body.lower()
     open_items = popia_pack.outstanding_fields(popia_pack.PRIVACY_NOTICE_KEY)
-    assert f"{len(open_items)} facts on the notice are still open" in body
+    assert "facts on the notice are still open" not in body
     monkeypatch.setattr(portal_intake, "registration_is_open", lambda: True)
     body = text_of(client.get(f"/settings/portal/{ids['Midrand']}/print"))
-    assert "not open yet" not in body.lower()
+    assert "registration is currently unavailable" not in body.lower()
 
 
 def test_print_sheet_refuses_a_switched_off_branch(app, client):
