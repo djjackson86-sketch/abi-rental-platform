@@ -36,9 +36,20 @@ from app.services.access import (
 )
 from app.services.vehicles import get_main_vehicle_id
 
-#: The two states a registration can be in. Only 'pending' hides a client.
+#: The states a registration can be in. ``pending`` hides a client as an unverified
+#: self-registration; ``approved`` turns them into a normal client; ``deleted`` is the
+#: verification-phase **tombstone** — the sign-up is removed from the queue and the client
+#: lists, but the customer row (and any order/invoice/credit that references it) is kept, so
+#: no financial record is ever erased or orphaned. ``pending`` and ``deleted`` both hide.
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
+STATUS_DELETED = "deleted"
+
+#: The registration states that make a client behave as a non-approved, hidden one — a
+#: still-pending sign-up and its deleted (tombstoned) follow-on. Shared by the customer-list
+#: exclusion clause and by ``is_pending`` so a removed sign-up is never shown *and* never
+#: bookable.
+HIDDEN_STATUSES = (STATUS_PENDING, STATUS_DELETED)
 
 #: The refusal sentences the approve route shows. One per unmet check, so a staff member
 #: is told exactly what is missing instead of a generic "cannot approve".
@@ -120,13 +131,16 @@ def pending_exclusion_clause(alias="c"):
     """SQL fragment that excludes a client while they are a pending self-registration.
 
     Appended to customer list / count / selection queries so a self-registered client does
-    not behave as an approved one until staff approve them. A client with **no** pending
-    row (every existing, imported or already-approved client) is untouched.
+    not behave as an approved one until staff approve them, and a **deleted** (tombstoned)
+    sign-up stays hidden even after it is removed from the pending queue. A client with
+    **no** pending/deleted row (every existing, imported or already-approved client) is
+    untouched.
     """
+    hidden = ", ".join(f"'{status}'" for status in HIDDEN_STATUSES)
     return (
         f" AND COALESCE({alias}.source_system, '') <> 'portal_pending'"
         f" AND NOT EXISTS (SELECT 1 FROM portal_registrations pr "
-        f"WHERE pr.customer_id = {alias}.id AND pr.status = '{STATUS_PENDING}')"
+        f"WHERE pr.customer_id = {alias}.id AND pr.status IN ({hidden}))"
     )
 
 
@@ -241,12 +255,14 @@ def pending_registration_for_customer(customer_id):
 
 
 def is_pending(customer_id):
-    """True when the client has a **pending** portal registration (not yet approved).
+    """True when the client is a **pending or deleted** portal registration (not approved).
 
-    The order create/update path uses this to refuse booking a self-registered client
-    before staff approve them, so a pending submission never behaves as an approved
-    customer. A client with no pending row — every ordinary, imported or already-approved
-    client — is never pending, which keeps the rule additive and never backfilled.
+    The order create/update path uses this to refuse booking a self-registered client before
+    staff approve them, and (after the tombstone) to also refuse one whose sign-up was
+    removed — a deleted sign-up is *not* a real client, so no order may ever be raised
+    against it, even though its customer row is kept for the ledger. A client with no
+    pending/deleted row — every ordinary, imported or already-approved client — is never
+    pending, which keeps the rule additive and never backfilled.
     """
     resolved = _as_int(customer_id)
     if resolved is None:
@@ -254,8 +270,9 @@ def is_pending(customer_id):
     row = get_db().execute(
         "SELECT 1 FROM customers c WHERE c.id = ? AND "
         "(c.source_system = 'portal_pending' OR EXISTS "
-        "(SELECT 1 FROM portal_registrations r WHERE r.customer_id = c.id AND r.status = ?)) LIMIT 1",
-        (resolved, STATUS_PENDING),
+        "(SELECT 1 FROM portal_registrations r WHERE r.customer_id = c.id "
+        "AND r.status IN (?, ?))) LIMIT 1",
+        (resolved, STATUS_PENDING, STATUS_DELETED),
     ).fetchone()
     return row is not None
 
@@ -369,3 +386,61 @@ def approve_registration(registration_id):
     )
     db.commit()
     return registration_by_id(registration["id"])
+
+
+# --- the "cannot proceed" removal (tombstone) ---------------------------------------------------
+
+#: Refusal sentences the delete route can show, kept here so both the route and the service
+#: speak with one voice about what may and may not be removed.
+ONLY_PENDING_DELETABLE_MESSAGE = (
+    "Only a pending registration can be removed. This client has already been approved — "
+    "use the client's own Delete only if it truly has no history."
+)
+OUT_OF_SCOPE_DELETE_MESSAGE = "That portal registration is outside the branches you can access."
+
+
+def delete_pending_registration(registration_id):
+    """Remove a still-pending registration from the verification queue — **tombstone, never erase**.
+
+    The counter's "we cannot proceed with this client" action. Corrected rule: the removal
+    **always succeeds for a pending sign-up** — there is no financial/order-history
+    eligibility gate, and the delete never erases an order, invoice, payment, credit or any
+    other financial row. Instead the registration is marked ``status = 'deleted'``: the
+    sign-up leaves the pending queue and the client leaves the default customer list, the
+    counts and the order/allocation pickers, but the customer row and every row that
+    references it stay behind, so no ledger link is ever broken or orphaned. A client
+    tombstoned this way is still refused by ``is_pending`` (``HIDDEN_STATUSES``), so a removed
+    sign-up can never be booked either.
+
+    Deliberately narrow, in the same spirit as ``approve_registration``:
+
+    * **Pending only.** A registration that is already ``approved`` is refused — an approved
+      client is a real customer with a real ledger and is never touched through this path. An
+      already-tombstoned (``deleted``) registration is idempotent: it returns ``False``.
+    * **Branch-scoped.** A registration outside the session's branch scope is refused even
+      if a caller reaches this service directly.
+    * **The registration id is the one the route already resolved**, never a form field, so a
+      crafted payload cannot redirect the action at another client.
+
+    Returns ``True`` when the registration was tombstoned, ``False`` when it was already
+    removed. Nothing external (no notification, no refund, no financial write) is ever sent.
+    """
+    registration = registration_by_id(registration_id)
+    if registration is None:
+        raise ValueError("That portal registration is no longer on file.")
+    status = _row_value(registration, "status", "")
+    if status == STATUS_DELETED:
+        # Already tombstoned — nothing left to remove, and no second tombstone is written.
+        return False
+    if status != STATUS_PENDING:
+        raise ValueError(ONLY_PENDING_DELETABLE_MESSAGE)
+    if not branch_in_session_scope(registration):
+        raise ValueError(OUT_OF_SCOPE_DELETE_MESSAGE)
+
+    db = get_db()
+    cur = db.execute(
+        "UPDATE portal_registrations SET status = ? WHERE id = ? AND status = ?",
+        (STATUS_DELETED, registration["id"], STATUS_PENDING),
+    )
+    db.commit()
+    return cur.rowcount > 0

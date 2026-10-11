@@ -300,8 +300,10 @@ def test_the_reference_is_shown_to_the_customer(client, branch, app):
 
 # --- dedupe: "is this you?" (D6) ----------------------------------------------------------------
 
-def test_a_phone_match_does_not_create_a_second_row_and_asks_the_customer(client, branch, app):
-    existing = make_customer(app, name="Charmaine Mokoena", phone="082 123 4567")
+def test_an_exact_phone_match_is_refused_with_the_duplicate_warning(client, branch, app):
+    """Client portal changes: an exact normalised phone match is refused outright — no second
+    customer, no "Is this you?" screen, and never the matched client's name on the page."""
+    make_customer(app, name="Charmaine Mokoena", phone="082 123 4567")
     slug = slug_of(app, branch)
     response = client.post(
         f"/portal/{slug}/register",
@@ -309,13 +311,15 @@ def test_a_phone_match_does_not_create_a_second_row_and_asks_the_customer(client
     )
     body = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "Is this you" in body
-    assert "Charmaine M." in body, "the candidate is shown masked"
-    assert len(rows(app)) == 1, "nothing is created until the customer decides"
-    assert f"link:{existing}" in body
+    assert portal_intake.DUPLICATE_MESSAGE in body
+    assert "Is this you" not in body
+    assert "Charmaine" not in body, "the duplicate warning must not expose the matched PII"
+    assert len(rows(app)) == 1, "an exact contact match never creates a second customer"
 
 
-def test_this_is_me_links_the_submission_and_only_fills_blank_fields(client, branch, app):
+def test_the_staff_service_still_links_and_only_fills_blank_fields(app, branch):
+    """The public route refuses an exact match, but the create/link behaviour is preserved on the
+    service's default (staff) path — the optional portal_duplicate_refuse switch is what changes it."""
     existing = make_customer(
         app,
         name="Charmaine Mokoena",
@@ -323,20 +327,20 @@ def test_this_is_me_links_the_submission_and_only_fills_blank_fields(client, bra
         email="charmaine@example.co.za",
         address_line1="9 Old Road",
     )
-    slug = slug_of(app, branch)
-    response = client.post(
-        f"/portal/{slug}/register",
-        data=submission(
-            name="Charmaine Mokoena",
-            phone="082 123 4567",
-            email="CHARMAINE@example.co.za",
-            address_line1="12 New Street",
-            city="Johannesburg",
-            decision=f"link:{existing}",
-        ),
-    )
-    assert response.status_code == 200
-    assert "Thank you" in response.get_data(as_text=True)
+    with app.app_context():
+        result = portal_intake.create_or_link_customer(
+            submission(
+                name="Charmaine Mokoena",
+                phone="082 123 4567",
+                email="CHARMAINE@example.co.za",
+                address_line1="12 New Street",
+                city="Johannesburg",
+            ),
+            branch,
+            f"link:{existing}",
+            slug="midrand",
+        )
+    assert result["linked"] and not result["created"]
     assert len(rows(app)) == 1
     row = rows(app)[0]
     assert row["address_line1"] == "9 Old Road", "a populated field is never overwritten"
@@ -344,14 +348,29 @@ def test_this_is_me_links_the_submission_and_only_fills_blank_fields(client, bra
     assert row["email"] == "charmaine@example.co.za"
 
 
-def test_none_of_these_creates_a_second_row_on_purpose(client, branch, app):
+def test_none_of_these_is_refused_for_an_exact_match_on_the_public_route(client, branch, app):
+    """A crafted "create" for an exact contact match no longer slips a second row through."""
     make_customer(app, name="Charmaine Mokoena", phone="0821234567")
     slug = slug_of(app, branch)
     response = client.post(
         f"/portal/{slug}/register",
         data=submission(name="Charmaine Mokoena", phone="082 123 4567", decision="create"),
     )
-    assert "Thank you" in response.get_data(as_text=True)
+    assert portal_intake.DUPLICATE_MESSAGE in response.get_data(as_text=True)
+    assert len(rows(app)) == 1
+
+
+def test_the_staff_service_still_creates_a_second_row_on_demand(app, branch):
+    """The "none of these is me" create is preserved on the service default (staff callers)."""
+    make_customer(app, name="Charmaine Mokoena", phone="0821234567")
+    with app.app_context():
+        result = portal_intake.create_or_link_customer(
+            submission(name="Charmaine Mokoena", phone="082 123 4567", decision="create"),
+            branch,
+            "create",
+            slug="midrand",
+        )
+    assert result["created"]
     assert [row["name"] for row in rows(app)] == ["Charmaine Mokoena", "Charmaine Mokoena"]
 
 
@@ -443,16 +462,19 @@ def test_an_accepted_submission_records_the_consent_on_the_portal_channel(client
     assert stored[0]["notice_version"] == consent.PRIVACY_NOTICE_VERSION
 
 
-def test_linking_also_records_the_consent(client, branch, app):
+def test_a_refused_duplicate_records_no_consent(client, branch, app):
+    """A link decision for an exact match is refused, so nothing — including the acceptance — is
+    written for it."""
     make_customer(app, name="Charmaine Mokoena", phone="0821234567")
     slug = slug_of(app, branch)
-    client.post(
+    response = client.post(
         f"/portal/{slug}/register",
         data=submission(name="Charmaine Mokoena", phone="0821234567", decision="link:1"),
     )
+    assert portal_intake.DUPLICATE_MESSAGE in response.get_data(as_text=True)
     with app.app_context():
         stored = get_db().execute("SELECT * FROM consent_records").fetchall()
-    assert [row["customer_id"] for row in stored] == [1]
+    assert stored == [], "a refused submission records nothing"
 
 
 # --- honeypot + rate limit (D7) -----------------------------------------------------------------

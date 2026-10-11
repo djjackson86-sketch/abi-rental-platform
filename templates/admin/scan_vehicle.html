@@ -15,8 +15,11 @@
 </header>
 
 <section class="panel scan-capture-panel">
-  <form method="post" class="scan-capture-form">
+  <form method="post" class="scan-capture-form"{% if start_scan %} data-scan-autostart="1"{% endif %}>
     <input type="hidden" name="customer_id" value="{{ preselected_customer.id if preselected_customer else '' }}">
+    <input type="hidden" name="vehicle_role" value="{{ vehicle_role or '' }}">
+    {# The verification checklist's "scan and come back" intent must survive the decode POST. #}
+    {% if return_to_verification %}<input type="hidden" name="return_to_verification" value="1">{% endif %}
 
     <div class="scan-actions-simple">
       <button class="btn primary scan-big" type="button" id="scan-camera-start">Scan licence disk</button>
@@ -33,7 +36,7 @@
 (function () {
   if (!window.AbiScanCamera) { return; }
   var manual = document.getElementById('scan-manual');
-  AbiScanCamera.init({
+  var scanner = AbiScanCamera.init({
     form: '.scan-capture-form',
     start: 'scan-camera-start',
     manual: 'scan-manual',
@@ -41,6 +44,17 @@
     onOpen: function () { if (manual) { manual.hidden = true; } },
     onClose: function () { if (manual) { manual.hidden = false; } }
   });
+
+  // Arriving from the verification checklist: open the camera straight away, so its "Scan main
+  // vehicle disk" button is itself the scanner rather than one more tap on this landing screen
+  // (opt-in via start_scan=1; a plain visit is unchanged). The server cannot grant camera
+  // permission — the module's own routine already surfaces the blocked/permission fallback, and
+  // the "Scan licence disk" and manual buttons stay on the page either way, so a refused camera
+  // degrades to a visible retry or manual entry, never a dead screen.
+  var capture = document.querySelector('.scan-capture-form');
+  if (scanner && capture && capture.getAttribute('data-scan-autostart') === '1') {
+    scanner.open();
+  }
 })();
 </script>
 
@@ -61,6 +75,9 @@
 
   <form method="post" action="{{ url_for('vehicles.save_scan_vehicle') }}" class="form-grid scan-review-form">
     <input type="hidden" name="source" value="{{ values.source or 'scan' }}">
+    <input type="hidden" name="vehicle_role" value="{{ vehicle_role or '' }}">
+    {# Return to the verification checklist after saving, when the panel sent us here. #}
+    {% if return_to_verification %}<input type="hidden" name="return_to_verification" value="1">{% endif %}
 
     {% set scan_fields = [
       ('registration', 'Number plate', 'text'),

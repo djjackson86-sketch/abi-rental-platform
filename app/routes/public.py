@@ -435,6 +435,11 @@ def _render_portal_form(branch, status=200, intake_closed=None, **extra):
                 not portal_intake.registration_is_open() if intake_closed is None else intake_closed
             ),
             universal=extra.pop("universal", False),
+            # One unguessable key per rendered form: the browser posts it and the server claims it
+            # before writing, so a double submit cannot create a second customer. The template
+            # prefers a key already in ``form_values`` (a re-render of a posted form), so a retry
+            # keeps the same key and replays rather than duplicating.
+            request_key=portal_intake.new_request_key(),
             **extra,
         ),
     )
@@ -498,23 +503,17 @@ def customer_portal_register():
             branch, status=400, error=consent.consent_required_error(), form_values=posted, universal=True
         )
     # D7 (release security audit): the shared lookup budget is charged *before* any dedupe
-    # query, so the client-book search behind registration — the candidate list **and** the
-    # decision flow that re-runs the match inside create_or_link_customer — is throttled
-    # exactly like the standalone lookup. Over the limit the answer is 429 and nothing is
-    # read or written.
+    # query, so the client-book search behind registration — the duplicate check inside
+    # create_or_link_customer — is throttled exactly like the standalone lookup. Over the limit
+    # the answer is 429 and nothing is read or written.
     if not portal_intake.allow_lookup(request.remote_addr):
         return _render_portal_form(
             branch, status=429, intake_closed=False, rate_limited=True,
             form_values=posted, universal=True,
         )
-    # D6: a possible duplicate is a question for the customer, never a silent merge.
-    if not str(form.get("decision") or "").strip():
-        candidates = portal_intake.find_possible_matches(values["name"], values["phone"], values["email"])
-        if candidates:
-            return render_template(
-                "public/portal_exists.html",
-                **_portal_context(branch, candidates=candidates, form_values=posted, universal=True),
-            )
+    # D6 (client portal changes): the route no longer asks "Is this you?". An exact phone/email
+    # match is refused **inside** the service, after the claim, with the duplicate warning page, so
+    # a submission can never create a second customer for a contact already on file.
     # Re-check the gate immediately before the write: the notice could have been
     # withdrawn between the GET and a slow POST, and the public write path stays shut.
     if not portal_intake.registration_is_open():
@@ -525,12 +524,25 @@ def customer_portal_register():
             branch["id"],
             form.get("decision"),
             slug=portal.UNIVERSAL_PORTAL_SOURCE_SLUG,
+            portal_duplicate_refuse=True,
         )
+    except portal_intake.DuplicateRegistration as exc:
+        # Already on file: the warning page shows the sentence and nothing else — never the
+        # matched client's name or any other detail (the matched PII stays private).
+        return render_template(
+            "public/portal_duplicate.html",
+            **_portal_context(branch, message=str(exc), universal=True),
+        )
+    except portal_intake.SubmissionInFlight as exc:
+        # A concurrent request is writing this exact submission: refuse clearly and write nothing.
+        return _render_portal_form(branch, status=409, error=str(exc), form_values=posted, universal=True)
     except ValueError as exc:
         return _render_portal_form(branch, status=400, error=str(exc), form_values=posted, universal=True)
     # The acceptance is recorded against the notice genuinely in force — never a hard-coded
-    # version — in the same request that wrote the customer (decision D10).
-    consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"))
+    # version — in the same request that wrote the customer (decision D10). A replay already
+    # recorded it in the request that wrote the customer, so it is not recorded a second time.
+    if not result.get("replayed"):
+        consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"))
     return render_template(
         "public/portal_confirm.html",
         **_portal_context(
@@ -555,8 +567,9 @@ def branch_portal_register(slug):
     3. a filled honeypot is swallowed: a bot gets a page that looks like success and no record;
     4. the submission is validated, then the consent is required *server-side* — an unticked box
        (or a crafted ``popia_consent=0``) is refused and nothing is written (decision D10);
-    5. only then does dedupe run. A possible match is **presented to the customer, not resolved
-       for them** (decision D6): nothing is created, and the screen asks "Is this you?";
+    5. only then does dedupe run, **inside** the service and after the claim: an exact phone/email
+       match is refused with the duplicate warning page — never a second customer, and never an
+       "Is this you?" screen (client portal changes);
     6. the acceptance is recorded in the same request that writes the customer, on the portal
        channel, against the notice version.
     """
@@ -593,32 +606,39 @@ def branch_portal_register(slug):
         )
 
     # D7 (release security audit): the shared lookup budget is charged *before* any dedupe
-    # query, so the client-book search behind registration — the candidate list **and** the
-    # decision flow — is throttled exactly like the standalone lookup. Over the limit → 429.
+    # query, so the client-book search behind registration — the duplicate check inside
+    # create_or_link_customer — is throttled exactly like the standalone lookup. Over the limit 429.
     if not portal_intake.allow_lookup(request.remote_addr):
         return _render_portal_form(
             branch, status=429, intake_closed=False, rate_limited=True, form_values=posted
         )
 
-    if not str(form.get("decision") or "").strip():
-        candidates = portal_intake.find_possible_matches(values["name"], values["phone"], values["email"])
-        if candidates:
-            return render_template(
-                "public/portal_exists.html",
-                **_portal_context(branch, candidates=candidates, form_values=posted),
-            )
+    # D6 (client portal changes): no "Is this you?" screen. An exact phone/email match is refused
+    # inside the service, after the claim, with the duplicate warning page — never a second client.
 
     if not portal_intake.registration_is_open():
         return _render_portal_form(branch, intake_closed=True)
 
     try:
         result = portal_intake.create_or_link_customer(
-            form, branch["id"], form.get("decision"), slug=branch["public_slug"]
+            form, branch["id"], form.get("decision"), slug=branch["public_slug"],
+            portal_duplicate_refuse=True,
         )
+    except portal_intake.DuplicateRegistration as exc:
+        # Already on file: the sentence only — never the matched client's name or any other detail.
+        return render_template(
+            "public/portal_duplicate.html",
+            **_portal_context(branch, message=str(exc)),
+        )
+    except portal_intake.SubmissionInFlight as exc:
+        # A concurrent request is writing this exact submission: refuse clearly and write nothing.
+        return _render_portal_form(branch, status=409, error=str(exc), form_values=posted)
     except ValueError as exc:
         return _render_portal_form(branch, status=400, error=str(exc), form_values=posted)
 
-    consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"))
+    # A replay already recorded the acceptance in the request that wrote the customer.
+    if not result.get("replayed"):
+        consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"))
 
     return render_template(
         "public/portal_confirm.html",

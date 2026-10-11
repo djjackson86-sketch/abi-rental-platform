@@ -539,3 +539,216 @@ def test_pending_queue_and_approval_with_real_libsql_rows(tmp_path, monkeypatch)
         assert portal_registrations.id_verified(get_customer(queue[0]["customer_id"])) is True
         updated = portal_registrations.approve_registration(queue[0]["id"])
         assert updated["status"] == "approved"
+
+
+# ---------------------------------------------------------------- "cannot proceed": remove pending client
+#
+# The owner's follow-up change: when the branch cannot proceed with a self-registered client
+# at verification, a red **Delete pending client** action removes the pending sign-up. It is
+# narrow on purpose — pending only (approving first takes it out of reach), scoped CSRF, the
+# client's branch scope. The corrected rule: the action **always** proceeds for a pending
+# sign-up — there is NO financial/order-history eligibility gate and it NEVER erases an order,
+# invoice, payment or credit. The removal is a **tombstone** (``status = 'deleted'``): the
+# sign-up leaves the queue and the client leaves the default list/counts/pickers, while the
+# customer row and every referencing row are kept so no ledger link is broken, and no
+# notification is ever sent.
+
+DELETE_SCOPE = "portal_pending_delete"
+
+
+def _delete_token(client, app, customer_id):
+    """Load the client's page (which mints the scoped tokens) and return the delete token."""
+    client.get(f"/customers/{customer_id}/edit")
+    return csrf_token(client, DELETE_SCOPE)
+
+
+def test_delete_pending_client_tombstones_the_registration_and_keeps_every_client_row(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    customer_id = stored["id"]
+    with app.app_context():
+        db = get_db()
+        # A client at verification can already carry the things the review captured: a
+        # scanned main vehicle, a POPIA consent event, a credit and an imported balance.
+        db.execute(
+            "INSERT INTO vehicles (customer_id, registration, created_at, updated_at) VALUES (?, 'DEL001GP', '', '')",
+            (customer_id,),
+        )
+        db.execute("INSERT INTO consent_records (customer_id, accepted_at) VALUES (?, '2026-01-01T00:00:00')", (customer_id,))
+        db.execute("INSERT INTO customer_credits (customer_id, amount, created_at) VALUES (?, 100.0, '2026-01-01T00:00:00')", (customer_id,))
+        db.execute(
+            "INSERT INTO legacy_customer_balances (customer_id, source_order_number, created_at, updated_at) VALUES (?, 'LEG-1', '', '')",
+            (customer_id,),
+        )
+        db.execute("INSERT INTO legacy_balance_payments (customer_id, amount, created_at) VALUES (?, 50.0, '')", (customer_id,))
+        db.commit()
+
+    sign_in(client, app, role="owner")
+    token = _delete_token(client, app, customer_id)
+    assert token
+    response = client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token})
+    assert response.status_code == 302
+
+    with app.app_context():
+        # The sign-up leaves the queue, and the tombstone hides the client from the lists ...
+        assert registration_for(app, customer_id)["status"] == "deleted"
+        assert portal_registrations.list_pending_registrations() == []
+        assert list_customers() == []
+        assert portal_registrations.pending_registration_for_customer(customer_id) is None
+        # ... but the client row and EVERY row that references it are kept (nothing erased).
+        assert get_customer(customer_id) is not None, "the client row is preserved for the ledger"
+        for table in (
+            "portal_registrations",
+            "vehicles",
+            "consent_records",
+            "customer_credits",
+            "legacy_customer_balances",
+            "legacy_balance_payments",
+        ):
+            kept = get_db().execute(f"SELECT COUNT(*) AS c FROM {table} WHERE customer_id = ?", (customer_id,)).fetchone()["c"]
+            assert kept > 0, f"the tombstone must not erase {table}"
+        orphans = get_db().execute(
+            "SELECT COUNT(*) AS c FROM vehicles WHERE customer_id NOT IN (SELECT id FROM customers)"
+        ).fetchone()["c"]
+        assert orphans == 0
+
+
+def test_delete_pending_client_refuses_without_the_scoped_csrf_token(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    sign_in(client, app, role="owner")
+    assert client.post(f"/customers/portal/{registration['id']}/delete").status_code == 400
+    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": "nope"}).status_code == 400
+    with app.app_context():
+        assert get_customer(stored["id"]) is not None
+        assert registration_for(app, stored["id"])["status"] == "pending"
+
+
+def test_the_approve_token_cannot_be_reused_to_delete(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    sign_in(client, app, role="owner")
+    client.get(f"/customers/{stored['id']}/edit")
+    approve_token = csrf_token(client, "portal_approval")
+    assert approve_token
+    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": approve_token}).status_code == 400
+    with app.app_context():
+        assert get_customer(stored["id"]) is not None, "a wrong-scope token deletes nothing"
+
+
+def test_delete_pending_client_is_post_only(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    sign_in(client, app, role="owner")
+    assert client.get(f"/customers/portal/{registration['id']}/delete").status_code == 405
+
+
+def test_delete_pending_client_is_refused_for_another_branch(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    # A staff account scoped to Roodepoort cannot delete a Midrand sign-up.
+    sign_in(client, app, role="staff", branch_id=branches["roodepoort"], modules=["customers"], can_view_all=False)
+    token = _delete_token(client, app, stored["id"])
+    assert token
+    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}).status_code == 403
+    with app.app_context():
+        assert get_customer(stored["id"]) is not None
+        assert registration_for(app, stored["id"])["status"] == "pending"
+
+
+def test_delete_pending_client_needs_the_customers_module(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    sign_in(client, app, role="staff", branch_id=branches["midrand"], modules=["orders"], can_view_all=False)
+    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": "x"}).status_code == 403
+
+
+def test_delete_pending_client_404s_for_an_unknown_registration(client, app, branches):
+    sign_in(client, app, role="owner")
+    with client.session_transaction() as session:
+        session["_csrf_tokens"] = {DELETE_SCOPE: "tok"}
+    assert client.post("/customers/portal/9999/delete", data={"csrf_token": "tok"}).status_code == 404
+
+
+def test_an_approved_client_is_never_deleted_by_the_pending_action(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    sign_in(client, app, role="owner")
+    _set_id_verified(client, app, stored["id"])
+    _capture_main_vehicle(client, stored["id"])
+    with app.app_context():
+        portal_registrations.approve_registration(registration["id"])
+    token = _delete_token(client, app, stored["id"])
+    response = client.post(
+        f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}, follow_redirects=True
+    )
+    assert response.status_code == 200
+    assert b"already been approved" in response.data
+    with app.app_context():
+        assert get_customer(stored["id"]) is not None, "an approved client is a real customer and is kept"
+        assert portal_registrations.registration_by_id(registration["id"])["status"] == "approved"
+
+
+def test_a_pending_client_with_order_history_is_removed_and_the_history_is_kept(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    with app.app_context():
+        db = get_db()
+        db.execute("INSERT INTO orders (order_number, customer_id, created_at) VALUES ('DEL-ORD-1', ?, '')", (stored["id"],))
+        order_id = db.execute("SELECT id FROM orders WHERE order_number = 'DEL-ORD-1'").fetchone()["id"]
+        db.execute("INSERT INTO order_items (order_id, custom_name, quantity) VALUES (?, 'Trailer hire', 1)", (order_id,))
+        db.execute("INSERT INTO payments (order_id, amount, created_at) VALUES (?, 500.0, '')", (order_id,))
+        db.commit()
+    sign_in(client, app, role="owner")
+    token = _delete_token(client, app, stored["id"])
+    response = client.post(
+        f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}, follow_redirects=True
+    )
+    assert response.status_code == 200
+    # No eligibility gate: a pending client with history is still removed from the queue.
+    assert b"removed from the verification queue" in response.data
+    with app.app_context():
+        assert registration_for(app, stored["id"])["status"] == "deleted"
+        assert portal_registrations.list_pending_registrations() == []
+        # ... and the order history is never erased (no cascade, no financial write).
+        order = get_db().execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+        assert order is not None and order["customer_id"] == stored["id"], "the order and its link are kept"
+        assert get_db().execute("SELECT COUNT(*) AS c FROM order_items WHERE order_id = ?", (order_id,)).fetchone()["c"] == 1
+        assert get_db().execute("SELECT COUNT(*) AS c FROM payments WHERE order_id = ?", (order_id,)).fetchone()["c"] == 1
+        assert get_customer(stored["id"]) is not None, "the client row is preserved for the ledger"
+
+
+def test_a_crafted_customer_id_cannot_choose_a_different_client(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    with app.app_context():
+        other = create_customer({"name": "Real Walk-in", "phone": "0837778888"})
+    sign_in(client, app, role="owner")
+    token = _delete_token(client, app, stored["id"])
+    response = client.post(
+        f"/customers/portal/{registration['id']}/delete",
+        data={"csrf_token": token, "customer_id": str(other)},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        assert get_customer(other) is not None, "a posted customer_id must never pick the victim"
+        assert registration_for(app, other) is None, "the walk-in has no registration to touch"
+        # The registration's own sign-up is the one tombstoned.
+        assert registration_for(app, stored["id"])["status"] == "deleted"
+
+
+def test_deleting_a_pending_client_sends_no_notification(client, app, branches, monkeypatch):
+    from app.services import telegram
+
+    stored, registration = _pending(client, app, branches)
+    sent = []
+    monkeypatch.setattr(telegram, "_send_message", lambda text: sent.append(text))
+    sign_in(client, app, role="owner")
+    token = _delete_token(client, app, stored["id"])
+    client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token})
+    assert sent == [], "the delete is silent — no message is ever sent"
+
+
+def test_the_panel_renders_the_red_delete_form_with_its_own_token(client, app, branches):
+    stored, registration = _pending(client, app, branches)
+    sign_in(client, app, role="owner")
+    body = client.get(f"/customers/{stored['id']}/edit").get_data(as_text=True)
+    assert f"/customers/portal/{registration['id']}/delete" in body
+    assert "btn danger" in body
+    assert "cannot be undone" in body
+    approve_token = csrf_token(client, "portal_approval")
+    delete_token = csrf_token(client, DELETE_SCOPE)
+    assert approve_token and delete_token
+    assert approve_token != delete_token, "the delete has its own scoped token"
+    assert approve_token in body and delete_token in body

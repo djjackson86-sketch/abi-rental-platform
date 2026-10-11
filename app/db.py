@@ -594,6 +594,33 @@ CREATE TABLE IF NOT EXISTS portal_registrations (
 CREATE INDEX IF NOT EXISTS idx_portal_registrations_customer ON portal_registrations(customer_id);
 
 CREATE INDEX IF NOT EXISTS idx_portal_registrations_branch ON portal_registrations(branch_id);
+
+-- One row per public-portal submission that is being written (client portal changes).
+-- A double submit of the registration form must not create two customers: the browser
+-- sends an unguessable ``request_key`` and the first request to claim it wins. The
+-- UNIQUE index on ``(scope, request_key)`` is the database-level guarantee, so the
+-- guard holds even though the libSQL adapter autocommits and its commit()/rollback()
+-- are deliberate no-ops (app/turso_db.py): the claim is a single INSERT the moment it
+-- is issued, never a transaction that another request cannot see. ``scope`` is the
+-- portal slug the submission arrived at, so the same key at two branches is two
+-- claims. ``status`` is 'in_flight' until the customer is written ('done'); a replay
+-- of a 'done' key returns the same success, an 'in_flight' key is refused.
+CREATE TABLE IF NOT EXISTS portal_submission_claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL DEFAULT '',
+    request_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'in_flight',
+    customer_id INTEGER,
+    reference TEXT NOT NULL DEFAULT '',
+    linked INTEGER NOT NULL DEFAULT 0,
+    created INTEGER NOT NULL DEFAULT 0,
+    registration_id INTEGER,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_submission_claims_key
+    ON portal_submission_claims(scope, request_key);
 """
 
 
@@ -1240,6 +1267,30 @@ def run_migrations(db):
     db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_registrations_pending "
         "ON portal_registrations(customer_id) WHERE status = 'pending'"
+    )
+
+    # --- Double-submit guard for the public portal (client portal changes) ---
+    # See the SCHEMA block: one claim row per submission, keyed by an unguessable
+    # request_key scoped to the portal slug. Additive and empty on an existing
+    # database, so nothing changes for anyone until a portal form is submitted.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS portal_submission_claims (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope TEXT NOT NULL DEFAULT '',
+            request_key TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'in_flight',
+            customer_id INTEGER,
+            reference TEXT NOT NULL DEFAULT '',
+            linked INTEGER NOT NULL DEFAULT 0,
+            created INTEGER NOT NULL DEFAULT 0,
+            registration_id INTEGER,
+            created_at TEXT NOT NULL,
+            completed_at TEXT
+        )"""
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_submission_claims_key "
+        "ON portal_submission_claims(scope, request_key)"
     )
 
 

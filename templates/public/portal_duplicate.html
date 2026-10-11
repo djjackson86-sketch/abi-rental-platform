@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Client is already registered | {{ settings.company_name }}{% endblock %}
+{# The duplicate warning page (client portal changes).
+
+   A submission arrived whose phone or email exactly matches a client already on file. Nothing was
+   written — no second customer, and no "Is this you?" decision — and the customer is asked to
+   proceed to the front desk. The matched client's name and any other detail are deliberately NOT
+   shown: this page carries only the sentence, so it can never leak who the match was.
+
+   No form and no consent widget here: there is nothing left to submit. The shared consent block
+   belongs to the registration form only. #}
+{% block body %}
+<header class="store-header">
+  <a class="store-logo" href="{{ url_for('public.store') }}">{{ settings.company_name }}</a>
+</header>
+<main class="store-main">
+  <article class="panel portal-panel">
+    <p class="eyebrow">Customer registration</p>
+    <h1>Client is already registered</h1>
+    <p>{{ message }}</p>
+    <div class="portal-actions">
+      <p>You do not need to register again — the front desk can find your record from any branch.</p>
+      {% if branch.phone %}<p>Phone: <a href="tel:{{ branch.phone }}">{{ branch.phone }}</a></p>{% endif %}
+      <p>Keep this page: <a href="{{ portal_url }}">{{ portal_url }}</a></p>
+    </div>
+  </article>
+</main>
+<footer class="store-footer">
+  © 2026, {{ settings.company_name }}
+  <span><a href="{{ url_for('public.privacy_notice') }}">View our privacy notice</a></span>
+</footer>
+{% endblock %}

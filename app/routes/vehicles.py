@@ -94,6 +94,26 @@ def _to_int(value):
         return None
 
 
+def _truthy(value):
+    """A query-string / hidden-field opt-in flag: ``1``/``on``/``yes``/``true`` (case-blind)."""
+    return str(value or "").strip().lower() in {"1", "on", "yes", "true"}
+
+
+def _customer_edit_redirect(customer_id, return_to_verification):
+    """Land back on the customer edit screen, at the verification checklist when asked.
+
+    The scanner is opened from the self-registration verification panel (which lives on
+    ``customers.edit`` behind the ``#pending-registration`` anchor). When that panel sent staff
+    here with ``return_to_verification=1`` they came to record the main vehicle and expect to be
+    returned to the checklist they left — not dropped at the top of the page. Without the opt-in
+    the redirect is exactly the historical one, so the ordinary scanner is unchanged.
+    """
+    url = url_for("customers.edit", customer_id=customer_id)
+    if return_to_verification:
+        url += "#pending-registration"
+    return redirect(url)
+
+
 def _blank_values():
     """An empty review form: every text field blank, both masses blank (never 0 — D3)."""
     values = {field: "" for field in vehicles.TEXT_FIELDS}
@@ -130,7 +150,7 @@ def _review(values, customer_id=None, *, raw_text="", unparsed=None, needs_main_
     }
 
 
-def _render(review=None, *, customer_id=None, vehicle_role=None):
+def _render(review=None, *, customer_id=None, vehicle_role=None, start_scan=False, return_to_verification=False):
     preselected = get_customer(customer_id) if customer_id else None
     if review is not None and review.get("customer") is None and preselected is not None:
         review["customer"] = preselected
@@ -144,6 +164,15 @@ def _render(review=None, *, customer_id=None, vehicle_role=None):
         # panel's "Add another vehicle" link passes vehicle_role=additional. The review form uses
         # it to default the "make this the main vehicle?" choice (yes for a main-vehicle scan).
         vehicle_role=vehicle_role,
+        # ``start_scan`` is the verification checklist's opt-in: open the camera on load. The
+        # template marks the capture form so the shared scanner module is driven straight into its
+        # own start routine — the server cannot grant camera permission, so the module's existing
+        # blocked/permission fallback (and the always-visible scan + manual buttons) is the
+        # degradation, never a blank screen.
+        start_scan=start_scan,
+        # ``return_to_verification`` rides the capture and review forms' hidden fields so the save
+        # can hand control back to ``customers.edit#pending-registration``.
+        return_to_verification=return_to_verification,
     )
 
 
@@ -182,6 +211,16 @@ def scan_vehicle():
     The photo-upload path is retired. A multipart POST (or an oversized body) is refused from the
     request headers *before* the body is parsed, so no image is ever decoded server-side; staff get
     the manual review form instead. The camera posts the decoded barcode text urlencoded.
+
+    Two opt-ins, both from the verification checklist on ``customers.edit`` (they are the only
+    difference from the ordinary scanner, which they must never alter):
+
+    * ``start_scan=1`` — drive the shared camera module straight into its start routine on load, so
+      the checklist's "Scan main vehicle disk" button opens the camera itself rather than the
+      scanner's landing screen. Honoured on a fresh GET only: the decode POST re-renders the same
+      capture form, and re-arming the camera there would loop after every scan.
+    * ``return_to_verification=1`` — carried on the query string and echoed through the capture and
+      review forms so the finished save returns to ``customers.edit#pending-registration``.
     """
     if request.method == "POST":
         rejection = scan_request_rejection(request)
@@ -194,20 +233,38 @@ def scan_vehicle():
                 _review(_blank_values(), customer_id),
                 customer_id=customer_id,
                 vehicle_role=(request.args.get("vehicle_role") or "").strip() or None,
+                return_to_verification=_truthy(request.args.get("return_to_verification")),
             )
 
     customer_id = _to_int(request.values.get("customer_id"))
     # ``main`` (the customer form's main-vehicle link) or ``additional`` (the vehicles panel's
     # "Add another vehicle"). It decides what the "make this the main vehicle?" choice defaults to.
     vehicle_role = (request.values.get("vehicle_role") or "").strip() or None
+    # Auto-start is a GET-only opt-in (see the docstring): the capture form re-renders after every
+    # decode POST, so honouring it there would reopen the camera in a loop.
+    start_scan = request.method == "GET" and _truthy(request.args.get("start_scan"))
+    # The return intent survives the decode POST through the capture form's hidden field, so it is
+    # read from the merged query string + form, not the query string alone.
+    return_to_verification = _truthy(request.values.get("return_to_verification"))
 
     if request.method == "GET":
-        return _render(None, customer_id=customer_id, vehicle_role=vehicle_role)
+        return _render(
+            None,
+            customer_id=customer_id,
+            vehicle_role=vehicle_role,
+            start_scan=start_scan,
+            return_to_verification=return_to_verification,
+        )
 
     if (request.form.get("action") or "").strip() == "manual":
         # The manual fallback: no scan at all, just type the fields.
         flash("Type the vehicle details and choose the client.", "info")
-        return _render(_review(_blank_values(), customer_id), customer_id=customer_id, vehicle_role=vehicle_role)
+        return _render(
+            _review(_blank_values(), customer_id),
+            customer_id=customer_id,
+            vehicle_role=vehicle_role,
+            return_to_verification=return_to_verification,
+        )
 
     values, raw_text, unparsed, message, category = _read_scan(request.form.get("disc_text"))
     if message:
@@ -218,6 +275,7 @@ def scan_vehicle():
         _review(values, customer_id, raw_text=raw_text, unparsed=unparsed),
         customer_id=customer_id,
         vehicle_role=vehicle_role,
+        return_to_verification=return_to_verification,
     )
 
 
@@ -233,6 +291,11 @@ def save_scan_vehicle():
     """
     values = _posted_values(request.form)
     customer_id = _to_int(request.form.get("customer_id"))
+    # Carried through from the capture screen so the review re-renders and the finished save keep
+    # the checklist's context: ``main`` keeps the "make this the main vehicle?" default and
+    # ``return_to_verification`` decides whether the success redirect lands on the checklist anchor.
+    vehicle_role = (request.form.get("vehicle_role") or "").strip() or None
+    return_to_verification = _truthy(request.form.get("return_to_verification"))
     transfer = str(request.form.get("transfer") or "").strip().lower() in {"1", "on", "yes", "true"}
     make_main = vehicles.parse_main_choice(request.form.get("make_main"))
 
@@ -243,31 +306,39 @@ def save_scan_vehicle():
     if not customer_id:
         customer_id = find_customer_id_by_text(request.form.get("customer_pick"))
 
+    def review_response(review):
+        """Re-render the review panel, keeping this screen's context for a retry."""
+        return _render(
+            review,
+            vehicle_role=vehicle_role,
+            return_to_verification=return_to_verification,
+        )
+
     if not customer_id:
         flash(
             "Choose the client from the list: type at least two letters of the name or number, "
             "then pick the client from the suggestions.",
             "error",
         )
-        return _render(_review(values, None, raw_text=values["raw_scan_text"]))
+        return review_response(_review(values, None, raw_text=values["raw_scan_text"]))
     customer = get_customer(customer_id)
     if customer is None:
         flash("That client is no longer on file — search for them again.", "error")
-        return _render(_review(values, None, raw_text=values["raw_scan_text"]))
+        return review_response(_review(values, None, raw_text=values["raw_scan_text"]))
 
     registration = values["registration"]
 
     if transfer:
         if make_main is None:
             flash("Choose whether this vehicle becomes the client's main vehicle before transferring it.", "error")
-            return _render(_review(values, customer_id, needs_main_choice=True))
+            return review_response(_review(values, customer_id, needs_main_choice=True))
         owner = vehicles.customer_for_vehicle_registration(registration)
         if owner is None:
             flash(
                 "That registration is not recorded for another client, so there is nothing to transfer.",
                 "error",
             )
-            return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
+            return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
         # Explicit action: MOVE the existing row (never copy), then apply the freshly scanned
         # fields to it, so the record keeps one owner and gains the new disc details. If staff
         # chose "yes", the moved vehicle also becomes the new owner's main vehicle; otherwise the
@@ -277,11 +348,11 @@ def save_scan_vehicle():
             vehicles.update_vehicle(owner["vehicle_id"], values)
         except ValueError as exc:
             flash(str(exc), "error")
-            return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
+            return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
         if make_main is True:
             vehicles.promote_main_vehicle(customer_id, owner["vehicle_id"])
         flash(f"Vehicle {registration} transferred to {customer['name']}.", "success")
-        return redirect(url_for("customers.edit", customer_id=customer_id))
+        return _customer_edit_redirect(customer_id, return_to_verification)
 
     # Re-scanning a plate this client already holds is a correction, not a second vehicle: update
     # that record in place (the duplicate guard in create_vehicle still stands for everything else).
@@ -291,7 +362,7 @@ def save_scan_vehicle():
             vehicles.update_vehicle(existing_same["id"], values)
         except ValueError as exc:
             flash(str(exc), "error")
-            return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
+            return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
         if make_main is True:
             vehicles.promote_main_vehicle(customer_id, existing_same["id"])
         flash(
@@ -299,7 +370,7 @@ def save_scan_vehicle():
             "updated the existing vehicle instead of adding a second one.",
             "success",
         )
-        return redirect(url_for("customers.edit", customer_id=customer_id))
+        return _customer_edit_redirect(customer_id, return_to_verification)
 
     # A brand-new vehicle. The main vehicle is the one the client's invoices print, so a different
     # vehicle may only take that place when staff say so.
@@ -312,7 +383,7 @@ def save_scan_vehicle():
                 "their main vehicle, then save again.",
                 "error",
             )
-            return _render(
+            return review_response(
                 _review(values, customer_id, raw_text=values["raw_scan_text"], needs_main_choice=True)
             )
         # First vehicle for the client, and no choice was posted (an older caller): keep the old
@@ -324,12 +395,12 @@ def save_scan_vehicle():
     except ValueError as exc:
         # A2's message names the current owner; surface it verbatim (never a silent second row).
         flash(str(exc), "error")
-        return _render(_review(values, customer_id, raw_text=values["raw_scan_text"]))
+        return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
 
     if make_main:
         vehicles.promote_main_vehicle(customer_id, vehicle_id)
     flash(f"Vehicle {registration or 'saved'} allocated to {customer['name']}.", "success")
-    return redirect(url_for("customers.edit", customer_id=customer_id))
+    return _customer_edit_redirect(customer_id, return_to_verification)
 
 
 @bp.post("/vehicles/<int:vehicle_id>/edit")

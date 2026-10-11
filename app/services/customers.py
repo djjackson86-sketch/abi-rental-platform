@@ -299,13 +299,39 @@ def customer_has_history(customer_id):
     return bool(row and row["count"])
 
 
+#: Every table that references ``customers(id)`` and must be cleared when a client is
+#: removed. ``orders`` is deliberately absent: it is the one child that blocks deletion
+#: (the history guard below rejects a client with any), so it is never silently touched.
+#: libSQL / Turso does not guarantee the declared ``ON DELETE CASCADE`` (and a Turso
+#: write is autocommit, so a half-applied transaction cannot be relied on to roll back),
+#: so each child row is removed explicitly rather than trusting the FK cascade — that is
+#: what keeps the delete from ever leaving an orphan (a pending queue entry, a vehicle,
+#: a POPIA consent event, a credit or a legacy balance behind).
+_CUSTOMER_CHILD_TABLES = (
+    "portal_registrations",
+    "vehicles",
+    "consent_records",
+    "customer_credits",
+    "legacy_customer_balances",
+    "legacy_balance_payments",
+)
+
+
 def delete_customer(customer_id):
+    """Delete a client with **no** order/invoice history, leaving zero orphan rows.
+
+    Refuses outright when the client has any order history, so an existing client's
+    ledger is never removed and no refund/notification is ever triggered by a delete.
+    When it does proceed it clears every child row explicitly (see
+    ``_CUSTOMER_CHILD_TABLES``) before the customer, because libSQL does not honour the
+    declared FK cascade — a left-behind pending registration would otherwise show an
+    orphan entry in the verification queue.
+    """
     if customer_has_history(customer_id):
         raise ValueError("Customer has existing orders/history and cannot be deleted")
     db = get_db()
-    # Clear any self-registration row first: libSQL does not guarantee the FK cascade, and
-    # a left-behind pending row would show an orphan entry in the pending queue.
-    db.execute("DELETE FROM portal_registrations WHERE customer_id = ?", (customer_id,))
+    for table in _CUSTOMER_CHILD_TABLES:
+        db.execute(f"DELETE FROM {table} WHERE customer_id = ?", (customer_id,))
     cur = db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     db.commit()
     return cur.rowcount > 0

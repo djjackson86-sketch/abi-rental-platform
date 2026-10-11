@@ -652,12 +652,23 @@ body.scan-fs-open{overflow:hidden}
 .pending-checklist{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}
 .pending-check{display:grid;gap:2px;padding:10px 14px;border:1px solid var(--line);border-left-width:4px;border-radius:10px}
 .pending-check strong{font-size:13px;letter-spacing:.02em}
+.pending-checklist .pending-check{padding:0}
+.pending-check-link{display:grid;gap:4px;padding:12px 14px;min-height:44px;border-radius:8px;color:inherit;text-decoration:none}
+a.pending-check-link:hover{background:var(--line-soft)}
+a.pending-check-link:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+.pending-check .pending-check-action{display:inline-flex;align-items:center;justify-self:start;min-height:44px;padding:8px 14px;border:1px solid var(--brand);border-radius:8px;background:#f3f8ff;color:var(--brand);font-weight:700}
+a.pending-check-link{cursor:pointer}
+a.pending-check-link:active{background:#e7f0ff}
+#client-verified,#pending-registration{scroll-margin-top:96px}
 .pending-check span{color:var(--muted);font-size:13px}
 .pending-check.is-done{border-left-color:var(--brand)}
 .pending-check.is-open{border-left-color:#d4342c}
 .pending-actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px}
 .pending-approve-form{display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-top:1px solid var(--line-soft);padding-top:14px}
 .pending-approve-form .form-help{margin:0;flex:1 1 240px}
+.pending-approve-form .btn:disabled{opacity:.45;cursor:not-allowed}
+.pending-delete-form{display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-top:1px solid var(--line-soft);margin-top:16px;padding-top:16px}
+.pending-delete-form .form-help{margin:0;flex:1 1 240px}
 .pending-queue-card{margin-bottom:18px}
 .pending-queue-row .pending-queue-meta{display:grid;justify-items:end;gap:2px;text-align:right}
 .pending-queue-age{color:var(--muted-2)}

@@ -1,0 +1,94 @@
+{# The browser half of the public portal's double-submit guard (client portal changes).
+
+   The registration form writes a customer, so a second tap while the first request is still in
+   the post must not send a second one. This disables the submit button the moment a valid form is
+   submitted and relabels it, so the button both cannot be pressed twice and says what is happening
+   instead of looking dead. The server holds the real guard (a per-submission claim key that the
+   form also carries), so this is a courtesy, not the boundary.
+
+   Two browser-warts it defends against:
+
+   * a disabled submit control is dropped from the posted form data, so a **named** button would
+     silently lose its value - the pressed button's name/value is mirrored into a hidden field
+     BEFORE disabling it;
+   * Safari restores a page from the back/forward cache exactly as it was left, with the button
+     still disabled and the panel still busy - on pageshow with event.persisted the panel is reset
+     (aria-busy cleared, button re-enabled and relabelled) so the customer can submit again;
+   * Chrome likewise restores the previous form state onto the response document, so a validation
+     re-render can arrive with the button already stuck on "Sending..." - every load therefore
+     resets, not just a persisted pageshow.
+
+   Kept free of square brackets: a walk test asserts no customer-facing page carries a bracketed
+   placeholder token. Included by the portal form. #}
+<script>
+(function(){
+  function each(list, fn){ Array.prototype.forEach.call(list, fn); }
+  function buttons(form){ return form.querySelectorAll('button.primary'); }
+  function restore(form){
+    form.removeAttribute('aria-busy');
+    each(buttons(form), function(button){
+      button.disabled = false;
+      button.removeAttribute('aria-disabled');
+      var original = button.getAttribute('data-busy-label');
+      if(original !== null){ button.textContent = original; }
+    });
+  }
+  function resetOne(form){
+    // State lives on the element itself: this file must carry no square-bracket token, because a
+    // walk test asserts no customer-facing page holds a bracketed placeholder.
+    form.portalBusy = false;
+    restore(form);
+  }
+  each(document.querySelectorAll('.portal-panel form'), function(form){
+    form.portalBusy = false;
+    each(buttons(form), function(button){
+      if(button.getAttribute('data-busy-label') === null){
+        button.setAttribute('data-busy-label', button.textContent);
+      }
+    });
+    form.addEventListener('submit', function(event){
+      if(form.portalBusy){ event.preventDefault(); return; }
+      form.portalBusy = true;
+      // Mirror the pressed submit button's name/value into a hidden field *before* disabling it:
+      // a disabled control is left out of the form data, so a named decision button would lose
+      // its value. The public form has one unnamed button today, but this keeps the value
+      // whatever the button is called.
+      var submitter = event.submitter || form.querySelector('button.primary');
+      if(submitter && submitter.name){
+        var mirror = null;
+        each(form.querySelectorAll('.portal-submitter-mirror'), function(field){
+          if(field.name === submitter.name){ mirror = field; }
+        });
+        if(!mirror){
+          mirror = document.createElement('input');
+          mirror.type = 'hidden';
+          mirror.name = submitter.name;
+          mirror.className = 'portal-submitter-mirror';
+          form.appendChild(mirror);
+        }
+        mirror.value = submitter.value || '';
+      }
+      form.setAttribute('aria-busy', 'true');
+      each(buttons(form), function(button){
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
+        button.textContent = 'Sending\u2026';
+      });
+    });
+    // Safari returns the form from the back/forward cache still disabled and busy: reset it.
+    window.addEventListener('pageshow', function(event){
+      if(event.persisted){ resetOne(form); }
+    });
+  });
+  // Every load, fresh or restored: never leave a submit button disabled by an earlier submit.
+  function resetAll(){
+    each(document.querySelectorAll('.portal-panel form'), resetOne);
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', resetAll);
+  } else {
+    resetAll();
+  }
+  window.addEventListener('load', resetAll);
+})();
+</script>

@@ -55,6 +55,10 @@
 
     <form method="post" action="{{ url_for('public.customer_portal_register') if universal else url_for('public.branch_portal_register', slug=branch.public_slug) }}" class="settings-form customer-form">
       <input type="hidden" name="portal_slug" value="{{ branch.public_slug }}">
+      {# The double-submit key: rendered once per form, posted back with the details, claimed by the
+         server before it writes. A re-render of a posted form keeps the posted key (form_values),
+         so a retry after an "already saving" refusal replays rather than creating a second client. #}
+      <input type="hidden" name="request_key" value="{{ form_values.get('request_key') or request_key }}">
 
       <section class="form-section"><h2>Customer type</h2><div class="option-grid two-options">{% for value,label,help in [('individual','Individual','A person renting or buying from us.'),('company','Company','A business or organisation contact.')] %}<label class="choice-card"><input type="radio" name="customer_type" value="{{ value }}" {% if form_values.get('customer_type', 'individual') == value %}checked{% endif %}><strong>{{ label }}</strong><span>{{ help }}</span></label>{% endfor %}</div></section>
 
@@ -111,6 +115,8 @@
 
       <div class="form-actions"><button class="btn primary" type="submit">Send my details</button></div>
     </form>
+
+    {% include "public/_portal_submit_busy.html" %}
 
     {% endif %}
 

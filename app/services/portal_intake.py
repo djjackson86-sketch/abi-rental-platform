@@ -33,10 +33,11 @@ import json
 import os
 import re
 import secrets
+import sqlite3
 import time
 import unicodedata
 
-from app.db import get_db
+from app.db import get_db, now
 from app.services import consent
 from app.services.customers import create_customer, get_customer
 
@@ -51,6 +52,41 @@ CONFIDENCE_LOW = "low"
 #: The honeypot the public form carries. Hidden from people, irresistible to a form-filler bot:
 #: a submission that arrives with it filled is swallowed without writing anything.
 HONEYPOT_FIELD = "company_website"
+
+#: The hidden field the public form posts so one *submission* writes at most one customer, however
+#: many times the button is tapped (client portal changes: a double-click while the first request
+#: was still in flight created two company rows). The browser is the only client, and the field is
+#: rendered server-side, so it is present even with JavaScript off; a request that omits it (an old
+#: fixture, or a hand-written POST) falls back to a digest of the submission itself, below.
+REQUEST_KEY_FIELD = "request_key"
+
+#: Bounds for a key the caller supplied. A browser key is ~43 URL-safe characters; the ceiling is
+#: generous, the floor stops an empty or one-character value being used to replay another claim.
+REQUEST_KEY_MIN_LEN = 16
+REQUEST_KEY_MAX_LEN = 200
+
+#: The claim table's two states. 'in_flight' until the customer row is written, then 'done'.
+CLAIM_IN_FLIGHT = "in_flight"
+CLAIM_DONE = "done"
+
+#: What ``claim_submission`` reports back. Public so a caller (and the tests) can name the state.
+SUBMISSION_CLAIMED = "claimed"    # this request owns the claim and may write
+SUBMISSION_REPLAY = "replay"      # this exact submission already succeeded: answer, do not write
+SUBMISSION_IN_FLIGHT = "in_flight"  # another request holds the claim: refuse, do not write
+
+#: The refusal a concurrent second submit sees. Plain words, and it says what to do.
+IN_FLIGHT_MESSAGE = (
+    "We're already saving this registration — please wait a moment rather than sending it again."
+)
+
+
+class SubmissionInFlight(ValueError):
+    """The same submission is already being written by another request.
+
+    Its own type so the route can answer 409 (a conflict with an in-flight write) rather than the
+    generic 400 every other refusal uses, while still being a ``ValueError`` so any existing caller
+    that only catches ``ValueError`` keeps behaving.
+    """
 
 #: Lookup throttle — 10 per address per 5 minutes (D7).
 LOOKUP_LIMIT = 10
@@ -129,6 +165,19 @@ BLOCKED_MESSAGE = (
     "before registering again."
 )
 
+#: What a customer sees when their phone or email is already on file (client portal changes).
+#: Registering is not a way around the counter: an exact contact match is refused outright — no
+#: "Is this you?" decision, no second customer — and the person is sent to the front desk.
+DUPLICATE_MESSAGE = "Client is already registered. Proceed to the front desk."
+
+
+class DuplicateRegistration(ValueError):
+    """The submitted phone/email already belongs to a client: refuse and write nothing.
+
+    Its own type so the public route can render the duplicate warning page, while staying a
+    ``ValueError`` so any caller that only catches ``ValueError`` keeps behaving as it did.
+    """
+
 
 def _clean_ascii(value):
     """Fold accents so ``Müller`` and ``Muller`` compare (and mask) the same."""
@@ -197,9 +246,20 @@ def masked_display(customer):
 
 
 def _candidate_rows():
-    """Only what the match and the mask need — never the address, the balance or the history."""
+    """Only what the match and the mask need — never the address, the balance or the history.
+
+    A client whose sign-up was **removed** (``portal_registrations.status = 'deleted'``) is
+    excluded: removing a rejected sign-up is exactly what lets that person register again, so a
+    tombstoned record must never keep matching them as an existing client (client portal changes).
+    """
+    from app.services import portal_registrations
+
+    deleted = getattr(portal_registrations, "STATUS_DELETED", "deleted")
     return get_db().execute(
-        "SELECT id, name, phone, email, is_blocked FROM customers"
+        "SELECT id, name, phone, email, is_blocked FROM customers AS c "
+        "WHERE NOT EXISTS (SELECT 1 FROM portal_registrations pr "
+        "WHERE pr.customer_id = c.id AND pr.status = ?)",
+        (deleted,),
     ).fetchall()
 
 
@@ -394,6 +454,176 @@ def new_reference(slug):
     return f"{stem}-{secrets.token_hex(3).upper()}"
 
 
+# --- the double-submit claim -------------------------------------------------------------------
+
+
+def new_request_key():
+    """A fresh, unguessable token for one rendered form — the browser's idempotency key.
+
+    ``secrets`` (not ``random``): the key decides whether a submission writes, so it must be
+    unpredictable, and it is per render, so two submissions of the same form share one key and a
+    second render gets a new one. ~256 bits, URL-safe.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def _request_digest(values, decision, scope):
+    """A stable digest of a submission that carried no ``request_key`` — the compatibility path.
+
+    Old fixtures (and any hand-written POST) omit the field. Rather than lose the guard entirely,
+    the submission is digested from its own canonical values, the posted ``decision`` and the portal
+    scope, so two identical submissions of one form agree and two *different* submissions never do.
+    The ``values`` here are already cleaned by :func:`submission_values`, so ``Pieter@X`` and
+    ``pieter@x`` digest alike. Prefixed ``d:`` so a derived key can never equal a posted one.
+    """
+    payload = {"scope": str(scope or ""), "decision": str(decision or "")}
+    if isinstance(values, dict):
+        for key in sorted(values):
+            payload[key] = values[key]
+    serialised = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return "d:" + hashlib.sha256(serialised.encode("utf-8")).hexdigest()
+
+
+def resolve_request_key(form, scope, values=None, decision=None):
+    """The key this submission is claimed under: the posted one when it is usable, else a digest.
+
+    A posted key that is too short (or absurdly long) is ignored rather than trusted — the floor
+    keeps an empty or one-character value from being used to replay another submission, and the
+    ceiling keeps a hostile POST from bloating the key column.
+    """
+    posted = str(form.get(REQUEST_KEY_FIELD) or "").strip() if form is not None else ""
+    if REQUEST_KEY_MIN_LEN <= len(posted) <= REQUEST_KEY_MAX_LEN:
+        return posted
+    return _request_digest(values, decision, scope)
+
+
+def contact_digest(values):
+    """A stable digest of a submission's exact contact keys (normalised phone + email).
+
+    The key a *shared contact claim* is taken under (client portal changes): two submissions that
+    carry the same phone or email cannot both hold it at once, so on the remote libSQL backend —
+    where a write only crosses to a concurrent request once it commits — two **different**
+    submission keys with identical contact still cannot race into two customers. Prefixed ``c:`` so
+    a contact claim can never collide with a posted or derived submission key.
+    """
+    values = values or {}
+    payload = f"{normalise_phone(values.get('phone', ''))}|{normalise_email(values.get('email', ''))}"
+    if not payload.strip("|"):
+        return ""
+    return "c:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _is_unique_violation(exc):
+    """True for a local ``sqlite3`` or remote libSQL unique-index refusal.
+
+    The two backends raise different types (``sqlite3.IntegrityError`` locally, ``LibsqlError``
+    from the Turso adapter), so the check is by type where possible and by the error text
+    otherwise. Only a *unique* refusal is swallowed here; anything else is re-raised.
+    """
+    if isinstance(exc, sqlite3.IntegrityError):
+        return True
+    text = f"{getattr(exc, 'code', '')} {getattr(exc, 'message', '')} {exc}".upper()
+    return "UNIQUE" in text or "CONSTRAINT" in text
+
+
+def claim_submission(scope, request_key):
+    """Try to claim ``(scope, request_key)``; report whether to write, replay or refuse.
+
+    Returns ``(state, row)`` where ``state`` is ``SUBMISSION_CLAIMED`` (this request may write),
+    ``SUBMISSION_REPLAY`` (a previous request already wrote — ``row`` carries its result) or
+    ``SUBMISSION_IN_FLIGHT`` (another request holds the claim right now).
+
+    The claim is a single ``INSERT`` that only fires when no row exists yet, so on the two backends
+    this app uses it is atomic exactly where it must be: the libSQL adapter autocommits every
+    statement and its ``commit()``/``rollback()`` are no-ops (``app/turso_db.py``), so a claim that
+    rode on a transaction would be invisible to a concurrent second request. The unique index is
+    the backstop for the narrow race where two statements both pass the ``NOT EXISTS`` check; the
+    loser sees the constraint refusal and reads the winner's row.
+    """
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO portal_submission_claims (scope, request_key, status, created_at) "
+            "SELECT ?, ?, ?, ? "
+            "WHERE NOT EXISTS (SELECT 1 FROM portal_submission_claims "
+            "WHERE scope = ? AND request_key = ?)",
+            (scope, request_key, CLAIM_IN_FLIGHT, now(), scope, request_key),
+        )
+        won = cursor.rowcount == 1
+    except Exception as exc:  # the unique index winning a race — expected, not an error
+        if not _is_unique_violation(exc):
+            raise
+        won = False
+    if won:
+        return SUBMISSION_CLAIMED, None
+    row = db.execute(
+        "SELECT status, customer_id, reference, linked, created, registration_id "
+        "FROM portal_submission_claims WHERE scope = ? AND request_key = ?",
+        (scope, request_key),
+    ).fetchone()
+    if row is not None and str(_row_value(row, "status", "")) == CLAIM_DONE:
+        return SUBMISSION_REPLAY, row
+    return SUBMISSION_IN_FLIGHT, None
+
+
+def complete_submission(scope, request_key, result):
+    """Mark a claim done and store the result a replay must return, once the customer is written.
+
+    Called only after the write itself has committed, so a claim left ``in_flight`` is always a
+    write that did not finish — the safe direction (a stuck claim refuses, never duplicates).
+    """
+    result = result or {}
+    get_db().execute(
+        "UPDATE portal_submission_claims "
+        "SET status = ?, customer_id = ?, reference = ?, linked = ?, created = ?, "
+        "registration_id = ?, completed_at = ? "
+        "WHERE scope = ? AND request_key = ?",
+        (
+            CLAIM_DONE,
+            result.get("customer_id"),
+            str(result.get("reference") or ""),
+            1 if result.get("linked") else 0,
+            1 if result.get("created") else 0,
+            result.get("registration_id"),
+            now(),
+            scope,
+            request_key,
+        ),
+    )
+    get_db().commit()
+
+
+def release_submission(scope, request_key):
+    """Drop an ``in_flight`` claim after a failed write, so the customer may try again.
+
+    Only an ``in_flight`` row is ever deleted: a ``done`` claim stays so a late replay still gets
+    the original success instead of writing a second customer.
+    """
+    try:
+        get_db().execute(
+            "DELETE FROM portal_submission_claims "
+            "WHERE scope = ? AND request_key = ? AND status = ?",
+            (scope, request_key, CLAIM_IN_FLIGHT),
+        )
+        get_db().commit()
+    except Exception:
+        # Releasing is best-effort: the operator's cleanup is the customer row, and a stuck claim
+        # only refuses the *same* key — never a different submission.
+        pass
+
+
+def submission_result_from_claim(row):
+    """The same ``create_or_link_customer`` result, rebuilt from a completed claim row."""
+    return {
+        "customer_id": _row_value(row, "customer_id", None),
+        "created": bool(_row_value(row, "created", 0)),
+        "linked": bool(_row_value(row, "linked", 0)),
+        "reference": str(_row_value(row, "reference", "") or ""),
+        "registration_id": _row_value(row, "registration_id", None),
+        "replayed": True,
+    }
+
+
 def registration_is_open():
     """False while the published notice still carries an open placeholder (D11).
 
@@ -421,7 +651,7 @@ def _source_keys_taken(system, reference, exclude_customer_id=None):
     return row is not None
 
 
-def create_or_link_customer(form, branch_id, decision, slug=None):
+def create_or_link_customer(form, branch_id, decision, slug=None, portal_duplicate_refuse=False):
     """Create a client, or link this submission to the one it matched — the customer's choice.
 
     ``decision`` is the posted value: ``''`` (first pass — create when nothing matched),
@@ -429,20 +659,94 @@ def create_or_link_customer(form, branch_id, decision, slug=None):
     slug from the **URL** (the route passes it); a posted ``portal_slug`` field is only a fallback,
     because the record's provenance should not be dictated by a hidden input a stranger can edit.
 
+    ``portal_duplicate_refuse`` (client portal changes) is the **public routes'** switch: when true,
+    an **exact** phone or email match — the same person with near-certainty — is refused outright
+    with :class:`DuplicateRegistration`, whatever ``decision`` was posted, so a public form can
+    never write a second customer for a contact already on file. A name-only match is **not** a
+    duplicate (two people share a name), so it is left to the create path. Left false (the staff
+    callers), the historical create/link behaviour is unchanged.
+
     Returns ``{customer_id, created, linked, reference}``. Raises ``ValueError`` with the message
-    the page shows, and writes **nothing**, when the submission is invalid, when the link target
-    was not one of this submission's own candidates (a crafted POST must not be able to write to
-    an arbitrary client), or when it would resurrect a blocked client.
+    the page shows, and writes **nothing**, when the submission is invalid, when it is a duplicate
+    and refusal is on, when the link target was not one of this submission's own candidates (a
+    crafted POST must not be able to write to an arbitrary client), or when it would resurrect a
+    blocked client.
+
+    **One submission, one customer.** Before any row is written this request claims the
+    submission's key (:func:`claim_submission`), so a second tap of the same form — a double-click
+    while the first request is still in flight, or a replay once it is done — cannot create a
+    second client. A completed claim is answered with the *same* success (``replayed=True``) and a
+    claim another request still holds is refused with :class:`SubmissionInFlight`. The duplicate
+    check runs **after** the claim and before any write, so a replay returns the original receipt
+    without re-checking. A failed or refused write releases the claim, so a corrected resubmission
+    still works.
     """
     values = submission_values(form)
     action, target_id = parse_decision(decision)
-    matches = find_possible_matches(values["name"], values["phone"], values["email"])
-    blocked = blocked_match(values["name"], values["phone"], values["email"])
     slug = str(slug or form.get("portal_slug") or "").strip()
+
+    request_key = resolve_request_key(form, slug, values, decision)
+    state, claim_row = claim_submission(slug, request_key)
+    if state == SUBMISSION_REPLAY:
+        return submission_result_from_claim(claim_row)
+    if state == SUBMISSION_IN_FLIGHT:
+        # The key is deliberately left in place: a *retry* once the first request finishes replays
+        # (returns its success) rather than writing a second customer.
+        raise SubmissionInFlight(IN_FLIGHT_MESSAGE)
+
+    # Claim each exact identifier globally, not merely the combined phone/email pair at
+    # one branch. Requests with the same email but different phones (or vice versa), even
+    # from different branches, must not race past the duplicate check on autocommit Turso.
+    contact_claims = []
     reference = new_reference(slug)
     source_id = f"{slug}:{reference}" if slug else reference
     db = get_db()
 
+    try:
+        if portal_duplicate_refuse:
+            identifiers = [(slug, contact_digest(values))]
+            for kind, value in (("phone", normalise_phone(values.get("phone"))),
+                                ("email", normalise_email(values.get("email")))):
+                if value:
+                    key = "contact:" + kind + ":" + hashlib.sha256(value.encode()).hexdigest()
+                    identifiers.append(("@portal-contact-locks", key))
+            for scope, key in sorted(set(identifiers)):
+                if not key:
+                    continue
+                contact_state, _ = claim_submission(scope, key)
+                if contact_state != SUBMISSION_CLAIMED:
+                    raise SubmissionInFlight(DUPLICATE_MESSAGE)
+                contact_claims.append((scope, key))
+        # Read matches only AFTER acquiring every contact lock: a previous writer may
+        # have committed between our request claim and our contact claim.
+        matches = find_possible_matches(values["name"], values["phone"], values["email"])
+        blocked = blocked_match(values["name"], values["phone"], values["email"])
+        if portal_duplicate_refuse:
+            # An exact phone or email match is the same person with near-certainty: refuse, and
+            # never create or link, whatever ``decision`` was posted (a crafted ``create`` or
+            # ``link:<id>`` is refused the same way). A name-only match is NOT a duplicate — two
+            # people share a name — so it is left to the create path below.
+            if blocked is not None:
+                raise ValueError(BLOCKED_MESSAGE)
+            if any(match["confidence"] == CONFIDENCE_HIGH for match in matches):
+                raise DuplicateRegistration(DUPLICATE_MESSAGE)
+        result = _write_submission(
+            db, values, action, target_id, matches, blocked, slug, reference, source_id, branch_id
+        )
+    except Exception:
+        release_submission(slug, request_key)
+        for scope, key in contact_claims:
+            release_submission(scope, key)
+        raise
+    complete_submission(slug, request_key, result)
+    # Release only claims this request actually won, and only after its receipt is durable.
+    for scope, key in contact_claims:
+        release_submission(scope, key)
+    return result
+
+
+def _write_submission(db, values, action, target_id, matches, blocked, slug, reference, source_id, branch_id):
+    """The link / create writes themselves — reached only by a request that holds the claim."""
     if action == "link":
         # Only a **high-confidence** match may be linked (an exact normalised phone or
         # email). A name-only match is a hint for staff, never proof of identity: allowing
