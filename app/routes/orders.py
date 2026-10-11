@@ -59,21 +59,80 @@ def _submitted_customer_values(form):
     return {key: (form.get(key) or "") for key in CUSTOMER_EDIT_FIELD_KEYS}
 
 
+# Ticket ABI-341953196. The order form's customer picker lists the whole client
+# book with each client's running balances, and the same columns feed the
+# selected-client card. It previously ran five correlated subqueries PER customer;
+# on the live ~4 800-client book that billed ~4 million rows_read, because every
+# order was scanned once per customer and every payment once per matched order.
+# They are now batched as grouped derived tables — one grouped scan each — with
+# exactly the values the correlated form produced:
+#   * account_credit_debt       = SUM over ALL the client's orders of
+#                                 MAX(ROUND(total - active non-account payments, 2), 0)
+#                                 (the credit_limits.debt_sql basis, unchanged)
+#   * previous_orders_balance   = SUM(total - paid) over the client's orders that
+#                                 are not canceled/cancelled/archived, counting only
+#                                 paid, non-deleted, non-account payments
+#   * orders_to_date            = COUNT of those orders whose payment_status is
+#                                 paid/overpaid
+#   * customer_credit_balance   = grouped active customer_credits
+#   * legacy_balance            = grouped active legacy_customer_balances
+# ``customers`` is kept as the table name (not an alias) so the shared
+# ``pending_exclusion_clause`` keeps hiding pending/deleted self-registrations.
+_CUSTOMER_PICKER_COLUMNS = """
+        customers.id, customers.customer_type, customers.name, customers.email, customers.phone, customers.marketing_opt_in,
+        customers.address_line1, customers.address_line2, customers.suburb, customers.city, customers.province, customers.postal_code, customers.country, customers.custom_fields_json, customers.standard_discount_percent,
+        customers.client_verified, customers.is_blocked, customers.blocked_reason, customers.credit_allowed, customers.credit_limit,
+        CASE WHEN customers.credit_allowed = 1 THEN COALESCE(order_totals.account_credit_debt, 0) ELSE 0 END AS account_credit_debt,
+        COALESCE(order_totals.previous_orders_balance, 0) AS previous_orders_balance,
+        COALESCE(credit_totals.customer_credit_balance, 0) AS customer_credit_balance,
+        COALESCE(legacy_totals.legacy_balance, 0) AS legacy_balance,
+        COALESCE(order_totals.orders_to_date, 0) AS orders_to_date
+"""
+
+_CUSTOMER_PICKER_JOINS = """
+        LEFT JOIN (
+            SELECT o.customer_id AS customer_id,
+                   SUM(CASE WHEN o.status NOT IN ('canceled','cancelled','archived')
+                            THEN o.total - COALESCE(paid.paid_strict, 0) ELSE 0 END) AS previous_orders_balance,
+                   SUM(CASE WHEN o.status NOT IN ('canceled','cancelled','archived')
+                            AND o.payment_status IN ('paid','overpaid') THEN 1 ELSE 0 END) AS orders_to_date,
+                   SUM(MAX(ROUND(o.total - COALESCE(paid.paid_active, 0), 2), 0)) AS account_credit_debt
+            FROM orders o
+            LEFT JOIN (
+                SELECT order_id,
+                       SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS paid_strict,
+                       SUM(CASE WHEN COALESCE(status, 'paid') = 'paid' THEN amount ELSE 0 END) AS paid_active
+                FROM payments
+                WHERE COALESCE(deleted_at, '') = '' AND LOWER(COALESCE(method, '')) <> 'account'
+                GROUP BY order_id
+            ) paid ON paid.order_id = o.id
+            GROUP BY o.customer_id
+        ) order_totals ON order_totals.customer_id = customers.id
+        LEFT JOIN (
+            SELECT customer_id, SUM(amount) AS customer_credit_balance
+            FROM customer_credits WHERE status = 'active' GROUP BY customer_id
+        ) credit_totals ON credit_totals.customer_id = customers.id
+        LEFT JOIN (
+            SELECT customer_id, SUM(amount_due - settled_amount) AS legacy_balance
+            FROM legacy_customer_balances
+            WHERE status = 'active' AND amount_due > settled_amount
+            GROUP BY customer_id
+        ) legacy_totals ON legacy_totals.customer_id = customers.id
+"""
+
+
+def _customer_picker_sql(where_sql="", tail=""):
+    return (
+        "SELECT " + _CUSTOMER_PICKER_COLUMNS
+        + " FROM customers" + _CUSTOMER_PICKER_JOINS
+        + " WHERE 1=1" + where_sql + tail
+    )
+
+
 def _customers():
-    rows = get_db().execute(f"""
-        SELECT id, customer_type, name, email, phone, marketing_opt_in,
-               address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,
-               client_verified, is_blocked, blocked_reason, credit_allowed, credit_limit,
-               CASE WHEN credit_allowed = 1 THEN {debt_sql("customers.id")} ELSE 0 END AS account_credit_debt,
-               (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')='' AND LOWER(COALESCE(p.method,'')) <> 'account'), 0)), 0)
-                FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
-               (SELECT COALESCE(SUM(cc.amount), 0) FROM customer_credits cc WHERE cc.customer_id = customers.id AND cc.status = 'active') AS customer_credit_balance,
-               (SELECT COALESCE(SUM(l.amount_due - l.settled_amount), 0) FROM legacy_customer_balances l WHERE l.customer_id = customers.id AND l.status = 'active' AND l.amount_due > l.settled_amount) AS legacy_balance,
-               (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
-        FROM customers
-        WHERE 1=1{pending_exclusion_clause("customers")}
-        ORDER BY name
-    """).fetchall()
+    rows = get_db().execute(
+        _customer_picker_sql(pending_exclusion_clause("customers"), " ORDER BY customers.name")
+    ).fetchall()
     return [customer_summary_for(row) for row in rows]
 
 
@@ -88,6 +147,12 @@ def _selected_customer_summary(customers, selected_customer_id):
 
 
 def _customer_summary_by_id(customer_id):
+    # A single selected client is looked up by primary key, so the per-parent
+    # correlated projection is the cheap form here: every child fetch is an index
+    # probe (idx_orders_customer / idx_payments_order). The batched grouped joins
+    # used by the whole-book picker would materialise every order and payment for
+    # one row (measured on the live book: ~3 700 rows_read vs ~54). Same values -
+    # this is the exact pre-fix projection the batched form was proven against.
     row = get_db().execute(f"""
         SELECT id, customer_type, name, email, phone, marketing_opt_in,
                address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, standard_discount_percent,

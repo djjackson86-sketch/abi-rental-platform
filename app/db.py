@@ -621,6 +621,17 @@ CREATE TABLE IF NOT EXISTS portal_submission_claims (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_submission_claims_key
     ON portal_submission_claims(scope, request_key);
+
+-- Hot-path indexes (ABI-341953196). The order/payment/document screens join
+-- children back to their parent on every list and picker render. Without these
+-- the remote libSQL database bills a full child scan per parent: the new-order
+-- customer picker alone read ~4 million rows (every order scanned once per
+-- customer, and every payment scanned once per matched order). ``IF NOT EXISTS``
+-- makes them additive and idempotent, so a fresh install and an existing
+-- database (including the live Turso book) end up identical.
+CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_documents_order ON documents(order_id);
 """
 
 
@@ -1292,6 +1303,15 @@ def run_migrations(db):
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_submission_claims_key "
         "ON portal_submission_claims(scope, request_key)"
     )
+
+    # --- Hot-path indexes for the order/payment/document screens (ABI-341953196) ---
+    # Additive and idempotent: an existing database (the live Turso book included)
+    # gains exactly the same three indexes a fresh install creates in SCHEMA, with
+    # no row touched. They turn the customer picker's per-parent child lookups into
+    # index probes — the live 4 800-client book billed ~4M rows_read before this.
+    db.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_documents_order ON documents(order_id)")
 
 
 def init_db():

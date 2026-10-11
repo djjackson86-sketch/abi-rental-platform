@@ -90,11 +90,17 @@ CREDIT_LIMIT_ERROR = "Credit limit must be a positive amount"
 
 
 def list_customers(query="", customer_type="", marketing="", limit=None, offset=0):
+    # Ticket ABI-341953196: ``order_count`` is a grouped LEFT JOIN, not a
+    # correlated subquery per returned row. The Customers list is paged, but the
+    # CSV export reads the whole book, where the per-row count billed one orders
+    # scan per client on the remote libSQL database.
     sql = """SELECT c.*, CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL
             THEN 'Public' ELSE u.name END AS created_by_name, u.email AS created_by_email,
-        (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count
+        COALESCE(oc.order_count, 0) AS order_count
         FROM customers c
         LEFT JOIN users u ON u.id = c.created_by_user_id
+        LEFT JOIN (SELECT customer_id, COUNT(*) AS order_count FROM orders GROUP BY customer_id) oc
+            ON oc.customer_id = c.id
         WHERE 1=1""" + pending_exclusion_clause("c")
     params = []
     if query:
