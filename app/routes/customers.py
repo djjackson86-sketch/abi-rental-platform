@@ -6,7 +6,7 @@ from flask import Blueprint, Response, abort, flash, jsonify, redirect, render_t
 
 from app.routes.auth import login_required
 from app.services import csrf, portal_registrations
-from app.services.access import user_can_module
+from app.services.access import main_required, user_can_module
 from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
@@ -118,7 +118,17 @@ def index():
 
 @bp.route("/export.csv")
 @login_required
+@main_required
 def export_csv():
+    """Ticket ABI-341953195: the whole client book as CSV, main profile only.
+
+    The archive carries every customer (names, contact details, balances), so
+    staff may not pull it out even though they keep the Customers module. The
+    guard is on the endpoint, not just the button, and it runs before any
+    customer row is read: a staff request - including a filtered export from a
+    direct URL - is refused with 403. Login is still checked first, so an
+    anonymous hit is redirected to sign in as it was.
+    """
     query = request.args.get("query", "").strip()
     customer_type = request.args.get("customer_type", "")
     marketing = request.args.get("marketing", "")

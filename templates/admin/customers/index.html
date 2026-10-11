@@ -56,8 +56,14 @@
         <div class="filter-date-line">▣ <span>All time</span></div>
       </div>
 
+      {# Ticket ABI-341953195: the customer CSV export hands over the whole client
+         book, so Import and Export are main-profile only. The archive endpoint is
+         gated server-side too (customers.export_csv) - hiding the button is not
+         the permission boundary. Import stays the disabled placeholder it was. #}
+      {% if current_user_is_main %}
       <button class="btn ghost import-btn" type="button" disabled title="CSV import is planned for a later pass">Import</button>
       <a class="btn ghost export-btn" href="{{ url_for('customers.export_csv', query=filters.query, customer_type=filters.customer_type, marketing=filters.marketing) }}">Export</a>
+      {% endif %}
 
       <article class="customer-help-card">
         <h3>Customers</h3>
