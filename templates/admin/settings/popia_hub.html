@@ -1,0 +1,54 @@
+{% extends "admin/layout.html" %}
+{% set title='POPIA | Settings' %}
+{% block admin_body %}
+<style>
+.popia-hub{display:grid;gap:20px;min-width:0}.popia-hub .panel{min-width:0}.popia-hub .panel-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.popia-hub h2{margin:0 0 8px}.popia-hub p{line-height:1.6}.popia-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.popia-actions .btn{white-space:normal;text-align:center;max-width:100%}.popia-version{overflow-wrap:anywhere;word-break:break-word;color:#64748b;font-size:13px}.popia-editor{width:100%;max-width:100%;box-sizing:border-box;min-height:380px;resize:vertical;font:14px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;padding:14px}.popia-editor-label{display:block;font-weight:600;margin:12px 0 8px}.popia-note{background:#f3f7f4;border-left:3px solid #438f60;padding:12px 14px;border-radius:6px;font-size:14px}.popia-error{color:#991b1b;background:#fff1f2;padding:12px 14px;border-radius:6px;margin:14px 0}.popia-hub .form-help{font-size:13px;color:#64748b}.popia-check{display:flex;align-items:flex-start;gap:10px;margin:14px 0;line-height:1.5}.popia-check input{width:18px;height:18px;flex:0 0 18px;margin:3px 0 0}.popia-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.popia-advanced{margin-top:4px}@media(max-width:760px){.popia-columns{grid-template-columns:minmax(0,1fr)}.popia-editor{min-height:320px}.popia-hub .panel{padding:18px}}
+</style>
+<header class="page-header"><div><p class="eyebrow">Settings</p><h1>POPIA</h1><p>Manage your customer privacy notice and the documents Sano needs.</p></div></header>
+{% include "admin/settings/nav.html" %}
+<div class="popia-hub" data-popia-settings="v1">
+  <nav class="popia-actions" aria-label="POPIA sections"><a class="btn ghost" href="#notice-heading">Privacy notice</a><a class="btn ghost" href="#agreement-heading">Agreement</a><a class="btn ghost" href="#officer-heading">Officer registration</a></nav>
+  <section class="panel" aria-labelledby="notice-heading">
+    <div class="panel-header">
+      <div><h2 id="notice-heading">1. Customer privacy notice</h2><p>Edit the notice your customers see when they register or book.</p></div>
+      {% if published %}<div class="popia-actions">
+        <a class="btn ghost" href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View customer notice</a>
+        <a class="btn ghost" href="{{ url_for('settings.popia_notice_print') }}" target="_blank" rel="noopener noreferrer">Print notice</a>
+        <a class="btn ghost" href="{{ url_for('settings.popia_notice_pdf') }}">Download notice PDF</a>
+      </div>{% endif %}
+    </div>
+    {% if published %}
+      <p class="popia-version">Current published version: <strong>{{ published.notice_version }}</strong><br>Published: {{ published.published_at }}</p>
+      <div class="popia-note">Publishing updates the customer-facing notice immediately. A new version is saved each time the wording changes. Previous notices and customer consent records stay unchanged.</div>
+      {% if editor_error %}<div class="popia-error" role="alert">{{ editor_error }}{% if conflict %} <a href="{{ url_for('settings.popia_wizard_index') }}">Reload the current notice</a> and merge your changes before publishing. Copy your edited text first if you want to keep it.{% endif %}</div>{% endif %}
+      <form method="post" action="{{ url_for('settings.popia_notice_save') }}" id="popia-notice-form">
+        <input type="hidden" name="csrf_token" value="{{ editor_csrf_token }}">
+        <input type="hidden" name="expected_version" value="{{ expected_version }}">
+        <label class="popia-editor-label" for="notice-text">Privacy notice wording</label>
+        <textarea id="notice-text" class="popia-editor" name="notice_text" rows="18" maxlength="30000" required aria-describedby="notice-format-help">{{ editor_text }}</textarea>
+        <p class="form-help" id="notice-format-help">Keep the wording accurate for Sano. Use # for a title, ## for headings, - for lists and **bold** for emphasis. Maximum 30,000 characters. Printing and PDF downloads use the published wording, not unsaved edits.</p>
+        <label class="popia-check"><input type="checkbox" name="confirm_publish" value="1" required><span>I have reviewed these changes and want to publish them for customers.</span></label>
+        <div class="popia-actions"><button class="btn primary" type="submit">Save and publish notice</button><a class="btn ghost" href="{{ url_for('settings.popia_wizard_index') }}">Discard unsaved edits</a></div>
+      </form>
+    {% else %}
+      <p>No customer notice has been published yet. Complete the notice setup before editing or printing it here.</p>
+      <a class="btn primary" href="{{ url_for('settings.popia_wizard_step', step=1) }}">Set up the customer notice</a>
+    {% endif %}
+  </section>
+  <div class="popia-columns">
+    <section class="panel" aria-labelledby="agreement-heading">
+      <h2 id="agreement-heading">2. Sano–Jackapp agreement</h2>
+      <p>Download our simplified agreement about the customer information handled in Sano's rental system and the responsibilities of Sano Trailers and Jackapp.</p>
+      <div class="popia-actions"><a class="btn primary" href="{{ url_for('settings.popia_agreement_pdf') }}">Download agreement PDF</a></div>
+      <p class="form-help">Review it and arrange acceptance by both parties. Downloading it does not sign the agreement or record acceptance.</p>
+    </section>
+    <section class="panel" aria-labelledby="officer-heading">
+      <h2 id="officer-heading">3. Register an Information Officer</h2>
+      <p><strong>Sano must register its Information Officer with South Africa's Information Regulator</strong>, as required by section 55(2) of POPIA. For a private business, the Information Officer is normally the head of the business.</p>
+      <div class="popia-actions"><a class="btn primary" href="https://eservices.inforegulator.org.za/" target="_blank" rel="noopener noreferrer">Register Information Officer</a><a class="btn ghost" href="https://inforegulator.org.za/information-officers/" target="_blank" rel="noopener noreferrer">Official guidance and forms</a></div>
+      <p class="form-help">Register through the Regulator's eServices portal and keep the confirmation. Entering an officer's details in this app does not register them. If the portal is unavailable, the official guidance page provides the manual form and submission instructions.</p>
+    </section>
+  </div>
+  <details class="popia-advanced"><summary>Advanced notice setup</summary><p>The guided setup remains available for your business details and privacy-policy answers. Publishing through it also creates a new notice version.</p><a class="btn ghost" href="{{ url_for('settings.popia_wizard_step', step=1) }}">Open guided setup</a></details>
+</div>
+{% endblock %}

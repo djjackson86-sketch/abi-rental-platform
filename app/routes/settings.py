@@ -438,11 +438,101 @@ def _popia_render(step):
     )
 
 
+def _popia_hub(editor_text=None, expected_version=None, editor_error=None, conflict=False):
+    from app.services import popia_notice_editor
+    published = popia_notice_editor.current_notice()
+    return render_template(
+        "admin/settings/popia_hub.html",
+        published=published,
+        editor_text=editor_text if editor_text is not None else (published["notice_text"] if published else ""),
+        expected_version=expected_version if expected_version is not None else (published["notice_version"] if published else ""),
+        editor_error=editor_error,
+        conflict=conflict,
+        editor_csrf_token=csrf.issue_token("popia_notice_editor"),
+    )
+
+
 @bp.route("/popia")
 @login_required
 @main_required
 def popia_wizard_index():
-    return _popia_render(1)
+    return _popia_hub()
+
+
+@bp.post("/popia/notice")
+@login_required
+@main_required
+def popia_notice_save():
+    from app.services import popia_notice_editor
+    if request.content_length is None or request.content_length <= 0:
+        abort(400, description="Submit the notice using the POPIA settings form.")
+    if request.content_length > 400000:
+        abort(413)
+    if request.mimetype != "application/x-www-form-urlencoded":
+        abort(400, description="Use the POPIA settings form to publish the notice.")
+    csrf.validate("popia_notice_editor")
+    text = request.form.get("notice_text", "")
+    expected_version = request.form.get("expected_version", "")
+    try:
+        if request.form.get("confirm_publish") != "1":
+            raise ValueError("Please confirm that you have reviewed the notice and want to publish it.")
+        result = popia_notice_editor.publish_notice(text, expected_version, user_id=session.get("user_id"))
+    except popia_notice_editor.NoticeConflict as exc:
+        return _popia_hub(text, expected_version, str(exc), conflict=True), 409
+    except ValueError as exc:
+        return _popia_hub(text, expected_version, str(exc)), 400
+    if result.get("unchanged"):
+        flash("No wording changed. The current notice remains published.", "success")
+    else:
+        flash(f"Privacy notice published as version {result['notice_version']}.", "success")
+    return redirect(url_for("settings.popia_wizard_index"))
+
+
+def _published_popia_document():
+    from app.services import popia_notice_editor
+    published = popia_notice_editor.current_notice()
+    if not published:
+        abort(404, description="Publish a customer privacy notice before printing or downloading it.")
+    return published
+
+
+@bp.get("/popia/notice/print")
+@login_required
+@main_required
+def popia_notice_print():
+    from app.routes.public import render_markdown_html
+    published = _published_popia_document()
+    response = Response(render_template("admin/settings/popia_notice_print.html",
+        settings=get_company_settings(), published=published,
+        notice_html=render_markdown_html(published["notice_text"])), mimetype="text/html")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@bp.get("/popia/notice.pdf")
+@login_required
+@main_required
+def popia_notice_pdf():
+    from app.services.popia_documents import document_pdf
+    published = _published_popia_document()
+    pdf = document_pdf(published["notice_text"], "Sano Trailers — Customer Privacy Notice",
+                       version=published["notice_version"], published_at=published["published_at"])
+    return Response(pdf, mimetype="application/pdf", headers={
+        "Content-Disposition": "attachment; filename=sano-customer-privacy-notice.pdf",
+        "Cache-Control": "no-store",
+    })
+
+
+@bp.get("/popia/agreement.pdf")
+@login_required
+@main_required
+def popia_agreement_pdf():
+    from app.services.popia_documents import agreement_text, document_pdf
+    pdf = document_pdf(agreement_text(), "Jackapp and Sano Trailers — Simplified Agreement")
+    return Response(pdf, mimetype="application/pdf", headers={
+        "Content-Disposition": "attachment; filename=sano-jackapp-simplified-agreement.pdf",
+        "Cache-Control": "no-store",
+    })
 
 
 @bp.route("/popia/<int:step>")

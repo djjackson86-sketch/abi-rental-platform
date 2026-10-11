@@ -73,7 +73,7 @@ def test_new_owner_posts_require_session_token(app,path,scope):
     with app.app_context(): owner=get_db().execute("SELECT id FROM users WHERE role='owner'").fetchone()[0]
     with client.session_transaction() as session:
         session['user_id']=owner; session['user_role']='owner'
-    client.get('/settings/portal' if scope=='portal_save' else '/settings/popia')
+    client.get('/settings/portal' if scope=='portal_save' else '/settings/popia/1')
     with client.session_transaction() as session: token=session['_csrf_tokens'][scope]
     assert token
     assert client.post(path,data={'csrf_token':'wrong'}).status_code==400

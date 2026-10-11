@@ -172,6 +172,24 @@ def booking_confirmation(order_id):
 # whole POPIA document-pack blueprint) so the public page renders the wizard's notice
 # with no dependency on the internal compliance screens.
 
+def _safe_notice_link(match):
+    # Notice text is owner-editable: escaping text alone does not make href safe.
+    from urllib.parse import urlsplit
+    label, escaped_url = match.group(1), match.group(2)
+    url = html.unescape(escaped_url)
+    if any(ord(char) < 32 or ord(char) == 127 for char in url):
+        return label
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return label
+    allowed = (parsed.scheme.lower() in ("http", "https") and bool(parsed.netloc)) or parsed.scheme.lower() in ("mailto", "tel")
+    allowed = allowed or (not parsed.scheme and (url.startswith("#") or (url.startswith("/") and not url.startswith("//"))))
+    if not allowed:
+        return label
+    return f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{label}</a>'
+
+
 def _md_inline(text):
     """Escape a fragment, then apply the inline Markdown the notice actually uses.
 
@@ -181,7 +199,7 @@ def _md_inline(text):
     text = html.escape(text, quote=False)
     text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", r'<a href="\2" target="_blank" rel="noopener">\1</a>', text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", _safe_notice_link, text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"__([^_]+)__", r"<strong>\1</strong>", text)
     text = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<em>\1</em>", text)

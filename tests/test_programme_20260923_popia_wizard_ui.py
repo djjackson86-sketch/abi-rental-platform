@@ -219,7 +219,7 @@ def test_unknown_step_404s(app, client):
 def test_owner_sees_step1_prefilled_and_unknown_fields_blank(app, client):
     seed_company_settings(app)
     login_owner(client)
-    body = text_of(client.get("/settings/popia"))
+    body = text_of(client.get("/settings/popia/1"))
     assert "Who you are" in body
     assert "0" in body and "of 5 steps done" in body  # the progress rail
     assert 'value="Sano Trailers"' in body
