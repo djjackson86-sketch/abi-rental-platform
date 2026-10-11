@@ -14,7 +14,7 @@ from app.routes.public import render_markdown_html
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "sano-customer-privacy-v2"
 TEXT = (ROOT / "docs/popia/SANO-CUSTOMER-PRIVACY-NOTICE.md").read_text(encoding="utf-8")
-GET_PATHS = ["/settings/popia", "/settings/popia/notice/print", "/settings/popia/notice.pdf", "/settings/popia/agreement.pdf", "/settings/popia/information-notice.pdf"]
+GET_PATHS = ["/settings/popia", "/settings/popia/notice/print", "/settings/popia/notice.pdf", "/settings/popia/agreement.pdf", "/settings/popia/information-notice.pdf", "/settings/popia/operator-contract.pdf"]
 
 
 @pytest.fixture
@@ -58,13 +58,13 @@ def test_owner_settings_nav_and_three_sections(owner):
     response = owner.get("/settings/popia")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert all(text in body for text in ["1. Customer privacy notice", "2. Sano–Jackapp information notice", "3. Register an Information Officer"])
+    assert all(text in body for text in ["1. Customer privacy notice", "2. Sano–Jackapp operator contract", "3. Register an Information Officer"])
     assert TEXT in html.unescape(body)
     assert 'href="https://eservices.inforegulator.org.za/"' in body
     assert 'href="https://inforegulator.org.za/information-officers/"' in body
     assert "55(2)" in body and "does not register them" in body
-    assert "No signature form is required" in body
-    assert "downloading alone does not establish agreement" in body
+    assert "Both authorised representatives" in body
+    assert "Downloading does not sign the contract" in body
     assert "Publishing updates the customer-facing notice immediately" in body
     assert "not unsaved edits" in body
 
@@ -176,7 +176,7 @@ def test_pdf_downloads_have_wrapped_content_signature_and_a4(owner):
     fitz = pytest.importorskip("fitz")
     for path, filename, markers in [
         ("/settings/popia/notice.pdf", "sano-customer-privacy-notice.pdf", [VERSION, "Who collects your information?", "Information Regulator"]),
-        ("/settings/popia/agreement.pdf", "sano-jackapp-client-information-notice.pdf", ["Jackapp", "Sano Trailers", "11. Keeping this record", "written contract", "handwritten signatures", "email exchange"]),
+        ("/settings/popia/agreement.pdf", "sano-jackapp-operator-contract.pdf", ["Jackapp", "Sano Trailers", "11. Electronic signing and copies", "Electronic signing", "contract"]),
     ]:
         response = owner.get(path)
         assert response.status_code == 200

@@ -34,7 +34,7 @@ def _inline(text):
     return text
 
 
-def document_pdf(text, title, version="", published_at=""):
+def document_pdf(text, title, version="", published_at="", *, signing_page=False):
     """A4, wrapped paragraphs, repeated table headers, and numbered pages."""
     stream = BytesIO()
     document = SimpleDocTemplate(stream, pagesize=A4, rightMargin=48, leftMargin=48,
@@ -124,5 +124,9 @@ def document_pdf(text, title, version="", published_at=""):
         canvas.drawRightString(A4[0] - 48, 27, f"Page {doc.page}")
         canvas.restoreState()
 
+    if signing_page:
+        from reportlab.platypus import PageBreak
+        from app.services.popia_contract import ContractSigningPage
+        story.extend([PageBreak(), ContractSigningPage(text)])
     document.build(story or [Paragraph("No document text available.", body)], onFirstPage=footer, onLaterPages=footer)
     return stream.getvalue()

@@ -7,7 +7,7 @@
 <header class="page-header"><div><p class="eyebrow">Settings</p><h1>POPIA</h1><p>Manage your customer privacy notice and the documents Sano needs.</p></div></header>
 {% include "admin/settings/nav.html" %}
 <div class="popia-hub" data-popia-settings="v1">
-  <nav class="popia-actions" aria-label="POPIA sections"><a class="btn ghost" href="#notice-heading">Privacy notice</a><a class="btn ghost" href="#agreement-heading">Information notice</a><a class="btn ghost" href="#officer-heading">Officer registration</a></nav>
+  <nav class="popia-actions" aria-label="POPIA sections"><a class="btn ghost" href="#notice-heading">Privacy notice</a><a class="btn ghost" href="#agreement-heading">Operator contract</a><a class="btn ghost" href="#officer-heading">Officer registration</a></nav>
   <section class="panel" aria-labelledby="notice-heading">
     <div class="panel-header">
       <div><h2 id="notice-heading">1. Customer privacy notice</h2><p>Edit the notice your customers see when they register or book.</p></div>
@@ -37,10 +37,10 @@
   </section>
   <div class="popia-columns">
     <section class="panel" aria-labelledby="agreement-heading">
-      <h2 id="agreement-heading">2. Sano–Jackapp information notice</h2>
-      <p>Keep this plain-English record of how Jackapp handles and helps protect Sano's customer information, and the responsibilities of each business.</p>
-      <div class="popia-actions"><a class="btn primary" href="{{ url_for('settings.popia_agreement_pdf') }}">Download information notice PDF</a></div>
-      <p class="form-help">No signature form is required for this record. POPIA still requires written operator security terms, covered by your service agreement or clear written confirmation. Keep that agreement or confirmation with this notice; downloading alone does not establish agreement.</p>
+      <h2 id="agreement-heading">2. Sano–Jackapp operator contract</h2>
+      <p>Download the written customer-information contract covering Sano and Jackapp's responsibilities, processing instructions, confidentiality and security safeguards.</p>
+      <div class="popia-actions"><a class="btn primary" href="{{ url_for('settings.popia_agreement_pdf') }}">Download contract to sign electronically</a></div>
+      <p class="form-help">Both authorised representatives must review the terms, confirm the legal party details and sign. The PDF includes fillable names, signing dates, electronic-signature name fields and unticked signing declarations for both parties. Use a compatible PDF editor, such as Adobe Acrobat Reader, or an appropriate electronic-signature service, then exchange and keep the completed copy. Downloading does not sign the contract or record acceptance in this app. Typed-name fields are not cryptographic signatures or identity verification.</p>
     </section>
     <section class="panel" aria-labelledby="officer-heading">
       <h2 id="officer-heading">3. Register an Information Officer</h2>

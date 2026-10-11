@@ -525,13 +525,14 @@ def popia_notice_pdf():
 
 @bp.get("/popia/agreement.pdf")
 @bp.get("/popia/information-notice.pdf")
+@bp.get("/popia/operator-contract.pdf")
 @login_required
 @main_required
 def popia_agreement_pdf():
-    from app.services.popia_documents import agreement_text, document_pdf
-    pdf = document_pdf(agreement_text(), "Jackapp and Sano Trailers — Client Information Notice")
+    from app.services.popia_contract import contract_pdf
+    pdf = contract_pdf()
     return Response(pdf, mimetype="application/pdf", headers={
-        "Content-Disposition": "attachment; filename=sano-jackapp-client-information-notice.pdf",
+        "Content-Disposition": "attachment; filename=sano-jackapp-operator-contract.pdf",
         "Cache-Control": "no-store",
     })
 
