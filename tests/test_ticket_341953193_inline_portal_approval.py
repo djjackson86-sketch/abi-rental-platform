@@ -37,7 +37,8 @@ def test_inline_success_persists_and_prefills_existing_customer(client, app, pen
     assert 'disabled>Approved</button>' in result['html']
     assert 'Delete pending client' not in result['html']
     assert f'/orders/new?customer_id={cid}' in result['html']
-    assert result['html'].index('>Create order</a>') < result['html'].index('>Create order for this customer</a>')
+    assert '>Create order</a>' not in result['html']
+    assert result['html'].count('>Create order for this customer</a>') == 1
     assert registration_for(app, cid)['status'] == 'approved'
     for path in (f'/customers/{cid}', f'/customers/{cid}/edit'):
         html = client.get(path).get_data(as_text=True)

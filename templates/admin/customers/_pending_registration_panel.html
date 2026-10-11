@@ -61,7 +61,6 @@
   </div>
   {% if user_can('new_order') %}
   <div class="portal-order-actions">
-    <a class="btn primary" href="{{ url_for('orders.new') }}">Create order</a>
     <a class="btn primary" href="{{ url_for('orders.new', customer_id=customer.id) }}">Create order for this customer</a>
   </div>
   {% endif %}
