@@ -1,7 +1,7 @@
 {
   "contract_version": "1.0",
   "contract_text_sha256": "ad7212bb825a5552b60da5adfd92e39933172a7e35337c6cfe8dfa5d58b94432",
-  "signed_pdf_sha256": "79a0260aeade3c9807385961f8ce895884e0ffc42d0221e69ee36282193ad54c",
+  "signed_pdf_sha256": "e7d8f92e2014d066b05baac2925e88e9f058e409bd98c3338da1d966de7ae9c0",
   "signed_at": "2026-10-11T08:37:38.170204+02:00",
   "signer": "Donovan Jackson",
   "party": "Donovan Jackson t/a Jackapp",
@@ -10,5 +10,15 @@
   "authority_source": "Direct user instruction in WhatsApp conversation",
   "authorising_instruction": "On popia page in settings electronically sign the contract between me and Sano for me (the signed version replaces the current one)",
   "sano_signed": false,
-  "identity_or_cryptographic_verification": false
+  "identity_or_cryptographic_verification": false,
+  "layout_revisions": [
+    {
+      "revised_at": "2026-10-11T09:14:03.354847+02:00",
+      "prior_pdf_sha256": "79a0260aeade3c9807385961f8ce895884e0ffc42d0221e69ee36282193ad54c",
+      "revised_pdf_sha256": "e7d8f92e2014d066b05baac2925e88e9f058e409bd98c3338da1d966de7ae9c0",
+      "authorising_instruction": "Remove all wording below signatures on page 4; clarified: just instructions, disclaimer and footer",
+      "scope": "Removed post-declaration instructions, disclaimer, source-hash footer and page footer from page 4 only. Contract terms, signature fields, dates and intention declarations preserved.",
+      "terms_and_signature_values_unchanged": true
+    }
+  ]
 }
