@@ -29,6 +29,7 @@ to any customer id in the book).
 """
 
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -77,17 +78,36 @@ FILLABLE_FIELDS = (
     "country",
 )
 
-#: The custom-detail keys the public form carries — the same eight the staff Edit customer page
-#: posts, so a record created from the portal is shaped exactly like one typed at the counter.
+#: The custom-detail keys the public form carries — the counter-only extras beside the
+#: address block. The vehicle-make/colour/reg keys the staff Edit customer page also posts
+#: were **removed from the public form** (client instruction): a customer never types a
+#: vehicle, staff capture and scan it. Country was removed for the same reason (a South
+#: African depot's customers are South African; the record defaults to SA internally), and
+#: ``website`` is handled separately because it applies to a company only.
 PORTAL_CUSTOM_FIELD_KEYS = (
-    "vehicle_make",
-    "vehicle_color",
-    "vehicle_reg_no",
     "alternative_contact_name",
     "alternative_contact_number",
     "alternative_contact_relationship",
     "vat_number",
     "company_reg_no",
+)
+
+#: Every field the public form must carry a value for, with the sentence shown when it is
+#: blank. The owner asked for these to be mandatory (the red asterisk on the form) and the
+#: server enforces the same set, so a crafted POST that omits one is refused exactly like a
+#: customer who left the box empty.
+PORTAL_REQUIRED_FIELDS = (
+    ("name", "Please enter your name."),
+    ("email", "Please enter your email address."),
+    ("phone", "Please enter your phone number."),
+    ("address_line1", "Please enter your address line 1."),
+    ("suburb", "Please enter your suburb."),
+    ("city", "Please enter your city."),
+    ("province", "Please enter your province."),
+    ("postal_code", "Please enter your postal code."),
+    ("alternative_contact_name", "Please enter the alternative contact's name."),
+    ("alternative_contact_number", "Please enter the alternative contact's number."),
+    ("alternative_contact_relationship", "Please enter the alternative contact's relationship."),
 )
 
 #: The two customer types the staff form offers; anything else falls back to individual.
@@ -311,18 +331,19 @@ def parse_decision(value):
 
 
 def submission_values(form):
-    """The public form's values, cleaned and validated — the same shape the staff form posts.
+    """The public form's values, cleaned and validated — the shape the intake service writes.
 
-    The public form mirrors the staff Edit customer page field for field (minus the vehicle
-    details panel and the staff-only Client Verified / Standard discount / Block customer
-    controls), so this returns everything that page posts: the customer type, the contact block,
-    the address block including address line 2 and country, and the eight custom details.
-    ``create_customer`` reads exactly these keys, which is what keeps a record created on the
-    portal identical to one typed at the counter.
+    The customer's own capture: the customer type, the contact block, the (required) SA
+    address block and the alternative-contact block. Two staff-only things are gone by
+    design — **country** (a South African depot's clients are South African, so the record
+    defaults to SA internally and a posted country is ignored) and the **vehicle** fields
+    (make/colour/reg), which staff capture and scan, never the customer. ``website`` is a
+    company-only detail: it is accepted for a company and dropped for an individual, so a
+    crafted post cannot put one on a person.
 
-    Validation is deliberately small and honest: a name, at least one way to reach the customer,
-    and a plausible email/phone when one was given. Everything else is optional, because a
-    customer filling this in at a counter should never be blocked by a field they do not know.
+    Every field the owner marked mandatory is required here too (``PORTAL_REQUIRED_FIELDS``),
+    with a real email/phone shape check on top. The rule is server-side on purpose: the red
+    asterisk and the browser's ``required`` are a courtesy, this is the boundary.
     """
     customer_type = str(form.get("customer_type") or "individual").strip().lower()
     if customer_type not in PORTAL_CUSTOMER_TYPES:
@@ -338,21 +359,26 @@ def submission_values(form):
         "city": str(form.get("city") or "").strip(),
         "province": str(form.get("province") or "").strip(),
         "postal_code": str(form.get("postal_code") or "").strip(),
-        "country": str(form.get("country") or "").strip() or "South Africa",
         "marketing_opt_in": 1 if form.get("marketing_opt_in") else 0,
     }
     for key in PORTAL_CUSTOM_FIELD_KEYS:
         values[key] = str(form.get(key) or "").strip()
-    if not values["name"]:
-        raise ValueError("Please enter your name.")
-    if not values["phone"] and not values["email"]:
-        raise ValueError("Please give a phone number or an email address so the branch can reach you.")
-    if values["email"] and not _EMAIL_RE.match(values["email"]):
-        raise ValueError("Please enter a valid email address, or leave the email box empty.")
-    if values["phone"]:
-        digits = normalise_phone(values["phone"])
-        if not (_PHONE_DIGITS_MIN <= len(digits) <= _PHONE_DIGITS_MAX):
-            raise ValueError("Please enter a valid phone number, e.g. 082 123 4567.")
+    # Company-only: website. A crafted ``website`` on an individual is dropped here rather
+    # than stored, so the field really is "visible only for Company" server-side too.
+    values["website"] = (
+        str(form.get("website") or "").strip() if customer_type == "company" else ""
+    )
+    for key, message in PORTAL_REQUIRED_FIELDS:
+        if not str(values.get(key) or "").strip():
+            raise ValueError(message)
+    if not _EMAIL_RE.match(values["email"]):
+        raise ValueError("Please enter a valid email address.")
+    digits = normalise_phone(values["phone"])
+    if not (_PHONE_DIGITS_MIN <= len(digits) <= _PHONE_DIGITS_MAX):
+        raise ValueError("Please enter a valid phone number, e.g. 082 123 4567.")
+    alt_digits = normalise_phone(values["alternative_contact_number"])
+    if not (_PHONE_DIGITS_MIN <= len(alt_digits) <= _PHONE_DIGITS_MAX):
+        raise ValueError("Please enter a valid alternative contact number, e.g. 082 123 4567.")
     return values
 
 
@@ -465,16 +491,89 @@ def create_or_link_customer(form, branch_id, decision, slug=None):
             raise ValueError(BLOCKED_MESSAGE)
         # create_customer() is the house path: name required, email lower-cased, the branch taken
         # from the session — which, on a public request, is nobody. The branch the QR belongs to is
-        # written below, because that is the branch this client belongs to.
-        customer_id = create_customer(values)
-        if _source_keys_taken(PORTAL_SOURCE_SYSTEM, source_id):
-            reference = new_reference(slug)
-            source_id = f"{slug}:{reference}" if slug else reference
-        db.execute(
-            "UPDATE customers SET branch_id = ?, source_system = ?, source_id = ?, created_by_user_id = NULL WHERE id = ?",
-            (branch_id, PORTAL_SOURCE_SYSTEM, source_id, customer_id),
-        )
-        db.commit()
-        return {"customer_id": customer_id, "created": True, "linked": False, "reference": reference}
+        # passed in explicitly so the client — and the Telegram message — keep that branch
+        # attribution (client instruction: a Midrand submission stays Midrand). The notification is
+        # deferred (`notify=False`) so it goes out once, after the pending registration below.
+        from app.services import portal_registrations
+
+        # The whole create is ONE submission: the customer row, its portal source keys and the
+        # pending registration are written together and committed once. A failure while recording
+        # the pending registration rolls the customer row back with it, so the client never leaks
+        # as an ordinary, approved-looking customer that carries no pending flag. Every other
+        # caller keeps create_customer's and record_pending_registration's own commits; here each
+        # takes the deferred form and this path owns the single commit.
+        customer_id = None
+        try:
+            customer_id = create_customer(values, branch_id=branch_id, notify=False, defer_commit=True, pending_portal=True)
+            if _source_keys_taken(PORTAL_SOURCE_SYSTEM, source_id):
+                reference = new_reference(slug)
+                source_id = f"{slug}:{reference}" if slug else reference
+            db.execute(
+                "UPDATE customers SET branch_id = ?, source_system = ?, source_id = ?, created_by_user_id = NULL WHERE id = ?",
+                (branch_id, "portal_pending", source_id, customer_id),
+            )
+            # Company-only website: stored beside the other custom details. Never written for an
+            # individual (submission_values already dropped it), never for the staff path.
+            if values.get("website") and values.get("customer_type") == "company":
+                row = db.execute(
+                    "SELECT custom_fields_json FROM customers WHERE id = ?", (customer_id,)
+                ).fetchone()
+                try:
+                    fields = json.loads((_row_value(row, "custom_fields_json", "") or "") or "{}")
+                except ValueError:
+                    fields = {}
+                if not isinstance(fields, dict):
+                    fields = {}
+                fields["website"] = values["website"]
+                db.execute(
+                    "UPDATE customers SET custom_fields_json = ? WHERE id = ?",
+                    (json.dumps(fields, ensure_ascii=False), customer_id),
+                )
+            # A brand-new portal client is a *pending* registration: staff must verify the ID and
+            # record the main vehicle, then approve — the submission itself never approves anyone.
+            # Additive only: a link to an existing client (above) records no registration, so an
+            # already-verified client is never downgraded, and nothing is ever backfilled.
+            registration_id = portal_registrations.record_pending_registration(
+                customer_id,
+                branch_id,
+                reference,
+                name=values["name"],
+                email=values["email"],
+                phone=values["phone"],
+                commit=False,
+            )
+            # Fail closed on Turso too: its adapter autocommits each statement.
+            # Only drop the initial pending marker once the queue row exists.
+            db.execute("UPDATE customers SET source_system = ? WHERE id = ?",
+                       (PORTAL_SOURCE_SYSTEM, customer_id))
+            db.commit()
+        except Exception:
+            db.rollback()
+            # Compensating cleanup: the remote libSQL adapter autocommits every statement and its
+            # commit()/rollback() are deliberate no-ops (see app/turso_db.py), so a rollback alone
+            # cannot undo the customer row there. Delete it explicitly so a failed pending insert
+            # can never leave an approved-looking client on either backend. On SQLite the rollback
+            # has already removed the row and these deletes are harmless no-ops.
+            if customer_id is not None:
+                try:
+                    db.execute("DELETE FROM portal_registrations WHERE customer_id = ?", (customer_id,))
+                    db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+                    db.commit()
+                except Exception:
+                    pass
+            raise
+        try:
+            from app.services.telegram import send_new_customer_notification
+
+            send_new_customer_notification(customer_id)
+        except Exception:
+            pass
+        return {
+            "customer_id": customer_id,
+            "created": True,
+            "linked": False,
+            "reference": reference,
+            "registration_id": registration_id,
+        }
 
     raise ValueError("Please choose one of the options we showed you.")  # pragma: no cover

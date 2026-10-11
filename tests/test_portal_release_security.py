@@ -4,6 +4,20 @@ from app import create_app
 from app.db import get_db
 from app.services import customers, portal_intake, consent
 
+# Client portal changes: the public form now requires the SA address block and the
+# alternative-contact block, enforced server-side. Every portal POST in this file must carry
+# them, or the submission is refused for a missing field before the behaviour under test.
+PORTAL_REQUIRED = {
+    'address_line1': '1 Test Road',
+    'suburb': 'Testville',
+    'city': 'Testburg',
+    'province': 'Gauteng',
+    'postal_code': '2000',
+    'alternative_contact_name': 'Test Contact',
+    'alternative_contact_number': '0825550000',
+    'alternative_contact_relationship': 'Friend',
+}
+
 @pytest.fixture
 def app(tmp_path):
     return create_app({'TESTING': True, 'DATABASE': str(tmp_path/'security.sqlite'),
@@ -36,7 +50,7 @@ def test_registration_and_lookup_share_the_rate_budget(app,branch,route,monkeypa
         customers.create_customer({'name':'Synthetic Person','phone':'0825550111'})
     base='/portal' if route=='universal' else '/portal/'+branch['public_slug']
     client=app.test_client()
-    data={'name':'Synthetic Person','phone':'0825550111','popia_consent':'1'}
+    data={'name':'Synthetic Person','phone':'0825550111','email':'synthetic.rate@example.test','popia_consent':'1', **PORTAL_REQUIRED}
     for _ in range(portal_intake.LOOKUP_LIMIT):
         assert client.post(base+'/register',data=data).status_code==200
     assert client.post(base+'/register',data=data).status_code==429
@@ -51,7 +65,7 @@ def test_name_only_link_cannot_fill_existing_identity(app,branch,monkeypatch):
         victim=customers.create_customer({'name':'Synthetic Victim','phone':'0835550100'})
     response=app.test_client().post('/portal/register',data={
         'name':'Synthetic Victim','phone':'0825550999','email':'attacker@example.test',
-        'suburb':'Attacker Suburb','decision':f'link:{victim}','popia_consent':'1'})
+        'suburb':'Attacker Suburb','decision':f'link:{victim}','popia_consent':'1', **PORTAL_REQUIRED})
     assert response.status_code==400
     with app.app_context():
         row=customers.get_customer(victim)

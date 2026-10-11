@@ -568,6 +568,32 @@ CREATE TABLE IF NOT EXISTS recovery_events (
     user_id INTEGER,
     note TEXT NOT NULL DEFAULT ''
 );
+
+-- Self-registered customers awaiting verification (client portal changes). A public
+-- portal submission that creates a NEW client records a pending registration here; the
+-- client does not behave as an approved client (default customer list, order/allocation
+-- selection) until staff explicitly approve it. Additive only -- existing/imported
+-- clients get NO row and are therefore never affected, and nothing is ever backfilled.
+-- ``branch_id`` is the branch the submission belongs to (the Midrand attribution) and is
+-- what the pending queue and the approval check are scoped by. No ID image, ID number or
+-- OCR data is stored: ``status`` + the customer's own fields are the whole record.
+CREATE TABLE IF NOT EXISTS portal_registrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference TEXT NOT NULL DEFAULT '',
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+    name TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    approved_at TEXT,
+    approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_portal_registrations_customer ON portal_registrations(customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_portal_registrations_branch ON portal_registrations(branch_id);
 """
 
 
@@ -1180,6 +1206,40 @@ def run_migrations(db):
     db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_slug "
         "ON branches(public_slug) WHERE public_slug <> ''"
+    )
+
+    # --- Self-registered customers awaiting verification (additive) ----------
+    # A new, empty table on an existing database: nobody is pending until a client
+    # self-registers through the portal. This is deliberately the ONLY thing the portal
+    # verification feature adds to the schema — no column is added to ``customers`` and
+    # nothing is backfilled, so every existing/imported client behaves exactly as before
+    # (an approved client simply has no row here). ``status`` is 'pending' until staff
+    # approve; the partial unique index keeps one pending row per client. No ID image or
+    # ID number is ever stored.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS portal_registrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference TEXT NOT NULL DEFAULT '',
+            customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+            branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+            name TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '',
+            phone TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            approved_at TEXT,
+            approved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_portal_registrations_customer ON portal_registrations(customer_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_portal_registrations_branch ON portal_registrations(branch_id)"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_registrations_pending "
+        "ON portal_registrations(customer_id) WHERE status = 'pending'"
     )
 
 

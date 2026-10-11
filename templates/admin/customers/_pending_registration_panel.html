@@ -1,0 +1,61 @@
+{# The verification panel for a self-registered client — Customers edit + detail.
+
+   Shown only while ``pending_registration`` is set (the client came in through the customer portal
+   and has not been approved yet); for an ordinary / imported / already-approved client it is None
+   and this whole block renders nothing.
+
+   The workflow the owner asked for, in one place on the selected customer:
+
+   * the submitted details and the registration reference, read-only;
+   * the two checks the explicit approval needs — the counter's existing **ID verification**
+     (``pending_id_verified``: customers.client_verified = 1) and a recorded **main vehicle**
+     (``pending_vehicle_captured``) — in either order, each shown as done or still open;
+   * the vehicle-disc scanner for this client, and a jump to the Client Verified section of the
+     customer form, so staff never leave the client's workflow;
+   * the approval itself: a POST to ``customers.approve_portal_registration`` with the scoped CSRF
+     token, disabled until both checks are met.
+
+   No ID image, ID number or OCR is requested or stored here — verification is the same yes/no flag
+   the counter already uses. The approval form is self-contained (never nested inside another
+   <form>), so the customer form keeps its own single form.
+
+   Context expected: pending_registration, pending_id_verified, pending_vehicle_captured,
+   portal_approval_csrf_token, customer. #}
+{% if pending_registration %}
+<article class="panel pending-registration-panel" id="pending-registration">
+  <div class="panel-title">
+    <h2>Awaiting verification</h2>
+    <span class="badge status-payment_due">Pending approval</span>
+  </div>
+  <p class="form-help">
+    Self-registered through the customer portal{% if pending_registration.created_at %} on {{ pending_registration.created_at[:10] }}{% endif %}{% if pending_registration.branch_name %} · {{ pending_registration.branch_name }} branch{% endif %}.
+    Verify the client's ID and capture their main vehicle, in either order, then approve.
+  </p>
+  <div class="detail-list pending-registration-details">
+    <div class="detail-row"><span>Reference</span><b>{{ pending_registration.reference or '—' }}</b></div>
+    <div class="detail-row"><span>Name submitted</span><b>{{ pending_registration.name or '—' }}</b></div>
+    <div class="detail-row"><span>Email</span><b>{{ pending_registration.email or '—' }}</b></div>
+    <div class="detail-row"><span>Phone</span><b>{{ pending_registration.phone or '—' }}</b></div>
+    <div class="detail-row"><span>Branch</span><b>{{ pending_registration.branch_name or 'No branch recorded' }}</b></div>
+  </div>
+  <ul class="pending-checklist">
+    <li class="pending-check {% if pending_id_verified %}is-done{% else %}is-open{% endif %}">
+      <strong>ID verification</strong>
+      <span>{% if pending_id_verified %}Recorded — the client is marked verified.{% else %}Not yet — set “Client verified” to Yes on this customer.{% endif %}</span>
+    </li>
+    <li class="pending-check {% if pending_vehicle_captured %}is-done{% else %}is-open{% endif %}">
+      <strong>Main vehicle</strong>
+      <span>{% if pending_vehicle_captured %}Recorded — the client has a main vehicle.{% else %}Not yet — scan the licence disk and make it the main vehicle.{% endif %}</span>
+    </li>
+  </ul>
+  <div class="pending-actions">
+    {% if user_can('scan_vehicle') %}<a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id, vehicle_role='main') }}">Scan main vehicle disk</a>{% endif %}
+    <a class="btn ghost" href="{{ url_for('customers.edit', customer_id=customer.id) }}#client-verified">Set ID verification</a>
+  </div>
+  <form method="post" action="{{ url_for('customers.approve_portal_registration', registration_id=pending_registration.id) }}" class="pending-approve-form">
+    <input type="hidden" name="csrf_token" value="{{ portal_approval_csrf_token }}">
+    <button class="btn primary" type="submit"{% if not (pending_id_verified and pending_vehicle_captured) %} disabled title="Both the ID verification and the main vehicle must be recorded before approving"{% endif %}>Approve client</button>
+    <span class="form-help">{% if pending_id_verified and pending_vehicle_captured %}Both checks are in place — approval makes this a normal customer for the branch.{% else %}Approval stays disabled until both checks above are recorded.{% endif %}</span>
+  </form>
+</article>
+{% endif %}

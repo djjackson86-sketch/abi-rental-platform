@@ -13,6 +13,7 @@ from app.services.customer_credits import customer_credit_balance
 from app.services.credit_limits import debt_sql, facility_summary
 from app.services.settings import get_company_settings
 from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
+from app.services.portal_registrations import pending_exclusion_clause
 from app.services.branches import adjusted_pickup_time_for_branch, branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
 from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
@@ -70,6 +71,7 @@ def _customers():
                (SELECT COALESCE(SUM(l.amount_due - l.settled_amount), 0) FROM legacy_customer_balances l WHERE l.customer_id = customers.id AND l.status = 'active' AND l.amount_due > l.settled_amount) AS legacy_balance,
                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
+        WHERE 1=1{pending_exclusion_clause("customers")}
         ORDER BY name
     """).fetchall()
     return [customer_summary_for(row) for row in rows]
@@ -97,7 +99,7 @@ def _customer_summary_by_id(customer_id):
                (SELECT COALESCE(SUM(l.amount_due - l.settled_amount), 0) FROM legacy_customer_balances l WHERE l.customer_id = customers.id AND l.status = 'active' AND l.amount_due > l.settled_amount) AS legacy_balance,
                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
-        WHERE id = ?
+        WHERE id = ?{pending_exclusion_clause("customers")}
     """, (customer_id,)).fetchone()
     return customer_summary_for(row) if row else None
 
@@ -420,7 +422,7 @@ def edit(order_id):
                 # order's OWN customer may be blocked (a block applied after the
                 # order was raised) — only re-pointing it at a blocked customer is
                 # refused.
-                _build_order_payload(form, allow_blocked_customer_id=_order_customer_id(form_data))
+                _build_order_payload(form, allow_blocked_customer_id=_order_customer_id(form_data), allow_pending_customer_id=_order_customer_id(form_data))
                 form = _form_with_inline_customer(form)
                 update_draft_order(order_id, form)
                 if _wants_sales_repairs(form, order_id):

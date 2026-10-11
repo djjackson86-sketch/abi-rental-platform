@@ -55,7 +55,11 @@ def test_real_registration_records_basic_version_and_requires_consent(app,channe
     client=app.test_client()
     with app.app_context():slug=get_db().execute('SELECT public_slug FROM branches ORDER BY id LIMIT 1').fetchone()[0]
     path='/portal/register' if channel=='universal' else '/portal/'+slug+'/register'
-    data={'name':'Synthetic Basic Customer','phone':'0825550119','email':'basic@example.test'}
+    data={'name':'Synthetic Basic Customer','phone':'0825550119','email':'basic@example.test',
+          'address_line1':'1 Basic Road','suburb':'Basicville','city':'Basicburg',
+          'province':'Gauteng','postal_code':'2003',
+          'alternative_contact_name':'Basic Contact','alternative_contact_number':'0825550118',
+          'alternative_contact_relationship':'Friend'}
     refused=client.post(path,data=data)
     assert 'Please tick the box' in refused.get_data(as_text=True)
     with app.app_context():assert get_db().execute('SELECT COUNT(*) FROM customers').fetchone()[0]==0

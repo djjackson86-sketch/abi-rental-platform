@@ -5,6 +5,7 @@ from io import StringIO
 from flask import Blueprint, Response, abort, flash, redirect, render_template, request, session, url_for
 
 from app.routes.auth import login_required
+from app.services import csrf, portal_registrations
 from app.services.access import user_can_module
 from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
@@ -64,6 +65,25 @@ def _display_limit():
     return max(PAGE_SIZE, min(requested, 5000))
 
 
+def _pending_registration_context(customer_id, customer=None):
+    """The self-registration verification panel's context for one client.
+
+    Frontend contract (fixed): ``pending_registration`` is the pending registration mapping
+    (or ``None`` for an ordinary client), ``portal_approval_csrf_token`` is the scoped CSRF
+    token the approve form must post, ``pending_id_verified`` reflects the existing
+    ``client_verified`` flag and ``pending_vehicle_captured`` reflects whether a main vehicle
+    is already recorded — the two things the explicit approval requires, in either order.
+    """
+    if customer is None:
+        customer = get_customer(customer_id)
+    return {
+        "pending_registration": portal_registrations.pending_registration_for_customer(customer_id),
+        "portal_approval_csrf_token": csrf.issue_token("portal_approval"),
+        "pending_id_verified": portal_registrations.id_verified(customer),
+        "pending_vehicle_captured": portal_registrations.main_vehicle_recorded(customer_id),
+    }
+
+
 @bp.route("")
 @login_required
 def index():
@@ -85,6 +105,10 @@ def index():
         filter_counts=customer_filter_counts(),
         filters={"query": query, "customer_type": customer_type, "marketing": marketing},
         client_verified_label=client_verified_label,
+        # Self-registered customers awaiting verification, branch-scoped, at the top of the
+        # list (client instruction). Each row: id / reference / customer_id / name / email /
+        # phone / branch_name / created_at.
+        pending_registrations=portal_registrations.list_pending_registrations(),
     )
 
 
@@ -159,6 +183,9 @@ def detail(customer_id):
         # facility figures as the statement and the order screens.
         facility=facility_summary(customer_id),
         funding_request_key=uuid.uuid4().hex,
+        # Client portal changes: the verification panel for a self-registered client. For an
+        # ordinary (non-pending) client ``pending_registration`` is None and the panel is hidden.
+        **_pending_registration_context(customer_id, customer),
     )
 
 
@@ -297,4 +324,31 @@ def edit(customer_id):
         except ValueError as exc:
             flash(str(exc), "error")
     customer = get_customer(customer_id)
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit(), vehicles=list_vehicles(customer_id))
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit(), vehicles=list_vehicles(customer_id), **_pending_registration_context(customer_id, customer))
+
+
+@bp.post("/portal/<int:registration_id>/approve")
+@login_required
+def approve_portal_registration(registration_id):
+    """Approve a self-registered client's pending portal registration — explicit action only.
+
+    The one path that turns a pending sign-up into an approved client. Refused unless the
+    client is ID-verified **and** has a recorded main vehicle (either order — the checks read
+    the final state), and refused for a registration outside the session's branch scope.
+    Scoped CSRF, so a cross-site POST cannot approve anyone, and nothing here is triggered by
+    a submission or a scan on its own.
+    """
+    csrf.validate("portal_approval")
+    registration = portal_registrations.registration_by_id(registration_id)
+    if registration is None:
+        abort(404)
+    if not portal_registrations.branch_in_session_scope(registration):
+        abort(403)
+    customer_id = registration.get("customer_id")
+    try:
+        portal_registrations.approve_registration(registration_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("customers.edit", customer_id=customer_id))
+    flash("Client approved — they now show as a normal customer for this branch.", "success")
+    return redirect(url_for("customers.edit", customer_id=customer_id))

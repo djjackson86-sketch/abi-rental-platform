@@ -18,6 +18,10 @@
   <a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a>
 </header>
 
+{# Client instruction: self-registered customers awaiting verification sit at the very top of the
+   Customers page, in the same movement-card style as the dashboard's "Going out" worklist. #}
+{% include "admin/customers/_pending_registrations_queue.html" %}
+
 <section class="customers-page-shell">
   <aside class="customers-filter-rail panel">
     <form method="get" class="customers-filter-form">

@@ -642,3 +642,32 @@ body.scan-fs-open{overflow:hidden}
 @media(max-width:1050px){.customer-vehicles-card{grid-column:auto}}
 @media(max-width:520px){.vehicle-remove-form button{width:100%}}
 
+/* --- Client portal changes: required-field markers, honeypot, pending self-registrations.
+   Scoped to the classes the templates add, and responsive at the end of the sheet so nothing
+   above is disturbed. --- */
+.field-label{display:inline-flex;align-items:baseline;gap:4px;min-width:0}
+.req-star{color:#d4342c;font-weight:900;font-size:12px;line-height:1}
+.honeypot{position:absolute!important;left:-9999px!important;top:auto!important;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none}
+.pending-registration-panel .pending-registration-details{margin:10px 0 14px}
+.pending-checklist{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}
+.pending-check{display:grid;gap:2px;padding:10px 14px;border:1px solid var(--line);border-left-width:4px;border-radius:10px}
+.pending-check strong{font-size:13px;letter-spacing:.02em}
+.pending-check span{color:var(--muted);font-size:13px}
+.pending-check.is-done{border-left-color:var(--brand)}
+.pending-check.is-open{border-left-color:#d4342c}
+.pending-actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px}
+.pending-approve-form{display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-top:1px solid var(--line-soft);padding-top:14px}
+.pending-approve-form .form-help{margin:0;flex:1 1 240px}
+.pending-queue-card{margin-bottom:18px}
+.pending-queue-row .pending-queue-meta{display:grid;justify-items:end;gap:2px;text-align:right}
+.pending-queue-age{color:var(--muted-2)}
+.pending-queue-card .movement-foot span{color:var(--muted);font-size:13px;font-weight:600}
+@media(max-width:620px){
+  .pending-queue-row{flex-wrap:wrap}
+  .pending-queue-row .pending-queue-meta{justify-items:start;text-align:left}
+  .pending-actions{flex-direction:column}
+  .pending-actions .btn{width:100%}
+  .pending-approve-form{flex-direction:column;align-items:stretch}
+  .pending-approve-form .btn{width:100%}
+}
+

@@ -7,6 +7,7 @@ from flask import has_request_context, session
 from app.db import get_db, now
 from app.services.access import current_session_user_id, is_main_session, session_active_branch_id, session_primary_branch_id
 from app.services.payments import _active_payment_clause, normalise_payment_date_filter
+from app.services.portal_registrations import pending_exclusion_clause
 from app.services.settings import get_company_settings
 
 VALID_TYPES = {"individual", "company"}
@@ -94,7 +95,7 @@ def list_customers(query="", customer_type="", marketing="", limit=None, offset=
         (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count
         FROM customers c
         LEFT JOIN users u ON u.id = c.created_by_user_id
-        WHERE 1=1"""
+        WHERE 1=1""" + pending_exclusion_clause("c")
     params = []
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
@@ -159,7 +160,7 @@ def customer_outstanding_balances(customer_ids):
 
 
 def customer_filtered_total(query="", customer_type="", marketing=""):
-    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1"
+    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1" + pending_exclusion_clause("c")
     params = []
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
@@ -192,8 +193,9 @@ def search_customers(query, limit=8):
     except (TypeError, ValueError):
         limit = 8
     rows = get_db().execute(
-        """SELECT id, name, phone FROM customers
-        WHERE LOWER(name) LIKE ? OR LOWER(phone) LIKE ?
+        """SELECT id, name, phone FROM customers c
+        WHERE 1=1""" + pending_exclusion_clause("c") + """
+        AND (LOWER(name) LIKE ? OR LOWER(phone) LIKE ?)
         ORDER BY CASE WHEN LOWER(name) LIKE ? THEN 0 ELSE 1 END, LOWER(name), id
         LIMIT ?""",
         (like, like, f"{needle.lower()}%", limit),
@@ -227,7 +229,9 @@ def find_customer_id_by_text(text):
     label_phone = label_phone.strip()
     if not label_phone and re.fullmatch(r"[\d\s()+\-]{9,}", raw):
         label_phone, label_name = raw, ""
-    rows = get_db().execute("SELECT id, name, phone FROM customers").fetchall()
+    rows = get_db().execute(
+        "SELECT id, name, phone FROM customers c WHERE 1=1" + pending_exclusion_clause("c")
+    ).fetchall()
 
     phone_hits = []
     if label_phone:
@@ -251,7 +255,8 @@ def find_customer_id_by_text(text):
 
 def customer_counts():
     row = get_db().execute(
-        "SELECT COUNT(*) total, SUM(customer_type='individual') individuals, SUM(customer_type='company') companies, SUM(marketing_opt_in) subscribed FROM customers"
+        "SELECT COUNT(*) total, SUM(customer_type='individual') individuals, SUM(customer_type='company') companies, SUM(marketing_opt_in) subscribed FROM customers c WHERE 1=1"
+        + pending_exclusion_clause("c")
     ).fetchone()
     return {
         "total": row["total"] or 0,
@@ -298,6 +303,9 @@ def delete_customer(customer_id):
     if customer_has_history(customer_id):
         raise ValueError("Customer has existing orders/history and cannot be deleted")
     db = get_db()
+    # Clear any self-registration row first: libSQL does not guarantee the FK cascade, and
+    # a left-behind pending row would show an orphan entry in the pending queue.
+    db.execute("DELETE FROM portal_registrations WHERE customer_id = ?", (customer_id,))
     cur = db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     db.commit()
     return cur.rowcount > 0
@@ -505,7 +513,24 @@ def customer_branch_id():
     return session_active_branch_id() or session_primary_branch_id()
 
 
-def create_customer(form):
+def create_customer(form, branch_id=None, notify=True, defer_commit=False, pending_portal=False):
+    """Create a client and record where it was captured.
+
+    ``branch_id`` overrides the branch the client is recorded against. The public portal
+    passes the branch its link belongs to (so the client keeps that branch attribution — in
+    the customer list and in the Telegram message — instead of the session-derived default,
+    which is nobody on a public request). Any other caller leaves it ``None`` and keeps the
+    historic ``customer_branch_id()`` behaviour.
+
+    ``notify`` lets a caller that will write more of the record afterwards (the portal, which
+    also records the pending registration and its reference) send the single notification
+    itself once the record is complete, rather than fire a premature one here.
+
+    ``defer_commit`` lets a caller that must write more rows in the SAME transaction hold the
+    commit back and own it itself, so a later failure rolls the customer row back instead of
+    leaking an approved-looking client. Default ``False`` keeps every other caller committing
+    immediately.
+    """
     data = _clean(form)
     db = get_db()
     # Ticket ABI-341953028: a customer created from the customer form can be
@@ -513,8 +538,8 @@ def create_customer(form):
     # order customer, inline AJAX create) carries no blocking panel, so its new
     # customer starts unblocked.
     cur = db.execute(
-        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, is_blocked, blocked_reason, credit_allowed, credit_limit, created_by_user_id, branch_id, created_at)
-        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :is_blocked, :blocked_reason, :credit_allowed, :credit_limit, :created_by_user_id, :branch_id, :created_at)""",
+        """INSERT INTO customers (customer_type, name, email, phone, marketing_opt_in, address_line1, address_line2, suburb, city, province, postal_code, country, custom_fields_json, balance_due, standard_discount_percent, client_verified, is_blocked, blocked_reason, credit_allowed, credit_limit, created_by_user_id, branch_id, created_at, source_system)
+        VALUES (:customer_type, :name, :email, :phone, :marketing_opt_in, :address_line1, :address_line2, :suburb, :city, :province, :postal_code, :country, :custom_fields_json, 0, :standard_discount_percent, :client_verified, :is_blocked, :blocked_reason, :credit_allowed, :credit_limit, :created_by_user_id, :branch_id, :created_at, :source_system)""",
         {
             **data,
             "is_blocked": int(data.get("is_blocked") or 0),
@@ -524,18 +549,21 @@ def create_customer(form):
             # form, inline order card, public storefront — starts at 0/0.
             "credit_allowed": int(data.get("credit_allowed") or 0),
             "credit_limit": float(data.get("credit_limit") or 0),
+            "source_system": "portal_pending" if pending_portal else "",
             "created_by_user_id": current_session_user_id(),
-            "branch_id": customer_branch_id(),
+            "branch_id": branch_id if branch_id is not None else customer_branch_id(),
             "created_at": now(),
         },
     )
-    db.commit()
+    if not defer_commit:
+        db.commit()
     customer_id = cur.lastrowid
-    try:
-        from app.services.telegram import send_new_customer_notification
-        send_new_customer_notification(customer_id)
-    except Exception:
-        pass
+    if notify:
+        try:
+            from app.services.telegram import send_new_customer_notification
+            send_new_customer_notification(customer_id)
+        except Exception:
+            pass
     return customer_id
 
 

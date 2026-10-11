@@ -61,9 +61,9 @@
       <section class="form-section">
         <h2>Contact details</h2>
         <div class="form-grid">
-          <label class="span-2">Name<input name="name" required autocomplete="name" value="{{ form_values.get('name', '') }}" placeholder="e.g. Thabo Mokoena"></label>
-          <label>Email<input name="email" type="email" autocomplete="email" value="{{ form_values.get('email', '') }}" placeholder="e.g. customer@example.com"></label>
-          <label>Phone<input name="phone" type="tel" inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
+          <label class="span-2"><span class="field-label"><span class="portal-name-label" data-portal-name-label>Name &amp; Surname</span> <span class="req-star" aria-hidden="true">*</span></span><input name="name" required autocomplete="name" value="{{ form_values.get('name', '') }}" placeholder="e.g. Thabo Mokoena"></label>
+          <label><span class="field-label">Email <span class="req-star" aria-hidden="true">*</span></span><input name="email" type="email" required autocomplete="email" value="{{ form_values.get('email', '') }}" placeholder="e.g. customer@example.com"></label>
+          <label><span class="field-label">Phone <span class="req-star" aria-hidden="true">*</span></span><input name="phone" type="tel" required inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
           <label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" {% if form_values.get('marketing_opt_in') %}checked{% endif %}> Subscribed to marketing emails</label>
         </div>
       </section>
@@ -73,36 +73,34 @@
         <div class="form-grid">
           <label>VAT No<input name="vat_number" value="{{ form_values.get('vat_number', '') }}" placeholder="e.g. 4123456789"></label>
           <label>Company Reg No<input name="company_reg_no" value="{{ form_values.get('company_reg_no', '') }}" placeholder="e.g. 2024/123456/07"></label>
+          <label class="span-2">Website<input name="website" value="{{ form_values.get('website', '') }}" placeholder="e.g. https://www.example.co.za"></label>
         </div>
       </section>
 
       <section class="form-section">
         <h2>Address</h2>
         <div class="form-grid">
-          <label class="span-2">Address line 1<input name="address_line1" autocomplete="street-address" value="{{ form_values.get('address_line1', '') }}" placeholder="e.g. 12 Main Road"></label>
+          <label class="span-2"><span class="field-label">Address line 1 <span class="req-star" aria-hidden="true">*</span></span><input name="address_line1" required autocomplete="street-address" value="{{ form_values.get('address_line1', '') }}" placeholder="e.g. 12 Main Road"></label>
           <label class="span-2">Address line 2<input name="address_line2" value="{{ form_values.get('address_line2', '') }}" placeholder="e.g. Unit 4, Sunset Complex"></label>
-          <label>Suburb<input name="suburb" value="{{ form_values.get('suburb', '') }}"></label>
-          <label>City<input name="city" autocomplete="address-level2" value="{{ form_values.get('city', '') }}"></label>
-          <label>Province<input name="province" autocomplete="address-level1" value="{{ form_values.get('province', '') }}"></label>
-          <label>Postal code<input name="postal_code" inputmode="numeric" autocomplete="postal-code" value="{{ form_values.get('postal_code', '') }}"></label>
-          <label class="span-2">Country<input name="country" value="{{ form_values.get('country', 'South Africa') }}"></label>
+          <label><span class="field-label">Suburb <span class="req-star" aria-hidden="true">*</span></span><input name="suburb" required value="{{ form_values.get('suburb', '') }}"></label>
+          <label><span class="field-label">City <span class="req-star" aria-hidden="true">*</span></span><input name="city" required autocomplete="address-level2" value="{{ form_values.get('city', '') }}"></label>
+          <label><span class="field-label">Province <span class="req-star" aria-hidden="true">*</span></span><input name="province" required autocomplete="address-level1" value="{{ form_values.get('province', '') }}"></label>
+          <label><span class="field-label">Postal code <span class="req-star" aria-hidden="true">*</span></span><input name="postal_code" required inputmode="numeric" autocomplete="postal-code" value="{{ form_values.get('postal_code', '') }}"></label>
         </div>
       </section>
 
       <section class="form-section">
-        <h2>Custom customer details</h2>
+        <h2>Alternative contact</h2>
         <div class="form-grid">
-          <label>Vehicle Make<input name="vehicle_make" value="{{ form_values.get('vehicle_make', '') }}" placeholder="e.g. Toyota Hilux"></label>
-          <label>Vehicle Color<input name="vehicle_color" value="{{ form_values.get('vehicle_color', '') }}" placeholder="e.g. White"></label>
-          <label>Veh Reg No<input name="vehicle_reg_no" value="{{ form_values.get('vehicle_reg_no', '') }}" placeholder="e.g. CA 123-456"></label>
-          <label>Alternative Contact Name<input name="alternative_contact_name" value="{{ form_values.get('alternative_contact_name', '') }}" placeholder="e.g. Jane Smith"></label>
-          <label>Alternative Contact Number<input name="alternative_contact_number" type="tel" inputmode="tel" value="{{ form_values.get('alternative_contact_number', '') }}" placeholder="e.g. 082 123 4567"></label>
-          <label>Alternative Contact Relationship<input name="alternative_contact_relationship" value="{{ form_values.get('alternative_contact_relationship', '') }}" placeholder="e.g. Sister"></label>
+          <label><span class="field-label">Alternative Contact Name <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_name" required value="{{ form_values.get('alternative_contact_name', '') }}" placeholder="e.g. Jane Smith"></label>
+          <label><span class="field-label">Alternative Contact Number <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_number" type="tel" inputmode="tel" required value="{{ form_values.get('alternative_contact_number', '') }}" placeholder="e.g. 082 123 4567"></label>
+          <label><span class="field-label">Alternative Contact Relationship <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_relationship" required value="{{ form_values.get('alternative_contact_relationship', '') }}" placeholder="e.g. Sister"></label>
         </div>
       </section>
 
-      {# The honeypot: off-screen, out of the tab order and not announced, so a person never
-         fills it in and a bot always does. #}
+      {# The honeypot: off-screen (the .honeypot rule in app.css), out of the tab order and not
+         announced, so a person never fills it in and a form-filling bot always does. The visible
+         "Website" field above is the genuine, company-only one. #}
       <div class="honeypot" aria-hidden="true">
         <label for="portal-website">Website</label>
         <input id="portal-website" name="company_website" type="text" tabindex="-1" autocomplete="off">
@@ -128,12 +126,14 @@
 (function(){
   var section = document.querySelector('.company-details-section');
   var inputs = document.getElementsByName('customer_type');
+  var nameLabel = document.querySelector('.portal-name-label');
   if(!section){ return; }
   function each(list, fn){ Array.prototype.forEach.call(list, fn); }
   function sync(){
     var selected = null;
     each(inputs, function(input){ if(input.checked){ selected = input; } });
     section.hidden = !selected || selected.value !== 'company';
+    if(nameLabel){ nameLabel.textContent = (selected && selected.value === 'company') ? 'Company Name' : 'Name & Surname'; }
   }
   each(inputs, function(input){ input.addEventListener('change', sync); });
   sync();

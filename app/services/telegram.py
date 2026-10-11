@@ -293,7 +293,7 @@ def _branch_label(row, *keys):
 
 
 def format_customer_message(customer):
-    return "\n".join([
+    lines = [
         "👤 <b>New customer created</b>",
         f"Name: {_escape(customer['name'])}",
         f"Type: {_escape(customer['customer_type'])}",
@@ -301,14 +301,24 @@ def format_customer_message(customer):
         f"Email: {_escape(customer['email'] or 'Not supplied')}",
         f"Phone: {_escape(customer['phone'] or 'Not supplied')}",
         f"Marketing: {'Yes' if customer['marketing_opt_in'] else 'No'}",
-    ])
+    ]
+    # A self-registration carries its reference and its pending state in the same message, so
+    # the group sees *which* submission to verify — and the branch it belongs to (above) is the
+    # branch the portal link came from, never "head office".
+    reference = str(_row_value(customer, "portal_reference", "") or "").strip()
+    if reference:
+        lines.append(f"Portal registration: {_escape(reference)} (awaiting ID + vehicle verification)")
+    return "\n".join(lines)
 
 
 def send_new_customer_notification(customer_id):
     def build():
         customer = get_db().execute(
-            """SELECT c.*, b.name AS branch_name
-            FROM customers c LEFT JOIN branches b ON b.id = c.branch_id
+            """SELECT c.*, b.name AS branch_name, pr.reference AS portal_reference
+            FROM customers c
+            LEFT JOIN branches b ON b.id = c.branch_id
+            LEFT JOIN portal_registrations pr
+                ON pr.customer_id = c.id AND pr.status = 'pending'
             WHERE c.id = ?""",
             (customer_id,),
         ).fetchone()

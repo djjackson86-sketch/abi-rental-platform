@@ -1,0 +1,38 @@
+{# Self-registered customers awaiting verification — the top queue on Customers.
+
+   Client instruction: a self-registered portal submission shows immediately in a panel at the top
+   of the Customers page, styled like the dashboard's "Going out" movement card so it reads as the
+   same kind of live worklist. Each row is a pending registration in the queue contract shape
+   (id / reference / customer_id / name / email / phone / branch_name / created_at) and links
+   straight to the client's edit screen, where the approval checklist lives — staff select the
+   pending customer directly, with no separate search.
+
+   The list is branch-scoped server-side (``portal_registrations.list_pending_registrations``), so
+   a depot sees only its own submissions. Nothing here approves anyone: it is a pointer only. #}
+{% if pending_registrations %}
+<article class="panel movement-card pending-queue-card">
+  <div class="movement-head">
+    <h2>Awaiting verification</h2>
+    <span class="badge status-payment_due">{{ pending_registrations|length }} pending</span>
+  </div>
+  <div class="movement-body">
+    <div class="schedule-list">
+      {% for pending in pending_registrations %}
+      <a class="schedule-row movement-row pending-queue-row" href="{{ url_for('customers.edit', customer_id=pending.customer_id) }}">
+        <span>
+          <b>{{ pending.name or 'No name recorded' }}</b>
+          <small>{{ pending.reference or 'No reference' }}{% if pending.branch_name %} · {{ pending.branch_name }}{% endif %}</small>
+        </span>
+        <span class="pending-queue-meta">
+          <small>{% if pending.phone %}{{ pending.phone }}{% elif pending.email %}{{ pending.email }}{% else %}No contact details{% endif %}</small>
+          <small class="pending-queue-age">{{ pending.created_at[:10] if pending.created_at else '—' }}</small>
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="movement-foot">
+    <span>Self-registered through the customer portal. Review, verify the ID and capture the main vehicle, then approve.</span>
+  </div>
+</article>
+{% endif %}

@@ -157,6 +157,30 @@ def _consent_count(app):
         return get_db().execute("SELECT COUNT(*) AS c FROM consent_records").fetchone()["c"]
 
 
+def _portal_required(**overrides):
+    """A complete public submission's mandatory fields (client portal changes).
+
+    The SA address block and the alternative-contact block are required server-side now, so
+    every consent/marketing test that expects the write path to run must carry them — only then
+    does a refusal come from the consent rule under test rather than a missing field.
+    """
+    data = {
+        "name": "Synthetic Portal Customer",
+        "phone": "0825550113",
+        "email": "synthetic-portal@example.test",
+        "address_line1": "1 Required Road",
+        "suburb": "Requiredville",
+        "city": "Requiredburg",
+        "province": "Gauteng",
+        "postal_code": "2003",
+        "alternative_contact_name": "Required Contact",
+        "alternative_contact_number": "0825550112",
+        "alternative_contact_relationship": "Friend",
+    }
+    data.update(overrides)
+    return data
+
+
 # ---------------------------------------------------------------------------
 # The publication opens both portal forms and links the new version
 # ---------------------------------------------------------------------------
@@ -230,7 +254,7 @@ def test_a_submission_without_consent_is_refused_and_writes_nothing(app, channel
     client = app.test_client()
     slug = _branch_slug(app)
     path = "/portal/register" if channel == "universal" else "/portal/" + slug + "/register"
-    data = {"name": "Synthetic Refused Customer", "phone": "0825550118", "email": "refused@example.test"}
+    data = _portal_required(name="Synthetic Refused Customer", phone="0825550118", email="refused@example.test")
     refused = client.post(path, data=data)
     assert refused.status_code == 400
     assert "Please tick the box" in refused.get_data(as_text=True)
@@ -248,12 +272,12 @@ def test_a_consented_submission_records_the_new_version(app, channel):
     client = app.test_client()
     slug = _branch_slug(app)
     path = "/portal/register" if channel == "universal" else "/portal/" + slug + "/register"
-    data = {
-        "name": "Synthetic Accepted Customer",
-        "phone": "0825550117",
-        "email": "accepted@example.test",
-        "popia_consent": "1",
-    }
+    data = _portal_required(
+        name="Synthetic Accepted Customer",
+        phone="0825550117",
+        email="accepted@example.test",
+        popia_consent="1",
+    )
     response = client.post(path, data=data)
     assert response.status_code == 200
     with app.app_context():
@@ -273,12 +297,12 @@ def test_a_consented_submission_records_the_new_version(app, channel):
 @pytest.mark.parametrize("marketing", ["", "1"])
 def test_marketing_is_a_separate_optional_choice(app, marketing):
     client = app.test_client()
-    data = {
-        "name": "Synthetic Marketing " + ("Yes" if marketing else "No"),
-        "phone": "0825550116",
-        "email": "",
-        "popia_consent": "1",
-    }
+    data = _portal_required(
+        name="Synthetic Marketing " + ("Yes" if marketing else "No"),
+        phone="0825550116",
+        email="marketing@example.test",
+        popia_consent="1",
+    )
     if marketing:
         data["marketing_opt_in"] = marketing
     response = client.post("/portal/register", data=data)
@@ -294,7 +318,7 @@ def test_marketing_alone_does_not_substitute_for_privacy_consent(app):
     client = app.test_client()
     response = client.post(
         "/portal/register",
-        data={"name": "Synthetic Marketing Only", "phone": "0825550115", "marketing_opt_in": "1"},
+        data=_portal_required(name="Synthetic Marketing Only", phone="0825550115", marketing_opt_in="1"),
     )
     assert response.status_code == 400
     assert _customer_count(app) == 0

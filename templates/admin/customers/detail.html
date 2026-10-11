@@ -22,6 +22,10 @@
   </div>
 </header>
 
+{# Client portal changes: the self-registration verification panel, shown at the top of the client's
+   page for a self-registered client who is still awaiting approval (hidden for everyone else). #}
+{% include "admin/customers/_pending_registration_panel.html" %}
+
 <section class="panel">
   <div class="panel-title"><h2>Customer actions</h2></div>
   {% if customer_has_history %}

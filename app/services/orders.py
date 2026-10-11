@@ -779,6 +779,11 @@ def _blocked_customer_allowance(value):
         return None
 
 
+def _pending_customer_allowance(value):
+    """Normalise the same "this order already had that client" allowance for the pending rule."""
+    return _blocked_customer_allowance(value)
+
+
 MAINTENANCE_MESSAGE = "Trailer under maintenance"
 
 
@@ -807,7 +812,7 @@ def under_maintenance_error(product):
     return f"{MAINTENANCE_MESSAGE}{detail}"
 
 
-def _build_order_payload(form, allow_blocked_customer_id=None):
+def _build_order_payload(form, allow_blocked_customer_id=None, allow_pending_customer_id=None):
     db = get_db()
     customer_id = int(form.get("customer_id") or 0) or None
     if customer_id:
@@ -827,6 +832,18 @@ def _build_order_payload(form, allow_blocked_customer_id=None):
             blocked = 0
         if blocked and customer_id != _blocked_customer_allowance(allow_blocked_customer_id):
             raise ValueError(blocked_customer_error(customer))
+        # A client who self-registered through the public portal is *pending* until
+        # staff verify the ID and record the main vehicle and then approve — so they
+        # can never be attached to an order before that, whatever the picker showed
+        # or a crafted POST submitted. The server-side gate mirrors the blocked rule:
+        # an order that already had this client keeps saving, but pointing a new (or
+        # other) order at a pending client is refused. Imported lazily to avoid a
+        # module import cycle.
+        if customer_id != _pending_customer_allowance(allow_pending_customer_id):
+            from app.services import portal_registrations
+
+            if portal_registrations.is_pending(customer_id):
+                raise ValueError(portal_registrations.PENDING_BLOCKED_MESSAGE)
     booking_type = form.get("booking_type") if form.get("booking_type") in {"return", "oneway"} else "return"
     collect_branch_id = int(form.get("collect_branch_id") or 0) or None
     return_branch_id = int(form.get("return_branch_id") or 0) or collect_branch_id
@@ -1146,7 +1163,7 @@ def update_draft_order(order_id, form):
     # Ticket ABI-341953028: a customer blocked AFTER this order was created can
     # still be kept on the order it is already attached to — only pointing the
     # order at a different blocked customer is refused.
-    payload = _build_order_payload(form, allow_blocked_customer_id=order["customer_id"])
+    payload = _build_order_payload(form, allow_blocked_customer_id=order["customer_id"], allow_pending_customer_id=order["customer_id"])
     db = get_db()
     # Data-safety net (update path only): the order form no longer exposes an
     # editable "Damage waiver amount" box, so a re-save of an existing

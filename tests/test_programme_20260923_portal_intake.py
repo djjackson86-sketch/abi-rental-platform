@@ -44,7 +44,7 @@ import pytest
 from app import create_app
 from app.db import get_db
 from app.services import branches as branches_service
-from app.services import consent, portal_intake
+from app.services import consent, portal_intake, portal_registrations
 from app.services.customers import get_customer, list_customers
 
 
@@ -123,6 +123,9 @@ def submission(**overrides):
         "city": "Johannesburg",
         "province": "Gauteng",
         "postal_code": "2194",
+        "alternative_contact_name": "Jane Smith",
+        "alternative_contact_number": "082 111 2222",
+        "alternative_contact_relationship": "Sister",
         "popia_consent": "1",
     }
     data.update(overrides)
@@ -250,9 +253,14 @@ def test_the_created_client_is_visible_to_staff_on_their_branch(client, branch, 
     slug = slug_of(app, branch)
     client.post(f"/portal/{slug}/register", data=submission())
     with app.app_context():
-        listed = list_customers()
         customer = get_customer(1)
-    assert [row["name"] for row in listed] == ["Pieter van Wyk"]
+        # Client portal changes: a self-registered client is PENDING, so it does NOT appear
+        # as an approved client in the default list until staff approve it — it shows in the
+        # pending queue at the top of Customers instead, and is reachable by id.
+        listed = list_customers()
+        pending = portal_registrations.list_pending_registrations()
+    assert listed == [], "a pending sign-up must not behave as an approved client"
+    assert [item["name"] for item in pending] == ["Pieter van Wyk"]
     assert customer["branch_name"] == "Midrand Depot", "the record carries the branch the QR belongs to"
 
 
@@ -721,14 +729,16 @@ STAFF_FORM_FIELDS = (
     "city",
     "province",
     "postal_code",
-    "country",
-    "vehicle_make",
-    "vehicle_color",
-    "vehicle_reg_no",
     "alternative_contact_name",
     "alternative_contact_number",
     "alternative_contact_relationship",
 )
+
+# Client portal changes: these staff-form inputs were deliberately REMOVED from the public
+# form. Country is gone because a South African depot's clients are South African (the record
+# defaults to SA internally); the vehicle make/colour/reg are gone because staff capture and
+# scan the vehicle, never the customer.
+PUBLIC_REMOVED_FIELDS = ("country", "vehicle_make", "vehicle_color", "vehicle_reg_no")
 
 STAFF_ONLY_FIELDS = ("client_verified", "standard_discount_percent", "is_blocked", "blocked_reason")
 
@@ -740,6 +750,8 @@ def test_the_portal_carries_the_same_inputs_as_the_staff_customer_form(client, b
     body = client.get(f"/portal/{slug}/register").get_data(as_text=True)
     for field in STAFF_FORM_FIELDS:
         assert f'name="{field}"' in body, f"the staff form's {field} belongs on the portal too"
+    for removed in PUBLIC_REMOVED_FIELDS:
+        assert f'name="{removed}"' not in body, f"{removed} was removed from the public form"
     for staff_only in STAFF_ONLY_FIELDS:
         assert f'name="{staff_only}"' not in body, f"{staff_only} is the counter's decision, not the public's"
     for vehicle_field in VEHICLE_DETAIL_FIELDS:
@@ -783,9 +795,10 @@ def test_a_portal_submission_saves_every_field_the_staff_form_captures(client, b
     custom = json.loads(stored["custom_fields_json"] or "{}")
     assert custom["vat_number"] == "4123456789"
     assert custom["company_reg_no"] == "2024/123456/07"
-    assert custom["vehicle_make"] == "Toyota Hilux"
-    assert custom["vehicle_color"] == "White"
-    assert custom["vehicle_reg_no"] == "CA 123-456"
+    # Client portal changes: the vehicle fields were removed from the public form — a public
+    # post must never store a vehicle. Staff capture/scan the main vehicle instead.
+    for removed in ("vehicle_make", "vehicle_color", "vehicle_reg_no"):
+        assert removed not in custom, f"a public post must not store {removed}"
     assert custom["alternative_contact_name"] == "Jane Smith"
     assert custom["alternative_contact_number"] == "082 111 2222"
     assert custom["alternative_contact_relationship"] == "Sister"
