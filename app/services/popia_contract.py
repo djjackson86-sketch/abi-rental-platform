@@ -58,7 +58,7 @@ class ContractSigningPage(Flowable):
             p=Paragraph(text,style); _,height=p.wrap(width,100)
             p.drawOn(c,x,y-height)
         paragraph('Contract version 1.0. Confirm the legal party details, complete the fields, '
-                  'and deliberately sign below. Nothing is pre-signed. Use Adobe Acrobat Reader '
+                  'and deliberately sign below. Retain any existing signature. Use Adobe Acrobat Reader '
                   'or another compatible PDF editor; a browser preview may not support form saving.',0,680)
         for index, (prefix, party, legal_name) in enumerate(PARTIES):
             c.setFont('Helvetica-Bold',12);c.setFillColor(ink)
@@ -95,6 +95,20 @@ class ContractSigningPage(Flowable):
         c.setFont('Courier',7);c.drawString(0,23,self.digest)
 
 
-def contract_pdf():
+def unsigned_contract_pdf():
+    """Retain an unsigned template for testing and future separately-authorised versions."""
     from app.services.popia_documents import document_pdf
     return document_pdf(contract_text(),'Sano Trailers and Jackapp — Customer Information Contract',signing_page=True)
+
+
+def contract_pdf():
+    """Return the retained Jackapp-signed copy, never silently re-sign changed terms."""
+    import json
+    folder = CONTRACT_PATH.parent
+    record = json.loads((folder / 'SANO-JACKAPP-OPERATOR-SIGNING-RECORD.json').read_text(encoding='utf-8'))
+    if hashlib.sha256(contract_text().encode('utf-8')).hexdigest() != record['contract_text_sha256']:
+        raise ValueError('Contract terms changed after Jackapp signed; fresh agreement is required.')
+    data = (folder / 'SANO-JACKAPP-OPERATOR-CONTRACT-JACKAPP-SIGNED.pdf').read_bytes()
+    if hashlib.sha256(data).hexdigest() != record['signed_pdf_sha256']:
+        raise ValueError('Retained signed contract does not match its signing record.')
+    return data

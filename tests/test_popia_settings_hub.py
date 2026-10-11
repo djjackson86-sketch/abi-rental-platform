@@ -63,8 +63,9 @@ def test_owner_settings_nav_and_three_sections(owner):
     assert 'href="https://eservices.inforegulator.org.za/"' in body
     assert 'href="https://inforegulator.org.za/information-officers/"' in body
     assert "55(2)" in body and "does not register them" in body
-    assert "Both authorised representatives" in body
-    assert "Downloading does not sign the contract" in body
+    assert "Jackapp signed — 11 October 2026" in body
+    assert "Download Jackapp-signed contract" in body
+    assert "Downloading does not sign for Sano" in body
     assert "Publishing updates the customer-facing notice immediately" in body
     assert "not unsaved edits" in body
 

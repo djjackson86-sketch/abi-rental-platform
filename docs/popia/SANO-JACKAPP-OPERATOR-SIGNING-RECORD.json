@@ -1,0 +1,14 @@
+{
+  "contract_version": "1.0",
+  "contract_text_sha256": "ad7212bb825a5552b60da5adfd92e39933172a7e35337c6cfe8dfa5d58b94432",
+  "signed_pdf_sha256": "79a0260aeade3c9807385961f8ce895884e0ffc42d0221e69ee36282193ad54c",
+  "signed_at": "2026-10-11T08:37:38.170204+02:00",
+  "signer": "Donovan Jackson",
+  "party": "Donovan Jackson t/a Jackapp",
+  "capacity": "Sole proprietor / operator",
+  "signature_method": "Ordinary electronic typed-name signature and checked intention declaration, applied by assistant on express user instruction",
+  "authority_source": "Direct user instruction in WhatsApp conversation",
+  "authorising_instruction": "On popia page in settings electronically sign the contract between me and Sano for me (the signed version replaces the current one)",
+  "sano_signed": false,
+  "identity_or_cryptographic_verification": false
+}

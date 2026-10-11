@@ -3,7 +3,7 @@ import hashlib
 from io import BytesIO
 
 import pytest
-from app.services.popia_contract import contract_pdf, contract_text, signing_field_spec
+from app.services.popia_contract import contract_pdf, unsigned_contract_pdf, contract_text, signing_field_spec
 
 
 def test_signing_layout_has_two_complete_blank_signatures_and_no_collisions():
@@ -25,7 +25,7 @@ def test_signing_layout_has_two_complete_blank_signatures_and_no_collisions():
 
 def test_actual_pdf_widgets_and_unsigned_state():
     fitz=pytest.importorskip('pymupdf')
-    doc=fitz.open(stream=contract_pdf(),filetype='pdf')
+    doc=fitz.open(stream=unsigned_contract_pdf(),filetype='pdf')
     widgets=[widget for page in doc for widget in (page.widgets() or [])]
     assert len(widgets)==14
     assert all(widget.field_type != fitz.PDF_WIDGET_TYPE_SIGNATURE for widget in widgets)
@@ -51,7 +51,7 @@ def test_actual_pdf_widgets_and_unsigned_state():
 
 def test_both_parties_can_complete_save_and_reopen_form_without_losing_terms():
     fitz=pytest.importorskip('pymupdf')
-    data=contract_pdf()
+    data=unsigned_contract_pdf()
     doc=fitz.open(stream=data,filetype='pdf')
     original_terms=' '.join(page.get_text() for page in list(doc)[:-1])
     expected={}
