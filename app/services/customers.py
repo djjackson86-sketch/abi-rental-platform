@@ -21,13 +21,13 @@ HIDDEN_CUSTOM_FIELD_KEYS = {
     # mirrored vehicle fields to a vehicle row and is never shown or edited as a custom field.
     "main_vehicle_id",
 }
-#: The custom-field keys the client's main vehicle is shown under. Deliberately the seven fields
-#: staff type on the scan screen's manual entry — number plate, disc licence number, NaTIS
-#: registration number, VIN, engine number, make and disk expiry. Other decoded disk data (model,
-#: colour, category, registering authority, control number) lives on the vehicle row; a legacy
-#: value already stored against a client is preserved but not offered on the form.
-#: ``app.services.vehicles`` owns the column↔key mapping; a test pins these keys to
-#: ``vehicles.MAIN_VEHICLE_CUSTOM_KEYS``.
+#: The custom-field keys the client's main vehicle is shown under. Deliberately the eight fields
+#: staff capture on the scan screen — number plate, disc licence number, NaTIS registration number,
+#: VIN, engine number, make, disk expiry and colour. Colour joined the original seven on request: the
+#: licence disc decodes it, so staff see and correct it rather than leaving it to a hand-typed legacy
+#: field. Other decoded disk data (model, category, registering authority, control number) lives on
+#: the vehicle row only. ``app.services.vehicles`` owns the column↔key mapping; a test pins these
+#: keys to ``vehicles.MAIN_VEHICLE_CUSTOM_KEYS``.
 VEHICLE_CUSTOM_FIELD_KEYS = (
     "vehicle_reg_no",
     "vehicle_licence_number",
@@ -36,6 +36,7 @@ VEHICLE_CUSTOM_FIELD_KEYS = (
     "vehicle_engine_number",
     "vehicle_make",
     "vehicle_licence_disk_expiry",
+    "vehicle_color",
 )
 VISIBLE_CUSTOM_FIELD_LABELS = {
     "vehicle_make": "Vehicle Make",

@@ -13,11 +13,12 @@ and it is now part of the Edit customer page, because vehicle details belong wit
 counter edits. These tests follow it there — the customer page must NOT carry the panel any more,
 and that is asserted below so the section cannot creep back.
 
-The panel also carries **only the fields the app uses** (number plate, make, VIN, engine number,
-disk expiry, plus NaTIS/disk numbers under the plate). Model, colour, year, vehicle type and the
-tare/GVM masses were dropped from the scan screen, the panel and the edit form on request, so the
-old column-index assertions are gone; what replaces them is a test that those columns are *absent*
-and that a stored mass survives an edit that does not post it.
+The panel carries **only the fields the app uses** (number plate, make, colour, VIN, engine number,
+disk expiry, plus NaTIS/disk numbers under the plate). Colour joined them on request — the licence
+disc decodes it, so it is shown and editable rather than left to a hand-typed field. Model, year,
+vehicle type and the tare/GVM masses stay dropped from the scan screen, the panel and the edit form,
+so the old column-index assertions are gone; what replaces them is a test that those columns are
+*absent* and that a stored mass survives an edit that does not post it.
 
 Two plan items are recorded here as measured facts rather than assumptions:
 
@@ -183,11 +184,12 @@ def test_an_allocated_vehicle_appears_in_the_panel(app, client, charmaine):
     row = vehicle_row(page, "ABC123GP")
     assert row, "the vehicle row is not on the edit page"
     cells = row_cells(row)
-    # only the fields the app uses, in order: plate, make, VIN, engine number, disk expiry
+    # only the fields the app uses, in order: plate, make, colour, VIN, engine number, disk expiry
     assert cells[1] == "MITSUBISHI"
-    assert cells[2] == "JMBXTGA2WJZ123456"
-    assert cells[3] == "K9K7654321"
-    assert cells[4] == "2027-07-31"
+    assert cells[2] == "WHITE"
+    assert cells[3] == "JMBXTGA2WJZ123456"
+    assert cells[4] == "K9K7654321"
+    assert cells[5] == "2027-07-31"
     assert f"/vehicles/{vehicle_id}/edit" in panel_html(page)
 
 
@@ -220,23 +222,44 @@ def test_the_panel_matches_the_json_feed(app, client, charmaine):
 
 
 def test_the_panel_carries_no_dropped_columns_or_inputs(app, client, charmaine):
-    """Model, colour, year, vehicle type and the masses are not app inputs — they are gone.
+    """Model, year, vehicle type and the masses are not app inputs — they are gone.
 
     They were trimmed from the scan screen on request ("only show/capture details that the app
-    uses as inputs"), so the panel and its edit form must not offer them back.
+    uses as inputs"), so the panel and its edit form must not offer them back. Colour is the one
+    exception: the licence disc decodes it, so it is now an app input (shown and editable).
     """
     vehicle_id = add_vehicle(app, charmaine, tare_kg="1890", gvm_kg="2800", model="ASX", colour="WHITE", year="2019")
     login_owner(client)
     page = edit_page_of(client, charmaine)
     panel = panel_html(page)
-    for dropped in ("Model", "Vehicle Color", "Colour", "Year", "Vehicle category", "Tare (kg)", "GVM (kg)"):
+    for dropped in ("Model", "Year", "Vehicle category", "Tare (kg)", "GVM (kg)"):
         assert dropped not in panel, f"{dropped} is not an app input and must not be on the panel"
-    for dropped_field in ('name="tare_kg"', 'name="gvm_kg"', 'name="model"', 'name="colour"', 'name="year"'):
+    for dropped_field in ('name="tare_kg"', 'name="gvm_kg"', 'name="model"', 'name="year"'):
         assert dropped_field not in panel, dropped_field
+    # …but colour IS an app input now: shown in the table and editable in the per-vehicle form
+    assert "Colour" in panel and "WHITE" in panel
+    assert 'name="colour"' in panel
     # …and the stored masses are untouched by an edit that does not post them
     with app.app_context():
         row = vehicles.get_vehicle(vehicle_id)
     assert row["tare_kg"] == 1890.0 and row["gvm_kg"] == 2800.0
+
+
+def test_a_vehicle_colour_is_displayed_and_editable_from_the_panel(app, client, charmaine):
+    vehicle_id = add_vehicle(app, charmaine, colour="SILVER")
+    login_owner(client)
+    panel = panel_html(edit_page_of(client, charmaine))
+    assert "SILVER" in panel
+    assert 'name="colour"' in panel
+    response = client.post(
+        f"/vehicles/{vehicle_id}/edit",
+        data={"registration": "ABC123GP", "colour": "Midnight Blue"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    with app.app_context():
+        assert vehicles.get_vehicle(vehicle_id)["colour"] == "Midnight Blue"
+    assert "Midnight Blue" in panel_html(html_of(response))
 
 
 def test_a_disc_that_carries_no_masses_still_records_the_rest(app, client, charmaine):
@@ -251,9 +274,10 @@ def test_a_disc_that_carries_no_masses_still_records_the_rest(app, client, charm
     assert row, "the vehicle the disc described is missing from the panel"
     cells = row_cells(row)
     assert cells[1] == parsed["make"]
-    assert cells[2] == parsed["vin"]
-    assert cells[3] == parsed["engine_number"]
-    assert cells[4] == parsed["licence_disk_expiry"]
+    assert cells[2] == parsed["colour"]
+    assert cells[3] == parsed["vin"]
+    assert cells[4] == parsed["engine_number"]
+    assert cells[5] == parsed["licence_disk_expiry"]
     assert cells[1] and cells[2] and cells[3], "the disc's own fields must render, not a dash"
 
 
@@ -282,6 +306,7 @@ def test_editing_a_vehicle_from_the_edit_page_saves_and_redisplays(app, client, 
             "registration_number": "ZZ1234Z",
             "licence_number": "T9876543210X",
             "make": "MITSUBISHI",
+            "colour": "Arctic White",
             "vin": "JMBXTGA2WJZ123456",
             "engine_number": "K9K7654321",
             "licence_disk_expiry": "2028-01-31",
@@ -293,13 +318,15 @@ def test_editing_a_vehicle_from_the_edit_page_saves_and_redisplays(app, client, 
         row = vehicles.get_vehicle(vehicle_id)
     assert row["registration"] == "ABC 123 GP"
     assert row["licence_disk_expiry"] == "2028-01-31"
+    assert row["colour"] == "Arctic White"
     assert row["vin"] == "JMBXTGA2WJZ123456"  # untouched fields survive the edit
     page = html_of(response)
     cells = row_cells(vehicle_row(page, "ABC 123 GP"))
     assert cells[1] == "MITSUBISHI"
-    assert cells[2] == "JMBXTGA2WJZ123456"
-    assert cells[3] == "K9K7654321"
-    assert cells[4] == "2028-01-31"
+    assert cells[2] == "Arctic White"
+    assert cells[3] == "JMBXTGA2WJZ123456"
+    assert cells[4] == "K9K7654321"
+    assert cells[5] == "2028-01-31"
     # the save keeps the user on the page the panel lives on
     assert "Vehicle saved." in page and "Vehicle details" in page
 

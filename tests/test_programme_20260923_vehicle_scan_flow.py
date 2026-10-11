@@ -166,9 +166,12 @@ def test_pasting_the_decoded_text_fills_the_review_form(app, client):
     assert b'value="AHTFR22G10L123456"' in response.data
     assert b'value="2GD1234567"' in response.data           # engine number off the barcode
     # Only the fields the app uses are offered back - the masses the disk also carries are not
-    # inputs anywhere, so the review form does not ask for them any more.
-    for dropped in (b'name="tare_kg"', b'name="gvm_kg"', b'name="model"', b'name="colour"', b'name="year"'):
+    # inputs anywhere, so the review form does not ask for them any more. Colour IS offered now:
+    # the disc decodes it, so it is shown (and correctable) rather than dropped.
+    for dropped in (b'name="tare_kg"', b'name="gvm_kg"', b'name="model"', b'name="year"'):
         assert dropped not in response.data, dropped
+    assert b'name="colour"' in response.data
+    assert b'value="WHITE"' in response.data  # the colour off the barcode, shown for review
 
 
 def test_the_browser_decoded_barcode_text_fills_the_review_form(app, client):

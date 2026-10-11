@@ -36,7 +36,7 @@ def test_staff_main_fields_and_additional_vehicle_prompt(tmp_path):
     html = client.get(f'/customers/{customer_id}/edit').get_data(as_text=True)
     for key in ('vehicle_make', 'vehicle_reg_no', 'vehicle_registration_number',
                 'vehicle_licence_number', 'vehicle_vin', 'vehicle_engine_number',
-                'vehicle_licence_disk_expiry'):
+                'vehicle_licence_disk_expiry', 'vehicle_color'):
         assert f'name="{key}"' in html
         assert html.index(f'name="{key}"') < html.index('name="alternative_contact_name"')
     assert 'Main client vehicle' in html
@@ -49,7 +49,8 @@ def test_staff_main_fields_and_additional_vehicle_prompt(tmp_path):
     assert 'Is this the main client vehicle?' in scan
     assert 'name="make_main" value="yes" required' in scan
     assert 'name="make_main" value="no" required' in scan
-    for name in ('model', 'colour', 'vehicle_type', 'registering_authority', 'control_number'):
+    # Colour IS an app input now (the disc decodes it), so it is offered; the rest stay dropped.
+    for name in ('model', 'vehicle_type', 'registering_authority', 'control_number'):
         assert f'name="{name}"' not in scan
 
 

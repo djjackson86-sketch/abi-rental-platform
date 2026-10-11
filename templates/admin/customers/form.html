@@ -54,6 +54,7 @@
           <tr>
             <th>Number plate</th>
             <th>Make</th>
+            <th>Colour</th>
             <th>VIN</th>
             <th>Engine number</th>
             <th>Disk expiry</th>
@@ -69,6 +70,7 @@
                 {% if vehicle.licence_number %}<small class="vehicle-sub">Disk {{ vehicle.licence_number }}</small>{% endif %}
               </td>
               <td>{{ vehicle.make or '—' }}</td>
+              <td>{{ vehicle.colour or '—' }}</td>
               <td>{{ vehicle.vin or '—' }}</td>
               <td>{{ vehicle.engine_number or '—' }}</td>
               <td>{{ vehicle.licence_disk_expiry or '—' }}{% if vehicle.licence_disk_expiry and vehicle.licence_disk_expiry < business_today %}<small class="scan-expiry-warning" role="alert">Licence disk expired</small>{% endif %}</td>
@@ -84,6 +86,7 @@
           ('registration_number', 'NaTIS registration number'),
           ('licence_number', 'Disk licence number'),
           ('make', 'Make'),
+          ('colour', 'Colour'),
           ('vin', 'VIN'),
           ('engine_number', 'Engine number'),
           ('licence_disk_expiry', 'Licence disk expiry'),
@@ -113,7 +116,7 @@
   {% else %}
     <div class="soft-empty">
       <h3>No vehicles recorded</h3>
-      <p>Scan the client's licence disk to capture the number plate, VIN, engine number and disk expiry on their record.</p>
+      <p>Scan the client's licence disk to capture the number plate, make, colour, VIN, engine number and disk expiry on their record.</p>
       {% if user_can('scan_vehicle') %}
         <a class="btn primary" href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id, vehicle_role='additional') }}">Scan a vehicle disk</a>
       {% endif %}

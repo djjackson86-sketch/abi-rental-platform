@@ -32,12 +32,13 @@ VALID_SOURCES = (SOURCE_MANUAL, SOURCE_SCAN, SOURCE_IMPORT)
 
 #: A client's **main vehicle** — the one their invoices print — is mirrored into the client's
 #: ``custom_fields_json`` under these canonical keys. Scanning/linking a vehicle can make it the
-#: main one; the customer form edits the same fields. The set is deliberately the seven fields staff
-#: capture on the scan screen's manual entry (registration, disc licence number, NaTIS registration
-#: number, VIN, engine number, make, disk expiry) — the rest of a decoded disk (model, colour,
-#: category, registering authority, control number) stays on the vehicle row only, and any legacy
-#: value already stored against a client is left exactly as it is. The mapping is declared once,
-#: here, and the label/order metadata in ``app.services.customers`` follows it (a test pins them).
+#: main one; the customer form edits the same fields. The set is deliberately the eight fields staff
+#: capture on the scan screen (registration, disc licence number, NaTIS registration number, VIN,
+#: engine number, make, disk expiry and colour) — colour joined the original seven on request,
+#: because the licence disc decodes it and staff need to see and correct it instead of leaving it to
+#: a hand-typed legacy field — while the rest of a decoded disk (model, category, registering
+#: authority, control number) stays on the vehicle row only. The mapping is declared once, here, and
+#: the label/order metadata in ``app.services.customers`` follows it (a test pins them).
 MAIN_VEHICLE_FIELD_MAP = {
     "registration": "vehicle_reg_no",
     "licence_number": "vehicle_licence_number",
@@ -46,8 +47,9 @@ MAIN_VEHICLE_FIELD_MAP = {
     "engine_number": "vehicle_engine_number",
     "make": "vehicle_make",
     "licence_disk_expiry": "vehicle_licence_disk_expiry",
+    "colour": "vehicle_color",
 }
-#: The custom-field keys that carry the main vehicle (the seven above). A **customer form** posts all
+#: The custom-field keys that carry the main vehicle (the eight above). A **customer form** posts all
 #: of them and is therefore authoritative over the vehicle row; a partial post (public portal, order
 #: card's cached snapshot) carries only some, so it must never push stale values onto the main row.
 MAIN_VEHICLE_CUSTOM_KEYS = tuple(MAIN_VEHICLE_FIELD_MAP.values())
@@ -471,7 +473,7 @@ def apply_main_vehicle_form_sync(customer_id, form, custom_fields_json):
     and a partial post from the public portal or the order screen's cached snapshot can neither
     blank those fields nor push a stale value into the row.
 
-    Only the **customer form** (which carries all 12 mirrored fields) is authoritative over the
+    Only the **customer form** (which carries all eight mirrored fields) is authoritative over the
     vehicle row: an edit there saves to the row, with a plate another client owns refused rather
     than swapped in. Any other caller's vehicle fields are ignored (the row wins).
 

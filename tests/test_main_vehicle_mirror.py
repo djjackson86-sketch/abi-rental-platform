@@ -1,27 +1,30 @@
 """Main client vehicle — the client's invoiced vehicle mirrored into their Custom details.
 
-Covers the 2026-10-10 request (after the parent's correction trimming the mirror to the seven
-scan-manual fields):
+Covers the 2026-10-10 request, extended when **colour joined the mirror** (the licence disc decodes
+it, so it is captured, shown and corrected rather than left to a hand-typed field):
 
-* the seven canonical ``vehicle_*`` keys map to the client's main vehicle and nothing else;
+* the eight canonical ``vehicle_*`` keys map to the client's main vehicle and nothing else;
 * a scan that links a vehicle can make it the client's main vehicle (make_main=yes), and only then
   — "no" leaves the current main alone, a first vehicle defaults to main for older callers;
 * a *different* vehicle may not silently replace the main one: with a main on file and no choice
   posted, the save is refused with the choice highlighted and nothing is written;
 * re-scanning a plate the client already holds updates that record (never duplicates it) and the
-  disk expiry follows;
+  disk expiry and colour follow;
 * the main-vehicle mirror is cleared when the vehicle is deleted or transferred away, and replacing
-  the main clears the stale fields — all while every other custom field survives;
+  the main clears the stale fields — colour included — while every other custom field survives;
 * a customer-form save is authoritative over the linked vehicle row (a plate another client owns is
   refused), while a partial post (portal/order card) can neither blank the mirror nor push a stale
   snapshot into the row;
-* the internal ``main_vehicle_id`` never renders, and a legacy ``vehicle_color`` stays stored.
+* the decoded colour is offered once, in a visible editable field, so a human correction always
+  wins over the value the disc carried;
+* the internal ``main_vehicle_id`` never renders.
 
 Every identifier is synthetic.
 """
 
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -40,7 +43,11 @@ from app.services.customers import (
     update_customer,
 )
 
-SEVEN_KEYS = (
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "disc"
+
+#: The eight custom-field keys a client's main vehicle is mirrored under, in the order the mapping
+#: declares them (colour is last).
+MAIN_VEHICLE_KEYS = (
     "vehicle_reg_no",
     "vehicle_licence_number",
     "vehicle_registration_number",
@@ -48,6 +55,7 @@ SEVEN_KEYS = (
     "vehicle_engine_number",
     "vehicle_make",
     "vehicle_licence_disk_expiry",
+    "vehicle_color",
 )
 
 
@@ -92,7 +100,7 @@ def login_owner(client):
 
 
 def vehicle_form(registration="ABC123GP", **overrides):
-    """A scan-screen vehicle payload — the seven fields the app records plus the disk extras."""
+    """A scan-screen vehicle payload — the eight fields the app records plus the disk extras."""
     data = {
         "registration": registration,
         "registration_number": "ZZ1234Z",
@@ -119,7 +127,7 @@ def save_scan(client, customer_id, registration="ABC123GP", **overrides):
 
 
 def customer_form(name="Charmaine Mokoena", **overrides):
-    """A full customer-form payload — it carries all seven mirrored vehicle fields."""
+    """A full customer-form payload — it carries all eight mirrored vehicle fields."""
     data = {
         "customer_type": "individual",
         "name": name,
@@ -135,6 +143,7 @@ def customer_form(name="Charmaine Mokoena", **overrides):
         "vehicle_engine_number": "",
         "vehicle_make": "",
         "vehicle_licence_disk_expiry": "",
+        "vehicle_color": "",
         "alternative_contact_name": "",
         "alternative_contact_number": "",
         "alternative_contact_relationship": "",
@@ -148,12 +157,12 @@ def customer_form(name="Charmaine Mokoena", **overrides):
 # ── the mapping contract ─────────────────────────────────────────────────────
 
 
-def test_the_seven_mirror_keys_are_the_canonical_mapping():
-    assert tuple(vehicles.MAIN_VEHICLE_CUSTOM_KEYS) == SEVEN_KEYS
-    assert set(vehicles.MAIN_VEHICLE_FIELD_MAP.values()) == set(SEVEN_KEYS)
-    # the customers metadata agrees, and the seven lead the visible order (alternatives after)
-    assert tuple(customers_service.VEHICLE_CUSTOM_FIELD_KEYS) == SEVEN_KEYS
-    for key in SEVEN_KEYS:
+def test_the_eight_mirror_keys_are_the_canonical_mapping():
+    assert tuple(vehicles.MAIN_VEHICLE_CUSTOM_KEYS) == MAIN_VEHICLE_KEYS
+    assert set(vehicles.MAIN_VEHICLE_FIELD_MAP.values()) == set(MAIN_VEHICLE_KEYS)
+    # the customers metadata agrees, and the eight lead the visible order (alternatives after)
+    assert tuple(customers_service.VEHICLE_CUSTOM_FIELD_KEYS) == MAIN_VEHICLE_KEYS
+    for key in MAIN_VEHICLE_KEYS:
         assert key in VISIBLE_CUSTOM_FIELD_ORDER
         assert key in CUSTOM_FIELD_FORM_KEYS
     assert VISIBLE_CUSTOM_FIELD_ORDER.index("vehicle_licence_disk_expiry") < VISIBLE_CUSTOM_FIELD_ORDER.index(
@@ -169,6 +178,7 @@ def test_the_mapping_pairs_every_key_with_a_vehicle_column():
     assert vehicles.MAIN_VEHICLE_FIELD_MAP["engine_number"] == "vehicle_engine_number"
     assert vehicles.MAIN_VEHICLE_FIELD_MAP["make"] == "vehicle_make"
     assert vehicles.MAIN_VEHICLE_FIELD_MAP["licence_disk_expiry"] == "vehicle_licence_disk_expiry"
+    assert vehicles.MAIN_VEHICLE_FIELD_MAP["colour"] == "vehicle_color"
 
 
 def test_the_internal_pointer_is_hidden_from_rendered_custom_fields(app, customer_id):
@@ -185,7 +195,7 @@ def test_the_internal_pointer_is_hidden_from_rendered_custom_fields(app, custome
 # ── promote / clear / sync ───────────────────────────────────────────────────
 
 
-def test_promote_mirrors_the_seven_fields_and_clears_stale_on_replace(app, customer_id):
+def test_promote_mirrors_the_eight_fields_and_clears_stale_on_replace(app, customer_id):
     with app.app_context():
         first = vehicles.create_vehicle(
             vehicle_form("AAA111GP", make="TOYOTA", model="HILUX", colour="WHITE"), customer_id=customer_id
@@ -196,7 +206,8 @@ def test_promote_mirrors_the_seven_fields_and_clears_stale_on_replace(app, custo
         assert fields["vehicle_reg_no"] == "AAA111GP"
         assert fields["vehicle_vin"] == "AHTFR22G10L123456"
         assert fields["vehicle_licence_disk_expiry"] == "2027-03-31"
-        # a decoded extra (model) is NOT mirrored — only the seven are
+        assert fields["vehicle_color"] == "WHITE"
+        # a decoded extra (model) is NOT mirrored — only the eight are
         assert "vehicle_model" not in fields
 
         # replace the main with a vehicle that carries far fewer fields
@@ -209,10 +220,11 @@ def test_promote_mirrors_the_seven_fields_and_clears_stale_on_replace(app, custo
     assert replaced["main_vehicle_id"] == second
     assert replaced["vehicle_reg_no"] == "BBB222GP"
     assert replaced["vehicle_make"] == "FORD"
-    # stale fields from the first vehicle are gone, not left behind
+    # stale fields from the first vehicle are gone, not left behind — colour included
     assert replaced.get("vehicle_vin", "") == ""
     assert replaced.get("vehicle_licence_disk_expiry", "") == ""
     assert replaced.get("vehicle_licence_number", "") == ""
+    assert replaced.get("vehicle_color", "") == ""
 
 
 def test_promote_preserves_every_non_vehicle_custom_field(app, customer_id):
@@ -429,23 +441,127 @@ def test_a_partial_post_cannot_wipe_the_mirror_or_the_vehicle(app, customer_id):
     assert fields["vehicle_licence_disk_expiry"] == "2027-03-31"
 
 
-def test_legacy_vehicle_colour_is_preserved_and_not_exposed_as_a_new_field(app, customer_id):
+def test_colour_is_an_offered_and_synced_field_not_a_legacy_extra(app, customer_id):
+    """Colour joined the mirror on request: it is offered on the form and synced to the row."""
+    assert "vehicle_color" in customers_service.VEHICLE_CUSTOM_FIELD_KEYS
     with app.app_context():
-        # a client with a legacy colour already stored
-        update_customer(customer_id, customer_form())
-        get_db().execute(
-            "UPDATE customers SET custom_fields_json = ? WHERE id = ?",
-            ('{"vehicle_color": "WHITE", "vehicle_make": "TOYOTA"}', customer_id),
-        )
-        get_db().commit()
-        update_customer(customer_id, customer_form(vehicle_make="TOYOTA"))
+        vehicle_id = vehicles.create_vehicle(vehicle_form(colour="SILVER"), customer_id=customer_id)
+        vehicles.promote_main_vehicle(customer_id, vehicle_id)
         raw = raw_custom_fields_for(get_customer(customer_id))
-        # colour is not one of the seven offered fields ...
-        assert "vehicle_color" not in customers_service.VEHICLE_CUSTOM_FIELD_KEYS
-        # ... but the stored value is untouched and still decoded for documents/invoices
-        assert raw["vehicle_color"] == "WHITE"
         visible = custom_fields_for(get_customer(customer_id))
-    assert visible.get("vehicle_color") == "WHITE"
+    assert raw["vehicle_color"] == "SILVER"
+    assert visible.get("vehicle_color") == "SILVER"
+
+
+# ── colour: scan -> vehicle row -> the client's main vehicle ────────────────
+
+
+def test_scan_save_stores_colour_on_the_vehicle_and_mirrors_it_to_the_client(app, client, customer_id):
+    login_owner(client)
+    save_scan(client, customer_id, "ABC123GP", colour="SILVER", make_main="yes")
+    with app.app_context():
+        rows = vehicles.list_vehicles(customer_id)
+        assert rows[0]["colour"] == "SILVER"
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "SILVER"
+
+
+def test_make_main_no_keeps_the_main_colour_and_yes_syncs_the_new_one(app, client, customer_id):
+    login_owner(client)
+    save_scan(client, customer_id, "AAA111GP", colour="WHITE", make_main="yes")
+    # a different vehicle that is NOT main: the client's main colour is preserved
+    save_scan(client, customer_id, "BBB222GP", colour="RED", make_main="no")
+    with app.app_context():
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "WHITE"
+        red = vehicles.get_customer_vehicle_by_registration(customer_id, "BBB222GP")
+        assert red["colour"] == "RED"  # the additional vehicle keeps its own colour
+    # a third vehicle made main replaces the colour on the mirror
+    save_scan(client, customer_id, "CCC333GP", colour="BLUE", make_main="yes")
+    with app.app_context():
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "BLUE"
+
+
+def test_replacing_the_main_vehicle_clears_a_colour_the_new_one_does_not_have(app, client, customer_id):
+    login_owner(client)
+    save_scan(client, customer_id, "AAA111GP", colour="WHITE", make_main="yes")
+    with app.app_context():
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "WHITE"
+    # a new main vehicle with no recorded colour clears the stale mirror value
+    save_scan(client, customer_id, "BBB222GP", colour="", make_main="yes")
+    with app.app_context():
+        assert raw_custom_fields_for(get_customer(customer_id)).get("vehicle_color", "") == ""
+
+
+def test_rescanning_the_same_plate_updates_its_colour_and_the_mirror(app, client, customer_id):
+    login_owner(client)
+    save_scan(client, customer_id, "ABC123GP", colour="WHITE", make_main="yes")
+    save_scan(client, customer_id, "ABC123GP", colour="SILVER", make_main="no")
+    with app.app_context():
+        rows = vehicles.list_vehicles(customer_id)
+        assert len(rows) == 1  # updated, never duplicated
+        assert rows[0]["colour"] == "SILVER"
+        # it is the main vehicle, so the client's mirrored colour followed the rescan
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "SILVER"
+
+
+def test_a_partial_post_preserves_the_main_colour_and_an_explicit_blank_clears_it(app, client, customer_id):
+    login_owner(client)
+    save_scan(client, customer_id, "ABC123GP", colour="WHITE", make_main="yes")
+    with app.app_context():
+        # a partial post (order card / portal) does not carry the full set of vehicle fields
+        update_customer(
+            customer_id,
+            {"name": "Charmaine Mokoena", "customer_type": "individual", "vehicle_color": "STALE"},
+        )
+        # the stale colour is ignored: the linked row still wins
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "WHITE"
+        # the full customer form with an explicitly blank colour clears it (and the row)
+        client.post(f"/customers/{customer_id}/edit", data=customer_form(vehicle_color=""), follow_redirects=True)
+    with app.app_context():
+        assert raw_custom_fields_for(get_customer(customer_id)).get("vehicle_color", "") == ""
+        assert vehicles.get_vehicle(vehicles.get_main_vehicle_id(customer_id))["colour"] == ""
+
+
+def test_customer_form_edit_syncs_the_linked_main_vehicle_colour(app, client, customer_id):
+    login_owner(client)
+    save_scan(client, customer_id, "ABC123GP", colour="WHITE", make_main="yes")
+    response = client.post(
+        f"/customers/{customer_id}/edit",
+        data=customer_form(vehicle_color="Midnight Blue"),
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    with app.app_context():
+        assert vehicles.get_vehicle(vehicles.get_main_vehicle_id(customer_id))["colour"] == "Midnight Blue"
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "Midnight Blue"
+
+
+# ── the scan review form: the decoded colour is visible and correctable ─────
+
+
+def test_the_scan_review_offers_colour_once_as_a_visible_editable_field(app, client):
+    """The decoded colour is shown once, in a visible text input — never a hidden duplicate.
+
+    With no hidden field carrying the same name, the visible box is the only 'colour' the save
+    reads, so a staff correction can never be overridden by the value the disc carried.
+    """
+    login_owner(client)
+    disc = (FIXTURE_DIR / "natis_positional.txt").read_text(encoding="utf-8")
+    response = client.post("/scan-vehicle", data={"disc_text": disc}, follow_redirects=True)
+    body = response.data.decode()
+    assert body.count('name="colour"') == 1
+    assert 'type="hidden" name="colour"' not in body
+    assert 'name="colour" value="WHITE"' in body  # the English half of "White / Wit"
+
+
+def test_a_human_corrected_colour_wins_over_the_decoded_one(app, client, customer_id):
+    login_owner(client)
+    disc = (FIXTURE_DIR / "natis_positional.txt").read_text(encoding="utf-8")
+    client.post("/scan-vehicle", data={"disc_text": disc}, follow_redirects=True)  # decoded: WHITE
+    # staff correct the colour on the review form before saving
+    save_scan(client, customer_id, "ABC123GP", colour="SUNSET ORANGE", make_main="yes")
+    with app.app_context():
+        assert vehicles.list_vehicles(customer_id)[0]["colour"] == "SUNSET ORANGE"
+        assert raw_custom_fields_for(get_customer(customer_id))["vehicle_color"] == "SUNSET ORANGE"
 
 
 # ── expiry warning helper ────────────────────────────────────────────────────
