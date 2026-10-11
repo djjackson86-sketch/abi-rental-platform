@@ -235,6 +235,20 @@ def registration_by_id(registration_id):
     return _mapping(row)
 
 
+def approved_registration_for_customer(customer_id):
+    """Saved approval evidence for the verification panel after refresh."""
+    resolved = _as_int(customer_id)
+    if resolved is None:
+        return None
+    row = get_db().execute(
+        "SELECT r.*, b.name AS branch_name FROM portal_registrations r "
+        "LEFT JOIN branches b ON b.id = r.branch_id "
+        "WHERE r.customer_id = ? AND r.status = ? ORDER BY r.id DESC LIMIT 1",
+        (resolved, STATUS_APPROVED),
+    ).fetchone()
+    return _mapping(row)
+
+
 def pending_registration_for_customer(customer_id):
     """The client's pending registration as a dict, or ``None``.
 

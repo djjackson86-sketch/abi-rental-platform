@@ -667,6 +667,8 @@ a.pending-check-link:active{background:#e7f0ff}
 .pending-approve-form{display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-top:1px solid var(--line-soft);padding-top:14px}
 .pending-approve-form .form-help{margin:0;flex:1 1 240px}
 .pending-approve-form .btn:disabled{opacity:.45;cursor:not-allowed}
+.pending-approve-form .btn.portal-approved:disabled{background:#15803d;color:#fff;border-color:#15803d;opacity:1;cursor:default}
+.portal-order-actions{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin-top:14px}
 .pending-delete-form{display:flex;flex-wrap:wrap;align-items:center;gap:12px;border-top:1px solid var(--line-soft);margin-top:16px;padding-top:16px}
 .pending-delete-form .form-help{margin:0;flex:1 1 240px}
 .pending-queue-card{margin-bottom:18px}

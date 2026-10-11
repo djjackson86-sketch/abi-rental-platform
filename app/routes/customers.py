@@ -2,7 +2,7 @@ import csv
 import uuid
 from io import StringIO
 
-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, Response, abort, flash, jsonify, redirect, render_template, request, session, url_for
 
 from app.routes.auth import login_required
 from app.services import csrf, portal_registrations
@@ -78,6 +78,7 @@ def _pending_registration_context(customer_id, customer=None):
         customer = get_customer(customer_id)
     return {
         "pending_registration": portal_registrations.pending_registration_for_customer(customer_id),
+        "approved_registration": portal_registrations.approved_registration_for_customer(customer_id),
         "portal_approval_csrf_token": csrf.issue_token("portal_approval"),
         # Client portal changes (follow-up): the "cannot proceed" delete. Its own scoped
         # CSRF token, so the approve form's token is never reused for a destructive action.
@@ -348,13 +349,24 @@ def approve_portal_registration(registration_id):
     if not portal_registrations.branch_in_session_scope(registration):
         abort(403)
     customer_id = registration.get("customer_id")
+    wants_json = request.accept_mimetypes.best == "application/json"
     try:
-        portal_registrations.approve_registration(registration_id)
+        # A retry after a lost response must not rewrite saved approval evidence.
+        if registration.get("status") != portal_registrations.STATUS_APPROVED:
+            portal_registrations.approve_registration(registration_id)
     except ValueError as exc:
+        if wants_json:
+            return jsonify(ok=False, message=str(exc)), 400
         flash(str(exc), "error")
-        return redirect(url_for("customers.edit", customer_id=customer_id))
+        return redirect(url_for("customers.detail", customer_id=customer_id))
+    if wants_json:
+        customer = get_customer(customer_id)
+        return jsonify(ok=True, html=render_template(
+            "admin/customers/_pending_registration_panel.html",
+            customer=customer, **_pending_registration_context(customer_id, customer),
+        ))
     flash("Client approved — they now show as a normal customer for this branch.", "success")
-    return redirect(url_for("customers.edit", customer_id=customer_id))
+    return redirect(url_for("customers.detail", customer_id=customer_id))
 
 
 @bp.post("/portal/<int:registration_id>/delete")
