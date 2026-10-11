@@ -524,13 +524,14 @@ def popia_notice_pdf():
 
 
 @bp.get("/popia/agreement.pdf")
+@bp.get("/popia/information-notice.pdf")
 @login_required
 @main_required
 def popia_agreement_pdf():
     from app.services.popia_documents import agreement_text, document_pdf
-    pdf = document_pdf(agreement_text(), "Jackapp and Sano Trailers — Simplified Agreement")
+    pdf = document_pdf(agreement_text(), "Jackapp and Sano Trailers — Client Information Notice")
     return Response(pdf, mimetype="application/pdf", headers={
-        "Content-Disposition": "attachment; filename=sano-jackapp-simplified-agreement.pdf",
+        "Content-Disposition": "attachment; filename=sano-jackapp-client-information-notice.pdf",
         "Cache-Control": "no-store",
     })
 

@@ -1,6 +1,6 @@
 # Jackapp and Sano Trailers — Client Information Notice
 
-**Version 1.0 · 2026-09-23**
+**Version 1.1 · 2026-10-11**
 
 This notice explains the basic responsibilities between **Jackapp** and **Sano Trailers** regarding the customer information stored and processed in the Sano Trailers rental system.
 
@@ -87,17 +87,10 @@ Customer information remains the information of **Sano Trailers**. Jackapp does 
 
 If the service ends, Jackapp will reasonably assist Sano Trailers with access to its information, export of data, or deletion of information where appropriate and technically possible.
 
-## 11. Acceptance
+## 11. Keeping this record
 
-This notice is the short written arrangement between the parties for the customer information in the system. It is deliberately kept in plain English and short. It comes into effect when accepted by both parties.
+Sano can keep this notice as a record of how Jackapp handles and helps protect its customer information. There is no signature form to complete for this record.
 
-| | Sano Trailers (responsible party) | Jackapp (service provider) |
-|---|---|---|
-| Name | | Donovan Jackson |
-| Position | | Owner |
-| Accepted on | | |
-| Signature / electronic acceptance | | |
+POPIA requires a written contract covering the security measures used by an operator. It does not expressly require handwritten signatures for that contract. Those terms can be included in the existing written service agreement, or agreed through clear written confirmation, such as an email exchange between authorised representatives of Sano and Jackapp. The agreed terms should require appropriate, reasonable technical and organisational safeguards to protect the information.
 
-Acceptance by electronic means is valid between the parties.
-
-*Bracketed items: none. Everything above is final wording — nothing left to confirm.*
+Keep this notice together with the relevant service agreement or written confirmation. Downloading or filing this notice alone does not establish that both parties have agreed to the terms, and this notice does not certify full POPIA compliance.
