@@ -15,6 +15,11 @@
 //   * ambiguous TYPED text (a label two clients share, a shared bare name, a number on file
 //     for two clients) never resolves to "first in the list" — no id is written at all,
 //     because the save trusts the hidden id;
+//   * a keystroke is never a selection: a UNIQUE PREFIX typed into the box selects nobody and
+//     is not rewritten, so the picker cannot quietly allocate the vehicle to a client whose
+//     name merely starts with what is being typed — resolution happens on the explicit
+//     pick/change, or once at save time;
+//   * editing the box away from a picked client drops that client (no stale id rides along);
 //   * a genuinely unique typed name or number still resolves (no over-refusal).
 //
 // Usage: node tests/js/scan_customer_picker.mjs [path/to/scan_vehicle.html]
@@ -256,6 +261,54 @@ async function aUniqueTypedClientStillResolves() {
   equal(byNumber.hidden.value, '7', 'the only client with that number is resolved');
 }
 
+async function aUniquePrefixIsNeverSelectedWhileTyping() {
+  console.log('a unique prefix is NOT selected before the name is finished');
+  const clients = [{ id: 11, name: 'Charmaine Mokoena', phone: '+27821234567' }];
+  const env = makeEnv([{ customers: clients }, { customers: clients }]);
+  type(env, 'Cha');
+  await env.settle();
+  type(env, 'Charm');
+  equal(env.hidden.value, '', 'a partial name writes NO id while the name is still being typed');
+  equal(env.pick.value, 'Charm', 'and the box is left exactly as it was typed');
+  await env.settle();
+  type(env, 'Charmaine');
+  equal(env.hidden.value, '', 'a longer unique prefix is still not a selection');
+  equal(env.pick.value, 'Charmaine', 'the box still holds what was typed');
+  await env.settle();
+  type(env, 'Charmaine Moke');
+  equal(env.hidden.value, '', 'and neither is a longer partial');
+
+  choose(env, 'Charmaine Mokoena · +27821234567');       // the explicit pick
+  equal(env.hidden.value, '11', 'picking the client from the list still resolves');
+  equal(env.pick.value, 'Charmaine Mokoena · +27821234567', 'and the picked label stays in the box');
+}
+
+async function aUniquePrefixStillResolvesWhenTheFormIsSaved() {
+  console.log('a unique prefix resolves once, at save time (not while typing)');
+  const clients = [{ id: 4, name: 'Charmaine Mokoena', phone: '+27821234567' }];
+  const env = makeEnv([{ customers: clients }]);
+  type(env, 'Charmaine');
+  await env.settle();
+  equal(env.hidden.value, '', 'nothing is selected while typing');
+  const prevented = submit(env);
+  await flush();
+  ok(!prevented, 'the save was not held back for another lookup');
+  equal(env.hidden.value, '4', 'the typed prefix resolves only when the form is actually saved');
+  equal(env.submitted.length, 0, 'the form posts its own resolved id');
+}
+
+async function typingAwayFromAPickedClientDropsIt() {
+  console.log('editing the box away from a picked client drops its id');
+  const clients = [{ id: 5, name: 'Charmaine Mokoena', phone: '+27821234567' }];
+  const env = makeEnv([{ customers: clients }, { customers: clients }]);
+  type(env, 'Cha');
+  await env.settle();
+  choose(env, 'Charmaine Mokoena · +27821234567');
+  equal(env.hidden.value, '5', 'the pick resolved');
+  type(env, 'Charmaine Mokoena · +27821234567x');
+  equal(env.hidden.value, '', 'a stale id cannot ride along with edited text');
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────
 
 const scenarios = [
@@ -265,6 +318,9 @@ const scenarios = [
   aSharedNameTypedByHandIsNeverGuessed,
   aNumberOnFileForTwoClientsTypedByHandIsNeverGuessed,
   aUniqueTypedClientStillResolves,
+  aUniquePrefixIsNeverSelectedWhileTyping,
+  aUniquePrefixStillResolvesWhenTheFormIsSaved,
+  typingAwayFromAPickedClientDropsIt,
 ];
 
 for (const scenario of scenarios) {

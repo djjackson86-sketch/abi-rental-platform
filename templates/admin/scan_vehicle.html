@@ -157,11 +157,18 @@
 
   function digits(value) { return (value || '').replace(/\D/g, ''); }
 
-  // Tolerant on purpose: staff type a name, a number, or pick the typeahead label. An exact-label
-  // match is the normal path; the looser steps stop a chosen client from being thrown away when
-  // the text in the box is not byte-for-byte the option string.
+  // Two resolution modes, and the difference between them is the point of this script.
   //
-  // Every step returns a client only when the text identifies EXACTLY ONE of them. A typed string
+  // exactIn() answers "does this text NAME exactly one client?" — the typeahead's own label, the
+  // client's full name, or a full phone number. It is the ONLY thing allowed to resolve while the
+  // box is still being typed into.
+  //
+  // looseIn() adds a partial-name step, and is used only for an explicit commitment: the change
+  // event, and the submit-time re-resolve. Running it on every keystroke is what made the picker
+  // choose a client before the staff member had finished typing: a *unique prefix* picked that
+  // client and overwrote the box with their full label mid-word. A prefix is not a choice.
+  //
+  // Both modes return a client only when the text identifies EXACTLY ONE of them. A typed string
   // that fits several clients is refused here (the box is left alone and no id is written), because
   // the hidden id is what the save trusts: "first in the list" would allocate the vehicle to
   // whoever the search happened to order first — the one thing worse than a refusal. Two clients
@@ -170,7 +177,7 @@
   // syncId() keeps that id by label before this is consulted, so an identical label the staff
   // member chose stays chosen. The server refuses the same ambiguous text
   // (find_customer_id_by_text), so both ends agree on what "identified" means.
-  function resolveIn(pool, typed) {
+  function exactIn(pool, typed) {
     var want = typed.trim();
     if (!want) { return null; }
     var lower = want.toLowerCase();
@@ -180,37 +187,51 @@
     hits = pool.filter(function (client) {
       return (client.name || '').trim().toLowerCase() === lower;
     });
-    if (hits.length) { return hits.length === 1 ? hits[0] : null; }        // a bare name
-    if (wanted.length >= 9) {                                             // a bare phone number
+    if (hits.length) { return hits.length === 1 ? hits[0] : null; }        // the client's full name
+    if (wanted.length >= 9 && /^[\d\s()+\-]+$/.test(want)) {              // a full phone number, and nothing else
       hits = pool.filter(function (client) { return digits(client.phone).slice(-9) === wanted.slice(-9); });
       if (hits.length) { return hits.length === 1 ? hits[0] : null; }
     }
-    hits = pool.filter(function (client) {                                // a partial name
+    return null;
+  }
+
+  function looseIn(pool, typed) {
+    var found = exactIn(pool, typed);
+    if (found) { return found; }
+    var lower = typed.trim().toLowerCase();
+    if (!lower) { return null; }
+    var hits = pool.filter(function (client) {                            // a partial name
       return lower.length >= 3 && (client.name || '').toLowerCase().indexOf(lower) !== -1;
     });
     return hits.length === 1 ? hits[0] : null;
   }
 
-  function resolve(typed) {
-    return resolveIn(results, typed) || resolveIn(options, typed);
+  function resolve(typed, committed) {
+    var look = committed ? looseIn : exactIn;
+    return look(results, typed) || look(options, typed);
   }
 
-  function syncId() {
+  // ``committed`` is true only for an explicit selection: the change event (a typeahead pick, or
+  // the box being left committed) and the submit-time re-resolve. A keystroke is NOT a selection —
+  // typing never writes a client id and never rewrites the box that is still being written into.
+  // Typing away from a chosen client drops that client, so a stale id cannot ride along.
+  function syncId(committed) {
     if (pick.value === initial) { return; }
     if (selected && pick.value === selected.label) {            // the picked client, unchanged
       hidden.value = selected.id;
       return;
     }
-    var found = resolve(pick.value);
+    var found = resolve(pick.value, committed);
     if (found) {
       selected = {id: found.id, label: labelFor(found)};
       hidden.value = found.id;
       if (labelFor(found) !== pick.value) { pick.value = labelFor(found); }
-    } else if (/^\d+$/.test(pick.value.trim()) && pick.value.trim().length < 9) {
-      // A bare client id typed into the box. Never a phone number: a cellphone number is nine or
-      // more digits, and the number step above resolves it — or, when it fits more than one client,
-      // refuses it. Accepting one here posted the number itself as a customer id: a nonsense lookup
-      // at best, and a silent allocation to whichever client happens to hold that id at worst.
+    } else if (committed && /^\d+$/.test(pick.value.trim()) && pick.value.trim().length < 9) {
+      // A bare client id, only ever on an explicit commit. Never a phone number: a cellphone
+      // number is nine or more digits, and the number step above resolves it — or, when it fits
+      // more than one client, refuses it. Accepting one on every keystroke posted the digits as a
+      // customer id the moment they were typed: a nonsense lookup at best, and a silent allocation
+      // to whichever client happens to hold that id at worst.
       selected = {id: pick.value.trim(), label: pick.value};
       hidden.value = pick.value.trim();
     } else {
@@ -238,21 +259,21 @@
   }
 
   pick.addEventListener('input', function () {
-    syncId();
+    syncId(false);
     if (timer) { clearTimeout(timer); }
     timer = setTimeout(load, 200);
   });
-  pick.addEventListener('change', syncId);
+  pick.addEventListener('change', function () { syncId(true); });
 
   // Last line of defence: if the box holds a name but no id was resolved yet, look the name up
   // once more before letting the save go, so "I selected a client" cannot become a refusal.
   var submitting = false;
   pick.form.addEventListener('submit', function (event) {
-    syncId();
+    syncId(true);
     if (submitting || hidden.value || !pick.value.trim()) { return; }
     event.preventDefault();
     load().then(function () {
-      syncId();
+      syncId(true);
       submitting = true;
       pick.form.submit();
     });

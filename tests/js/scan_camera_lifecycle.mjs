@@ -67,7 +67,22 @@ function makeElement(id) {
     scrollIntoView() {},
     setAttribute(name, value) { this.attributes[name] = value; },
     appendChild(child) { this.children.push(child); },
-    getContext() { return { drawImage() {}, getImageData(x, y, w, h) { return { data: new Uint8ClampedArray(w * h * 4) }; } }; },
+    // The source rectangle of every decode draw is recorded, so the guide ->
+    // native-camera-pixel mapping can be asserted (and so a decode that silently
+    // falls back to the whole downscaled frame is visible to the test).
+    _draws: [],
+    rect: { left: 0, top: 0, width: 0, height: 0 },
+    getBoundingClientRect() {
+      const r = this.rect;
+      return { left: r.left, top: r.top, width: r.width, height: r.height, right: r.left + r.width, bottom: r.top + r.height };
+    },
+    getContext() {
+      const el = this;
+      return {
+        drawImage(...args) { el._draws.push(args); },
+        getImageData(x, y, w, h) { return { data: new Uint8ClampedArray(w * h * 4) }; },
+      };
+    },
     play() { return this._playResult; },
     _playResult: undefined,
   };
@@ -79,7 +94,7 @@ function makeEnv() {
     'scan-camera-live', 'scan-camera-video', 'scan-camera-cancel',
     'scan-camera-playstart', 'scan-camera-manual', 'scan-camera-status',
     'scan-camera-blocked', 'scan-disc-text', 'scan-manual', 'scan-camera-start',
-    'scan-capture-form',
+    'scan-capture-form', 'scan-barcode-guide',
   ];
   const elements = {};
   for (const id of ids) { elements[id] = makeElement(id); }
@@ -103,12 +118,13 @@ function makeEnv() {
   form.submit = function () { state.submissions += 1; };
 
   const windowListeners = {};
+  const created = [];
   const sandboxDoc = {
     activeElement: null,
     body: makeElement('body'),
     getElementById: (id) => elements[id] || null,
     querySelector: (sel) => (sel === '.scan-capture-form' ? form : null),
-    createElement: (tag) => makeElement(`created-${tag}`),
+    createElement: (tag) => { const el = makeElement(`created-${tag}`); created.push(el); return el; },
   };
 
   function makeZXing() {
@@ -160,6 +176,7 @@ function makeEnv() {
   return {
     window: sandbox,
     elements,
+    created,
     state,
     timers,
     flushTimers() { const batch = timers.splice(0, timers.length); batch.forEach((t) => t.fn()); return batch.length; },
@@ -341,6 +358,40 @@ console.log('scan-camera lifecycle');
   await settle();
   equal(manualClicks, 1, 'the overlay manual button triggers the page manual action');
   equal(env.elements['scan-camera-live'].hidden, true, 'the overlay is closed before manual entry opens');
+}
+
+// 10. The guide region is decoded at NATIVE camera pixels, not the downscaled frame.
+//     The whole-frame path bounds a portrait stream to 1080 on its long edge
+//     (scale 0.5625 for 1080x1920), and that downscale is what loses a disc barcode
+//     that fits inside the guide.
+{
+  const env = makeEnv();
+  env.state.decodeQueue = [{ error: true }];
+  startScanner(env);
+  env.state.pendingMedia.resolve(fakeStream(env.state));
+  await settle();
+  const video = env.elements['scan-camera-video'];
+  video.videoWidth = 1080;
+  video.videoHeight = 1920;
+  video.rect = { left: 0, top: 0, width: 390, height: 844 };        // a phone-sized preview
+  env.elements['scan-barcode-guide'].rect = { left: 35, top: 400, width: 320, height: 53 };
+  env.flushTimers();                                               // tick 1: the guide crop
+  const canvas = env.created.find((el) => el.id === 'created-canvas');
+  const first = canvas._draws[0];
+  ok(!!first && first.length === 9, 'the decode draws a source REGION of the video');
+  ok(Math.abs(first[1] - 97) <= 2 && Math.abs(first[2] - 899) <= 2, 'the guide maps to native camera pixels');
+  ok(Math.abs(first[3] - 886) <= 2 && Math.abs(first[4] - 147) <= 2, '...using the guide width and height');
+  equal(first[7], 1772, 'the crop is scaled 2x, giving the decoder more pixels per module');
+  equal(first[8], 294, 'the crop keeps its aspect ratio');
+  ok(first[3] * first[4] < video.videoWidth * video.videoHeight, 'the crop is far smaller than the frame');
+
+  const second = canvas._draws[1];
+  ok(!!second && second.length === 9, 'the same tick then falls back to the whole frame');
+  equal(second[1], 0, 'the fallback starts at the frame origin (x)');
+  equal(second[2], 0, '...and the frame origin (y)');
+  equal(second[3], 1080, '...the whole frame (source width)');
+  equal(second[4], 1920, '...the whole frame (source height)');
+  equal(second[7], 608, '...still bounded to 1080 on the long edge');
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
