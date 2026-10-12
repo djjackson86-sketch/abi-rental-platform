@@ -226,6 +226,14 @@ def find_customer_id_by_text(text):
     (``Name · 082 123 4567``). Only an **unambiguous** match is accepted; two clients with
     the same number, or a name that matches more than one record, return ``None`` so the
     caller keeps its refusal rather than allocating a vehicle to the wrong person.
+
+    The typeahead label is resolved *first* and by exact string: the label the suggestion
+    list rendered is ``name · <the client's own stored phone>``, so two clients who share a
+    name and the same digits stored differently (``+27748848822`` vs ``0748848822``) show two
+    different labels. The label the staff member picked therefore identifies exactly one of
+    them, where the digit-normalised comparison below cannot tell them apart and refuses. A
+    label that is genuinely not unique still yields ``None``, so the ambiguity guard is
+    unchanged.
     """
     raw = str(text or "").strip()
     if not raw:
@@ -238,6 +246,18 @@ def find_customer_id_by_text(text):
     rows = get_db().execute(
         "SELECT id, name, phone FROM customers c WHERE 1=1" + pending_exclusion_clause("c")
     ).fetchall()
+
+    if label_name and label_phone:
+        want_name = " ".join(label_name.lower().split())
+        want_phone = " ".join(label_phone.lower().split())
+        label_hits = [
+            row["id"]
+            for row in rows
+            if " ".join(str(row["name"] or "").lower().split()) == want_name
+            and " ".join(str(row["phone"] or "").lower().split()) == want_phone
+        ]
+        if label_hits:
+            return label_hits[0] if len(label_hits) == 1 else None
 
     phone_hits = []
     if label_phone:

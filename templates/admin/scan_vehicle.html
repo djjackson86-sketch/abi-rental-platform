@@ -138,6 +138,18 @@
   // resolved (and its id already sits in the hidden field) while this page has fetched nothing, so
   // an untouched box must never clear it.
   var initial = pick.value;
+  // The client the staff member actually picked: its id plus the exact label it was picked from.
+  // The box text alone cannot survive a round trip through the typeahead — the debounced fetch
+  // runs for whatever is in the box, and the full label ("Name · 0748848822") matches no name or
+  // phone, so it answers with *nothing*. Re-resolving an unchanged box against that empty list is
+  // what used to throw the chosen client away and refuse the save for a client whose name or
+  // number is shared. A picked client is kept by label until the box text actually changes away
+  // from it.
+  var selected = null;
+  // The last non-empty suggestion set: the labels the staff member could have picked from. Used
+  // only as a second pool, so a pick still resolves after the fetch for its own label wiped
+  // "results".
+  var options = [];
 
   function labelFor(client) {
     return client.name + (client.phone ? ' · ' + client.phone : '');
@@ -148,47 +160,61 @@
   // Tolerant on purpose: staff type a name, a number, or pick the typeahead label. An exact-label
   // match is the normal path; the looser steps stop a chosen client from being thrown away when
   // the text in the box is not byte-for-byte the option string.
-  function resolve(typed) {
+  //
+  // Every step returns a client only when the text identifies EXACTLY ONE of them. A typed string
+  // that fits several clients is refused here (the box is left alone and no id is written), because
+  // the hidden id is what the save trusts: "first in the list" would allocate the vehicle to
+  // whoever the search happened to order first — the one thing worse than a refusal. Two clients
+  // who render the SAME label are exactly that case: the label cannot tell them apart, so a *typed*
+  // copy of it resolves to nobody. A client that was actually picked out of the list is different:
+  // syncId() keeps that id by label before this is consulted, so an identical label the staff
+  // member chose stays chosen. The server refuses the same ambiguous text
+  // (find_customer_id_by_text), so both ends agree on what "identified" means.
+  function resolveIn(pool, typed) {
     var want = typed.trim();
     if (!want) { return null; }
     var lower = want.toLowerCase();
     var wanted = digits(want);
-    var i, found;
-    for (i = 0; i < results.length; i++) {
-      if (labelFor(results[i]) === want) { return results[i]; }
+    var hits = pool.filter(function (client) { return labelFor(client) === want; });
+    if (hits.length) { return hits.length === 1 ? hits[0] : null; }        // the typeahead's own label
+    hits = pool.filter(function (client) {
+      return (client.name || '').trim().toLowerCase() === lower;
+    });
+    if (hits.length) { return hits.length === 1 ? hits[0] : null; }        // a bare name
+    if (wanted.length >= 9) {                                             // a bare phone number
+      hits = pool.filter(function (client) { return digits(client.phone).slice(-9) === wanted.slice(-9); });
+      if (hits.length) { return hits.length === 1 ? hits[0] : null; }
     }
-    for (i = 0; i < results.length; i++) {                       // bare name
-      if ((results[i].name || '').trim().toLowerCase() === lower) { return results[i]; }
-    }
-    if (wanted.length >= 9) {                                    // bare phone number
-      for (i = 0; i < results.length; i++) {
-        if (digits(results[i].phone).slice(-9) === wanted.slice(-9)) { return results[i]; }
-      }
-    }
-    for (i = 0; i < results.length; i++) {                       // unique partial name
-      if (lower.length >= 3 && (results[i].name || '').toLowerCase().indexOf(lower) !== -1) {
-        found = results[i];
-        break;
-      }
-    }
-    if (found) {
-      var matches = results.filter(function (client) {
-        return (client.name || '').toLowerCase().indexOf(lower) !== -1;
-      });
-      if (matches.length === 1) { return found; }
-    }
-    return null;
+    hits = pool.filter(function (client) {                                // a partial name
+      return lower.length >= 3 && (client.name || '').toLowerCase().indexOf(lower) !== -1;
+    });
+    return hits.length === 1 ? hits[0] : null;
+  }
+
+  function resolve(typed) {
+    return resolveIn(results, typed) || resolveIn(options, typed);
   }
 
   function syncId() {
     if (pick.value === initial) { return; }
+    if (selected && pick.value === selected.label) {            // the picked client, unchanged
+      hidden.value = selected.id;
+      return;
+    }
     var found = resolve(pick.value);
     if (found) {
+      selected = {id: found.id, label: labelFor(found)};
       hidden.value = found.id;
       if (labelFor(found) !== pick.value) { pick.value = labelFor(found); }
-    } else if (/^\d+$/.test(pick.value.trim())) {
+    } else if (/^\d+$/.test(pick.value.trim()) && pick.value.trim().length < 9) {
+      // A bare client id typed into the box. Never a phone number: a cellphone number is nine or
+      // more digits, and the number step above resolves it — or, when it fits more than one client,
+      // refuses it. Accepting one here posted the number itself as a customer id: a nonsense lookup
+      // at best, and a silent allocation to whichever client happens to hold that id at worst.
+      selected = {id: pick.value.trim(), label: pick.value};
       hidden.value = pick.value.trim();
     } else {
+      selected = null;
       hidden.value = '';
     }
   }
@@ -200,6 +226,7 @@
       .then(function (response) { return response.json(); })
       .then(function (data) {
         results = data.customers || [];
+        if (results.length) { options = results; }
         list.innerHTML = '';
         results.forEach(function (client) {
           var option = document.createElement('option');
