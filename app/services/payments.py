@@ -261,6 +261,9 @@ def archive_payment(payment_id):
     payment = get_payment(payment_id)
     if not payment or payment["deleted_at"]:
         raise ValueError("Payment not found")
+    if (payment["method"] or "").lower() == "deposit_applied":
+        from app.services.orders import reverse_deposit_settlement
+        return reverse_deposit_settlement(payment["order_id"], payment_id)
     db = get_db()
     execute_credit_checked(db, "UPDATE payments SET status = 'archived', deleted_at = ? WHERE id = ?", (now(), payment_id))
     db.commit()

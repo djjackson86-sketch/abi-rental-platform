@@ -50,6 +50,12 @@ class TursoConnection:
         self.total_changes += result.rows_affected or 0
         return TursoCursor(result)
 
+    def atomic_batch(self, statements):
+        """Execute this scoped multi-row write in one libSQL transaction."""
+        results = self._client.batch(statements)
+        self.total_changes += sum(result.rows_affected or 0 for result in results)
+        return [TursoCursor(result) for result in results]
+
     def executescript(self, script):
         cursor = None
         for statement in _split_sql_script(script):

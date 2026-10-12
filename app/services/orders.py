@@ -1996,7 +1996,7 @@ DEPOSIT_METHOD_ERROR = "Deposit process method must be EFT, Card, or Cash"
 
 def _deposit_applied_payment(order_id):
     return get_db().execute(
-        "SELECT id FROM payments WHERE order_id = ? AND method = 'deposit_applied' AND COALESCE(deleted_at, '') = '' ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM payments WHERE order_id = ? AND LOWER(COALESCE(method, '')) = 'deposit_applied' AND COALESCE(deleted_at, '') = '' ORDER BY id DESC LIMIT 1",
         (order_id,),
     ).fetchone()
 
@@ -2184,6 +2184,98 @@ def update_deposit_refund(order_id, form):
     return f"Deposit refund updated: R{refund_amount:.2f} paid out; R{applied_amount:.2f} used"
 
 
+def reverse_deposit_settlement(order_id, payment_id=None, *, repair_archived=False):
+    """Soft-reverse one settlement atomically, including its refund credit.
+
+    The guarded first write and every dependent write run in ONE transaction,
+    including on Turso (whose ordinary execute/commit calls autocommit). A
+    concurrent replacement payment or insufficient remaining customer credit
+    refuses the entire reversal. Archived-payment repair is explicit, never
+    reached by repeat payment deletion.
+    """
+    from app.services.payments import payment_summary, payment_total_sql
+
+    db = get_db()
+    order = get_order(order_id)
+    if not order:
+        raise ValueError("Order not found")
+    applied = float(order["deposit_applied_amount"] or 0)
+    refund = float(order["deposit_refund_amount"] or 0)
+    if applied <= 0 and refund <= 0:
+        raise ValueError("There is no deposit settlement recorded on this order to delete")
+    if payment_id is None:
+        payment = _deposit_applied_payment(order_id)
+        payment_id = payment["id"] if payment else None
+    stamp = local_now().isoformat(timespec="microseconds")
+    audit = (f"Deposit refund of R{refund:.2f} deleted {stamp}; used R{applied:.2f} reversed"
+             if refund > 0 else f"Deposit settlement deleted {stamp}: used R{applied:.2f} reversed")
+    if payment_id is not None:
+        audit += f" (payment {payment_id})"
+    previous_note = (order["deposit_note"] or "").strip()
+    audit_note = f"{previous_note[:max(0, 497 - len(audit))]} | {audit}" if previous_note else audit
+    # No replacement deposit payment may be silently removed. For payment
+    # deletion require an active row; the one-off repair requires an archived row.
+    payment_guard = ""
+    args = [audit_note, order_id, applied, refund, payment_id, payment_id]
+    if payment_id is not None:
+        payment_guard = """ AND EXISTS (SELECT 1 FROM payments WHERE id = ?
+            AND order_id = orders.id AND LOWER(COALESCE(method, '')) = 'deposit_applied'
+            AND """ + ("status = 'archived' AND COALESCE(deleted_at, '') <> ''" if repair_archived else "status = 'paid' AND COALESCE(deleted_at, '') = ''") + ")"
+        args.append(payment_id)
+    statements = [("""UPDATE orders SET deposit_applied_amount = 0,
+        deposit_refund_amount = 0, deposit_process_method = '',
+        deposit_processed_at = '', deposit_note = ?
+        WHERE id = ? AND deposit_applied_amount = ? AND deposit_refund_amount = ?
+        AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = orders.id
+            AND LOWER(COALESCE(p.method, '')) = 'deposit_applied' AND COALESCE(p.deleted_at, '') = ''
+            AND (? IS NULL OR p.id <> ?))
+        AND NOT EXISTS (SELECT 1 FROM customer_credits source
+            WHERE source.source_order_id = orders.id AND source.source_type = 'deposit_refund'
+            AND source.status = 'active'
+            AND (SELECT COALESCE(SUM(amount), 0) FROM customer_credits
+                 WHERE customer_id = source.customer_id AND status = 'active')
+              < (SELECT COALESCE(SUM(amount), 0) FROM customer_credits
+                 WHERE source_order_id = orders.id AND source_type = 'deposit_refund'
+                 AND customer_id = source.customer_id AND status = 'active'))""" + payment_guard,
+        tuple(args))]
+    gate = "EXISTS (SELECT 1 FROM orders WHERE id = ? AND deposit_note = ?)"
+    statements.extend([
+        (f"""UPDATE customer_credits SET status = 'reversed'
+            WHERE source_order_id = ? AND source_type = 'deposit_refund'
+            AND status = 'active' AND {gate}""", (order_id, order_id, audit_note)),
+        (f"""UPDATE payments SET status = 'archived', deleted_at = ?
+            WHERE id = ? AND COALESCE(deleted_at, '') = '' AND {gate}""",
+            (now(), payment_id, order_id, audit_note)),
+    ])
+    paid = payment_total_sql("orders")
+    statements.append((f"""UPDATE orders SET due_total = ROUND(total - ({paid}), 2),
+        payment_status = CASE WHEN ({paid}) <= 0 THEN 'payment_due'
+            WHEN ({paid}) < total THEN 'partially_paid'
+            WHEN ({paid}) = total THEN 'paid' ELSE 'overpaid' END
+        WHERE id = ? AND deposit_note = ?""", (order_id, audit_note)))
+    try:
+        if hasattr(db, "atomic_batch"):
+            results = db.atomic_batch(statements)
+        else:
+            db.execute("SAVEPOINT deposit_reversal")
+            try:
+                results = [db.execute(sql, params) for sql, params in statements]
+                db.execute("RELEASE SAVEPOINT deposit_reversal")
+            except Exception:
+                db.execute("ROLLBACK TO SAVEPOINT deposit_reversal")
+                db.execute("RELEASE SAVEPOINT deposit_reversal")
+                raise
+    except Exception as exc:
+        from app.services.credit_limits import CREDIT_LIMIT_ERROR, PAYMENT_REQUIRED_ERROR
+        for message in (CREDIT_LIMIT_ERROR, PAYMENT_REQUIRED_ERROR):
+            if message in str(exc):
+                raise ValueError(message) from exc
+        raise
+    if results[0].rowcount != 1:
+        raise ValueError("Deposit reversal refused: settlement changed, replacement payment exists, or refund credit has already been used")
+    return payment_summary(order_id)
+
+
 def delete_deposit_refund(order_id):
     """Remove a recorded deposit refund payout (ticket ABI-341953057).
 
@@ -2200,11 +2292,7 @@ def delete_deposit_refund(order_id):
     refund_amount = round(float(order["deposit_refund_amount"] or 0), 2)
     if refund_amount <= 0:
         raise ValueError("There is no deposit refund recorded on this order to delete")
-    existing_note = (order["deposit_note"] or "").strip()
-    audit_note = f"Deposit refund of R{refund_amount:.2f} deleted {local_now().strftime('%Y-%m-%d %H:%M')}"
-    if existing_note:
-        audit_note = f"{existing_note} | {audit_note}"
-    _write_deposit_split(order_id, 0, 0, "", "", audit_note[:500])
+    reverse_deposit_settlement(order_id)
     return f"Deposit refund of R{refund_amount:.2f} deleted — the order is back in Process deposit"
 
 
