@@ -1,0 +1,9 @@
+{# None means a new form; blank/legacy saved values must remain unchanged. #}
+{% macro province_select(value=none, required=false, customer_field=false, disabled=false) -%}
+{% set provinces = ['Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape', 'Western Cape'] %}
+{% set selected = 'Gauteng' if value is none else value %}
+<select name="province" autocomplete="address-level1"{% if required %} required{% endif %}{% if customer_field %} data-customer-field="province"{% endif %}{% if disabled %} disabled{% endif %}>
+{% if selected not in provinces %}<option value="{{ selected }}" selected>{{ selected or 'Select province' }}</option>{% endif %}
+{% for province in provinces %}<option value="{{ province }}"{% if province == selected %} selected{% endif %}>{{ province }}</option>{% endfor %}
+</select>
+{%- endmacro %}

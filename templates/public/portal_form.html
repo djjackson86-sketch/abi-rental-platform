@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "shared/_customer_province.html" import province_select %}
 {% block title %}Customer registration | {{ settings.company_name }}{% endblock %}
 {# A branch's public registration form — feature B (§B2).
 
@@ -65,7 +66,7 @@
       <section class="form-section">
         <h2>Contact details</h2>
         <div class="form-grid">
-          <label class="span-2"><span class="field-label"><span class="portal-name-label" data-portal-name-label>Name &amp; Surname</span> <span class="req-star" aria-hidden="true">*</span></span><input name="name" required autocomplete="name" value="{{ form_values.get('name', '') }}" placeholder="e.g. Thabo Mokoena"></label>
+          <label class="span-2"><span class="field-label"><span class="portal-name-label" data-portal-name-label>Name &amp; Surname</span> <span class="req-star" aria-hidden="true">*</span></span><input name="name" required autocomplete="name" value="{{ form_values.get('name', '') }}" placeholder="{{ 'e.g. ABC Trading (Pty) Ltd.' if form_values.get('customer_type') == 'company' else 'e.g. Alex Morgan' }}"></label>
           <label><span class="field-label">Email <span class="req-star" aria-hidden="true">*</span></span><input name="email" type="email" required autocomplete="email" value="{{ form_values.get('email', '') }}" placeholder="e.g. customer@example.com"></label>
           <label><span class="field-label">Phone <span class="req-star" aria-hidden="true">*</span></span><input name="phone" type="tel" required inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
           <label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" {% if form_values.get('marketing_opt_in') %}checked{% endif %}> Subscribed to marketing emails</label>
@@ -88,7 +89,7 @@
           <label class="span-2">Address line 2<input name="address_line2" value="{{ form_values.get('address_line2', '') }}" placeholder="e.g. Unit 4, Sunset Complex"></label>
           <label><span class="field-label">Suburb <span class="req-star" aria-hidden="true">*</span></span><input name="suburb" required value="{{ form_values.get('suburb', '') }}"></label>
           <label><span class="field-label">City <span class="req-star" aria-hidden="true">*</span></span><input name="city" required autocomplete="address-level2" value="{{ form_values.get('city', '') }}"></label>
-          <label><span class="field-label">Province <span class="req-star" aria-hidden="true">*</span></span><input name="province" required autocomplete="address-level1" value="{{ form_values.get('province', '') }}"></label>
+          <label><span class="field-label">Province <span class="req-star" aria-hidden="true">*</span></span>{{ province_select(form_values.get('province'), required=true) }}</label>
           <label><span class="field-label">Postal code <span class="req-star" aria-hidden="true">*</span></span><input name="postal_code" required inputmode="numeric" autocomplete="postal-code" value="{{ form_values.get('postal_code', '') }}"></label>
         </div>
       </section>
@@ -133,12 +134,14 @@
   var section = document.querySelector('.company-details-section');
   var inputs = document.getElementsByName('customer_type');
   var nameLabel = document.querySelector('.portal-name-label');
+  var nameInput = nameLabel ? nameLabel.closest('label').querySelector('input') : null;
   if(!section){ return; }
   function each(list, fn){ Array.prototype.forEach.call(list, fn); }
   function sync(){
     var selected = null;
     each(inputs, function(input){ if(input.checked){ selected = input; } });
     section.hidden = !selected || selected.value !== 'company';
+    if(nameInput){ nameInput.placeholder = (selected && selected.value === 'company') ? 'e.g. ABC Trading (Pty) Ltd.' : 'e.g. Alex Morgan'; }
     if(nameLabel){ nameLabel.textContent = (selected && selected.value === 'company') ? 'Company Name' : 'Name & Surname'; }
   }
   each(inputs, function(input){ input.addEventListener('change', sync); });
