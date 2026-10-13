@@ -742,6 +742,16 @@ def create_or_link_customer(form, branch_id, decision, slug=None, portal_duplica
     # Release only claims this request actually won, and only after its receipt is durable.
     for scope, key in contact_claims:
         release_submission(scope, key)
+    # Only the writer reaches here: completed-claim replays return above. Send
+    # after both the customer write and its receipt commit, never on a refusal.
+    try:
+        from app.services.telegram import send_portal_submission_notification
+
+        send_portal_submission_notification(result["customer_id"])
+    except Exception:
+        from flask import current_app
+
+        current_app.logger.exception("Customer portal notification failed")
     return result
 
 
@@ -866,12 +876,6 @@ def _write_submission(db, values, action, target_id, matches, blocked, slug, ref
                 except Exception:
                     pass
             raise
-        try:
-            from app.services.telegram import send_new_customer_notification
-
-            send_new_customer_notification(customer_id)
-        except Exception:
-            pass
         return {
             "customer_id": customer_id,
             "created": True,

@@ -328,6 +328,34 @@ def send_new_customer_notification(customer_id):
     return _safe_send(build)
 
 
+def send_portal_submission_notification(customer_id):
+    """Minimal admin alert, shared by new and permitted existing-client intake.
+
+    The intake service calls this only after a durable, non-replayed submission.
+    Public duplicate refusals and the existing consent gate remain unchanged.
+    """
+    def build():
+        customer = get_db().execute(
+            "SELECT id, name FROM customers WHERE id = ?", (customer_id,),
+        ).fetchone()
+        submitted_at = datetime.now(ZoneInfo(
+            current_app.config.get("BUSINESS_TIMEZONE", "Africa/Johannesburg")
+        )).isoformat(timespec="seconds")
+        lines = [
+            "👤 <b>Customer portal information submitted</b>",
+            f"Customer ID: {_escape(customer_id)}",
+            f"Name: {_escape(customer['name'] if customer else '')}",
+            f"Submitted: {_escape(submitted_at)}",
+        ]
+        if _base_url():
+            lines.append(f"Admin review: {_escape(_base_url())}/customers/{int(customer_id)}")
+        return "\n".join(lines)
+    result = _safe_send(build)
+    if result.get("sent"):
+        current_app.logger.info("Customer portal notification delivered for customer %s", customer_id)
+    return result
+
+
 def format_order_message(order, items):
     lines = [
         "📦 <b>New order / booking request</b>",
