@@ -755,4 +755,5 @@ def test_the_panel_renders_the_red_delete_form_with_its_own_token(client, app, b
     delete_token = csrf_token(client, DELETE_SCOPE)
     assert approve_token and delete_token
     assert approve_token != delete_token, "the delete has its own scoped token"
-    assert approve_token in body and delete_token in body
+    assert approve_token not in body, "client approval now lives on the scan screen"
+    assert delete_token in body
