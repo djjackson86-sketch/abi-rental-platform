@@ -64,6 +64,9 @@
 {% set owner_is_somebody_else = owner and (not review.customer or owner.id != review.customer.id) %}
 <section class="panel scan-review-panel">
   <h2>Check the details &amp; allocate the vehicle</h2>
+  {% if review.existing_vehicle_status == 'unapproved' %}
+  <p class="scan-vehicle-approved-state" role="status"><span class="badge vehicle-unapproved-badge">Unapproved</span> This vehicle is recorded on the client's file as <b>unapproved</b>. “Approve &amp; Save Vehicle” puts it back to approved.</p>
+  {% endif %}
   {% if review.fields.get('licence_disk_expiry') and review.fields.get('licence_disk_expiry') < business_today %}<p class="scan-expiry-warning" role="alert">Warning: this vehicle licence disk expired on {{ review.fields.get('licence_disk_expiry') }}.</p>{% endif %}
 
   {% if owner_is_somebody_else %}
@@ -76,6 +79,11 @@
   <form method="post" action="{{ url_for('vehicles.save_scan_vehicle') }}" class="form-grid scan-review-form">
     <input type="hidden" name="source" value="{{ values.source or 'scan' }}">
     <input type="hidden" name="vehicle_role" value="{{ vehicle_role or '' }}">
+    {# Answered only by the "Approve client?" dialog: 1 = approve the pending portal client,
+       0 / absent (the safe default, and what "No" posts) = leave the client's approval as it is. #}
+    <input type="hidden" name="approve_client" value="" data-approve-client-field>
+    <input type="hidden" name="csrf_token" value="{{ scan_approval_csrf_token }}">
+    <input type="hidden" name="action" value="approve" data-vehicle-action>
     {# Return to the verification checklist after saving, when the panel sent us here. #}
     {% if return_to_verification %}<input type="hidden" name="return_to_verification" value="1">{% endif %}
 
@@ -120,10 +128,34 @@
     {% endif %}
 
     <div class="form-actions span-2">
-      <button class="btn primary" type="submit">Save vehicle</button>
+      <button class="btn primary" type="submit" value="approve" id="scan-approve-save">Approve &amp; Save Vehicle</button>
       <a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle') }}">Start a new scan</a>
     </div>
+    {# The vehicle's OWN disapproval sits below the saving action: it records this very vehicle on
+       the client as unapproved (its red state) without touching the client's own approval. #}
+    <div class="form-actions span-2 scan-disapprove-action">
+      <button class="btn danger" type="submit" value="disapprove" id="scan-disapprove-vehicle" onclick="this.form.querySelector('[data-vehicle-action]').value='disapprove'">Disapprove Vehicle</button>
+      <span class="form-help">Records this vehicle on the client as <b>unapproved</b>. The client's own approval is not changed.</span>
+    </div>
   </form>
+
+  {% if user_can("customers") %}
+  {# The explicit Yes/No the owner asked for. Shown only when the client on this form is a saved
+     ID-verified *pending portal* registration — the one state "approve the client" can act on.
+     "No" (or closing the dialog) posts no approval at all, so the client's approval is untouched
+     and only the vehicle is saved. #}
+  <dialog id="approve-client-dialog" aria-labelledby="approve-client-title" style="width: min(32rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); max-height: 90dvh; overflow-y: auto; box-sizing: border-box; border: 1px solid #ccc; border-radius: 12px; padding: 24px;">
+    <h2 id="approve-client-title">Approve client?</h2>
+    <p>The selected client is marked ID verified. Approving their portal registration makes them a normal customer for this branch.</p>
+    <div class="form-actions">
+      <button class="btn" type="button" data-approve-client="0">No</button>
+      <button class="btn primary" type="button" data-approve-client="1">Yes</button>
+    </div>
+  </dialog>
+  <style>
+    #approve-client-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  </style>
+  {% endif %}
 </section>
 
 <script>
@@ -265,19 +297,62 @@
   });
   pick.addEventListener('change', function () { syncId(true); });
 
-  // Last line of defence: if the box holds a name but no id was resolved yet, look the name up
-  // once more before letting the save go, so "I selected a client" cannot become a refusal.
-  var submitting = false;
-  pick.form.addEventListener('submit', function (event) {
+  window.resolveScanCustomer = function () {
     syncId(true);
-    if (submitting || hidden.value || !pick.value.trim()) { return; }
+    if (hidden.value || !pick.value.trim()) { return Promise.resolve(); }
+    return load().then(function () { syncId(true); });
+  };
+})();
+</script>
+
+<script>
+// One submit pipeline handles both entry points and changing the selected customer.
+(function () {
+  var dialog = document.getElementById('approve-client-dialog');
+  var form = document.querySelector('.scan-review-form');
+  if (!form) { return; }
+  var field = form.querySelector('[data-approve-client-field]');
+  var action = form.querySelector('[data-vehicle-action]');
+  var busy = false;
+  function send(answer) {
+    field.value = answer;
+    form.querySelectorAll('button[type="submit"]').forEach(function (button) { button.disabled = true; });
+    form.submit();
+  }
+  form.addEventListener('submit', function (event) {
     event.preventDefault();
-    load().then(function () {
-      syncId(true);
-      submitting = true;
-      pick.form.submit();
+    if (busy) { return; }
+    busy = true;
+    action.value = event.submitter && event.submitter.value === 'disapprove' ? 'disapprove' : 'approve';
+    field.value = '';
+    Promise.resolve(window.resolveScanCustomer && window.resolveScanCustomer()).then(function () {
+      if (action.value === 'disapprove' || !dialog || !dialog.showModal) { send('0'); return; }
+      var params = new URLSearchParams({
+        customer_id: document.getElementById('scan-customer-id').value,
+        customer_pick: document.getElementById('scan-customer-pick').value
+      });
+      return fetch('{{ url_for("vehicles.client_approval_state") }}?' + params.toString(),
+        {headers: {'Accept': 'application/json'}}).then(function (response) {
+          if (!response.ok) { throw new Error('Unable to check client approval. Please try again.'); }
+          return response.json();
+        }).then(function (state) {
+          if (state.ask_approval) { dialog.showModal(); } else { send('0'); }
+        });
+    }).catch(function () {
+      busy = false;
+      alert('Unable to check client approval. Please try again. Nothing has been saved.');
     });
   });
+  if (dialog) {
+    dialog.addEventListener('cancel', function () { busy = false; });
+    dialog.querySelectorAll('[data-approve-client]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        if (!busy) { return; }
+        dialog.close();
+        send(button.getAttribute('data-approve-client'));
+      });
+    });
+  }
 })();
 </script>
 {% endif %}

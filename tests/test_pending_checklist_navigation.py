@@ -29,4 +29,5 @@ def test_verification_checklist_links_preserve_customer_and_direct_scan(tmp_path
     assert vehicle.path == '/scan-vehicle'
     assert parse_qs(vehicle.query) == {'customer_id': [str(cid)], 'vehicle_role': ['main'], 'start_scan': ['1'], 'return_to_verification': ['1']}
     assert 'Set ID verification' in text and 'Scan main vehicle →' in text
-    assert re.search(r'<button[^>]+disabled[^>]*>Approve client</button>', text)
+    assert ">Approve client</button>" not in text
+    assert "pending-approve-pointer" in text

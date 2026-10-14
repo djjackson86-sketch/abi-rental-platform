@@ -689,3 +689,11 @@ a.pending-check-link:active{background:#e7f0ff}
   .customer-not-verified { display:block; width:fit-content; color:#a11212 !important; background:#fee2e2; padding:3px 7px; border-radius:4px; font-weight:800; }
   .customer-verification-warning { display:flex; flex-direction:column; gap:4px; padding:14px 18px; margin-bottom:18px; border:1px solid #dc2626; border-radius:8px; color:#991b1b; background:#fef2f2; }
   .customer-verification-warning[hidden] { display:none; }
+
+/* ABI-341953212: the scan screen's Approve & Save Vehicle / Disapprove Vehicle pair, and the
+   vehicle's own unapproved red state. The red badge mirrors the existing "Licence disk expired"
+   warning treatment so an unapproved vehicle reads as a warning wherever it is listed. */
+.scan-review-panel .scan-disapprove-action { align-items:center; gap:10px; margin-top:4px; }
+.scan-review-panel .scan-disapprove-action .form-help { font-weight:600; color:var(--ink-2); }
+.badge.vehicle-unapproved-badge { background:#fee2e2; color:#a11212; font-weight:800; }
+.scan-review-panel .scan-vehicle-approved-state { display:flex; align-items:center; gap:10px; margin:0 0 14px; padding:12px 14px; border:1px solid #fecaca; border-radius:var(--radius,12px); background:var(--danger-soft,#fff0ee); color:var(--danger,#b42318); font-weight:650; }

@@ -247,11 +247,12 @@ def test_the_edit_page_shows_the_verification_panel_and_a_disabled_approval(clie
     assert registration["reference"] in body
     # Approval is a POST to the scoped endpoint, carrying the hidden CSRF token.
     action = f"/customers/portal/{registration['id']}/approve"
-    assert f'action="{action}"' in body
+    assert f'action="{action}"' not in body
     assert re.search(r'name="csrf_token" value="[^"]+"', body)
     assert scoped_csrf(client), "the scoped token is issued for the approve form"
     # Both checks are open, so the button is disabled.
-    assert re.search(r'<button[^>]*\bdisabled\b[^>]*>\s*Approve client', body)
+    assert '>Approve client</button>' not in body
+    assert 'pending-approve-pointer' in body
     # ...and the panel offers both workflow actions.
     assert f"/scan-vehicle?customer_id={stored['id']}" in body or f"customer_id={stored['id']}" in body
     assert "Set ID verification" in body
@@ -261,7 +262,7 @@ def test_the_approval_form_sits_outside_the_customer_form(client, app, pending_c
     stored, _registration = pending_client
     body = client.get(f"/customers/{stored['id']}/edit").get_data(as_text=True)
     # The panel (and its own <form>) is rendered before the customer form — never nested inside it.
-    assert body.index("pending-approve-form") < body.index("settings-form panel customer-form")
+    assert body.index("pending-approve-pointer") < body.index("settings-form panel customer-form")
 
 
 def test_the_detail_page_shows_the_verification_panel(client, app, pending_client):
@@ -269,7 +270,7 @@ def test_the_detail_page_shows_the_verification_panel(client, app, pending_clien
     body = client.get(f"/customers/{stored['id']}").get_data(as_text=True)
     assert "pending-registration-panel" in body
     assert registration["reference"] in body
-    assert "Approve client" in body
+    assert "Approve on the scan screen" in body
 
 
 def test_an_ordinary_customer_has_no_verification_panel(client, app):
@@ -296,12 +297,13 @@ def test_approval_enables_once_id_and_main_vehicle_are_both_recorded(client, app
         },
     )
     body = client.get(f"/customers/{stored['id']}/edit").get_data(as_text=True)
-    assert "disabled" in body.split("Approve client")[0].rsplit("<button", 1)[1], "still missing a vehicle"
+    assert ">Approve client</button>" not in body
+    assert "pending-approve-pointer" in body
 
     client.post(
         "/scan-vehicle/save",
         data={"customer_id": str(stored["id"]), "registration": "NB72XMGP", "make": "Toyota", "make_main": "yes"},
     )
     body = client.get(f"/customers/{stored['id']}/edit").get_data(as_text=True)
-    button = body.split("Approve client")[0].rsplit("<button", 1)[1]
-    assert "disabled" not in button, "both checks are met, so approval is enabled"
+    assert ">Approve client</button>" not in body
+    assert client.get("/scan-vehicle/client-approval-state", query_string={"customer_id": stored["id"]}).json["ask_approval"] is True

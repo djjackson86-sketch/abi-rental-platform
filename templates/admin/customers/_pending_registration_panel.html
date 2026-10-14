@@ -11,8 +11,13 @@
      (``pending_vehicle_captured``) — in either order, each shown as done or still open;
    * the vehicle-disc scanner for this client, and a jump to the Client Verified section of the
      customer form, so staff never leave the client's workflow;
-   * the approval itself: a POST to ``customers.approve_portal_registration`` with the scoped CSRF
-     token, disabled until both checks are met.
+   * the disapproval control (retains the client, saves a reason and blocks future rentals).
+
+   The approval itself lives on the scan screen now (ABI-341953212): "Approve & Save Vehicle"
+   records the main vehicle and asks an explicit "Approve client?" — the standalone "Approve
+   client" button here was removed, so a vehicle capture and an approval are never two halves of
+   one half-finished step. The route (``customers.approve_portal_registration``) is unchanged for
+   an already-open page or a direct caller.
 
    No ID image, ID number or OCR is requested or stored here — verification is the same yes/no flag
    the counter already uses. The approval form is self-contained (never nested inside another
@@ -70,12 +75,12 @@
     <button class="btn portal-approved" type="button" disabled>Approved</button>
   </div>
   {% else %}
-  <form method="post" action="{{ url_for('customers.approve_portal_registration', registration_id=registration.id) }}" class="pending-approve-form" data-portal-approval>
-    <input type="hidden" name="csrf_token" value="{{ portal_approval_csrf_token }}">
-    <button class="btn primary" type="submit"{% if not (pending_id_verified and pending_vehicle_captured) %} disabled title="Both the ID verification and the main vehicle must be recorded before approving"{% endif %}>Approve client</button>
-    <span class="form-help">{% if pending_id_verified and pending_vehicle_captured %}Both checks are in place — approval makes this a normal customer for the branch.{% else %}Approval stays disabled until both checks above are recorded.{% endif %}</span>
-  </form>
-  <p class="form-help" data-portal-approval-error role="alert" hidden></p>
+  {# The standalone "Approve client" button is gone (ABI-341953212). Approval now happens on the
+     scan screen's "Approve & Save Vehicle" — the same action that records the client's main
+     vehicle — and only after the explicit "Approve client?" Yes, so an approval can never be a
+     separate, half-finished step beside a vehicle that was never captured. This panel keeps the
+     checklist, the scan link that reaches it, and the disapproval control below. #}
+  <p class="form-help pending-approve-pointer">Approve on the scan screen: scan the client's main vehicle and choose <b>Approve &amp; Save Vehicle</b>.</p>
   <div class="pending-delete-form">
     <button class="btn danger" type="button" onclick="document.getElementById('disapprove-client-dialog').showModal()">Disapprove client</button>
     <span class="form-help">Retains the client and their history, saves a reason and blocks future rentals.</span>

@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from app.services.timezone import local_now_iso
 from flask import current_app, g
@@ -217,6 +218,12 @@ CREATE TABLE IF NOT EXISTS vehicles (
     licence_disk_expiry TEXT NOT NULL DEFAULT '',
     raw_scan_text TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT 'manual',
+    -- The vehicle's OWN approval state, deliberately separate from the client's verification
+    -- (``customers.client_verified``) and their rental block (``customers.is_blocked``): a
+    -- vehicle the counter disapproved stays recorded against the client and simply reads
+    -- 'unapproved'. Additive with a default, so every existing vehicle is 'approved' and no
+    -- other screen changes behaviour.
+    status TEXT NOT NULL DEFAULT 'approved',
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -649,6 +656,37 @@ def get_db():
             g.db.row_factory = sqlite3.Row
             g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
+
+
+@contextmanager
+def scan_write_transaction():
+    """Group only scan saves, including mirror/status/client approval, into one commit."""
+    original = get_db()
+    try:
+        if hasattr(original, "write_transaction"):
+            with original.write_transaction() as transaction:
+                g.db = transaction
+                yield
+        else:
+            class Connection:
+                def execute(self, *args, **kwargs):
+                    return original.execute(*args, **kwargs)
+
+                def commit(self):
+                    pass
+
+                def rollback(self):
+                    pass
+
+            g.db = Connection()
+            try:
+                yield
+                original.commit()
+            except BaseException:
+                original.rollback()
+                raise
+    finally:
+        g.db = original
 
 
 def close_db(e=None):
@@ -1312,6 +1350,13 @@ def run_migrations(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_documents_order ON documents(order_id)")
+
+    # --- Per-vehicle approval state (ABI-341953212) --------------------------
+    # The scan screen's "Approve & Save Vehicle" / "Disapprove Vehicle" pair records the
+    # vehicle's own status on the vehicle row. Additive with a default, so every existing
+    # vehicle (and every non-scan path — manual entry, import, edit) is 'approved' and behaves
+    # exactly as before; the client's own verification/block state is untouched by it.
+    ensure_column(db, "vehicles", "status", "TEXT NOT NULL DEFAULT 'approved'")
 
 
 def init_db():

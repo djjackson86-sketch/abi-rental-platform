@@ -20,6 +20,8 @@ class TursoConnection:
     def __init__(self, url, auth_token=None):
         from libsql_client import create_client_sync
 
+        self._transaction_url = url.replace("libsql://", "https://", 1)
+        self._auth_token = auth_token
         kwargs = {}
         if auth_token:
             kwargs["auth_token"] = auth_token
@@ -49,6 +51,70 @@ class TursoConnection:
         result = self._client.execute(sql, params)
         self.total_changes += result.rows_affected or 0
         return TursoCursor(result)
+
+    def write_transaction(self):
+        """Scoped interactive HTTP transaction using Hrana's stream baton (v2)."""
+        from contextlib import contextmanager
+        import json
+        from urllib.request import Request, urlopen
+        from libsql_client.hrana.convert import _stmt_to_proto, _result_set_from_proto
+        from libsql_client import LibsqlError
+
+        @contextmanager
+        def transaction():
+            outer = self
+
+            class Connection:
+                def __init__(self):
+                    self.baton = None
+                    self.url = outer._transaction_url.rstrip("/") + "/v2/pipeline"
+
+                def send(self, operation):
+                    payload = json.dumps({"baton": self.baton, "requests": [operation]}).encode()
+                    headers = {"Content-Type": "application/json"}
+                    if outer._auth_token:
+                        headers["Authorization"] = "Bearer " + outer._auth_token
+                    req = Request(self.url, data=payload, headers=headers, method="POST")
+                    with urlopen(req, timeout=20) as response:
+                        data = json.load(response)
+                    self.baton = data.get("baton")
+                    if data.get("base_url"):
+                        self.url = data["base_url"].rstrip("/") + "/v2/pipeline"
+                    result = data["results"][0]
+                    if result["type"] == "error":
+                        error = result["error"]
+                        raise LibsqlError(error["message"], error.get("code", "UNKNOWN"))
+                    return result["response"]
+
+                def execute(self, sql, params=None):
+                    result = self.send({"type": "execute", "stmt": _stmt_to_proto(sql, params)})
+                    return TursoCursor(_result_set_from_proto(result["result"]))
+
+                def commit(self):
+                    pass  # Only the outer context commits.
+
+                def rollback(self):
+                    pass
+
+            connection = Connection()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.execute("COMMIT")
+            except BaseException:
+                if connection.baton:
+                    try:
+                        connection.execute("ROLLBACK")
+                    except Exception:
+                        pass  # Preserve the original error; closing the stream rolls back.
+                raise
+            finally:
+                if connection.baton:
+                    try:
+                        connection.send({"type": "close"})
+                    except Exception:
+                        pass
+        return transaction()
 
     def atomic_batch(self, statements):
         """Execute this scoped multi-row write in one libSQL transaction."""

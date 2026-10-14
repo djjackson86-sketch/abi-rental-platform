@@ -18,9 +18,12 @@ through ``app/services/access.py``, so a sign-in without the ``scan_vehicle`` mo
 rather than a hidden button.
 """
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from app.services import csrf
+from app.services.access import user_can_module
 
 from app.routes.auth import login_required
+from app.services import portal_registrations
 from app.services import vehicle_disk as disk
 from app.services import vehicles
 from app.services.customers import find_customer_id_by_text, get_customer, search_customers
@@ -137,6 +140,9 @@ def _review(values, customer_id=None, *, raw_text="", unparsed=None, needs_main_
     save was refused because the client already has a main vehicle and staff did not say whether
     the vehicle being saved should replace it — the form highlights the choice.
     """
+    existing = None
+    if customer_id and (values.get("registration") or "").strip():
+        existing = vehicles.get_customer_vehicle_by_registration(customer_id, values.get("registration"))
     return {
         "fields": values,
         "customer": get_customer(customer_id) if customer_id else None,
@@ -144,6 +150,9 @@ def _review(values, customer_id=None, *, raw_text="", unparsed=None, needs_main_
         "raw_text": raw_text or values.get("raw_scan_text") or "",
         "unparsed": unparsed or {},
         "needs_main_choice": needs_main_choice,
+        # The plate's own saved approval state when it is already recorded for this client, so
+        # the review panel can show the unapproved red state instead of silently looking normal.
+        "existing_vehicle_status": vehicles.vehicle_status(existing) if existing is not None else "",
         # "Licence disk expired on …" when the scanned/typed expiry is in the past — the review form
         # (and the customer form) can show the warning without recomputing the date rules.
         "expiry_state": vehicles.licence_disk_expiry_state(values.get("licence_disk_expiry")),
@@ -154,6 +163,16 @@ def _render(review=None, *, customer_id=None, vehicle_role=None, start_scan=Fals
     preselected = get_customer(customer_id) if customer_id else None
     if review is not None and review.get("customer") is None and preselected is not None:
         review["customer"] = preselected
+    # The review form's "Approve client?" dialog is armed from the *saved* state of the client
+    # actually on the form (their verification flag and a still-pending portal registration), so
+    # both doors into the scanner — the verification checklist's pre-selected client and a plain
+    # scan where the client is picked on this page — show the same thing for the same client.
+    review_customer = (review or {}).get("customer")
+    pending_registration_id = ""
+    if review_customer is not None:
+        pending = portal_registrations.pending_registration_for_customer(review_customer["id"])
+        if pending is not None:
+            pending_registration_id = pending["id"]
     return render_template(
         "admin/scan_vehicle.html",
         settings=get_company_settings(),
@@ -173,6 +192,11 @@ def _render(review=None, *, customer_id=None, vehicle_role=None, start_scan=Fals
         # ``return_to_verification`` rides the capture and review forms' hidden fields so the save
         # can hand control back to ``customers.edit#pending-registration``.
         return_to_verification=return_to_verification,
+        # Saved client state the "Approve client?" dialog keys off (ABI-341953212): the client's
+        # persisted ID verification and the id of their still-pending portal registration, if any.
+        client_id_verified=portal_registrations.id_verified(review_customer) if review_customer else False,
+        pending_portal_registration_id=pending_registration_id,
+        scan_approval_csrf_token=csrf.issue_token("portal_approval"),
     )
 
 
@@ -298,13 +322,23 @@ def save_scan_vehicle():
     return_to_verification = _truthy(request.form.get("return_to_verification"))
     transfer = str(request.form.get("transfer") or "").strip().lower() in {"1", "on", "yes", "true"}
     make_main = vehicles.parse_main_choice(request.form.get("make_main"))
+    # The review form's two saving actions (ABI-341953212). "Approve & Save Vehicle" is the
+    # default — an older caller that posts no action at all keeps it — and records the vehicle as
+    # approved; "Disapprove Vehicle" records the very same vehicle as unapproved. Either way the
+    # vehicle stays on the client: only its own status moves, never the client's approval.
+    disapprove_vehicle = (request.form.get("action") or "").strip().lower() == "disapprove"
+    vehicle_status = vehicles.STATUS_UNAPPROVED if disapprove_vehicle else vehicles.STATUS_APPROVED
+    # The explicit Yes/No the "Approve client?" dialog posts. Yes (``approve_client=1``) is the
+    # only thing that can approve a pending portal client from this screen; No — or no answer at
+    # all — leaves the client's approval exactly as it was (the vehicle still saves).
+    approve_client = _truthy(request.form.get("approve_client"))
 
     # The picker's hidden id is a convenience, not the source of truth: staff routinely type the
     # name (or pick the typeahead label) without the id landing in the form, which used to refuse a
     # vehicle after the client had visibly been chosen. Resolve from the visible text when the id
     # is missing — an ambiguous or unknown name still refuses.
     if not customer_id:
-        customer_id = find_customer_id_by_text(request.form.get("customer_pick"))
+        customer_id = find_customer_id_by_text(request.form.get("customer_pick"), allow_pending=True)
 
     def review_response(review):
         """Re-render the review panel, keeping this screen's context for a retry."""
@@ -328,78 +362,72 @@ def save_scan_vehicle():
 
     registration = values["registration"]
 
-    if transfer:
-        if make_main is None:
-            flash("Choose whether this vehicle becomes the client's main vehicle before transferring it.", "error")
-            return review_response(_review(values, customer_id, needs_main_choice=True))
-        owner = vehicles.customer_for_vehicle_registration(registration)
-        if owner is None:
+    # "Approve client? → Yes" is validated HERE, before a single row is written, with the same
+    # checks the standalone approve route makes (a pending registration, inside the session's
+    # branch scope, an ID-verified client who is not blocked) plus the requirement that the client
+    # is even a pending portal sign-up. A refusal therefore cannot leave a half-saved vehicle
+    # behind: nothing has been saved when it is raised. The main-vehicle check is the one check
+    # left to ``approve_registration`` after the save below, because *this* request is what records
+    # that main vehicle — validating it here would always show "no main vehicle yet".
+    approval_registration_id = None
+    if approve_client:
+        if not user_can_module(session, "customers"):
+            abort(403)
+        csrf.validate("portal_approval")
+        if disapprove_vehicle:
             flash(
-                "That registration is not recorded for another client, so there is nothing to transfer.",
+                "Approve the client, or disapprove the vehicle — save them one at a time.",
                 "error",
             )
             return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
-        # Explicit action: MOVE the existing row (never copy), then apply the freshly scanned
-        # fields to it, so the record keeps one owner and gains the new disc details. If staff
-        # chose "yes", the moved vehicle also becomes the new owner's main vehicle; otherwise the
-        # new owner's main vehicle is left exactly as it was.
-        vehicles.transfer_vehicle(owner["vehicle_id"], customer_id)
-        try:
-            vehicles.update_vehicle(owner["vehicle_id"], values)
-        except ValueError as exc:
-            flash(str(exc), "error")
+        pending_registration = portal_registrations.pending_registration_for_customer(customer_id)
+        refusal = portal_registrations.approval_refusal(customer, pending_registration)
+        if refusal or pending_registration is None:
+            flash(refusal or "This client has no pending portal registration to approve.", "error")
             return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
-        if make_main is True:
-            vehicles.promote_main_vehicle(customer_id, owner["vehicle_id"])
-        flash(f"Vehicle {registration} transferred to {customer['name']}.", "success")
-        return _customer_edit_redirect(customer_id, return_to_verification)
+        approval_registration_id = pending_registration["id"]
 
-    # Re-scanning a plate this client already holds is a correction, not a second vehicle: update
-    # that record in place (the duplicate guard in create_vehicle still stands for everything else).
-    existing_same = vehicles.get_customer_vehicle_by_registration(customer_id, registration)
-    if existing_same is not None:
-        try:
-            vehicles.update_vehicle(existing_same["id"], values)
-        except ValueError as exc:
-            flash(str(exc), "error")
-            return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
-        if make_main is True:
-            vehicles.promote_main_vehicle(customer_id, existing_same["id"])
-        flash(
-            f"Registration {registration} is already recorded for {customer['name']} — "
-            "updated the existing vehicle instead of adding a second one.",
-            "success",
-        )
-        return _customer_edit_redirect(customer_id, return_to_verification)
-
-    # A brand-new vehicle. The main vehicle is the one the client's invoices print, so a different
-    # vehicle may only take that place when staff say so.
-    if make_main is None:
-        has_main = vehicles.get_main_vehicle_id(customer_id) is not None
-        custom_plate = vehicles.customer_custom_vehicle_plate(customer_id)
-        if has_main or custom_plate:
-            flash(
-                "This client already has a main vehicle on file. Choose whether this vehicle becomes "
-                "their main vehicle, then save again.",
-                "error",
-            )
-            return review_response(
-                _review(values, customer_id, raw_text=values["raw_scan_text"], needs_main_choice=True)
-            )
-        # First vehicle for the client, and no choice was posted (an older caller): keep the old
-        # behaviour of making it the main one so nothing regresses.
-        make_main = True
+    # Services historically commit each individual write. The scoped connection suppresses
+    # those commits and owns one real transaction (including on production Turso).
+    from app.db import scan_write_transaction
 
     try:
-        vehicle_id = vehicles.create_vehicle(request.form, customer_id=customer_id)
+        with scan_write_transaction():
+            if transfer:
+                if make_main is None:
+                    raise ValueError("Choose whether this vehicle becomes the client's main vehicle before transferring it.")
+                owner = vehicles.customer_for_vehicle_registration(registration)
+                if owner is None:
+                    raise ValueError("That registration is not recorded for another client, so there is nothing to transfer.")
+                vehicle_id = owner["vehicle_id"]
+                vehicles.transfer_vehicle(vehicle_id, customer_id)
+                vehicles.update_vehicle(vehicle_id, values)
+                message = f"Vehicle {registration} transferred to {customer['name']}."
+            else:
+                existing = vehicles.get_customer_vehicle_by_registration(customer_id, registration)
+                if existing is not None:
+                    vehicle_id = existing["id"]
+                    vehicles.update_vehicle(vehicle_id, values)
+                    message = (f"Registration {registration} is already recorded for {customer['name']} — "
+                               "updated the existing vehicle instead of adding a second one.")
+                else:
+                    if make_main is None:
+                        if vehicles.get_main_vehicle_id(customer_id) is not None or vehicles.customer_custom_vehicle_plate(customer_id):
+                            raise ValueError("This client already has a main vehicle on file. Choose whether this vehicle becomes their main vehicle, then save again.")
+                        make_main = True
+                    vehicle_id = vehicles.create_vehicle(request.form, customer_id=customer_id)
+                    message = f"Vehicle {registration or 'saved'} allocated to {customer['name']}."
+            if make_main is True:
+                vehicles.promote_main_vehicle(customer_id, vehicle_id)
+            vehicles.set_vehicle_status(vehicle_id, vehicle_status)
+            if approval_registration_id is not None:
+                portal_registrations.approve_registration(approval_registration_id)
     except ValueError as exc:
-        # A2's message names the current owner; surface it verbatim (never a silent second row).
         flash(str(exc), "error")
-        return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"]))
-
-    if make_main:
-        vehicles.promote_main_vehicle(customer_id, vehicle_id)
-    flash(f"Vehicle {registration or 'saved'} allocated to {customer['name']}.", "success")
+        return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"], needs_main_choice=make_main is None))
+    if approval_registration_id is not None:
+        flash("Client approved — they now show as a normal customer for this branch.", "success")
+    flash(message, "success")
     return _customer_edit_redirect(customer_id, return_to_verification)
 
 
@@ -446,8 +474,23 @@ def customer_vehicles(customer_id):
     return jsonify({"customer_id": customer_id, "count": len(rows), "vehicles": rows})
 
 
+@bp.get("/scan-vehicle/client-approval-state")
+@login_required
+def client_approval_state():
+    """Resolve the scanner's current selection from saved state, never from browser flags."""
+    customer_id = _to_int(request.args.get("customer_id"))
+    if not customer_id:
+        customer_id = find_customer_id_by_text(request.args.get("customer_pick"), allow_pending=True)
+    customer = get_customer(customer_id) if customer_id else None
+    registration = portal_registrations.pending_registration_for_customer(customer_id) if customer else None
+    ask = bool(customer and registration and portal_registrations.id_verified(customer)
+               and portal_registrations.branch_in_session_scope(registration)
+               and user_can_module(session, "customers"))
+    return jsonify(customer_id=customer_id if customer else None, ask_approval=ask)
+
+
 @bp.get("/api/customers/search")
 @login_required
 def customer_search():
     """Typeahead for the allocate step: name and phone only, never email/balance/history."""
-    return jsonify({"customers": search_customers(request.args.get("q", ""))})
+    return jsonify({"customers": search_customers(request.args.get("q", ""), allow_pending=True)})

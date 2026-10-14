@@ -71,6 +71,7 @@
               <td>
                 <strong>{{ vehicle.registration or 'No plate recorded' }}</strong>
                 {% if custom_fields.get('vehicle_reg_no','')|replace(' ','')|upper == vehicle.registration|replace(' ','')|upper and vehicle.registration %}<small class="vehicle-sub">Main client vehicle · used on invoices</small>{% else %}<small class="vehicle-sub">Additional vehicle</small>{% endif %}
+                {% if vehicle.status == 'unapproved' %}<small class="vehicle-sub"><span class="badge vehicle-unapproved-badge">Unapproved</span></small>{% endif %}
                 {% if vehicle.registration_number %}<small class="vehicle-sub">NaTIS {{ vehicle.registration_number }}</small>{% endif %}
                 {% if vehicle.licence_number %}<small class="vehicle-sub">Disk {{ vehicle.licence_number }}</small>{% endif %}
               </td>

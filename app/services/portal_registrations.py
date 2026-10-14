@@ -317,7 +317,9 @@ def main_vehicle_recorded(customer_id):
     resolved = _as_int(customer_id)
     if resolved is None:
         return False
-    return get_main_vehicle_id(resolved) is not None
+    from app.services.vehicles import get_main_vehicle, is_vehicle_unapproved
+    vehicle = get_main_vehicle(resolved)
+    return vehicle is not None and not is_vehicle_unapproved(vehicle)
 
 
 def approval_blockers(customer):
@@ -339,6 +341,30 @@ def approval_blockers(customer):
 def is_approvable(customer):
     """True when the client is ID-verified **and** has a recorded main vehicle."""
     return not approval_blockers(customer)
+
+
+def approval_refusal(customer, registration):
+    """Why this pending registration may not be approved in this request, or ``None``.
+
+    The scan screen's "Approve & Save Vehicle" uses this to validate **before it writes
+    anything**, so a refusal can never leave a half-saved vehicle behind. Every check the
+    standalone approve route makes is here, in the same order: a pending registration, inside the
+    session's branch scope, a client who is not blocked, and the ID verification flag. The only
+    check deliberately left out is the **main vehicle**: the caller is recording that vehicle in
+    this same request, so it is satisfied by the save that follows — ``approve_registration``
+    re-checks it for real, after the vehicle row exists.
+    """
+    if registration is None:
+        return "This client has no pending portal registration to approve."
+    if _row_value(registration, "status", "") != STATUS_PENDING:
+        return "That registration has already been approved."
+    if not branch_in_session_scope(registration):
+        return "That portal registration is outside the branches you can access."
+    if _row_value(customer, "is_blocked", 0):
+        return "This client is blocked. Review the saved reason before approving them."
+    if not id_verified(customer):
+        return ID_NOT_VERIFIED_MESSAGE
+    return None
 
 
 def branch_in_session_scope(registration):

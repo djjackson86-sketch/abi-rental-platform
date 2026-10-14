@@ -76,6 +76,17 @@ TEXT_FIELDS = (
 )
 MASS_FIELDS = ("tare_kg", "gvm_kg")
 
+#: A recorded vehicle's **own** approval state (ABI-341953212) — deliberately separate from the
+#: client's verification (``customers.client_verified``) and their rental block
+#: (``customers.is_blocked``). The scan screen's "Approve & Save Vehicle" records ``approved`` and
+#: its "Disapprove Vehicle" records ``unapproved``; either way the vehicle stays on the client's
+#: record (nothing is ever deleted), so the vehicle's state can never be confused with — or drift
+#: into — the client's approval. Every non-scan writer (manual entry, import, edit) leaves the
+#: column at its additive default of ``approved``, so nothing else changes behaviour.
+STATUS_APPROVED = "approved"
+STATUS_UNAPPROVED = "unapproved"
+VEHICLE_STATUSES = (STATUS_APPROVED, STATUS_UNAPPROVED)
+
 
 def _field(form, key):
     """Tolerant form read: a dict, a MultiDict or a sqlite Row all work."""
@@ -83,6 +94,47 @@ def _field(form, key):
         return form.get(key)
     except AttributeError:
         return None
+
+
+def _row_field(row, key, default=None):
+    """Read a column from a sqlite ``Row``, a dict or a plain mapping, tolerating absence."""
+    if row is None:
+        return default
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
+def vehicle_status(row):
+    """One vehicle's stored approval state: ``approved`` (the default) or ``unapproved``."""
+    value = _text(_row_field(row, "status", ""))
+    return value if value in VEHICLE_STATUSES else STATUS_APPROVED
+
+
+def is_vehicle_unapproved(row):
+    return vehicle_status(row) == STATUS_UNAPPROVED
+
+
+def set_vehicle_status(vehicle_id, status):
+    """Store one vehicle's own approval state. ``False`` when the vehicle does not exist.
+
+    Only ever called by the scan screen's Approve/Disapprove actions; the client row is not
+    touched, so the vehicle's state and the client's approval stay independent.
+    """
+    if status not in VEHICLE_STATUSES:
+        raise ValueError("Vehicle status must be approved or unapproved")
+    try:
+        vehicle_id = int(vehicle_id)
+    except (TypeError, ValueError):
+        return False
+    db = get_db()
+    cur = db.execute(
+        "UPDATE vehicles SET status = ?, updated_at = ? WHERE id = ?",
+        (status, now(), vehicle_id),
+    )
+    db.commit()
+    return cur.rowcount > 0
 
 
 def _text(value):

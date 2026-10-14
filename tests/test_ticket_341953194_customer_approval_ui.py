@@ -42,6 +42,7 @@ def test_light_green_rule_is_scoped_to_saved_approval_only():
 def test_pending_approval_keeps_its_existing_primary_button(client, pending_client):
     customer, _ = pending_client
     html = client.get(f"/customers/{customer['id']}").get_data(as_text=True)
-    assert 'class="btn primary" type="submit" disabled' in html
+    assert ">Approve client</button>" not in html
+    assert "pending-approve-pointer" in html
     assert 'portal-approved' not in html
     assert 'Create order for this customer' in html

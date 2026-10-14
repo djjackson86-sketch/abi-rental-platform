@@ -63,7 +63,8 @@ def test_failed_validation_keeps_pending_and_actionable(client, app, pending_cli
     assert response.get_json()['message']
     assert registration_for(app, customer['id'])['status'] == 'pending'
     html = client.get(f"/customers/{customer['id']}").get_data(as_text=True)
-    assert 'data-portal-approval>' in html
+    assert 'data-portal-approval>' not in html
+    assert 'pending-approve-pointer' in html
     assert 'portal-approved' not in html
     assert 'Create order for this customer' in html
 

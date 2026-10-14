@@ -183,7 +183,7 @@ def customer_filtered_total(query="", customer_type="", marketing=""):
     return int(row["total"] if row else 0)
 
 
-def search_customers(query, limit=8):
+def search_customers(query, limit=8, *, allow_pending=False):
     """Typeahead for the scan screen's "allocate to client" step: id, name and phone only.
 
     Deliberately narrow: the picker has to identify a client, so it gets the two things a
@@ -200,7 +200,7 @@ def search_customers(query, limit=8):
         limit = 8
     rows = get_db().execute(
         """SELECT id, name, phone FROM customers c
-        WHERE 1=1""" + pending_exclusion_clause("c") + """
+        WHERE 1=1""" + pending_exclusion_clause("c", allow_pending=allow_pending) + """
         AND (LOWER(name) LIKE ? OR LOWER(phone) LIKE ?)
         ORDER BY CASE WHEN LOWER(name) LIKE ? THEN 0 ELSE 1 END, LOWER(name), id
         LIMIT ?""",
@@ -219,7 +219,7 @@ def _phone_digits(value):
     return digits
 
 
-def find_customer_id_by_text(text):
+def find_customer_id_by_text(text, *, allow_pending=False):
     """Resolve the scan screen's "Allocate to client" text to a customer id, or ``None``.
 
     Staff type a name, a cellphone number, or pick the typeahead's own label
@@ -244,7 +244,7 @@ def find_customer_id_by_text(text):
     if not label_phone and re.fullmatch(r"[\d\s()+\-]{9,}", raw):
         label_phone, label_name = raw, ""
     rows = get_db().execute(
-        "SELECT id, name, phone FROM customers c WHERE 1=1" + pending_exclusion_clause("c")
+        "SELECT id, name, phone FROM customers c WHERE 1=1" + pending_exclusion_clause("c", allow_pending=allow_pending)
     ).fetchall()
 
     if label_name and label_phone:
