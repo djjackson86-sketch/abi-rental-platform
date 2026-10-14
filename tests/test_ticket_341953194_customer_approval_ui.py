@@ -44,4 +44,4 @@ def test_pending_approval_keeps_its_existing_primary_button(client, pending_clie
     html = client.get(f"/customers/{customer['id']}").get_data(as_text=True)
     assert 'class="btn primary" type="submit" disabled' in html
     assert 'portal-approved' not in html
-    assert 'Create order for this customer' not in html
+    assert 'Create order for this customer' in html

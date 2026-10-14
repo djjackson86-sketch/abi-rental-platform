@@ -93,7 +93,7 @@ def test_multiple_reservations_and_pickup_details(client, app, bookings):
     response = client.post(f'/orders/{third}/reserve')
     client.post(f'/orders/{third}/reserve', data={'reservation_confirm': token(response)})
     with app.app_context():
-        get_db().execute("UPDATE customers SET client_verified = 0 WHERE id = 1")
+        get_db().execute("UPDATE customers SET phone = '' WHERE id = 1")
         get_db().commit()
     response = client.post(f'/orders/{second}/start', follow_redirects=True)
     assert b'Critical customer details are missing for pickup' in response.data

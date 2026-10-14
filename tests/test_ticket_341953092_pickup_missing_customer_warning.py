@@ -133,7 +133,7 @@ def test_missing_critical_customer_details_require_explicit_pickup_confirmation(
         client,
         phone='',
         address_line1='',
-        client_verified='0',
+        client_verified='1',
         vehicle_make='',
         vehicle_color='',
         vehicle_reg_no='',
@@ -145,7 +145,7 @@ def test_missing_critical_customer_details_require_explicit_pickup_confirmation(
     missing = missing_fields_for(app, order_id)
     assert missing == [
         'Customer phone',
-        'Client not verified',
+
         'Address line 1',
         'Vehicle Make',
         'Vehicle Colour',
@@ -180,10 +180,9 @@ def test_pickup_warning_uses_not_verified_when_no_is_ticked(client, app):
 
     page = client.get(f'/orders/{order_id}')
     body = page.data.decode('utf-8')
-    assert 'data-pickup-critical-missing=' in body
-    assert 'Client not verified' in body
-    assert 'Client verification unconfirmed' not in body
-    assert 'Client verified' not in body
+    assert 'CUSTOMER NOT VERIFIED' in body
+    assert 'disabled title="CUSTOMER NOT VERIFIED' in body
+    assert 'data-pickup-critical-missing=' not in body
 
 
 @pytest.mark.parametrize('submitted_value', ['', '  '])
@@ -197,16 +196,15 @@ def test_pickup_warning_uses_unconfirmed_when_verification_is_blank(client, app,
 
     page = client.get(f'/orders/{order_id}')
     body = page.data.decode('utf-8')
-    assert 'data-pickup-critical-missing=' in body
-    assert 'Client verification unconfirmed' in body
-    assert 'Client not verified' not in body
-    assert 'Client verified' not in body
+    assert 'CUSTOMER NOT VERIFIED' in body
+    assert 'disabled title="CUSTOMER NOT VERIFIED' in body
+    assert 'data-pickup-critical-missing=' not in body
 
 
 def test_pickup_page_renders_mobile_confirmation_hook_for_missing_details(client, app):
     login(client)
     product_id = seed_product(client)
-    customer_id = create_customer(client, phone='', client_verified='')
+    customer_id = create_customer(client, phone='', client_verified='1')
     order_id = create_draft_order(client, customer_id, product_id)
 
     page = client.get(f'/orders/{order_id}')
@@ -215,7 +213,7 @@ def test_pickup_page_renders_mobile_confirmation_hook_for_missing_details(client
     assert 'data-pickup-critical-missing=' in body
     assert 'confirmCriticalPickup(this)' in body
     assert 'Customer phone' in body
-    assert 'Client verification unconfirmed' in body
+    assert 'CUSTOMER NOT VERIFIED' not in body
     assert 'pickup_critical_confirm' in body
 
 

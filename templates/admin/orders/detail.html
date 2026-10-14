@@ -1,6 +1,8 @@
 {% extends "admin/layout.html" %}
 {% set title=order.order_number %}
 {% block admin_body %}
+{% set customer_not_verified = order.customer_id and order.customer_client_verified != 1 %}
+{% if customer_not_verified %}<div class="customer-verification-warning" role="alert"><strong>CUSTOMER NOT VERIFIED</strong><span>Reservation is allowed, but pickup is blocked until the customer is verified.</span></div>{% endif %}
 <header class="page-header">
   <div>
     <p class="eyebrow">Order</p>
@@ -37,6 +39,8 @@
             <button class="btn {{ style }}" type="submit" title="Main profile only — puts the order back to the status it held before it was archived">Unarchive order</button>
           </form>
         {% endif %}
+      {% elif action == 'start' and customer_not_verified %}
+        <button class="btn {{ style }}" type="button" disabled title="CUSTOMER NOT VERIFIED — verify the customer before pickup">{{ label }}</button>
       {% elif action == 'return' and not finalized_invoice_exists %}
         <button class="btn {{ style }}" type="button" disabled title="Finalize the invoice before returning this order">{{ label }}</button>
       {% else %}

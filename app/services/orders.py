@@ -229,7 +229,7 @@ def _return_filter_clause(return_status, alias="o"):
 
 
 def list_orders(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None, limit=None, offset=0):
-    sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, cb.name AS collect_branch_name, rb.name AS return_branch_name,
+    sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.client_verified AS customer_client_verified, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         cu.name AS created_by_name, cu.email AS created_by_email,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
         FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
@@ -832,17 +832,16 @@ def _build_order_payload(form, allow_blocked_customer_id=None, allow_pending_cus
             blocked = 0
         if blocked and customer_id != _blocked_customer_allowance(allow_blocked_customer_id):
             raise ValueError(blocked_customer_error(customer))
-        # A client who self-registered through the public portal is *pending* until
-        # staff verify the ID and record the main vehicle and then approve — so they
-        # can never be attached to an order before that, whatever the picker showed
-        # or a crafted POST submitted. The server-side gate mirrors the blocked rule:
-        # an order that already had this client keeps saving, but pointing a new (or
-        # other) order at a pending client is refused. Imported lazily to avoid a
-        # module import cycle.
+        # ABI-341953208: pending clients may reserve without being approved.
+        # Keep the existing tombstone restriction for deleted portal clients.
         if customer_id != _pending_customer_allowance(allow_pending_customer_id):
             from app.services import portal_registrations
 
-            if portal_registrations.is_pending(customer_id):
+            deleted = db.execute(
+                "SELECT 1 FROM portal_registrations WHERE customer_id = ? AND status = ?",
+                (customer_id, portal_registrations.STATUS_DELETED),
+            ).fetchone()
+            if deleted:
                 raise ValueError(portal_registrations.PENDING_BLOCKED_MESSAGE)
     booking_type = form.get("booking_type") if form.get("booking_type") in {"return", "oneway"} else "return"
     collect_branch_id = int(form.get("collect_branch_id") or 0) or None
@@ -1611,6 +1610,8 @@ def transition_order(order_id, action, reservation_confirm=""):
         # Server-side rule, not just a hidden button: a hire order is never a
         # sales/repairs order (ticket ABI-341952960/962).
         raise ValueError(f"{SALES_REPAIRS_LABEL} applies to orders without rental items")
+    if action == "start" and order["customer_id"] and order["customer_client_verified"] != 1:
+        raise ValueError("CUSTOMER NOT VERIFIED — verify the customer before pickup. Reservation is still allowed.")
     if action in {"reserve", "start"}:
         if not order["customer_id"]:
             raise ValueError("Add customer details before reserving or pickup")

@@ -65,7 +65,7 @@ def test_failed_validation_keeps_pending_and_actionable(client, app, pending_cli
     html = client.get(f"/customers/{customer['id']}").get_data(as_text=True)
     assert 'data-portal-approval>' in html
     assert 'portal-approved' not in html
-    assert 'Create order for this customer' not in html
+    assert 'Create order for this customer' in html
 
 
 def test_retry_is_idempotent_and_retains_approval_audit(client, app, pending_client):

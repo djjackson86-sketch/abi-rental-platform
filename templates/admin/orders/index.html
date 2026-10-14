@@ -184,6 +184,7 @@
                   </td>
                   <td>
                     <strong class="table-primary-text">{{ o.customer_name or 'No customer yet' }}</strong>
+                    {% if o.customer_id and o.customer_client_verified != 1 %}<small class="customer-not-verified">NOT VERIFIED</small>{% endif %}
                     <small>{{ o.customer_email or 'Edit order to add customer details' }}</small>
                   </td>
                   <td><span class="badge status-{{ o.status }}">{{ status_label(o.status) }}</span></td>

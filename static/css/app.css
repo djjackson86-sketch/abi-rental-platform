@@ -684,3 +684,8 @@ a.pending-check-link:active{background:#e7f0ff}
   .pending-approve-form .btn{width:100%}
 }
 
+
+  /* ABI-341953208: persistent verification warnings on order screens. */
+  .customer-not-verified { display:block; width:fit-content; color:#a11212 !important; background:#fee2e2; padding:3px 7px; border-radius:4px; font-weight:800; }
+  .customer-verification-warning { display:flex; flex-direction:column; gap:4px; padding:14px 18px; margin-bottom:18px; border:1px solid #dc2626; border-radius:8px; color:#991b1b; background:#fef2f2; }
+  .customer-verification-warning[hidden] { display:none; }

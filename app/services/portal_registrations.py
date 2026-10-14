@@ -127,7 +127,7 @@ def _mapping(row):
     return row_dict(row)
 
 
-def pending_exclusion_clause(alias="c"):
+def pending_exclusion_clause(alias="c", *, allow_pending=False):
     """SQL fragment that excludes a client while they are a pending self-registration.
 
     Appended to customer list / count / selection queries so a self-registered client does
@@ -136,9 +136,12 @@ def pending_exclusion_clause(alias="c"):
     **no** pending/deleted row (every existing, imported or already-approved client) is
     untouched.
     """
-    hidden = ", ".join(f"'{status}'" for status in HIDDEN_STATUSES)
+    # Reservation selection may include pending clients; deleted sign-ups stay hidden.
+    statuses = (STATUS_DELETED,) if allow_pending else HIDDEN_STATUSES
+    hidden = ", ".join(f"'{status}'" for status in statuses)
+    source_clause = "" if allow_pending else f" AND COALESCE({alias}.source_system, '') <> 'portal_pending'"
     return (
-        f" AND COALESCE({alias}.source_system, '') <> 'portal_pending'"
+        source_clause +
         f" AND NOT EXISTS (SELECT 1 FROM portal_registrations pr "
         f"WHERE pr.customer_id = {alias}.id AND pr.status IN ({hidden}))"
     )

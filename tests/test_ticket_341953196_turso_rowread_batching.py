@@ -234,7 +234,7 @@ def test_picker_and_selected_summary_agree(app):
                             c["customer_credit_balance"], c["legacy_balance"], c["orders_to_date"])
                   for c in _customers() if c}
         for label, cid in ids.items():
-            if label in ("PendingSignUp", "DeletedSignUp"):
+            if label == "DeletedSignUp":
                 assert _customer_summary_by_id(cid) is None, label
                 continue
             selected = _customer_summary_by_id(cid)

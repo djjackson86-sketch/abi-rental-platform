@@ -1,14 +1,6 @@
-"""Client portal changes - a PENDING self-registered client cannot take an order.
+"""Pending customers can take drafts; blocked/deleted customers stay guarded.
 
-Backend guards for the pending twin of the blocked-customer rule: a client who
-self-registered through the public portal is *pending* until staff verify the ID,
-record the main vehicle and then approve - so they can never be attached to an
-order before that, whatever the picker showed or a crafted POST submitted.
-
-The server-side gate mirrors the blocked rule: an order that ALREADY had this
-client keeps saving (the allowance is the order's OWN stored ``customer_id`` read
-from the database, never a value from the submitted form), while pointing a new or
-a different order at a pending client is refused.
+Reservations do not implicitly approve a portal self-registration.
 """
 import os
 import tempfile
@@ -101,13 +93,13 @@ def order_count(app):
 
 # ------------------------------------------------------------------- the picker
 
-def test_the_order_picker_hides_a_pending_client(client, app):
+def test_the_order_picker_allows_a_pending_client_without_approving(client, app):
     login(client)
     pending_id = create_customer(client, 'Pending Portal Client', 'pending.portal@example.test', '0825550101')
     make_pending(app, pending_id, 'PRT-AAA111', name='Pending Portal Client')
 
     page = client.get('/orders/new').get_data(as_text=True)
-    assert 'Pending Portal Client' not in page
+    assert 'Pending Portal Client' in page
 
     # The picker's own data sources agree: pending is hidden everywhere it lists clients.
     with app.app_context():
@@ -117,35 +109,40 @@ def test_the_order_picker_hides_a_pending_client(client, app):
 
 # ------------------------------------------------------------- crafted create
 
-def test_a_crafted_new_order_for_a_pending_client_is_refused(client, app):
+def test_a_new_order_for_a_pending_client_is_allowed(client, app):
     login(client)
     pending_id = create_customer(client, 'Pending Create Client', 'pending.create@example.test', '0825550102')
     make_pending(app, pending_id, 'PRT-BBB222', name='Pending Create Client')
 
     response = client.post('/orders/new', data=order_payload(pending_id), follow_redirects=True)
     assert response.status_code == 200
-    assert portal_registrations.PENDING_BLOCKED_MESSAGE in response.get_data(as_text=True)
-    assert order_count(app) == 0
+    assert 'Draft order created' in response.get_data(as_text=True)
+    assert order_count(app) == 1
+    with app.app_context():
+        assert portal_registrations.is_pending(pending_id)
 
 
-def test_a_submitted_allowance_field_cannot_whitelist_a_pending_client(client, app):
+def test_a_submitted_allowance_field_cannot_whitelist_a_blocked_pending_client(client, app):
     """The allowance is server-derived: a posted allow_* field must be ignored."""
     login(client)
     pending_id = create_customer(client, 'Forged Allow Client', 'forged.allow@example.test', '0825550106')
     make_pending(app, pending_id, 'PRT-EEE555', name='Forged Allow Client')
 
+    with app.app_context():
+        get_db().execute('UPDATE customers SET is_blocked = 1 WHERE id = ?', (pending_id,))
+        get_db().commit()
     payload = order_payload(pending_id)
     payload['allow_pending_customer_id'] = str(pending_id)
     payload['allow_blocked_customer_id'] = str(pending_id)
 
     response = client.post('/orders/new', data=payload, follow_redirects=True)
-    assert portal_registrations.PENDING_BLOCKED_MESSAGE in response.get_data(as_text=True)
+    assert 'Customer Blocked' in response.get_data(as_text=True)
     assert order_count(app) == 0
 
 
 # ------------------------------------------------------------- crafted update
 
-def test_pointing_an_existing_order_at_a_pending_client_is_refused(client, app):
+def test_pointing_an_existing_order_at_a_pending_client_is_allowed(client, app):
     login(client)
     open_id = create_customer(client, 'Open Client', 'open.pending@example.test', '0825550103')
     pending_id = create_customer(client, 'Pending Switch Client', 'pending.switch@example.test', '0825550104')
@@ -153,8 +150,8 @@ def test_pointing_an_existing_order_at_a_pending_client_is_refused(client, app):
     order_id = create_order(client, open_id)
 
     response = client.post(f'/orders/{order_id}/edit', data=order_payload(pending_id), follow_redirects=True)
-    assert portal_registrations.PENDING_BLOCKED_MESSAGE in response.get_data(as_text=True)
-    assert order_row(app, order_id)['customer_id'] == open_id
+    assert 'Order saved' in response.get_data(as_text=True)
+    assert order_row(app, order_id)['customer_id'] == pending_id
 
 
 def test_an_order_already_attached_to_a_pending_client_still_saves(client, app):

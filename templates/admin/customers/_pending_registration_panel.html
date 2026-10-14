@@ -55,15 +55,16 @@
       {% if user_can('scan_vehicle') %}</a>{% else %}</div>{% endif %}
     </li>
   </ul>
+  {% if user_can('new_order') %}
+  <div class="portal-order-actions">
+    <a class="btn primary" href="{{ url_for('orders.new', customer_id=customer.id) }}">Create order for this customer</a>
+    {% if not is_approved %}<span class="form-help">Reservation is allowed. Verification is still required before pickup.</span>{% endif %}
+  </div>
+  {% endif %}
   {% if is_approved %}
   <div class="pending-approve-form">
     <button class="btn portal-approved" type="button" disabled>Approved</button>
   </div>
-  {% if user_can('new_order') %}
-  <div class="portal-order-actions">
-    <a class="btn primary" href="{{ url_for('orders.new', customer_id=customer.id) }}">Create order for this customer</a>
-  </div>
-  {% endif %}
   {% else %}
   <form method="post" action="{{ url_for('customers.approve_portal_registration', registration_id=registration.id) }}" class="pending-approve-form" data-portal-approval>
     <input type="hidden" name="csrf_token" value="{{ portal_approval_csrf_token }}">

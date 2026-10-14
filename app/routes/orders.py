@@ -77,7 +77,7 @@ def _submitted_customer_values(form):
 #   * customer_credit_balance   = grouped active customer_credits
 #   * legacy_balance            = grouped active legacy_customer_balances
 # ``customers`` is kept as the table name (not an alias) so the shared
-# ``pending_exclusion_clause`` keeps hiding pending/deleted self-registrations.
+# ``pending_exclusion_clause`` keeps deleted self-registrations hidden.
 _CUSTOMER_PICKER_COLUMNS = """
         customers.id, customers.customer_type, customers.name, customers.email, customers.phone, customers.marketing_opt_in,
         customers.address_line1, customers.address_line2, customers.suburb, customers.city, customers.province, customers.postal_code, customers.country, customers.custom_fields_json, customers.standard_discount_percent,
@@ -131,7 +131,7 @@ def _customer_picker_sql(where_sql="", tail=""):
 
 def _customers():
     rows = get_db().execute(
-        _customer_picker_sql(pending_exclusion_clause("customers"), " ORDER BY customers.name")
+        _customer_picker_sql(pending_exclusion_clause("customers", allow_pending=True), " ORDER BY customers.name")
     ).fetchall()
     return [customer_summary_for(row) for row in rows]
 
@@ -164,7 +164,7 @@ def _customer_summary_by_id(customer_id):
                (SELECT COALESCE(SUM(l.amount_due - l.settled_amount), 0) FROM legacy_customer_balances l WHERE l.customer_id = customers.id AND l.status = 'active' AND l.amount_due > l.settled_amount) AS legacy_balance,
                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
-        WHERE id = ?{pending_exclusion_clause("customers")}
+        WHERE id = ?{pending_exclusion_clause("customers", allow_pending=True)}
     """, (customer_id,)).fetchone()
     return customer_summary_for(row) if row else None
 
@@ -856,6 +856,9 @@ def change_status(order_id, action):
         # must not be able to sidestep the main-profile rule). Archive is also
         # main-only: staff may still run ordinary operational status changes.
         abort(403)
+    if action == "start" and order and order["customer_id"] and order["customer_client_verified"] != 1:
+        flash("CUSTOMER NOT VERIFIED — verify the customer before pickup. Reservation is still allowed.", "error")
+        return redirect(url_for("orders.detail", order_id=order_id))
     if action == "start" and order and (request.form.get("pickup_critical_confirm") or "").strip() != "1":
         missing = missing_pickup_critical_customer_fields(order)
         if missing:
