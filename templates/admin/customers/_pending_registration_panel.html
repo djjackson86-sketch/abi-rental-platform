@@ -22,15 +22,16 @@
    portal_approval_csrf_token, portal_pending_delete_csrf_token, customer. #}
 {% set registration = pending_registration or approved_registration %}
 {% set is_approved = not pending_registration and approved_registration %}
+{% set is_disapproved = pending_registration and customer.is_blocked %}
 {% if registration %}
 <article class="panel pending-registration-panel" id="pending-registration">
   <div class="panel-title">
-    <h2>{% if is_approved %}Customer approved{% else %}Awaiting verification{% endif %}</h2>
-    <span class="badge status-{% if is_approved %}paid{% else %}payment_due{% endif %}">{% if is_approved %}Approved{% else %}Pending approval{% endif %}</span>
+    <h2>{% if is_disapproved %}Client disapproved{% elif is_approved %}Customer approved{% else %}Awaiting verification{% endif %}</h2>
+    <span class="badge status-{% if is_approved %}paid{% else %}payment_due{% endif %}">{% if is_disapproved %}Blocked{% elif is_approved %}Approved{% else %}Pending approval{% endif %}</span>
   </div>
   <p class="form-help">
     Self-registered through the customer portal{% if registration.created_at %} on {{ registration.created_at[:10] }}{% endif %}{% if registration.branch_name %} · {{ registration.branch_name }} branch{% endif %}.
-    {% if is_approved %}Approval is saved. Continue with an order for this customer.{% else %}Verify the client's ID and capture their main vehicle, in either order, then approve.{% endif %}
+    {% if is_disapproved %}This record is retained. Future rentals are blocked until the client is explicitly unblocked.{% elif is_approved %}Approval is saved. Continue with an order for this customer.{% else %}Verify the client's ID and capture their main vehicle, in either order, then approve.{% endif %}
   </p>
   <div class="detail-list pending-registration-details">
     <div class="detail-row"><span>Reference</span><b>{{ registration.reference or '—' }}</b></div>
@@ -39,6 +40,9 @@
     <div class="detail-row"><span>Phone</span><b>{{ registration.phone or '—' }}</b></div>
     <div class="detail-row"><span>Branch</span><b>{{ registration.branch_name or 'No branch recorded' }}</b></div>
   </div>
+  {% if is_disapproved %}
+  <p><strong>Disapproval reason:</strong> {{ customer.blocked_reason }}</p>
+  {% else %}
   <ul class="pending-checklist">
     <li class="pending-check {% if pending_id_verified %}is-done{% else %}is-open{% endif %}">
       <a class="pending-check-link" href="{{ url_for('customers.edit', customer_id=customer.id) }}#client-verified">
@@ -72,16 +76,29 @@
     <span class="form-help">{% if pending_id_verified and pending_vehicle_captured %}Both checks are in place — approval makes this a normal customer for the branch.{% else %}Approval stays disabled until both checks above are recorded.{% endif %}</span>
   </form>
   <p class="form-help" data-portal-approval-error role="alert" hidden></p>
-  {# The "cannot proceed" action (client follow-up): the branch cannot take this client on at
-     verification, so the pending sign-up is deleted. Red (.btn danger), its own scoped CSRF
-     token, and a plain-language confirm — no submitted value is interpolated into the script,
-     so a name can never break out of the confirm. It is a separate, self-contained <form>. #}
-  <form method="post" action="{{ url_for('customers.delete_pending_portal_registration', registration_id=registration.id) }}" class="pending-delete-form"
-        onsubmit="return confirm('Remove this pending client from verification and active customer lists? This cannot be undone from this screen.');">
-    <input type="hidden" name="csrf_token" value="{{ portal_pending_delete_csrf_token }}">
-    <button class="btn danger" type="submit">Delete pending client</button>
-    <span class="form-help">Use this when the branch cannot proceed with the client at verification. Available while registration is pending; recorded transactions, if any, are retained.</span>
-  </form>
+  <div class="pending-delete-form">
+    <button class="btn danger" type="button" onclick="document.getElementById('disapprove-client-dialog').showModal()">Disapprove client</button>
+    <span class="form-help">Retains the client and their history, saves a reason and blocks future rentals.</span>
+  </div>
+  <style>
+    #disapprove-client-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+    #disapprove-client-dialog button[type="submit"] { background: #a11212; color: white; }
+    #disapprove-client-dialog textarea { resize: vertical; max-height: 35dvh; }
+  </style>
+  <dialog id="disapprove-client-dialog" aria-labelledby="disapprove-client-title" style="width: min(32rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); max-height: 90dvh; overflow-y: auto; box-sizing: border-box; border: 1px solid #ccc; border-radius: 12px; padding: 24px;">
+    <form method="post" action="{{ url_for('customers.disapprove_portal_registration', registration_id=registration.id) }}">
+      <h2 id="disapprove-client-title">Disapprove client</h2>
+      <p>The client record and history will be kept. Future rentals will be blocked.</p>
+      <input type="hidden" name="csrf_token" value="{{ portal_pending_delete_csrf_token }}">
+      <label for="disapproval-reason">Reason (required)</label>
+      <textarea id="disapproval-reason" name="reason" rows="4" required autofocus style="width: 100%; box-sizing: border-box;" oninput="this.setCustomValidity(this.value.trim() ? '' : 'Enter a reason for disapproving this client.')"></textarea>
+      <div class="form-actions">
+        <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+        <button class="btn danger" type="submit">Confirm disapproval</button>
+      </div>
+    </form>
+  </dialog>
+  {% endif %}
   {% endif %}
 </article>
 <script src="{{ url_for('static', filename='js/portal-approval.js') }}" defer></script>

@@ -80,8 +80,7 @@ def _pending_registration_context(customer_id, customer=None):
         "pending_registration": portal_registrations.pending_registration_for_customer(customer_id),
         "approved_registration": portal_registrations.approved_registration_for_customer(customer_id),
         "portal_approval_csrf_token": csrf.issue_token("portal_approval"),
-        # Client portal changes (follow-up): the "cannot proceed" delete. Its own scoped
-        # CSRF token, so the approve form's token is never reused for a destructive action.
+        # Retain the existing scoped token for old open pages; a reason is now mandatory.
         "portal_pending_delete_csrf_token": csrf.issue_token("portal_pending_delete"),
         "pending_id_verified": portal_registrations.id_verified(customer),
         "pending_vehicle_captured": portal_registrations.main_vehicle_recorded(customer_id),
@@ -380,23 +379,10 @@ def approve_portal_registration(registration_id):
 
 
 @bp.post("/portal/<int:registration_id>/delete")
+@bp.post("/portal/<int:registration_id>/disapprove")
 @login_required
-def delete_pending_portal_registration(registration_id):
-    """Remove a pending self-registration from the verification queue — "cannot proceed".
-
-    The counter's decision not to take a self-registered client on: the sign-up is removed
-    from the verification queue instead of being left there. It shares the approve route's
-    access checks exactly — the ``customers`` module gate, its own **scoped CSRF** token (so
-    a cross-site POST cannot act on anyone), an unknown registration is a 404 and a
-    registration outside the session's branch scope is a 403 — and it is POST-only, so it
-    can never be triggered by a GET, a submission or a scan.
-
-    The service owns every rule beyond access: **only a pending registration** can be
-    removed (an approved client is refused), and the removal is a **tombstone** — the
-    registration is marked ``deleted`` and leaves the queue, while the client row and any
-    order/invoice/payment/credit that references it are kept, so no financial record is ever
-    erased or orphaned, and no notification is ever sent.
-    """
+def disapprove_portal_registration(registration_id):
+    """Disapprove without deletion. Old delete URLs also require a reason and block."""
     csrf.validate("portal_pending_delete")
     registration = portal_registrations.registration_by_id(registration_id)
     if registration is None:
@@ -404,12 +390,12 @@ def delete_pending_portal_registration(registration_id):
     if not portal_registrations.branch_in_session_scope(registration):
         abort(403)
     try:
-        removed = portal_registrations.delete_pending_registration(registration_id)
+        changed = portal_registrations.disapprove_registration(registration_id, request.form.get("reason"))
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(url_for("customers.index"))
-    if removed:
-        flash("Pending client removed from the verification queue.", "success")
+        return redirect(url_for("customers.detail", customer_id=registration["customer_id"]))
+    if changed:
+        flash("Client disapproved — reason saved and future rentals blocked.", "success")
     else:
-        flash("That pending client was already removed.", "success")
-    return redirect(url_for("customers.index"))
+        flash("This client is already blocked; the saved reason was retained.", "success")
+    return redirect(url_for("customers.detail", customer_id=registration["customer_id"]))

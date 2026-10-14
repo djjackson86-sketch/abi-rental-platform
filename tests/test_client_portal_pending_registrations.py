@@ -562,7 +562,7 @@ def _delete_token(client, app, customer_id):
     return csrf_token(client, DELETE_SCOPE)
 
 
-def test_delete_pending_client_tombstones_the_registration_and_keeps_every_client_row(client, app, branches):
+def test_disapprove_pending_client_blocks_and_keeps_every_client_row(client, app, branches):
     stored, registration = _pending(client, app, branches)
     customer_id = stored["id"]
     with app.app_context():
@@ -585,15 +585,16 @@ def test_delete_pending_client_tombstones_the_registration_and_keeps_every_clien
     sign_in(client, app, role="owner")
     token = _delete_token(client, app, customer_id)
     assert token
-    response = client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token})
+    response = client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"})
     assert response.status_code == 302
 
     with app.app_context():
         # The sign-up leaves the queue, and the tombstone hides the client from the lists ...
-        assert registration_for(app, customer_id)["status"] == "deleted"
+        assert registration_for(app, customer_id)["status"] == "pending"
+        assert get_customer(customer_id)["is_blocked"] == 1
         assert portal_registrations.list_pending_registrations() == []
         assert list_customers() == []
-        assert portal_registrations.pending_registration_for_customer(customer_id) is None
+        assert portal_registrations.pending_registration_for_customer(customer_id) is not None
         # ... but the client row and EVERY row that references it are kept (nothing erased).
         assert get_customer(customer_id) is not None, "the client row is preserved for the ledger"
         for table in (
@@ -645,7 +646,7 @@ def test_delete_pending_client_is_refused_for_another_branch(client, app, branch
     sign_in(client, app, role="staff", branch_id=branches["roodepoort"], modules=["customers"], can_view_all=False)
     token = _delete_token(client, app, stored["id"])
     assert token
-    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}).status_code == 403
+    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"}).status_code == 403
     with app.app_context():
         assert get_customer(stored["id"]) is not None
         assert registration_for(app, stored["id"])["status"] == "pending"
@@ -673,10 +674,10 @@ def test_an_approved_client_is_never_deleted_by_the_pending_action(client, app, 
         portal_registrations.approve_registration(registration["id"])
     token = _delete_token(client, app, stored["id"])
     response = client.post(
-        f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}, follow_redirects=True
+        f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"}, follow_redirects=True
     )
     assert response.status_code == 200
-    assert b"already been approved" in response.data
+    assert b"Only a pending client can be disapproved" in response.data
     with app.app_context():
         assert get_customer(stored["id"]) is not None, "an approved client is a real customer and is kept"
         assert portal_registrations.registration_by_id(registration["id"])["status"] == "approved"
@@ -694,13 +695,14 @@ def test_a_pending_client_with_order_history_is_removed_and_the_history_is_kept(
     sign_in(client, app, role="owner")
     token = _delete_token(client, app, stored["id"])
     response = client.post(
-        f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}, follow_redirects=True
+        f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"}, follow_redirects=True
     )
     assert response.status_code == 200
     # No eligibility gate: a pending client with history is still removed from the queue.
-    assert b"removed from the verification queue" in response.data
+    assert b"Client disapproved" in response.data
     with app.app_context():
-        assert registration_for(app, stored["id"])["status"] == "deleted"
+        assert registration_for(app, stored["id"])["status"] == "pending"
+        assert get_customer(stored["id"])["is_blocked"] == 1
         assert portal_registrations.list_pending_registrations() == []
         # ... and the order history is never erased (no cascade, no financial write).
         order = get_db().execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
@@ -718,14 +720,15 @@ def test_a_crafted_customer_id_cannot_choose_a_different_client(client, app, bra
     token = _delete_token(client, app, stored["id"])
     response = client.post(
         f"/customers/portal/{registration['id']}/delete",
-        data={"csrf_token": token, "customer_id": str(other)},
+        data={"csrf_token": token, "customer_id": str(other), "reason": "Verification refused"},
     )
     assert response.status_code == 302
     with app.app_context():
         assert get_customer(other) is not None, "a posted customer_id must never pick the victim"
         assert registration_for(app, other) is None, "the walk-in has no registration to touch"
         # The registration's own sign-up is the one tombstoned.
-        assert registration_for(app, stored["id"])["status"] == "deleted"
+        assert registration_for(app, stored["id"])["status"] == "pending"
+        assert get_customer(stored["id"])["is_blocked"] == 1
 
 
 def test_deleting_a_pending_client_sends_no_notification(client, app, branches, monkeypatch):
@@ -736,7 +739,7 @@ def test_deleting_a_pending_client_sends_no_notification(client, app, branches, 
     monkeypatch.setattr(telegram, "_send_message", lambda text: sent.append(text))
     sign_in(client, app, role="owner")
     token = _delete_token(client, app, stored["id"])
-    client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token})
+    client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"})
     assert sent == [], "the delete is silent — no message is ever sent"
 
 
@@ -744,9 +747,10 @@ def test_the_panel_renders_the_red_delete_form_with_its_own_token(client, app, b
     stored, registration = _pending(client, app, branches)
     sign_in(client, app, role="owner")
     body = client.get(f"/customers/{stored['id']}/edit").get_data(as_text=True)
-    assert f"/customers/portal/{registration['id']}/delete" in body
+    assert f"/customers/portal/{registration['id']}/disapprove" in body
     assert "btn danger" in body
-    assert "cannot be undone" in body
+    assert "Confirm disapproval" in body
+    assert 'name="reason"' in body
     approve_token = csrf_token(client, "portal_approval")
     delete_token = csrf_token(client, DELETE_SCOPE)
     assert approve_token and delete_token

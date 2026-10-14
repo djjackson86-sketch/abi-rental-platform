@@ -136,6 +136,10 @@ def book_product(product_id):
         "notes": f"Public booking request. {request.form.get('notes', '').strip()}".strip(),
     }
     try:
+        # Reuse portal identity matching so a blocked client cannot create a fresh
+        # unblocked record through the storefront. Never expose their private reason.
+        if portal_intake.blocked_match(customer_name, request.form.get("customer_phone", ""), customer_email):
+            raise ValueError("We cannot accept this booking online. Please contact the branch.")
         # Validate the booking before the customer row is created, so a refused
         # request (e.g. a pickup outside the branch's trading hours) leaves no
         # stray customer behind.

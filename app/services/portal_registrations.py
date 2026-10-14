@@ -202,7 +202,8 @@ def list_pending_registrations():
         "r.created_at, b.name AS branch_name "
         "FROM portal_registrations r "
         "LEFT JOIN branches b ON b.id = r.branch_id "
-        "WHERE r.status = ?" + clause +
+        "WHERE r.status = ? AND NOT EXISTS (SELECT 1 FROM customers c "
+        "WHERE c.id = r.customer_id AND c.is_blocked = 1)" + clause +
         " ORDER BY r.created_at DESC, r.id DESC"
     )
     rows = get_db().execute(sql, [STATUS_PENDING, *params]).fetchall()
@@ -326,6 +327,8 @@ def approval_blockers(customer):
     verification semantics — there is no ID number, image or scan text involved.
     """
     blockers = []
+    if _row_value(customer, "is_blocked", 0):
+        blockers.append("This client is blocked. Review the saved reason before unblocking them.")
     if not id_verified(customer):
         blockers.append(ID_NOT_VERIFIED_MESSAGE)
     if not main_vehicle_recorded(_row_value(customer, "id", None)):
@@ -405,7 +408,36 @@ def approve_registration(registration_id):
     return registration_by_id(registration["id"])
 
 
-# --- the "cannot proceed" removal (tombstone) ---------------------------------------------------
+def disapprove_registration(registration_id, reason):
+    """Retain a pending client and atomically save a required rental-block reason.
+
+    The block itself is the disapproval state; no separate status can drift out of
+    sync with the existing unblock control. Unblocking returns them to verification,
+    never approves them. A retry cannot overwrite the original saved reason.
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("Enter a reason for disapproving this client.")
+    registration = registration_by_id(registration_id)
+    if registration is None:
+        raise ValueError("That portal registration is no longer on file.")
+    if not branch_in_session_scope(registration):
+        raise ValueError("That portal registration is outside the branches you can access.")
+    if registration["status"] != STATUS_PENDING:
+        raise ValueError("Only a pending client can be disapproved.")
+    db = get_db()
+    cur = db.execute(
+        "UPDATE customers SET is_blocked = 1, blocked_reason = ? "
+        "WHERE id = ? AND COALESCE(is_blocked, 0) = 0 "
+        "AND EXISTS (SELECT 1 FROM portal_registrations r "
+        "WHERE r.id = ? AND r.customer_id = customers.id AND r.status = ?)",
+        (reason, registration["customer_id"], registration_id, STATUS_PENDING),
+    )
+    db.commit()
+    return cur.rowcount > 0
+
+
+# --- legacy tombstone service (not exposed by the verification UI) -------------------------------
 
 #: Refusal sentences the delete route can show, kept here so both the route and the service
 #: speak with one voice about what may and may not be removed.

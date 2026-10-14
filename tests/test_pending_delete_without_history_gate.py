@@ -171,13 +171,13 @@ def test_the_removed_signup_leaves_the_queue_list_search_and_order_picker(client
     sign_in(client, app, role="owner")
     token = _delete_token(client, customer_id)
     assert token
-    response = client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}, follow_redirects=True)
+    response = client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"}, follow_redirects=True)
     assert response.status_code == 200
-    assert b"removed from the verification queue" in response.data
+    assert b"Client disapproved" in response.data
 
     with app.app_context():
         assert portal_registrations.list_pending_registrations() == [], "gone from the verification queue"
-        assert portal_registrations.pending_registration_for_customer(customer_id) is None
+        assert portal_registrations.pending_registration_for_customer(customer_id) is not None
         assert list_customers() == [], "a tombstoned sign-up is not a normal customer"
         assert search_customers("Pieter") == [], "and is not offered by the name search"
         # The order / allocation picker uses the same exclusion clause.
@@ -218,9 +218,9 @@ def test_an_approved_client_is_never_touched_by_the_pending_action(client, app, 
 
     sign_in(client, app, role="owner")
     token = _delete_token(client, stored["id"])
-    response = client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}, follow_redirects=True)
+    response = client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"}, follow_redirects=True)
     assert response.status_code == 200
-    assert b"already been approved" in response.data
+    assert b"Only a pending client can be disapproved" in response.data
     with app.app_context():
         assert get_customer(stored["id"]) is not None
         assert portal_registrations.registration_by_id(registration["id"])["status"] == "approved"
@@ -237,6 +237,6 @@ def test_the_removal_still_needs_its_scoped_csrf_token_and_branch(client, app, b
     # A staff account scoped to the other branch cannot act on a Midrand sign-up.
     sign_in(client, app, role="staff", branch_id=branches["roodepoort"], modules=["customers"], can_view_all=False)
     token = _delete_token(client, stored["id"])
-    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token}).status_code == 403
+    assert client.post(f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"}).status_code == 403
     with app.app_context():
         assert portal_registrations.registration_by_id(registration["id"])["status"] == "pending"
