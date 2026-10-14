@@ -164,7 +164,7 @@ def test_a_pending_client_with_history_is_removed_not_gated_and_nothing_financia
         assert portal_registrations.is_pending(customer_id) is True
 
 
-def test_the_removed_signup_leaves_the_queue_list_search_and_order_picker(client, app, branches):
+def test_disapproved_signup_stays_in_directory_but_leaves_queue_search_and_order_picker(client, app, branches):
     stored, registration, _ = _pending_with_history(client, app, branches)
     customer_id = stored["id"]
 
@@ -178,7 +178,7 @@ def test_the_removed_signup_leaves_the_queue_list_search_and_order_picker(client
     with app.app_context():
         assert portal_registrations.list_pending_registrations() == [], "gone from the verification queue"
         assert portal_registrations.pending_registration_for_customer(customer_id) is not None
-        assert list_customers() == [], "a tombstoned sign-up is not a normal customer"
+        assert [c['id'] for c in list_customers()] == [customer_id], "disapproved clients remain visible as blocked"
         assert search_customers("Pieter") == [], "and is not offered by the name search"
         # The order / allocation picker uses the same exclusion clause.
         picker = get_db().execute(

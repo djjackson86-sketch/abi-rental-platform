@@ -89,6 +89,19 @@ CREDIT_FIELDS = ("credit_allowed", "credit_limit")
 CREDIT_LIMIT_ERROR = "Credit limit must be a positive amount"
 
 
+def _directory_visibility_clause():
+    """Include disapproved portal clients in the directory, never in booking pickers.
+
+    Disapproval sets is_blocked but leaves the registration pending. Deleted
+    registrations remain hidden, even if their retained customer row is blocked.
+    """
+    return (
+        " AND ((1=1" + pending_exclusion_clause("c") + ") OR (c.is_blocked = 1"
+        " AND NOT EXISTS (SELECT 1 FROM portal_registrations pr"
+        " WHERE pr.customer_id = c.id AND pr.status = 'deleted')))"
+    )
+
+
 def list_customers(query="", customer_type="", marketing="", limit=None, offset=0):
     # Ticket ABI-341953196: ``order_count`` is a grouped LEFT JOIN, not a
     # correlated subquery per returned row. The Customers list is paged, but the
@@ -101,7 +114,7 @@ def list_customers(query="", customer_type="", marketing="", limit=None, offset=
         LEFT JOIN users u ON u.id = c.created_by_user_id
         LEFT JOIN (SELECT customer_id, COUNT(*) AS order_count FROM orders GROUP BY customer_id) oc
             ON oc.customer_id = c.id
-        WHERE 1=1""" + pending_exclusion_clause("c")
+        WHERE 1=1""" + _directory_visibility_clause()
     params = []
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
@@ -166,7 +179,7 @@ def customer_outstanding_balances(customer_ids):
 
 
 def customer_filtered_total(query="", customer_type="", marketing=""):
-    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1" + pending_exclusion_clause("c")
+    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1" + _directory_visibility_clause()
     params = []
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
@@ -282,7 +295,7 @@ def find_customer_id_by_text(text, *, allow_pending=False):
 def customer_counts():
     row = get_db().execute(
         "SELECT COUNT(*) total, SUM(customer_type='individual') individuals, SUM(customer_type='company') companies, SUM(marketing_opt_in) subscribed FROM customers c WHERE 1=1"
-        + pending_exclusion_clause("c")
+        + _directory_visibility_clause()
     ).fetchone()
     return {
         "total": row["total"] or 0,

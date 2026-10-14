@@ -589,11 +589,11 @@ def test_disapprove_pending_client_blocks_and_keeps_every_client_row(client, app
     assert response.status_code == 302
 
     with app.app_context():
-        # The sign-up leaves the queue, and the tombstone hides the client from the lists ...
+        # Disapproval leaves the queue but remains visible as blocked in the directory.
         assert registration_for(app, customer_id)["status"] == "pending"
         assert get_customer(customer_id)["is_blocked"] == 1
         assert portal_registrations.list_pending_registrations() == []
-        assert list_customers() == []
+        assert [c["id"] for c in list_customers()] == [customer_id]
         assert portal_registrations.pending_registration_for_customer(customer_id) is not None
         # ... but the client row and EVERY row that references it are kept (nothing erased).
         assert get_customer(customer_id) is not None, "the client row is preserved for the ledger"
