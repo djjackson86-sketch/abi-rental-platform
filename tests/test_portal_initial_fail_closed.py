@@ -22,7 +22,7 @@ def test_initial_portal_insert_is_hidden_even_without_queue_row(app):
 
 def test_success_drops_initial_marker_only_after_queue_exists(app):
     with app.test_request_context('/'):
-        form={'name':'Complete Portal','email':'complete@example.test','phone':'0820000002','address_line1':'1 Test Road','suburb':'Test Suburb','city':'Midrand','province':'Gauteng','postal_code':'1685','alternative_contact_name':'Test Contact','alternative_contact_number':'0830000002','alternative_contact_relationship':'Friend'}
+        form={'first_names':'Complete','surname':'Portal','email':'complete@example.test','phone':'0820000002','address_line1':'1 Test Road','suburb':'Test Suburb','city':'Midrand','province':'Gauteng','postal_code':'1685','alternative_contact_name':'Test Contact','alternative_contact_number':'0830000002','alternative_contact_relationship':'Friend'}
         result=portal_intake.create_or_link_customer(form,1,'create',slug='test')
         cid=result['customer_id']
         assert get_db().execute('SELECT source_system FROM customers WHERE id=?',(cid,)).fetchone()[0]=='portal'

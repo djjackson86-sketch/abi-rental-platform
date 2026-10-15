@@ -66,7 +66,11 @@
       <section class="form-section">
         <h2>Contact details</h2>
         <div class="form-grid">
-          <label class="span-2"><span class="field-label"><span class="portal-name-label" data-portal-name-label>Name &amp; Surname</span> <span class="req-star" aria-hidden="true">*</span></span><input name="name" required autocomplete="name" value="{{ form_values.get('name', '') }}" placeholder="{{ 'e.g. ABC Trading (Pty) Ltd.' if form_values.get('customer_type') == 'company' else 'e.g. Alex Morgan' }}"></label>
+          {% set is_company = form_values.get('customer_type', 'individual') == 'company' %}
+          <label class="span-2 portal-company-name" data-company-name {% if not is_company %}hidden{% endif %}><span class="field-label">Company Name <span class="req-star" aria-hidden="true">*</span></span><input name="name" {% if is_company %}required{% else %}disabled{% endif %} autocomplete="organization" value="{{ form_values.get('name', '') }}" placeholder="e.g. ABC Trading (Pty) Ltd."></label>
+          {% for field, label, autocomplete, message in [('first_names', 'Name(s)', 'given-name', 'Please enter your name(s).'), ('surname', 'Surname', 'family-name', 'Please enter your surname.')] %}
+          <label class="portal-individual-name" data-individual-name {% if is_company %}hidden{% endif %}><span class="field-label">{{ label }} <span class="req-star" aria-hidden="true">*</span></span><input name="{{ field }}" {% if is_company %}disabled{% else %}required{% endif %} pattern=".*\S.*" title="{{ message }}" autocomplete="{{ autocomplete }}" value="{{ form_values.get(field, '') }}" {% if error == message %}aria-invalid="true" aria-describedby="portal-{{ field }}-error"{% endif %}>{% if error == message %}<span id="portal-{{ field }}-error" role="alert">{{ message }}</span>{% endif %}</label>
+          {% endfor %}
           <label><span class="field-label">Email <span class="req-star" aria-hidden="true">*</span></span><input name="email" type="email" required autocomplete="email" value="{{ form_values.get('email', '') }}" placeholder="e.g. customer@example.com"></label>
           <label><span class="field-label">Phone <span class="req-star" aria-hidden="true">*</span></span><input name="phone" type="tel" required inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
           <label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" {% if form_values.get('marketing_opt_in') %}checked{% endif %}> Subscribed to marketing emails</label>
@@ -133,16 +137,23 @@
 (function(){
   var section = document.querySelector('.company-details-section');
   var inputs = document.getElementsByName('customer_type');
-  var nameLabel = document.querySelector('.portal-name-label');
-  var nameInput = nameLabel ? nameLabel.closest('label').querySelector('input') : null;
+  var companyName = document.querySelector('.portal-company-name');
+  var individualNames = document.querySelectorAll('.portal-individual-name');
   if(!section){ return; }
   function each(list, fn){ Array.prototype.forEach.call(list, fn); }
+  function toggleName(label, active){
+    label.hidden = !active;
+    var input = label.querySelector('input');
+    input.disabled = !active;
+    input.required = active;
+  }
   function sync(){
     var selected = null;
     each(inputs, function(input){ if(input.checked){ selected = input; } });
-    section.hidden = !selected || selected.value !== 'company';
-    if(nameInput){ nameInput.placeholder = (selected && selected.value === 'company') ? 'e.g. ABC Trading (Pty) Ltd.' : 'e.g. Alex Morgan'; }
-    if(nameLabel){ nameLabel.textContent = (selected && selected.value === 'company') ? 'Company Name' : 'Name & Surname'; }
+    var company = !!selected && selected.value === 'company';
+    section.hidden = !company;
+    toggleName(companyName, company);
+    each(individualNames, function(label){ toggleName(label, !company); });
   }
   each(inputs, function(input){ input.addEventListener('change', sync); });
   sync();

@@ -129,6 +129,10 @@ def submission(**overrides):
         "popia_consent": "1",
     }
     data.update(overrides)
+    # Synthetic legacy full-name fixtures now post the two explicit portal inputs.
+    parts = data["name"].strip().split(" ", 1)
+    data["first_names"] = parts[0]
+    data["surname"] = parts[1] if len(parts) > 1 else ""
     return data
 
 

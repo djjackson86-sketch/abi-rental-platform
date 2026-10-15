@@ -90,6 +90,10 @@ def submission(**overrides):
         "popia_consent": "1",
     }
     data.update(overrides)
+    # Synthetic full-name fixtures now supply the explicit portal name parts.
+    parts = data["name"].strip().split(" ", 1)
+    data["first_names"] = parts[0]
+    data["surname"] = parts[1] if len(parts) > 1 else ""
     return data
 
 

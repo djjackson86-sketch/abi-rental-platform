@@ -86,6 +86,11 @@ def submission(**overrides):
         "popia_consent": "1",
     }
     data.update(overrides)
+    # Synthetic legacy full-name fixtures now post the two explicit portal inputs.
+    parts = data["name"].strip().split(" ", 1)
+    data["first_names"] = parts[0]
+    data["surname"] = parts[1] if len(parts) > 1 else ""
+    data.update(overrides)
     return data
 
 
@@ -138,7 +143,7 @@ def csrf_token(client, scope="portal_approval"):
 # ---------------------------------------------------------------- required fields (server-side)
 
 REQUIRED = (
-    "name", "email", "phone", "address_line1", "suburb", "city", "province", "postal_code",
+    "first_names", "surname", "email", "phone", "address_line1", "suburb", "city", "province", "postal_code",
     "alternative_contact_name", "alternative_contact_number", "alternative_contact_relationship",
 )
 

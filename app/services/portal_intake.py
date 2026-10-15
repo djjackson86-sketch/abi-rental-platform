@@ -408,9 +408,20 @@ def submission_values(form):
     customer_type = str(form.get("customer_type") or "individual").strip().lower()
     if customer_type not in PORTAL_CUSTOMER_TYPES:
         customer_type = "individual"
+    # Individuals must supply both parts explicitly: never guess a surname from a
+    # combined name (including a crafted/old POST). Storage still uses the full name.
+    name = str(form.get("name") or "").strip()
+    first_names = str(form.get("first_names") or "").strip()
+    surname = str(form.get("surname") or "").strip()
+    if customer_type == "individual":
+        if not first_names:
+            raise ValueError("Please enter your name(s).")
+        if not surname:
+            raise ValueError("Please enter your surname.")
+        name = f"{first_names} {surname}"
     values = {
         "customer_type": customer_type,
-        "name": str(form.get("name") or "").strip(),
+        "name": name,
         "email": normalise_email(form.get("email")),
         "phone": str(form.get("phone") or "").strip(),
         "address_line1": str(form.get("address_line1") or "").strip(),
@@ -421,6 +432,9 @@ def submission_values(form):
         "postal_code": str(form.get("postal_code") or "").strip(),
         "marketing_opt_in": 1 if form.get("marketing_opt_in") else 0,
     }
+    if customer_type == "individual":
+        # Keep the explicit parts when validated values are passed through intake again.
+        values.update(first_names=first_names, surname=surname)
     for key in PORTAL_CUSTOM_FIELD_KEYS:
         values[key] = str(form.get(key) or "").strip()
     # Company-only: website. A crafted ``website`` on an individual is dropped here rather

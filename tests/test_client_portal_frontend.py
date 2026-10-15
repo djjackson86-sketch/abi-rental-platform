@@ -65,7 +65,9 @@ def slug_of(app, branch_id):
 
 
 SUBMISSION = {
-    "name": "Pieter van Wyk",
+    "name": "Pieter van Wyk",  # Company submissions still use name.
+    "first_names": "Pieter",
+    "surname": "van Wyk",
     "email": "pieter@example.co.za",
     "phone": "083 555 1234",
     "address_line1": "12 Kerk Street",
@@ -80,7 +82,7 @@ SUBMISSION = {
 }
 
 REQUIRED_FIELDS = (
-    "name", "email", "phone", "address_line1", "suburb", "city", "province", "postal_code",
+    "first_names", "surname", "email", "phone", "address_line1", "suburb", "city", "province", "postal_code",
     "alternative_contact_name", "alternative_contact_number", "alternative_contact_relationship",
 )
 
@@ -192,11 +194,14 @@ def test_the_required_field_marker_is_a_small_red_asterisk():
 
 
 def test_the_name_label_switches_with_the_customer_type(client, app, branch):
-    # Portal form: the marker the script drives, plus the default individual wording.
+    # Portal individuals have explicit name parts; staff forms are unchanged.
     portal = client.get(f"/portal/{slug_of(app, branch)}/register").get_data(as_text=True)
-    assert "data-portal-name-label" in portal
-    assert "Name &amp; Surname" in portal
-    assert "'Company Name'" in portal and "'Name & Surname'" in portal
+    assert 'name="first_names" required' in portal
+    assert 'name="surname" required' in portal
+    assert 'autocomplete="given-name"' in portal
+    assert 'autocomplete="family-name"' in portal
+    assert 'data-company-name hidden' in portal
+    assert 'name="name" disabled' in portal
     # Staff customer form (new + edit): same marker, and the preserved company-section JS line.
     sign_in(client, app)
     staff = client.get("/customers/new").get_data(as_text=True)
