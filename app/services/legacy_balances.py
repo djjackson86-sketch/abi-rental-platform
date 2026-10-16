@@ -35,6 +35,8 @@ PAYMENT_ARCHIVED = "archived"
 
 def _outstanding(row):
     """Outstanding on one imported row, never below zero."""
+    if row["status"] == "waived":
+        return 0.0
     return round(max(float(row["amount_due"] or 0) - float(row["settled_amount"] or 0), 0), 2)
 
 

@@ -944,7 +944,7 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
     # amount_due - settled_amount. Receipts below subtract the settlement once.
     # Keep collected rows: fully settled history belongs on a statement too.
     legacy_rows = db.execute("""
-        SELECT id, source_order_number, amount_due, source_started_at,
+        SELECT id, source_order_number, amount_due, settled_amount, status, source_started_at,
                source_created_at, created_at
         FROM legacy_customer_balances WHERE customer_id = ?
     """, (customer_id,)).fetchall()
@@ -963,7 +963,11 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         source_day = (_statement_day(row['source_started_at'])
                       or _statement_day(row['source_created_at']))
         day = source_day or _statement_day(row['created_at'])
-        amount = _statement_money(row['amount_due'])
+        # ABI-341953218: a waiver closes only the unpaid remainder. Retain the
+        # already-settled portion so existing receipts still offset it exactly;
+        # collected rows continue to carry the full imported debt as before.
+        waived = row['status'] == 'waived'
+        amount = _statement_money(row['settled_amount'] if waived else row['amount_due'])
         lifetime_invoiced += amount
         if date_from and day < date_from:
             opening_invoiced += amount
@@ -974,7 +978,8 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         entry = {
             'date': day, 'type': 'Legacy balance',
             'detail': str(row['source_order_number'] or 'Unnumbered')
-                      + (' (import date)' if not source_day else ''),
+                      + (' (import date)' if not source_day else '')
+                      + (' (unpaid remainder waived)' if waived else ''),
             'amount': amount, 'amount_display': _statement_money_display(amount),
             'type_rank': STATEMENT_ACTIVITY_INVOICE_RANK,
             'source_kind': 'legacy_balance', 'source_id': row['id'],

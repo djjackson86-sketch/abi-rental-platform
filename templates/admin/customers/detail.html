@@ -138,7 +138,7 @@
         <div class="customer-order-row legacy-balance-row">
           <span><strong>Old order #{{ entry.source_order_number }}</strong><small>{% if entry.source_started_at %}{{ entry.source_started_at[:10] }} · {% endif %}{{ entry.source_payment_status|replace('_', ' ')|title }} · {{ entry.source_order_status }}</small></span>
           <span class="legacy-balance-money"><small>Total R{{ '%.2f'|format(entry.source_total) }} · Paid then R{{ '%.2f'|format(entry.source_paid) }}{% if entry.invoice_count %} · {{ entry.invoice_count }} invoice{{ '' if entry.invoice_count == 1 else 's' }}{% endif %}</small></span>
-          <b class="{{ 'balance-owing' if entry.outstanding > 0 else 'balance-credit' }}">{% if entry.outstanding > 0 %}R{{ '%.2f'|format(entry.outstanding) }}{% else %}Settled{% endif %}</b>
+          <b class="{{ 'balance-owing' if entry.outstanding > 0 else 'balance-credit' }}">{% if entry.status == 'waived' %}Waived{% elif entry.outstanding > 0 %}R{{ '%.2f'|format(entry.outstanding) }}{% else %}Settled{% endif %}</b>
         </div>
       {% endfor %}
     </div>
