@@ -309,9 +309,11 @@ def _set_id_verified(client, app, customer_id, email="pieter@example.co.za", nam
 
 
 def _capture_main_vehicle(client, customer_id, registration="NB72XMGP"):
+    client.get(f"/customers/{customer_id}/edit")
+    token = csrf_token(client)
     return client.post(
         "/scan-vehicle/save",
-        data={"customer_id": str(customer_id), "registration": registration, "make": "Toyota", "make_main": "yes"},
+        data={"customer_id": str(customer_id), "registration": registration, "make": "Toyota", "make_main": "yes", "csrf_token": token},
     )
 
 
@@ -351,9 +353,9 @@ def test_approval_requires_id_and_main_vehicle_in_either_order(client, app, bran
                 portal_registrations.approve_registration(registration["id"])
         _set_id_verified(client, app, stored["id"])
 
-    # Both checks met → the client becomes an approved client.
+    # ABI-341953220: the second verification save already approved the client.
     with app.app_context():
-        portal_registrations.approve_registration(registration["id"])
+        assert portal_registrations.registration_by_id(registration["id"])["status"] == "approved"
         assert list_customers() and list_customers()[0]["id"] == stored["id"]
         assert portal_registrations.pending_registration_for_customer(stored["id"]) is None
         assert portal_registrations.registration_by_id(registration["id"])["status"] == "approved"
@@ -676,7 +678,7 @@ def test_an_approved_client_is_never_deleted_by_the_pending_action(client, app, 
     _set_id_verified(client, app, stored["id"])
     _capture_main_vehicle(client, stored["id"])
     with app.app_context():
-        portal_registrations.approve_registration(registration["id"])
+        assert portal_registrations.registration_by_id(registration["id"])["status"] == "approved"
     token = _delete_token(client, app, stored["id"])
     response = client.post(
         f"/customers/portal/{registration['id']}/delete", data={"csrf_token": token, "reason": "Verification refused"}, follow_redirects=True

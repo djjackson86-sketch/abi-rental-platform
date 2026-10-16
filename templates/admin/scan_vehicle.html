@@ -139,23 +139,6 @@
     </div>
   </form>
 
-  {% if user_can("customers") %}
-  {# The explicit Yes/No the owner asked for. Shown only when the client on this form is a saved
-     ID-verified *pending portal* registration — the one state "approve the client" can act on.
-     "No" (or closing the dialog) posts no approval at all, so the client's approval is untouched
-     and only the vehicle is saved. #}
-  <dialog id="approve-client-dialog" aria-labelledby="approve-client-title" style="width: min(32rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); max-height: 90dvh; overflow-y: auto; box-sizing: border-box; border: 1px solid #ccc; border-radius: 12px; padding: 24px;">
-    <h2 id="approve-client-title">Approve client?</h2>
-    <p>The selected client is marked ID verified. Approving their portal registration makes them a normal customer for this branch.</p>
-    <div class="form-actions">
-      <button class="btn" type="button" data-approve-client="0">No</button>
-      <button class="btn primary" type="button" data-approve-client="1">Yes</button>
-    </div>
-  </dialog>
-  <style>
-    #approve-client-dialog::backdrop { background: rgba(0, 0, 0, .45); }
-  </style>
-  {% endif %}
 </section>
 
 <script>
@@ -306,53 +289,26 @@
 </script>
 
 <script>
-// One submit pipeline handles both entry points and changing the selected customer.
+// Resolve the chosen client once, then save without a redundant approval question.
 (function () {
-  var dialog = document.getElementById('approve-client-dialog');
   var form = document.querySelector('.scan-review-form');
   if (!form) { return; }
-  var field = form.querySelector('[data-approve-client-field]');
   var action = form.querySelector('[data-vehicle-action]');
   var busy = false;
-  function send(answer) {
-    field.value = answer;
-    form.querySelectorAll('button[type="submit"]').forEach(function (button) { button.disabled = true; });
-    form.submit();
-  }
   form.addEventListener('submit', function (event) {
     event.preventDefault();
     if (busy) { return; }
     busy = true;
     action.value = event.submitter && event.submitter.value === 'disapprove' ? 'disapprove' : 'approve';
-    field.value = '';
+    form.querySelector('[data-approve-client-field]').value = '0';
     Promise.resolve(window.resolveScanCustomer && window.resolveScanCustomer()).then(function () {
-      if (action.value === 'disapprove' || !dialog || !dialog.showModal) { send('0'); return; }
-      var params = new URLSearchParams({
-        customer_id: document.getElementById('scan-customer-id').value,
-        customer_pick: document.getElementById('scan-customer-pick').value
-      });
-      return fetch('{{ url_for("vehicles.client_approval_state") }}?' + params.toString(),
-        {headers: {'Accept': 'application/json'}}).then(function (response) {
-          if (!response.ok) { throw new Error('Unable to check client approval. Please try again.'); }
-          return response.json();
-        }).then(function (state) {
-          if (state.ask_approval) { dialog.showModal(); } else { send('0'); }
-        });
+      form.querySelectorAll('button[type="submit"]').forEach(function (button) { button.disabled = true; });
+      form.submit();
     }).catch(function () {
       busy = false;
-      alert('Unable to check client approval. Please try again. Nothing has been saved.');
+      alert('Unable to resolve the selected client. Please try again. Nothing has been saved.');
     });
   });
-  if (dialog) {
-    dialog.addEventListener('cancel', function () { busy = false; });
-    dialog.querySelectorAll('[data-approve-client]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        if (!busy) { return; }
-        dialog.close();
-        send(button.getAttribute('data-approve-client'));
-      });
-    });
-  }
 })();
 </script>
 {% endif %}

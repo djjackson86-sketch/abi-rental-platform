@@ -72,7 +72,7 @@ def _pending_registration_context(customer_id, customer=None):
     (or ``None`` for an ordinary client), ``portal_approval_csrf_token`` is the scoped CSRF
     token the approve form must post, ``pending_id_verified`` reflects the existing
     ``client_verified`` flag and ``pending_vehicle_captured`` reflects whether a main vehicle
-    is already recorded — the two things the explicit approval requires, in either order.
+    is already approved — the two checks automatic approval requires, in either order.
     """
     if customer is None:
         customer = get_customer(customer_id)
@@ -331,7 +331,10 @@ def edit(customer_id):
     if request.method == "POST":
         try:
             _enforce_owner_only_credit(request.form)
-            update_customer(customer_id, request.form)
+            from app.db import scan_write_transaction
+            with scan_write_transaction():
+                update_customer(customer_id, request.form)
+                portal_registrations.approve_if_verification_complete(customer_id)
             flash("Customer saved", "success")
             return redirect(url_for("customers.detail", customer_id=customer_id))
         except ValueError as exc:

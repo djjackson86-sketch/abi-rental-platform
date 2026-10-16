@@ -4,15 +4,15 @@ A public customer-portal submission that creates a **new** client does not, by i
 make that client an approved customer of the branch. The submission is recorded here as a
 **pending registration**; the client keeps behaving like a new sign-up — hidden from the
 default customer list and from order / allocation selection — until staff have done both
-of the verifications the owner asked for and then approved it explicitly:
+of the required verifications (the final staff save approves it automatically):
 
 * the **ID verification flag** the counter already uses (``customers.client_verified = 1``),
   set from the ordinary customer form; and
 * a **recorded main vehicle** (the client's chosen ``main_vehicle_id``, captured by the
   existing scan screen).
 
-Either can be done first — the approval is a separate, deliberate action that only checks
-the *final* state, so nothing is ever auto-approved by a submission or a scan.
+Either can be done first. Only a staff verification write can finish approval, using the
+final saved state; submissions and read-only page loads never approve a client.
 
 Two rules this module keeps deliberately narrow:
 
@@ -386,7 +386,28 @@ def branch_in_session_scope(registration):
     return resolved in scope
 
 
-# --- the explicit approval ----------------------------------------------------------------------
+def approve_if_verification_complete(customer_id):
+    """Finish a pending sign-up on a staff verification write, never on a read.
+
+    Keep the existing approval checks, branch boundary and audit evidence. Missing
+    checks are normal (staff may do either first); retries are a no-op.
+    """
+    from flask import has_request_context, session
+    from app.services.access import user_can_module
+    from app.services.customers import get_customer
+
+    if not has_request_context() or not user_can_module(session, "customers"):
+        return None
+    registration = pending_registration_for_customer(customer_id)
+    if not registration or not branch_in_session_scope(registration):
+        return None
+    customer = get_customer(customer_id)
+    if customer is None or approval_blockers(customer):
+        return None
+    return approve_registration(registration["id"])
+
+
+# --- approval -----------------------------------------------------------------------------------
 
 def approve_registration(registration_id):
     """Approve a pending registration. Raises ``ValueError`` when a check is unmet.

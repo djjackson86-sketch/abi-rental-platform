@@ -219,8 +219,7 @@ def test_the_manual_entry_context_echoes_the_return_intent_only_when_asked(app, 
         assert 'name="registration"' in rendered                       # the fields are offered
         assert 'name="customer_pick"' in rendered                      # and the client is on the form
         assert 'value="Pieter van Wyk' in rendered                     # the saved client, pre-selected
-        assert 'id="approve-client-dialog"' in rendered                # pending + ID verified arms it
-        assert 'data-approve-client="1"' in rendered and 'data-approve-client="0"' in rendered
+        assert 'id="approve-client-dialog"' not in rendered  # ABI-341953220: no redundant question
         assert 'id="scan-approve-save"' in rendered                    # Approve & Save Vehicle
         assert 'id="scan-disapprove-vehicle"' in rendered              # Disapprove Vehicle
         assert 'name="approve_client"' in rendered                     # the hidden Yes/No field
@@ -234,7 +233,7 @@ def test_the_approval_dialog_is_never_armed_without_a_pending_verified_client(ap
     sign_in(client, app)
     for customer_id in (ordinary, unverified, None):
         page = body_of(manual_scan(client, customer_id))
-        assert '<dialog id="approve-client-dialog"' in page and '<dialog id="approve-client-dialog" open' not in page
+        assert '<dialog id="approve-client-dialog"' not in page
         assert client.get("/scan-vehicle/client-approval-state", query_string={"customer_id": customer_id or ""}).json["ask_approval"] is False
 
 
@@ -270,15 +269,15 @@ def test_approve_yes_saves_the_vehicle_and_approves_the_pending_client(app, clie
 
 
 @pytest.mark.parametrize("answer", ["0", "", None])
-def test_approve_no_or_no_answer_saves_the_vehicle_and_leaves_the_client_pending(app, client, branches, answer):
+def test_final_vehicle_check_approves_without_an_answer(app, client, branches, answer):
     customer_id, registration_id = make_pending(app, branch_id=branches["midrand"])
     sign_in(client, app)
 
     body = body_of(save_scan(client, customer_id, "NB72XMGP", approve_client=answer))
     assert "allocated to Pieter van Wyk" in body, "the vehicle still saves"
     assert "Client approved" not in body
-    assert registration_status(app, registration_id) == "pending"
-    assert visible_customer_ids(app) == [], "a client is never approved by a scan alone"
+    assert registration_status(app, registration_id) == "approved"
+    assert visible_customer_ids(app) == [customer_id], "both saved checks complete approval"
     assert len(vehicles_for(app, customer_id)) == 1
 
 
@@ -410,7 +409,7 @@ def test_the_pending_panel_no_longer_offers_its_own_approve_button(app, client, 
     assert "data-portal-approval" not in page
     assert "Approve client</button>" not in page
     # ... the approval moved to the scan screen, which the panel points at ...
-    assert "Approve on the scan screen" in page
+    assert "becomes Approved automatically" in page
     assert f"/scan-vehicle?customer_id={customer_id}" in page
     # ... while the refusal control stays here.
     assert "Disapprove client" in page

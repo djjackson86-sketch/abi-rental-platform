@@ -6,7 +6,7 @@
    The workflow the owner asked for, in one place on the selected customer:
 
    * the submitted details and the registration reference, read-only;
-   * the two checks the explicit approval needs — the counter's existing **ID verification**
+   * the two checks automatic approval needs — the counter's existing **ID verification**
      (``pending_id_verified``: customers.client_verified = 1) and a recorded **main vehicle**
      (``pending_vehicle_captured``) — in either order, each shown as done or still open;
    * the vehicle-disc scanner for this client, and a jump to the Client Verified section of the
@@ -14,7 +14,7 @@
    * the disapproval control (retains the client, saves a reason and blocks future rentals).
 
    The approval itself lives on the scan screen now (ABI-341953212): "Approve & Save Vehicle"
-   records the main vehicle and asks an explicit "Approve client?" — the standalone "Approve
+   records the main vehicle; ABI-341953220 removes the redundant question. The standalone "Approve
    client" button here was removed, so a vehicle capture and an approval are never two halves of
    one half-finished step. The route (``customers.approve_portal_registration``) is unchanged for
    an already-open page or a direct caller.
@@ -36,7 +36,7 @@
   </div>
   <p class="form-help">
     Self-registered through the customer portal{% if registration.created_at %} on {{ registration.created_at[:10] }}{% endif %}{% if registration.branch_name %} · {{ registration.branch_name }} branch{% endif %}.
-    {% if is_disapproved %}This record is retained. Future rentals are blocked until the client is explicitly unblocked.{% elif is_approved %}Approval is saved. Continue with an order for this customer.{% else %}Verify the client's ID and capture their main vehicle, in either order, then approve.{% endif %}
+    {% if is_disapproved %}This record is retained. Future rentals are blocked until the client is explicitly unblocked.{% elif is_approved %}Approval is saved. Continue with an order for this customer.{% else %}Verify the client's ID and approve their main vehicle, in either order. Approval is saved automatically once both checks are complete.{% endif %}
   </p>
   <div class="detail-list pending-registration-details">
     <div class="detail-row"><span>Reference</span><b>{{ registration.reference or '—' }}</b></div>
@@ -77,10 +77,10 @@
   {% else %}
   {# The standalone "Approve client" button is gone (ABI-341953212). Approval now happens on the
      scan screen's "Approve & Save Vehicle" — the same action that records the client's main
-     vehicle — and only after the explicit "Approve client?" Yes, so an approval can never be a
+     vehicle. ABI-341953220 approves once both checks pass; approval can never be a
      separate, half-finished step beside a vehicle that was never captured. This panel keeps the
      checklist, the scan link that reaches it, and the disapproval control below. #}
-  <p class="form-help pending-approve-pointer">Approve on the scan screen: scan the client's main vehicle and choose <b>Approve &amp; Save Vehicle</b>.</p>
+  <p class="form-help pending-approve-pointer">Choose <b>Approve &amp; Save Vehicle</b> on the scan screen and set <b>Client verified</b> to Yes. The customer becomes Approved automatically when both are saved.</p>
   <div class="pending-delete-form">
     <button class="btn danger" type="button" onclick="document.getElementById('disapprove-client-dialog').showModal()">Disapprove client</button>
     <span class="form-help">Retains the client and their history, saves a reason and blocks future rentals.</span>

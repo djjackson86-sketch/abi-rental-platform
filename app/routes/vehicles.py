@@ -325,7 +325,7 @@ def save_scan_vehicle():
     # The review form's two saving actions (ABI-341953212). "Approve & Save Vehicle" is the
     # default — an older caller that posts no action at all keeps it — and records the vehicle as
     # approved; "Disapprove Vehicle" records the very same vehicle as unapproved. Either way the
-    # vehicle stays on the client: only its own status moves, never the client's approval.
+    # vehicle stays on the client. Completing both checks also approves a pending sign-up.
     disapprove_vehicle = (request.form.get("action") or "").strip().lower() == "disapprove"
     vehicle_status = vehicles.STATUS_UNAPPROVED if disapprove_vehicle else vehicles.STATUS_APPROVED
     # The explicit Yes/No the "Approve client?" dialog posts. Yes (``approve_client=1``) is the
@@ -422,6 +422,15 @@ def save_scan_vehicle():
             vehicles.set_vehicle_status(vehicle_id, vehicle_status)
             if approval_registration_id is not None:
                 portal_registrations.approve_registration(approval_registration_id)
+            elif not disapprove_vehicle:
+                # The final saved ID + approved main vehicle state is authoritative.
+                # Keep the scoped CSRF requirement for the automatic approval too.
+                pending = portal_registrations.pending_registration_for_customer(customer_id)
+                if (pending and user_can_module(session, "customers")
+                        and portal_registrations.branch_in_session_scope(pending)
+                        and portal_registrations.is_approvable(get_customer(customer_id))):
+                    csrf.validate("portal_approval")
+                    portal_registrations.approve_if_verification_complete(customer_id)
     except ValueError as exc:
         flash(str(exc), "error")
         return review_response(_review(values, customer_id, raw_text=values["raw_scan_text"], needs_main_choice=make_main is None))

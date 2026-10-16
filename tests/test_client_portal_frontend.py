@@ -275,7 +275,7 @@ def test_the_detail_page_shows_the_verification_panel(client, app, pending_clien
     body = client.get(f"/customers/{stored['id']}").get_data(as_text=True)
     assert "pending-registration-panel" in body
     assert registration["reference"] in body
-    assert "Approve on the scan screen" in body
+    assert "becomes Approved automatically" in body
 
 
 def test_an_ordinary_customer_has_no_verification_panel(client, app):
