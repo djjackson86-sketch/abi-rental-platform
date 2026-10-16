@@ -1,4 +1,4 @@
-"""Portal-only own-use wording shares the existing required acknowledgement."""
+"""Portal-only own-use wording has a separate required acknowledgement."""
 import re
 
 import pytest
@@ -36,18 +36,21 @@ def payload(customer_type):
                 address_line1='1 Test Road', suburb='Test', city='Johannesburg',
                 province='Gauteng', postal_code='2194', alternative_contact_name='Test Contact',
                 alternative_contact_number='0835550188', alternative_contact_relationship='Friend',
-                popia_consent='1')
+                popia_consent='1', own_use_declaration=customer_type)
 
 
 def assert_declaration(body, customer_type):
     # Limit to markup, not the script containing the two possible replacement strings.
-    label = re.search(r'<label for="popia-consent">(.*?)</label>', body, re.S).group(1)
+    privacy_label = re.search(r'<label for="popia-consent">(.*?)</label>', body, re.S).group(1)
+    label = re.search(r'<label for="own-use-declaration"[^>]*>(.*?)</label>', body, re.S).group(1)
     expected, other = (COMPANY, INDIVIDUAL) if customer_type == 'company' else (INDIVIDUAL, COMPANY)
-    assert label.count(expected) == 1
+    assert label == expected
     assert other not in label
-    assert label.index('personal information') < label.index('<br>') < label.index(expected)
+    assert INDIVIDUAL not in privacy_label and COMPANY not in privacy_label
     assert body.count('name="popia_consent"') == 1
-    checkbox = re.search(r'<input[^>]+name="popia_consent"[^>]*>', body).group(0)
+    assert body.count('name="own_use_declaration"') == 1
+    checkbox = re.search(r'<input[^>]+name="own_use_declaration"[^>]*>', body).group(0)
+    assert f'value="{customer_type}"' in checkbox
     assert 'required' in checkbox
     assert 'checked' not in checkbox
 
@@ -85,7 +88,10 @@ def test_existing_acknowledgement_save_reload_unchanged(app, branch, customer_ty
         assert evidence is not None
         assert evidence['accepted_at']
         assert evidence['channel'] == consent.CHANNEL_PORTAL
-        assert get_db().execute('SELECT COUNT(*) FROM consent_records').fetchone()[0] == 1
+        assert get_db().execute('SELECT COUNT(*) FROM consent_records').fetchone()[0] == 2
+        own_use = consent.consent_for(row['id'], 'trailer_own_use')
+        assert own_use['notice_version'] == f'own-use-{customer_type}-v1'
+        assert own_use['accepted_at']
     # Reloading the public form must never pre-acknowledge it.
     assert_declaration(client.get('/portal').get_data(as_text=True), 'individual')
 

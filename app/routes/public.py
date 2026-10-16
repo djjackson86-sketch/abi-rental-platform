@@ -500,6 +500,8 @@ def customer_portal_register():
         )
     try:
         values = portal_intake.submission_values(form)
+        if form.get("own_use_declaration") != values["customer_type"]:
+            raise ValueError("Please tick the separate box to confirm the trailer is for your own use or your company's own business use.")
     except ValueError as exc:
         return _render_portal_form(branch, status=400, error=str(exc), form_values=posted, universal=True)
     if not consent.acceptance_given(form.get("popia_consent")):
@@ -547,6 +549,12 @@ def customer_portal_register():
     # recorded it in the request that wrote the customer, so it is not recorded a second time.
     if not result.get("replayed"):
         consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"))
+        # Separate evidence, pinned to the declaration wording and customer type; no backfill.
+        consent.record_consent(
+            result["customer_id"], consent.CHANNEL_PORTAL, True,
+            notice_version=f"own-use-{values['customer_type']}-v1",
+            consent_type="trailer_own_use",
+        )
     return render_template(
         "public/portal_confirm.html",
         **_portal_context(
@@ -598,6 +606,8 @@ def branch_portal_register(slug):
 
     try:
         values = portal_intake.submission_values(form)
+        if form.get("own_use_declaration") != values["customer_type"]:
+            raise ValueError("Please tick the separate box to confirm the trailer is for your own use or your company's own business use.")
     except ValueError as exc:
         return _render_portal_form(branch, status=400, error=str(exc), form_values=posted)
 
@@ -643,6 +653,12 @@ def branch_portal_register(slug):
     # A replay already recorded the acceptance in the request that wrote the customer.
     if not result.get("replayed"):
         consent.record_consent(result["customer_id"], consent.CHANNEL_PORTAL, form.get("popia_consent"))
+        # Separate evidence, pinned to the declaration wording and customer type; no backfill.
+        consent.record_consent(
+            result["customer_id"], consent.CHANNEL_PORTAL, True,
+            notice_version=f"own-use-{values['customer_type']}-v1",
+            consent_type="trailer_own_use",
+        )
 
     return render_template(
         "public/portal_confirm.html",

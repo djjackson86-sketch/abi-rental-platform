@@ -20,7 +20,7 @@ def payload():
                 address_line1='1 Test Road', suburb='Test', city='Johannesburg',
                 province='Gauteng', postal_code='2194', alternative_contact_name='Test Contact',
                 alternative_contact_number='0835550199', alternative_contact_relationship='Friend',
-                popia_consent='1')
+                popia_consent='1', own_use_declaration='individual')
 
 
 def endpoint(app, branch):
@@ -77,7 +77,7 @@ def test_complete_multipart_name_saved_and_displayed(app, payload, branch):
 
 @pytest.mark.parametrize('branch', [False, True])
 def test_company_unchanged_without_individual_names(app, payload, branch):
-    payload.update(customer_type='company', name='  ABC Trading (Pty) Ltd.  ')
+    payload.update(customer_type='company', own_use_declaration='company', name='  ABC Trading (Pty) Ltd.  ')
     payload.pop('first_names')
     payload.pop('surname')
     response = app.test_client().post(endpoint(app, branch), data=payload)

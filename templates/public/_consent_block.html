@@ -21,5 +21,5 @@
 </style>
 <div class="consent-block">
   <input type="checkbox" name="popia_consent" id="popia-consent" value="1" required>
-  <div class="consent-block-text"><label for="popia-consent">I agree that {{ (settings|default({})).company_name|default('Sano Trailers', true) }} may use my personal information to process this {{ consent_purpose|default('booking') }} and generate invoices, in accordance with POPIA.{% if portal_own_use_declaration|default(false) %}<br><span data-own-use-declaration>{{ 'We confirm that the company is renting the trailer for its own business use.' if form_values.get('customer_type', 'individual') == 'company' else 'I confirm that I am renting the trailer for my own use.' }}</span>{% endif %}</label> <a href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View Privacy Notice</a></div>
+  <div class="consent-block-text"><label for="popia-consent">I agree that {{ (settings|default({})).company_name|default('Sano Trailers', true) }} may use my personal information to process this {{ consent_purpose|default('booking') }} and generate invoices, in accordance with POPIA.</label> <a href="{{ url_for('public.privacy_notice') }}" target="_blank" rel="noopener noreferrer">View Privacy Notice</a></div>
 </div>

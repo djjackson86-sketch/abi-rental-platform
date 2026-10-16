@@ -79,6 +79,7 @@ SUBMISSION = {
     "alternative_contact_number": "082 111 2222",
     "alternative_contact_relationship": "Sister",
     "popia_consent": "1",
+    "own_use_declaration": "individual",
 }
 
 REQUIRED_FIELDS = (

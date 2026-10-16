@@ -116,8 +116,12 @@
       </div>
 
       {% set consent_purpose = "registration" %}
-      {% set portal_own_use_declaration = true %}
       {% include "public/_consent_block.html" %}
+
+      <div class="consent-block">
+        <input type="checkbox" name="own_use_declaration" id="own-use-declaration" value="{{ 'company' if is_company else 'individual' }}" required>
+        <div class="consent-block-text"><label for="own-use-declaration" data-own-use-declaration>{{ 'We confirm that the company is renting the trailer for its own business use.' if is_company else 'I confirm that I am renting the trailer for my own use.' }}</label></div>
+      </div>
 
       <div class="form-actions"><button class="btn primary" type="submit">Send my details</button></div>
     </form>
@@ -163,7 +167,9 @@
       if(declaration.textContent !== wording){
         declaration.textContent = wording;
         // A changed declaration needs a fresh acknowledgement.
-        document.getElementById('popia-consent').checked = false;
+        var checkbox = document.getElementById('own-use-declaration');
+        checkbox.checked = false;
+        checkbox.value = company ? 'company' : 'individual';
       }
     }
   }
