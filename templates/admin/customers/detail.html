@@ -174,7 +174,7 @@
   {% endif %}
 
   <article class="panel customer-orders-card">
-    <div class="panel-title"><h2>Order history</h2><a href="{{ url_for('orders.new') }}">New order</a></div>
+    <div class="panel-title"><h2>Order history</h2><a href="{{ url_for('orders.new', customer_id=customer.id) }}">New order</a></div>
     {% if orders %}
       <div class="customer-order-list">
         {% for order in orders %}
@@ -189,7 +189,7 @@
       <div class="soft-empty">
         <h3>No orders yet</h3>
         <p>This customer is ready to use on a draft order.</p>
-        <a class="btn primary" href="{{ url_for('orders.new') }}">Create order</a>
+        <a class="btn primary" href="{{ url_for('orders.new', customer_id=customer.id) }}">Create order</a>
       </div>
     {% endif %}
   </article>
