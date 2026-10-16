@@ -116,6 +116,7 @@
       </div>
 
       {% set consent_purpose = "registration" %}
+      {% set portal_own_use_declaration = true %}
       {% include "public/_consent_block.html" %}
 
       <div class="form-actions"><button class="btn primary" type="submit">Send my details</button></div>
@@ -154,6 +155,17 @@
     section.hidden = !company;
     toggleName(companyName, company);
     each(individualNames, function(label){ toggleName(label, !company); });
+    var declaration = document.querySelector('[data-own-use-declaration]');
+    if(declaration){
+      var wording = company
+        ? 'We confirm that the company is renting the trailer for its own business use.'
+        : 'I confirm that I am renting the trailer for my own use.';
+      if(declaration.textContent !== wording){
+        declaration.textContent = wording;
+        // A changed declaration needs a fresh acknowledgement.
+        document.getElementById('popia-consent').checked = false;
+      }
+    }
   }
   each(inputs, function(input){ input.addEventListener('change', sync); });
   sync();
