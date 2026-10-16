@@ -336,7 +336,9 @@ def send_portal_submission_notification(customer_id):
     """
     def build():
         customer = get_db().execute(
-            "SELECT id, name FROM customers WHERE id = ?", (customer_id,),
+            """SELECT c.id, c.name, b.name AS branch_name
+            FROM customers c LEFT JOIN branches b ON b.id = c.branch_id
+            WHERE c.id = ?""", (customer_id,),
         ).fetchone()
         submitted_at = datetime.now(ZoneInfo(
             current_app.config.get("BUSINESS_TIMEZONE", "Africa/Johannesburg")
@@ -345,6 +347,7 @@ def send_portal_submission_notification(customer_id):
             "👤 <b>Customer portal information submitted</b>",
             f"Customer ID: {_escape(customer_id)}",
             f"Name: {_escape(customer['name'] if customer else '')}",
+            f"Created at branch: {_escape(_branch_label(customer, 'branch_name'))}",
             f"Submitted: {_escape(submitted_at)}",
         ]
         if _base_url():
