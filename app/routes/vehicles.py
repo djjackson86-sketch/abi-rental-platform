@@ -348,6 +348,16 @@ def save_scan_vehicle():
             return_to_verification=return_to_verification,
         )
 
+    if (request.form.get("action") or "").strip() == "waiting":
+        csrf.validate("portal_approval")
+        try:
+            vehicles.save_waiting_vehicle(request.form)
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return review_response(_review(values, None))
+        flash("Vehicle approved and placed on the waiting list. No customer allocated.", "success")
+        return redirect(url_for("vehicles.scan_vehicle"))
+
     if not customer_id:
         flash(
             "Choose the client from the list: type at least two letters of the name or number, "

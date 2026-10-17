@@ -75,6 +75,7 @@
 
   <main class="customers-workspace">
     {# Keep registrations in the right-hand workspace beside the desktop filters. #}
+    {% include "admin/customers/_waiting_vehicles_queue.html" %}
     {% include "admin/customers/_pending_registrations_queue.html" %}
     <section class="metrics customers-metrics">
       <div class="metric-card"><small>Total customers</small><b>{{ counts.total }}</b></div>

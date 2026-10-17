@@ -62,8 +62,34 @@
         <span>{% if pending_vehicle_captured %}Recorded — the client has a main vehicle.{% else %}Not yet — scan the licence disk and make it the main vehicle.{% endif %}</span>
         {% if user_can('scan_vehicle') %}<span class="pending-check-action">Scan main vehicle →</span>{% endif %}
       {% if user_can('scan_vehicle') %}</a>{% else %}</div>{% endif %}
+      {% if pending_registration and user_can('scan_vehicle') %}
+      <div style="padding: 0 16px 12px">
+        <button class="btn" type="button" onclick="document.getElementById('allocate-waiting-dialog').showModal()">Allocate from list</button>
+      </div>
+      {% endif %}
     </li>
   </ul>
+  {% if pending_registration and user_can('scan_vehicle') %}
+  <dialog id="allocate-waiting-dialog" aria-labelledby="allocate-waiting-title" style="width: min(32rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); box-sizing: border-box; border: 1px solid #ccc; border-radius: 12px; padding: 24px;">
+    <form method="post" action="{{ url_for('customers.allocate_from_waiting_list', customer_id=customer.id) }}">
+      <h2 id="allocate-waiting-title">Allocate from list</h2>
+      <input type="hidden" name="csrf_token" value="{{ portal_approval_csrf_token }}">
+      {% if waiting_vehicles %}
+      <label>Vehicle awaiting allocation
+        <select name="waiting_id" required style="width: 100%">
+          <option value="">Choose a vehicle</option>
+          {% for vehicle in waiting_vehicles %}<option value="{{ vehicle.id }}">{{ vehicle.registration }} — {{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      <p>This becomes the main vehicle. Existing main vehicle details will not be replaced.</p>
+      {% else %}<p>No vehicles are awaiting allocation. Scan a vehicle and place it on the waiting list first.</p>{% endif %}
+      <div class="form-actions">
+        <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+        {% if waiting_vehicles %}<button class="btn primary" type="submit">Allocate vehicle</button>{% endif %}
+      </div>
+    </form>
+  </dialog>
+  {% endif %}
   {% if user_can('new_order') %}
   <div class="portal-order-actions">
     <a class="btn primary" href="{{ url_for('orders.new', customer_id=customer.id) }}">Create order for this customer</a>

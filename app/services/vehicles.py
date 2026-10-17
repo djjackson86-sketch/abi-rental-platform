@@ -21,8 +21,9 @@ House rules that this module is responsible for:
 
 import json
 import re
+import sqlite3
 
-from app.db import get_db, now
+from app.db import get_db, now, scan_write_transaction
 from app.services.access import current_session_user_id
 
 SOURCE_MANUAL = "manual"
@@ -814,3 +815,246 @@ def delete_vehicles_for_customer(customer_id):
     cur = db.execute("DELETE FROM vehicles WHERE customer_id = ?", (customer_id,))
     db.commit()
     return cur.rowcount
+
+
+# ── scanned vehicles waiting for a client (ABI-341953230) ────────────────────────────────
+#
+# ``vehicles.customer_id`` is NOT NULL, so a licence disc scanned before the client exists (or
+# before staff have finished verifying a pending portal sign-up) cannot be recorded against
+# anybody yet. The counter therefore parks up to THREE validated scans in this separate queue and
+# allocates one to a client later. A waiting row carries **no customer**: it is never a
+# half-allocated vehicle, and nothing here touches the ``vehicles`` table until allocation.
+#
+# The cap is a property of the table, not of the caller: ``slot`` is NOT NULL, CHECK 1..3 and
+# UNIQUE, and the insert is conditional on that slot being free, so two simultaneous saves can
+# never write a fourth row. Duplicate protection compares plates on :func:`registration_key`
+# (case and spacing ignored), against both this queue and the recorded vehicles — matching how
+# ``vehicles`` itself behaves.
+
+WAITING_LIST_SLOTS = (1, 2, 3)
+WAITING_LIST_FULL_MESSAGE = (
+    "The scanned-vehicle waiting list is full (3 vehicles). Allocate or remove one before "
+    "scanning another."
+)
+WAITING_LIST_NO_REGISTRATION_MESSAGE = (
+    "A registration number is required before a scanned vehicle can wait for a client."
+)
+WAITING_LIST_STALE_MESSAGE = (
+    "That scanned vehicle is no longer waiting — it may already have been allocated or removed."
+)
+
+
+def _waiting_columns():
+    return (
+        "slot",
+        *TEXT_FIELDS,
+        *MASS_FIELDS,
+        "source",
+        "status",
+        "created_by_user_id",
+        "created_at",
+        "updated_at",
+    )
+
+
+def list_waiting_vehicles():
+    """Every scanned vehicle waiting for a client, in counter order (slot 1 first)."""
+    return get_db().execute(
+        "SELECT * FROM vehicle_waiting_list ORDER BY slot, id"
+    ).fetchall()
+
+
+def get_waiting_vehicle(waiting_id):
+    """One waiting row, or ``None`` when it has been allocated or removed."""
+    try:
+        waiting_id = int(waiting_id)
+    except (TypeError, ValueError):
+        return None
+    return get_db().execute(
+        "SELECT * FROM vehicle_waiting_list WHERE id = ?", (waiting_id,)
+    ).fetchone()
+
+
+def _waiting_for_registration(registration):
+    """The waiting row already holding this plate (spacing/case ignored), if any."""
+    key = registration_key(registration)
+    if not key:
+        return None
+    return get_db().execute(
+        "SELECT * FROM vehicle_waiting_list "
+        "WHERE REPLACE(UPPER(registration), ' ', '') = ? ORDER BY slot, id LIMIT 1",
+        (key,),
+    ).fetchone()
+
+
+def _waiting_duplicate_error(registration, queued):
+    """The one 'that plate is already waiting' refusal, naming the slot it sits in."""
+    return ValueError(
+        f"Registration {registration} is already waiting on the list "
+        f"(slot {_row_field(queued, 'slot', '?')}) — allocate or remove that scanned "
+        "vehicle instead of adding it again."
+    )
+
+
+def _is_constraint_error(exc):
+    """True when either adapter refused a UNIQUE/CHECK constraint (not a generic failure)."""
+    if isinstance(exc, sqlite3.IntegrityError):
+        return True
+    return type(exc).__name__ == "LibsqlError" and "constraint" in str(exc).lower()
+
+
+def _insert_waiting(values, timestamp):
+    """Write one waiting row into the first free slot, or refuse when all three are taken.
+
+    The INSERT is conditional on the slot being free and the slot is UNIQUE, so the check and
+    the write are one statement — two requests cannot both claim slot 2, and no fourth row can
+    ever exist (the CHECK makes slots 1..3 the only possibilities). A constraint refusal means a
+    concurrent save won the race: a duplicate plate is refused with the normal clear message,
+    any other slot conflict simply tries the next slot.
+    """
+    columns = _waiting_columns()
+    sql = (
+        f"INSERT INTO vehicle_waiting_list ({', '.join(columns)}) "
+        f"SELECT {', '.join(':' + column for column in columns)} "
+        "WHERE NOT EXISTS (SELECT 1 FROM vehicle_waiting_list WHERE slot = :slot)"
+    )
+    params = {
+        **{field: values.get(field, "") for field in TEXT_FIELDS},
+        **{field: values.get(field) for field in MASS_FIELDS},
+        "source": values.get("source") or SOURCE_SCAN,
+        "status": STATUS_APPROVED,
+        "created_by_user_id": current_session_user_id(),
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    db = get_db()
+    for slot in WAITING_LIST_SLOTS:
+        params["slot"] = slot
+        try:
+            cur = db.execute(sql, params)
+        except Exception as exc:  # noqa: BLE001 - narrowed immediately below
+            if not _is_constraint_error(exc):
+                raise
+            queued = _waiting_for_registration(values["registration"])
+            if queued is not None:
+                raise _waiting_duplicate_error(values["registration"], queued) from None
+            continue
+        if cur.rowcount == 1:
+            return int(cur.lastrowid)
+    raise ValueError(WAITING_LIST_FULL_MESSAGE)
+
+
+def save_waiting_vehicle(form):
+    """Queue one validated scan until a client can be allocated. Returns the waiting row id.
+
+    The scan screen's field values are validated by the same helpers a real vehicle save uses
+    (:func:`_values_from_form`: registration normalised, expiry ISO, masses numeric-or-NULL), so a
+    row that waits cannot hold anything a vehicle row would refuse. The row is recorded
+    ``approved`` and carries **no customer**. A plate already waiting, or already recorded on a
+    vehicle (spacing/case ignored), is refused with a message naming the slot or the owner —
+    a replay never silently updates or duplicates a scan.
+    """
+    values = _values_from_form(form)
+    if not _form_has(form, "source"):
+        values["source"] = SOURCE_SCAN
+    for field in TEXT_FIELDS:
+        values.setdefault(field, "")
+    for field in MASS_FIELDS:
+        values.setdefault(field, None)
+    values["registration"] = normalise_registration(values.get("registration"))
+    if not registration_key(values["registration"]):
+        raise ValueError(WAITING_LIST_NO_REGISTRATION_MESSAGE)
+
+    timestamp = now()
+    with scan_write_transaction():
+        queued = _waiting_for_registration(values["registration"])
+        if queued is not None:
+            raise _waiting_duplicate_error(values["registration"], queued)
+        owner = _registration_owner(values["registration"])
+        if owner is not None:
+            raise ValueError(
+                f"Registration {values['registration']} is already recorded for {owner['name']} — "
+                "open that client's vehicle instead of adding it to the waiting list."
+            )
+        waiting_id = _insert_waiting(values, timestamp)
+    return waiting_id
+
+
+def remove_waiting_vehicle(waiting_id):
+    """Take one waiting scan off the list (no vehicle, no client). ``False`` when absent."""
+    try:
+        waiting_id = int(waiting_id)
+    except (TypeError, ValueError):
+        return False
+    with scan_write_transaction():
+        cur = get_db().execute(
+            "DELETE FROM vehicle_waiting_list WHERE id = ?", (waiting_id,)
+        )
+        removed = cur.rowcount > 0
+    return removed
+
+
+def allocate_waiting_vehicle(waiting_id, customer_id):
+    """Allocate one waiting scan to a pending portal client. Returns the new vehicle id.
+
+    Only a client whose portal registration is **still pending** and inside the session's branch
+    scope may receive a waiting vehicle, and only when they have no main vehicle yet — neither a
+    ``main_vehicle_id`` pointer nor any hand-typed legacy ``vehicle_*`` field. The new vehicle is
+    written exactly as a scan save would write it (``approved``) and becomes the client's main
+    vehicle, so the mirror and the row agree.
+
+    The waiting row is removed **in the same transaction** as the vehicle insert and the mirror
+    write: the removal is the claim, so two concurrent allocations of the same scan cannot both
+    succeed — the loser finds nothing to claim and is refused. Any failure after the claim rolls
+    the whole thing back, leaving the scan waiting.
+    """
+    from app.services import portal_registrations
+
+    with scan_write_transaction():
+        # Acquire SQLite's write lock before reading either the queue or the main vehicle.
+        # Two different waiting scans allocated to the same client must serialize too.
+        get_db().execute("UPDATE vehicle_waiting_list SET slot = slot WHERE id = ?", (waiting_id,))
+        waiting = get_waiting_vehicle(waiting_id)
+        if waiting is None:
+            raise ValueError(WAITING_LIST_STALE_MESSAGE)
+        target = _customer_exists(customer_id)
+        if target is None:
+            raise ValueError("Choose the client this scanned vehicle belongs to.")
+
+        pending = portal_registrations.pending_registration_for_customer(target)
+        if pending is None:
+            raise ValueError(
+                "A waiting vehicle may only be allocated to a client whose portal registration "
+                "is still pending approval."
+            )
+        if not portal_registrations.branch_in_session_scope(pending):
+            raise ValueError("That portal registration is outside the branches you can access.")
+
+        if get_main_vehicle_id(target) is not None:
+            raise ValueError(
+                "That client already has a main vehicle on file — open the client and edit it "
+                "instead of allocating another."
+            )
+        mirror = _raw_custom_fields(target) or {}
+        if any(_text(mirror.get(key)) for key in MAIN_VEHICLE_CUSTOM_KEYS):
+            raise ValueError(
+                "That client already has vehicle details captured on their record — clear or "
+                "edit those before allocating a scanned vehicle."
+            )
+
+        # Claim the row first. It is the only writer that can remove this id, so a concurrent
+        # allocation that read the same row is refused at the next line instead of writing a
+        # second vehicle.
+        claim = get_db().execute(
+            "DELETE FROM vehicle_waiting_list WHERE id = ? AND slot = ?",
+            (int(waiting["id"]), int(waiting["slot"])),
+        )
+        if claim.rowcount != 1:
+            raise ValueError(WAITING_LIST_STALE_MESSAGE)
+
+        # A plate recorded for somebody between scanning and allocation is refused by
+        # create_vehicle's own duplicate guard; the rollback puts the scan back on the list.
+        vehicle_id = create_vehicle(dict(waiting), customer_id=target)
+        set_vehicle_status(vehicle_id, STATUS_APPROVED)
+        promote_main_vehicle(target, vehicle_id)
+    return int(vehicle_id)

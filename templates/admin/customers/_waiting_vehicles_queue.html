@@ -1,0 +1,19 @@
+<article class="panel movement-card pending-queue-card" id="vehicles-awaiting-allocation">
+  <div class="movement-head">
+    <h2>Vehicles awaiting allocation</h2>
+    <span class="badge status-payment_due">{{ waiting_vehicles|length }} / 3 vehicles</span>
+  </div>
+  <div class="movement-body">
+    {% if waiting_vehicles %}
+    <div class="schedule-list">
+      {% for vehicle in waiting_vehicles %}
+      <div class="schedule-row movement-row">
+        <span><b>{{ vehicle.registration }}</b><small>{{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}</small></span>
+        <span><small>Approved · no customer allocated</small></span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p>No vehicles awaiting allocation.</p>{% endif %}
+  </div>
+  <div class="movement-foot"><span>Maximum 3 vehicles. Use “Allocate from list” under a pending customer's Main vehicle to assign one.</span></div>
+</article>

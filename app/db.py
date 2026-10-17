@@ -232,6 +232,46 @@ CREATE TABLE IF NOT EXISTS vehicles (
 CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration ON vehicles(registration) WHERE registration <> '';
 
+-- Scanned vehicles waiting for a client (ABI-341953230). ``vehicles.customer_id`` is NOT NULL —
+-- a licence disc can be scanned before the client exists (or before staff have finished a pending
+-- portal sign-up), so the queue holds the validated scan values with **no customer and no
+-- allocation**. Same column shape as ``vehicles`` (minus the owner) so allocation copies a row
+-- across unchanged, plus ``slot``: the counter may hold at most THREE waiting vehicles, and that cap
+-- is a property of the table (slot is NOT NULL, CHECK 1..3 and UNIQUE), so two simultaneous saves
+-- still cannot write a fourth row. ``status`` records the vehicle's approval state at scan time;
+-- an allocated vehicle is written to ``vehicles`` as ``approved``.
+CREATE TABLE IF NOT EXISTS vehicle_waiting_list (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slot INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 3),
+    registration TEXT NOT NULL DEFAULT '',
+    make TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    year TEXT NOT NULL DEFAULT '',
+    vin TEXT NOT NULL DEFAULT '',
+    engine_number TEXT NOT NULL DEFAULT '',
+    colour TEXT NOT NULL DEFAULT '',
+    licence_number TEXT NOT NULL DEFAULT '',
+    registration_number TEXT NOT NULL DEFAULT '',
+    control_number TEXT NOT NULL DEFAULT '',
+    registering_authority TEXT NOT NULL DEFAULT '',
+    vehicle_type TEXT NOT NULL DEFAULT '',
+    tare_kg REAL,
+    gvm_kg REAL,
+    licence_disk_expiry TEXT NOT NULL DEFAULT '',
+    raw_scan_text TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'scan',
+    status TEXT NOT NULL DEFAULT 'approved',
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_slot ON vehicle_waiting_list(slot);
+-- Spacing-/case-insensitive duplicate guard inside the queue itself: ``NB 72 XMGP`` and
+-- ``NB72XMGP`` are the same vehicle to a traffic officer, so the queue cannot hold both.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_registration
+    ON vehicle_waiting_list(REPLACE(UPPER(registration), ' ', '')) WHERE registration <> '';
+
 -- POPIA consent records (programme phase 7 / feature P, §P1). Decision D10: every
 -- client-facing capture point shows a required, unticked-by-default acceptance, and the
 -- acceptance is *recorded* so Sano can evidence it. The columns are deliberately the
@@ -1357,6 +1397,49 @@ def run_migrations(db):
     # vehicle (and every non-scan path — manual entry, import, edit) is 'approved' and behaves
     # exactly as before; the client's own verification/block state is untouched by it.
     ensure_column(db, "vehicles", "status", "TEXT NOT NULL DEFAULT 'approved'")
+
+    # --- Scanned vehicles waiting for a client (ABI-341953230) ---------------
+    # Additive and idempotent: an existing database gains one empty table and its two
+    # indexes; no customer, vehicle, order or product row is read or written. Kept a
+    # SEPARATE table on purpose -- ``vehicles.customer_id`` is NOT NULL, so a scan taken
+    # before the client exists cannot live in that table without rebuilding it.
+    db.execute("""CREATE TABLE IF NOT EXISTS vehicle_waiting_list (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slot INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 3),
+        registration TEXT NOT NULL DEFAULT '',
+        make TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        year TEXT NOT NULL DEFAULT '',
+        vin TEXT NOT NULL DEFAULT '',
+        engine_number TEXT NOT NULL DEFAULT '',
+        colour TEXT NOT NULL DEFAULT '',
+        licence_number TEXT NOT NULL DEFAULT '',
+        registration_number TEXT NOT NULL DEFAULT '',
+        control_number TEXT NOT NULL DEFAULT '',
+        registering_authority TEXT NOT NULL DEFAULT '',
+        vehicle_type TEXT NOT NULL DEFAULT '',
+        tare_kg REAL,
+        gvm_kg REAL,
+        licence_disk_expiry TEXT NOT NULL DEFAULT '',
+        raw_scan_text TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'scan',
+        status TEXT NOT NULL DEFAULT 'approved',
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""")
+    # The cap (at most three waiting vehicles) is enforced by the table itself: only slots
+    # 1..3 exist and each may be used once, so a fourth row cannot be written even when
+    # two requests save at the same moment.
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_slot "
+        "ON vehicle_waiting_list(slot)"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_registration "
+        "ON vehicle_waiting_list(REPLACE(UPPER(registration), ' ', '')) "
+        "WHERE registration <> ''"
+    )
 
 
 def init_db():

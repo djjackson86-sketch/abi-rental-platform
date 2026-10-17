@@ -14,7 +14,7 @@ from app.services.settings import get_company_settings
 from app.services.credit_limits import facility_summary
 from app.services.customer_credits import customer_credit_balance, customer_credit_entries
 from app.services.legacy_balances import legacy_balance_summary, record_legacy_payment
-from app.services.vehicles import list_vehicles
+from app.services.vehicles import list_vehicles, list_waiting_vehicles, allocate_waiting_vehicle
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
 
@@ -84,6 +84,7 @@ def _pending_registration_context(customer_id, customer=None):
         "portal_pending_delete_csrf_token": csrf.issue_token("portal_pending_delete"),
         "pending_id_verified": portal_registrations.id_verified(customer),
         "pending_vehicle_captured": portal_registrations.main_vehicle_recorded(customer_id),
+        "waiting_vehicles": list_waiting_vehicles(),
     }
 
 
@@ -112,7 +113,26 @@ def index():
         # list (client instruction). Each row: id / reference / customer_id / name / email /
         # phone / branch_name / created_at.
         pending_registrations=portal_registrations.list_pending_registrations(),
+        waiting_vehicles=list_waiting_vehicles(),
     )
+
+
+@bp.post("/<int:customer_id>/allocate-waiting-vehicle")
+@login_required
+def allocate_from_waiting_list(customer_id):
+    if not user_can_module(session, "scan_vehicle"):
+        abort(403)
+    csrf.validate("portal_approval")
+    from app.db import scan_write_transaction
+    try:
+        with scan_write_transaction():
+            allocate_waiting_vehicle(request.form.get("waiting_id"), customer_id)
+            portal_registrations.approve_if_verification_complete(customer_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Waiting vehicle allocated as the customer's main vehicle.", "success")
+    return redirect(url_for("customers.edit", customer_id=customer_id) + "#pending-registration")
 
 
 @bp.route("/export.csv")
