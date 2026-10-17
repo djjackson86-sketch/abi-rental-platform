@@ -47,6 +47,10 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
 .btn.warning:hover,button.warning:hover{background:#d97706}
 .btn.ghost,.logout button{background:#fff;border:1px solid var(--line);color:var(--ink-2);box-shadow:var(--shadow-sm)}
 .btn.ghost:hover,.logout button:hover{border-color:#b9c5d6;background:var(--surface-soft)}
+.btn.scan-waiting-list{background:#1d4ed8;color:#fff}
+.btn.scan-waiting-list:hover:not(:disabled){background:#1e40af}
+.btn.scan-waiting-list:focus-visible{outline:3px solid #1e3a8a;outline-offset:3px}
+.btn.scan-waiting-list:disabled{background:#475569;color:#fff;cursor:not-allowed;transform:none}
 .btn.danger,button.danger{background:var(--danger-soft);color:var(--danger);border:1px solid #ffd2cc}
 .badge,.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 9px;background:var(--brand-soft);color:#0b4ccc;font-weight:750;font-size:12px;text-transform:capitalize;white-space:nowrap}
 .badge:before{content:"";width:7px;height:7px;border-radius:999px;background:currentColor;opacity:.75}

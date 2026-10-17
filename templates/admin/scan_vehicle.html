@@ -129,7 +129,7 @@
 
     <div class="form-actions span-2">
       <button class="btn primary" type="submit" value="approve" id="scan-approve-save">Approve &amp; Save Vehicle</button>
-      <button class="btn" type="submit" value="waiting" formnovalidate onclick="this.form.querySelector('[data-vehicle-action]').value='waiting'">Approve &amp; place on waiting list</button>
+      <button class="btn scan-waiting-list" type="submit" value="waiting" formnovalidate onclick="this.form.querySelector('[data-vehicle-action]').value='waiting'">Approve &amp; place on waiting list</button>
       <a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle') }}">Start a new scan</a>
     </div>
     {# The vehicle's OWN disapproval sits below the saving action: it records this very vehicle on
