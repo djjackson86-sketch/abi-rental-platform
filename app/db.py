@@ -699,8 +699,8 @@ def get_db():
 
 
 @contextmanager
-def scan_write_transaction():
-    """Group only scan saves, including mirror/status/client approval, into one commit."""
+def write_transaction():
+    """One atomic write scope on SQLite and Turso, including dependent ledger rows."""
     original = get_db()
     try:
         if hasattr(original, "write_transaction"):
@@ -727,6 +727,9 @@ def scan_write_transaction():
                 raise
     finally:
         g.db = original
+
+
+scan_write_transaction = write_transaction  # Backward-compatible scan callers.
 
 
 def close_db(e=None):
@@ -895,6 +898,9 @@ def run_migrations(db):
     # Additive with a blank default, so an order archived before this column
     # existed simply has no remembered status (unarchive falls back to Returned).
     ensure_column(db, "orders", "status_before_archive", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "orders", "status_before_cancel", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "payments", "refund_request_id", "TEXT")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_refund_request ON payments(refund_request_id)")
     # --- Vehicles recorded against a client (additive, integrated feature A) ---
     # On an existing database this only adds an empty table: no customer, order or
     # product row is touched.

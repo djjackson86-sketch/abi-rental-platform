@@ -3,9 +3,9 @@ import math
 
 from app.services.credit_limits import execute_credit_checked
 
-from app.db import get_db, now
+from app.db import get_db, now, write_transaction
 from app.services.access import customer_branch_clause, order_branch_clause
-from app.services.orders import get_order
+from app.services.orders import get_order, is_cancelled_draft
 
 
 def _active_payment_clause(alias=""):
@@ -261,6 +261,8 @@ def archive_payment(payment_id):
     payment = get_payment(payment_id)
     if not payment or payment["deleted_at"]:
         raise ValueError("Payment not found")
+    if payment["refund_request_id"]:
+        raise ValueError("Cancelled-draft refunds cannot be deleted; their payment and customer-credit history must be preserved")
     if (payment["method"] or "").lower() == "deposit_applied":
         from app.services.orders import reverse_deposit_settlement
         return reverse_deposit_settlement(payment["order_id"], payment_id)
@@ -500,23 +502,51 @@ def label_for(payment_status):
     return PAYMENT_LABELS.get(payment_status, payment_status.replace("_", " ").title())
 
 
+def _draft_refund_balance_sql(alias="o"):
+    # Synthetic deposit utilisation is not a receipt. Negative customer-credit
+    # transfers are payouts too. Order-stored deposit payouts are separate rows.
+    return f"""ROUND((SELECT COALESCE(SUM(amount), 0) FROM payments
+        WHERE order_id = {alias}.id AND {_active_payment_clause()}
+        AND LOWER(COALESCE(method, '')) NOT IN ('account', 'deposit_applied'))
+        - CASE WHEN COALESCE({alias}.deposit_process_method, '') <> ''
+                    OR COALESCE({alias}.deposit_processed_at, '') <> ''
+               THEN COALESCE({alias}.deposit_refund_amount, 0) ELSE 0 END, 2)"""
+
+
+def refundable_amount(order_id):
+    order = get_order(order_id)
+    if not order:
+        return 0.0
+    if is_cancelled_draft(order):
+        row = get_db().execute(
+            f"SELECT {_draft_refund_balance_sql()} AS balance FROM orders o WHERE o.id = ?",
+            (order_id,),
+        ).fetchone()
+        return max(0.0, float(row["balance"] or 0))
+    paid = get_db().execute(
+        f"SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND {_active_payment_clause()} AND LOWER(COALESCE(method, '')) <> 'account'",
+        (order_id,),
+    ).fetchone()["paid"]
+    return round(max(0.0, float(paid or 0) - float(order["total"] or 0)), 2)
+
+
 def record_refund(order_id, form):
+    with write_transaction():
+        return _record_refund(order_id, form)
+
+
+def _record_refund(order_id, form):
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
-    # Account is borrowing, never money available for cash/prepaid refunds.
-    paid_total = float(get_db().execute(
-        f"SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE order_id = ? AND {_active_payment_clause()} AND LOWER(COALESCE(method, '')) <> 'account'",
-        (order_id,),
-    ).fetchone()["paid"] or 0)
-    credit = round(paid_total - float(order["total"] or 0), 2)
+    credit = refundable_amount(order_id)
     if credit <= 0:
         raise ValueError("This order does not have a credit to refund")
     try:
         amount = round(float(form.get("refund_amount") or credit), 2)
     except ValueError as exc:
         raise ValueError("Refund amount must be a number") from exc
-    if amount <= 0 or amount > credit:
+    if not math.isfinite(amount) or amount <= 0 or amount > credit:
         raise ValueError("Refund amount must be greater than zero and not more than the credit")
     method = (form.get("refund_method") or form.get("deposit_process_method") or "").strip().lower()
     if method not in {"eft", "card", "cash", "customer_credit"}:
@@ -526,8 +556,24 @@ def record_refund(order_id, form):
     if method == "customer_credit" and not order["customer_id"]:
         raise ValueError("A customer is required before credit can be stored")
     db = get_db()
-    db.execute("""INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
-        VALUES (?, ?, ?, ?, 'paid', ?, ?)""", (order_id, -amount, method, reference, payment_date, now()))
+    if is_cancelled_draft(order):
+        request_id = (form.get("refund_request_id") or "").strip()
+        if not request_id or len(request_id) > 100:
+            raise ValueError("Reload the order before recording a refund")
+        # One atomic guarded insert handles concurrent/stale forms and retries.
+        cur = db.execute(f"""INSERT INTO payments
+            (order_id, amount, method, reference, status, payment_date, created_at, refund_request_id)
+            SELECT o.id, ?, ?, ?, 'paid', ?, ?, ? FROM orders o
+            WHERE o.id = ? AND o.status IN ('canceled', 'cancelled') AND o.status_before_cancel = 'draft'
+              AND {_draft_refund_balance_sql()} >= ?
+              AND NOT EXISTS (SELECT 1 FROM payments WHERE refund_request_id = ?)""",
+            (-amount, method, reference, payment_date, now(), request_id, order_id, amount, request_id))
+        if cur.rowcount != 1:
+            db.rollback()
+            raise ValueError("Refund already recorded or available balance changed; reload the order")
+    else:
+        db.execute("""INSERT INTO payments (order_id, amount, method, reference, status, payment_date, created_at)
+            VALUES (?, ?, ?, ?, 'paid', ?, ?)""", (order_id, -amount, method, reference, payment_date, now()))
     if method == "customer_credit":
         from app.services.customer_credits import create_customer_credit, SOURCE_ORDER_REFUND
         create_customer_credit(

@@ -30,7 +30,7 @@ def order_paid_sql(alias='o'):
 def debt_sql(customer='NEW.customer_id', excluded='-1'):
     # All outstanding orders, not just finalised invoices. An invoice never
     # reserves the same order twice; archiving is not repayment.
-    return f"COALESCE((SELECT SUM({_exposure_sql('debt_order.id', 'debt_order.total')}) FROM orders debt_order WHERE debt_order.customer_id = {customer} AND debt_order.id != {excluded}), 0)"
+    return f"COALESCE((SELECT SUM({_exposure_sql('debt_order.id', 'debt_order.total')}) FROM orders debt_order WHERE debt_order.customer_id = {customer} AND debt_order.id != {excluded} AND NOT (debt_order.status IN ('canceled', 'cancelled') AND debt_order.status_before_cancel = 'draft')), 0)"
 
 
 def outstanding_debt(customer_id, exclude_order_id=-1):

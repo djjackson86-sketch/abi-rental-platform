@@ -397,7 +397,7 @@ def order_counts(query="", status: object = "", payment_status: object = "", ret
 
 
 def deposit_to_process_amount(order):
-    if not order or float(order["deposit_total"] or 0) <= 0:
+    if not order or is_cancelled_draft(order) or float(order["deposit_total"] or 0) <= 0:
         return 0
     if (order["deposit_process_method"] or "") or (order["deposit_processed_at"] or ""):
         return 0
@@ -1604,6 +1604,10 @@ def transition_order(order_id, action, reservation_confirm=""):
     # Ticket ABI-341953038(1): an unarchive has no fixed target — it restores the
     # status the order held before it was archived.
     target_status = unarchive_target_status(order) if action == "unarchive" else transition["to"]
+    if action == "revert_draft" and get_db().execute(
+        "SELECT 1 FROM payments WHERE order_id = ? AND refund_request_id IS NOT NULL LIMIT 1", (order_id,)
+    ).fetchone():
+        raise ValueError("This cancelled draft has recorded refunds; create a new order instead of reopening it")
     if action == "return":
         validate_return_ready(order_id)
     if action == "sales_repairs" and order_has_rental_items(order_items(order_id)):
@@ -1633,6 +1637,9 @@ def transition_order(order_id, action, reservation_confirm=""):
         # Ticket ABI-341953038(1): remember where the order was so the main
         # profile can unarchive it back to exactly that status.
         db.execute("UPDATE orders SET status = ?, status_before_archive = ? WHERE id = ?",
+                   (target_status, previous_status, order_id))
+    elif action == "cancel":
+        db.execute("UPDATE orders SET status = ?, status_before_cancel = ? WHERE id = ?",
                    (target_status, previous_status, order_id))
     elif action == "unarchive":
         db.execute("UPDATE orders SET status = ?, status_before_archive = '' WHERE id = ?",
@@ -1735,8 +1742,13 @@ def status_actions(status, has_rental_items=False):
     return actions
 
 
+def is_cancelled_draft(order):
+    return bool(order) and order["status"] in {"canceled", "cancelled"} and order["status_before_cancel"] == "draft"
+
+
 def can_process_return_deposit(order):
-    return bool(order) and order["status"] in {"started", "returned", "canceled", "cancelled"}
+    # Draft cancellations use the received-payment refund, not a second deposit payout.
+    return bool(order) and not is_cancelled_draft(order) and order["status"] in {"started", "returned", "canceled", "cancelled"}
 
 
 def _require_return_deposit_allowed(order):
@@ -2200,6 +2212,8 @@ def reverse_deposit_settlement(order_id, payment_id=None, *, repair_archived=Fal
     order = get_order(order_id)
     if not order:
         raise ValueError("Order not found")
+    if is_cancelled_draft(order):
+        raise ValueError("Use Refund customer for a cancelled draft; its deposit settlement cannot be reversed")
     applied = float(order["deposit_applied_amount"] or 0)
     refund = float(order["deposit_refund_amount"] or 0)
     if applied <= 0 and refund <= 0:

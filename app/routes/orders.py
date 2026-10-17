@@ -8,7 +8,7 @@ from app.routes.auth import login_required
 from app.db import get_db
 from app.services.orders import ReservationConfirmationRequired, SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
-from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund
+from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund, refundable_amount
 from app.services.customer_credits import customer_credit_balance
 from app.services.credit_limits import debt_sql, facility_summary
 from app.services.settings import get_company_settings
@@ -581,6 +581,8 @@ def detail(order_id):
         label_for=label_for,
         payments=payments_for_order(order_id),
         payment_summary=payment_summary(order_id),
+        refundable_amount=refundable_amount(order_id),
+        refund_request_id=str(uuid4()),
         payment_label_for=payment_label_for,
         customer_credit_balance=customer_credit_balance(order["customer_id"]),
         facility=facility_summary(order["customer_id"]),
