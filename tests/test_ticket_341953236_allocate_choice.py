@@ -521,3 +521,49 @@ def test_edit_page_offers_only_the_clients_own_branch(app, client, branches):
 
     assert "MINE 111" in html
     assert "THEIRS 111" not in html
+
+
+def test_detail_page_renders_one_allocate_dialog_for_a_pending_client(app, client, branches):
+    """The panel is the only allocate UI on the detail page — one dialog, never two."""
+    from app.services import portal_registrations
+
+    with app.app_context():
+        customer_id = create_customer(
+            {"name": "Nomsa Dlamini", "customer_type": "individual", "phone": "0821234567"},
+            branch_id=branches["midrand"],
+        )
+        portal_registrations.record_pending_registration(
+            customer_id, branches["midrand"], f"REG-{customer_id}", name="Nomsa Dlamini",
+            phone="0821234567",
+        )
+    queue_scan(app, "PEND 333", branches["midrand"])
+    sign_in(client, app)
+
+    html = client.get(f"/customers/{customer_id}").get_data(as_text=True)
+
+    assert "Allocate from list" in html
+    assert html.count('id="allocate-waiting-dialog-main"') == 1
+    assert 'id="allocate-waiting-dialog"' not in html
+
+
+def test_a_pending_client_with_a_main_vehicle_gets_the_choice_too(app, client, branches):
+    """The panel used to refuse this outright; now it offers keep-or-replace like the edit page."""
+    from app.services import portal_registrations
+
+    with app.app_context():
+        customer_id = create_customer(
+            {"name": "Johan Botha", "customer_type": "individual", "phone": "0821234567"},
+            branch_id=branches["midrand"],
+        )
+        portal_registrations.record_pending_registration(
+            customer_id, branches["midrand"], f"REG-{customer_id}", name="Johan Botha",
+            phone="0821234567",
+        )
+    with_main(app, customer_id, "KEEP 999")
+    queue_scan(app, "PEND 444", branches["midrand"])
+    sign_in(client, app)
+
+    html = client.get(f"/customers/{customer_id}/edit").get_data(as_text=True)
+
+    assert 'value="additional"' in html and 'value="replace_main"' in html
+    assert "Main client vehicle is <b>KEEP 999</b>" in html
