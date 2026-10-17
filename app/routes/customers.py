@@ -79,6 +79,8 @@ def _pending_registration_context(customer_id, customer=None):
     return {
         "pending_registration": portal_registrations.pending_registration_for_customer(customer_id),
         "approved_registration": portal_registrations.approved_registration_for_customer(customer_id),
+        "archived_registration": portal_registrations.archived_registration_for_customer(customer_id),
+        "portal_archive_csrf_token": csrf.issue_token("portal_archive"),
         "portal_approval_csrf_token": csrf.issue_token("portal_approval"),
         # Retain the existing scoped token for old open pages; a reason is now mandatory.
         "portal_pending_delete_csrf_token": csrf.issue_token("portal_pending_delete"),
@@ -399,6 +401,25 @@ def approve_portal_registration(registration_id):
         ))
     flash("Client approved — they now show as a normal customer for this branch.", "success")
     return redirect(url_for("customers.detail", customer_id=customer_id))
+
+
+@bp.post("/portal/<int:registration_id>/archive")
+@login_required
+def archive_portal_registration(registration_id):
+    csrf.validate("portal_archive")
+    registration = portal_registrations.registration_by_id(registration_id)
+    if registration is None:
+        abort(404)
+    if not portal_registrations.branch_in_session_scope(registration):
+        abort(403)
+    try:
+        changed = portal_registrations.archive_pending_registration(registration_id, request.form.get("reason"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("customers.detail", customer_id=registration["customer_id"]))
+    flash("Customer archived; their record and history have been retained." if changed
+          else "This customer is already archived; the original reason was retained.", "success")
+    return redirect(url_for("customers.index"))
 
 
 @bp.post("/portal/<int:registration_id>/delete")

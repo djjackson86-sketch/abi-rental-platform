@@ -25,6 +25,14 @@
 
    Context expected: pending_registration, pending_id_verified, pending_vehicle_captured,
    portal_approval_csrf_token, portal_pending_delete_csrf_token, customer. #}
+{% if archived_registration %}
+<article class="panel" id="archived-registration">
+  <h2>Customer archived</h2>
+  <p>This customer was removed from the waiting list. Their record and history are retained.</p>
+  <p><strong>Archive reason:</strong> {{ archived_registration.archive_reason or 'No reason recorded (legacy archive).' }}</p>
+  <p class="form-help">Archived {{ archived_registration.archived_at or 'before archive auditing' }}{% if archived_registration.archived_by_user_id %} · Staff user #{{ archived_registration.archived_by_user_id }}{% endif %}</p>
+</article>
+{% endif %}
 {% set registration = pending_registration or approved_registration %}
 {% set is_approved = not pending_registration and approved_registration %}
 {% set is_disapproved = pending_registration and customer.is_blocked %}
@@ -111,7 +119,27 @@
     <button class="btn danger" type="button" onclick="document.getElementById('disapprove-client-dialog').showModal()">Disapprove client</button>
     <span class="form-help">Retains the client and their history, saves a reason and blocks future rentals.</span>
   </div>
+  <div class="pending-delete-form" style="margin-top: 12px;">
+    <button class="btn portal-archive" id="archive-customer-button" type="button" onclick="document.getElementById('archive-customer-dialog').showModal()">Delete &amp; Archive</button>
+    <span class="form-help">Remove from the waiting list and archive, keeping the customer record and history.</span>
+  </div>
+  <dialog id="archive-customer-dialog" aria-labelledby="archive-customer-title" style="width: min(32rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); max-height: 90dvh; overflow-y: auto; box-sizing: border-box; border: 1px solid #ccc; border-radius: 12px; padding: 24px;">
+    <form method="post" action="{{ url_for('customers.archive_portal_registration', registration_id=registration.id) }}">
+      <h2 id="archive-customer-title">Delete &amp; Archive</h2>
+      <p>Remove this customer from the waiting list? Their record, documents, orders and financial history will be retained.</p>
+      <input type="hidden" name="csrf_token" value="{{ portal_archive_csrf_token }}">
+      <label for="archive-reason">Reason (required)</label>
+      <textarea id="archive-reason" name="reason" rows="4" required autofocus style="width: 100%; box-sizing: border-box; resize: vertical; max-height: 35dvh;" oninput="this.setCustomValidity(this.value.trim() ? '' : 'Enter a reason for deleting and archiving this customer.')"></textarea>
+      <div class="form-actions">
+        <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+        <button class="btn portal-archive" type="submit">Confirm archive</button>
+      </div>
+    </form>
+  </dialog>
   <style>
+    .btn.portal-archive { background: #ffddb3; border-color: #e8b477; color: #653b12; }
+    .btn.portal-archive:hover { background: #ffd09a; }
+    #archive-customer-dialog::backdrop { background: rgba(0, 0, 0, .45); }
     #disapprove-client-dialog::backdrop { background: rgba(0, 0, 0, .45); }
     #disapprove-client-dialog button[type="submit"] { background: #a11212; color: white; }
     #disapprove-client-dialog textarea { resize: vertical; max-height: 35dvh; }

@@ -484,6 +484,40 @@ def disapprove_registration(registration_id, reason):
     return cur.rowcount > 0
 
 
+def archived_registration_for_customer(customer_id):
+    """Read retained archive evidence on the existing customer detail/edit views."""
+    row = get_db().execute(
+        "SELECT r.* FROM portal_registrations r WHERE r.customer_id = ? "
+        "AND r.status = ? ORDER BY r.id DESC LIMIT 1",
+        (customer_id, STATUS_DELETED),
+    ).fetchone()
+    return _mapping(row)
+
+
+def archive_pending_registration(registration_id, reason):
+    """Soft archive only; the conditional write preserves original evidence on retries."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("Enter a reason for deleting and archiving this customer.")
+    registration = registration_by_id(registration_id)
+    if registration is None:
+        raise ValueError("That portal registration is no longer on file.")
+    if not branch_in_session_scope(registration):
+        raise ValueError(OUT_OF_SCOPE_DELETE_MESSAGE)
+    if registration["status"] == STATUS_DELETED:
+        return False
+    if registration["status"] != STATUS_PENDING:
+        raise ValueError("Only a customer awaiting verification can be archived.")
+    db = get_db()
+    cur = db.execute(
+        "UPDATE portal_registrations SET status = ?, archive_reason = ?, "
+        "archived_at = ?, archived_by_user_id = ? WHERE id = ? AND status = ?",
+        (STATUS_DELETED, reason, now(), current_session_user_id(), registration_id, STATUS_PENDING),
+    )
+    db.commit()
+    return cur.rowcount > 0
+
+
 # --- legacy tombstone service (not exposed by the verification UI) -------------------------------
 
 #: Refusal sentences the delete route can show, kept here so both the route and the service

@@ -1358,6 +1358,11 @@ def run_migrations(db):
         "ON portal_registrations(customer_id) WHERE status = 'pending'"
     )
 
+    # ABI-341953232: retain archive evidence without changing customer/history rows.
+    ensure_column(db, "portal_registrations", "archive_reason", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "portal_registrations", "archived_at", "TEXT")
+    ensure_column(db, "portal_registrations", "archived_by_user_id", "INTEGER REFERENCES users(id) ON DELETE SET NULL")
+
     # --- Double-submit guard for the public portal (client portal changes) ---
     # See the SCHEMA block: one claim row per submission, keyed by an unguessable
     # request_key scoped to the portal slug. Additive and empty on an existing
