@@ -90,6 +90,22 @@ def _waiting_vehicles_for_customer(customer):
     return list_waiting_vehicles(branch_ids=[branch_id])
 
 
+def _main_vehicle_registration(customer):
+    """The number plate the client's invoices print today, or ``''`` when none is recorded.
+
+    Read from the same mirrored ``vehicle_reg_no`` field the main-vehicle form shows, so the
+    allocate dialog names exactly the plate a "replace" would overwrite (ticket ABI-341953236).
+    """
+    if customer is None:
+        return ""
+    try:
+        fields = custom_fields_for(customer) or {}
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return ""
+    value = fields.get("vehicle_reg_no") or ""
+    return str(value).strip()
+
+
 def _pending_registration_context(customer_id, customer=None):
     """The self-registration verification panel's context for one client.
 
@@ -112,6 +128,9 @@ def _pending_registration_context(customer_id, customer=None):
         "pending_id_verified": portal_registrations.id_verified(customer),
         "pending_vehicle_captured": portal_registrations.main_vehicle_recorded(customer_id),
         "waiting_vehicles": _waiting_vehicles_for_customer(customer),
+        # The plate the client's invoices print today (ABI-341953236): the allocate dialog names it
+        # so "keep the main vehicle" and "replace the main vehicle" are never guesses.
+        "main_vehicle_registration": _main_vehicle_registration(customer),
     }
 
 
@@ -152,19 +171,47 @@ def index():
 @bp.post("/<int:customer_id>/allocate-waiting-vehicle")
 @login_required
 def allocate_from_waiting_list(customer_id):
+    """Allocate a scan from "Vehicles awaiting allocation" to this client (ABI-341953236).
+
+    Works for any client, not only a pending portal sign-up. The posted ``mode`` decides what
+    happens to a main vehicle they already have: keep it and add the scan as an additional
+    vehicle, or replace it with the scan. The service is the only writer, so the deposit of the
+    choice and the vehicle write happen together in one transaction.
+    """
     if not user_can_module(session, "scan_vehicle"):
         abort(403)
     csrf.validate("portal_approval")
     from app.db import scan_write_transaction
+
+    mode = request.form.get("mode")
+    outcome = None
     try:
         with scan_write_transaction():
-            allocate_waiting_vehicle(request.form.get("waiting_id"), customer_id)
+            outcome = allocate_waiting_vehicle(request.form.get("waiting_id"), customer_id, mode)
             portal_registrations.approve_if_verification_complete(customer_id)
     except ValueError as exc:
         flash(str(exc), "error")
     else:
-        flash("Waiting vehicle allocated as the customer's main vehicle.", "success")
-    return redirect(url_for("customers.edit", customer_id=customer_id) + "#pending-registration")
+        if outcome.mode_applied == "additional":
+            flash(
+                f"Waiting vehicle allocated as an additional vehicle. Main vehicle "
+                f"{outcome.previous_main_registration} is unchanged.",
+                "success",
+            )
+        elif outcome.mode_applied == "replace_main":
+            flash(
+                f"Waiting vehicle allocated as the new main vehicle, replacing "
+                f"{outcome.previous_main_registration}. The previous vehicle is kept as an "
+                f"additional vehicle.",
+                "success",
+            )
+        else:
+            flash("Waiting vehicle allocated as the customer's main vehicle.", "success")
+    # The pending-approval panel sits at the top of the page for a self-registered client; every
+    # other client is edited further down, where the main vehicle lives.
+    pending = portal_registrations.pending_registration_for_customer(customer_id)
+    anchor = "#pending-registration" if pending else "#main-vehicle"
+    return redirect(url_for("customers.edit", customer_id=customer_id) + anchor)
 
 
 @bp.route("/export.csv")

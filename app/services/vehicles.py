@@ -1130,14 +1130,89 @@ def remove_waiting_vehicle(waiting_id):
     return removed
 
 
-def allocate_waiting_vehicle(waiting_id, customer_id):
-    """Allocate one waiting scan to a pending portal client. Returns the new vehicle id.
+#: What to do with the client's existing main vehicle when a waiting scan is allocated
+#: (ticket ABI-341953236). ``additional`` records the scan beside the main vehicle and leaves the
+#: invoiced mirror alone; ``replace_main`` makes the scan the main vehicle and keeps the previous
+#: main row as an additional vehicle (vehicles are never deleted).
+ALLOCATION_MODE_ADDITIONAL = "additional"
+ALLOCATION_MODE_REPLACE = "replace_main"
+ALLOCATION_MODES = (ALLOCATION_MODE_ADDITIONAL, ALLOCATION_MODE_REPLACE)
 
-    Only a client whose portal registration is **still pending** and inside the session's branch
-    scope may receive a waiting vehicle, and only when they have no main vehicle yet — neither a
-    ``main_vehicle_id`` pointer nor any hand-typed legacy ``vehicle_*`` field. The new vehicle is
-    written exactly as a scan save would write it (``approved``) and becomes the client's main
-    vehicle, so the mirror and the row agree.
+
+class WaitingAllocation(int):
+    """The id of the vehicle an allocation created, plus what the allocation did.
+
+    Behaves exactly like the plain ``int`` this call used to return, so every existing caller
+    (and test) that treats the result as a vehicle id keeps working; the extra attributes let the
+    route say which choice was applied. ``mode_applied`` is ``additional``, ``replace_main`` (a
+    main vehicle was replaced) or ``main`` (it became the main vehicle — there was nothing before).
+    """
+
+    vehicle_id: int
+    mode_applied: str
+    previous_main_registration: str
+
+    def __new__(cls, vehicle_id, mode_applied, previous_main_registration=""):
+        result = super().__new__(cls, int(vehicle_id))
+        result.vehicle_id = int(vehicle_id)
+        result.mode_applied = mode_applied
+        result.previous_main_registration = _text(previous_main_registration)
+        return result
+
+
+def parse_allocation_mode(value):
+    """``additional`` / ``replace_main`` from a posted choice; ``None`` when nothing was posted.
+
+    ``add``/``keep_main`` and ``main``/``replace`` are accepted as friendly aliases. Anything else
+    is refused rather than guessed, so a broken or crafted form can never silently replace a
+    client's main vehicle.
+    """
+    text = _text(value).strip().lower()
+    if not text:
+        return None
+    if text in ("additional", "add", "keep_main"):
+        return ALLOCATION_MODE_ADDITIONAL
+    if text in ("replace_main", "replace", "main"):
+        return ALLOCATION_MODE_REPLACE
+    raise ValueError(
+        "Choose whether to keep the main vehicle and add this scanned vehicle, or replace the "
+        "main vehicle with it."
+    )
+
+
+def _refuse_customer_outside_session_scope(customer_id):
+    """Refuse a client recorded at a depot this session may not reach.
+
+    Same boundary every other customer screen uses, checked server-side so a crafted customer id
+    cannot cross it. A client with **no** branch recorded is not restricted here: that is the
+    legacy case, and the waiting scan's own branch check still applies.
+    """
+    scope = session_branch_scope_ids()
+    if scope is None:
+        return
+    branch_id = _customer_branch_id(customer_id)
+    if branch_id is None:
+        return
+    if int(branch_id) not in scope:
+        raise ValueError("That client is outside the branches you can access.")
+
+
+def allocate_waiting_vehicle(waiting_id, customer_id, mode=None):
+    """Allocate one waiting scan to a client. Returns the new vehicle id (a ``WaitingAllocation``).
+
+    Any client inside the session's branch scope may receive a waiting vehicle — an existing
+    client as well as a self-registered client whose portal registration is still pending
+    (ticket ABI-341953236). ``mode`` says what to do about a main vehicle the client already has:
+
+    * ``additional`` — the scan is recorded as another vehicle and the main vehicle, the invoiced
+      ``vehicle_*`` mirror and the branch's existing details stay exactly as they were;
+    * ``replace_main`` — the scan becomes the main (invoiced) vehicle; the previous main vehicle
+      row is kept as an additional vehicle, because vehicles are never deleted.
+
+    With **no** choice posted (the pending-approval panel, or any older caller) the historic
+    behaviour stands: the scan becomes the main vehicle, and a client that already has one is
+    refused rather than silently overwritten. A client with no main vehicle always receives it as
+    the main vehicle under either choice — there is nothing to keep.
 
     The waiting row is removed **in the same transaction** as the vehicle insert and the mirror
     write: the removal is the claim, so two concurrent allocations of the same scan cannot both
@@ -1145,6 +1220,8 @@ def allocate_waiting_vehicle(waiting_id, customer_id):
     the whole thing back, leaving the scan waiting.
     """
     from app.services import portal_registrations
+
+    mode = parse_allocation_mode(mode)
 
     with scan_write_transaction():
         # Acquire SQLite's write lock before reading either the queue or the main vehicle.
@@ -1158,13 +1235,13 @@ def allocate_waiting_vehicle(waiting_id, customer_id):
             raise ValueError("Choose the client this scanned vehicle belongs to.")
 
         pending = portal_registrations.pending_registration_for_customer(target)
-        if pending is None:
-            raise ValueError(
-                "A waiting vehicle may only be allocated to a client whose portal registration "
-                "is still pending approval."
-            )
-        if not portal_registrations.branch_in_session_scope(pending):
-            raise ValueError("That portal registration is outside the branches you can access.")
+        if pending is not None:
+            if not portal_registrations.branch_in_session_scope(pending):
+                raise ValueError("That portal registration is outside the branches you can access.")
+        else:
+            # An existing client (ticket ABI-341953236): the registration scope no longer applies,
+            # so the client's own depot is checked against the same session boundary instead.
+            _refuse_customer_outside_session_scope(target)
 
         # A branch's queue feeds that branch's clients (ticket ABI-341953235). The scan was taken
         # at the depot that queued it, so handing it to a client of a different depot would let
@@ -1184,17 +1261,38 @@ def allocate_waiting_vehicle(waiting_id, customer_id):
                     "of its own branch."
                 )
 
-        if get_main_vehicle_id(target) is not None:
-            raise ValueError(
-                "That client already has a main vehicle on file — open the client and edit it "
-                "instead of allocating another."
-            )
+        # What the client already has as their main (invoiced) vehicle — a real row via the
+        # pointer, hand-typed legacy ``vehicle_*`` fields, or both. Either way there is a main
+        # vehicle whose details an allocation must not silently overwrite.
+        main_id = get_main_vehicle_id(target)
         mirror = _raw_custom_fields(target) or {}
-        if any(_text(mirror.get(key)) for key in MAIN_VEHICLE_CUSTOM_KEYS):
+        mirrored_details = any(_text(mirror.get(key)) for key in MAIN_VEHICLE_CUSTOM_KEYS)
+        previous_main_registration = ""
+        if main_id is not None:
+            previous_main_row = get_vehicle(main_id)
+            if previous_main_row is not None:
+                previous_main_registration = _text(previous_main_row["registration"])
+        if not previous_main_registration:
+            previous_main_registration = _text(mirror.get("vehicle_reg_no"))
+        has_main = main_id is not None or mirrored_details
+
+        if mode is None and has_main:
+            # Nothing posted and there is a main vehicle to lose: refuse instead of choosing for
+            # the user. The panel and the edit page always post an explicit choice.
+            if main_id is None:
+                raise ValueError(
+                    "That client already has vehicle details captured on their record — choose "
+                    "whether to replace the main vehicle with this scan or add it as an "
+                    "additional vehicle."
+                )
             raise ValueError(
-                "That client already has vehicle details captured on their record — clear or "
-                "edit those before allocating a scanned vehicle."
+                "That client already has a main vehicle on file — choose whether to replace it "
+                "with this scan or add it as an additional vehicle."
             )
+        # ``additional`` keeps the main vehicle exactly as it is; every other case makes the scan
+        # the main vehicle (a client with no main vehicle has nothing to keep, so either choice
+        # ends the same way).
+        keep_main = has_main and mode == ALLOCATION_MODE_ADDITIONAL
 
         # Claim the row first. It is the only writer that can remove this id, so a concurrent
         # allocation that read the same row is refused at the next line instead of writing a
@@ -1211,5 +1309,15 @@ def allocate_waiting_vehicle(waiting_id, customer_id):
         from app.services.reports import row_dict
         vehicle_id = create_vehicle(row_dict(waiting), customer_id=target)
         set_vehicle_status(vehicle_id, STATUS_APPROVED)
-        promote_main_vehicle(target, vehicle_id)
-    return int(vehicle_id)
+        if not keep_main:
+            # replace_main (or a client with no main vehicle yet): the new row becomes the main
+            # vehicle and the mirrored invoice fields are rewritten from it. The previous main
+            # row is deliberately left in place as an additional vehicle.
+            promote_main_vehicle(target, vehicle_id)
+    if keep_main:
+        mode_applied = ALLOCATION_MODE_ADDITIONAL
+    elif previous_main_registration:
+        mode_applied = ALLOCATION_MODE_REPLACE
+    else:
+        mode_applied = "main"
+    return WaitingAllocation(vehicle_id, mode_applied, previous_main_registration)

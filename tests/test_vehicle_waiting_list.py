@@ -288,15 +288,21 @@ def test_removing_a_missing_scan_is_a_no_op(app):
 # ── allocation guards ───────────────────────────────────────────────────────
 
 
-def test_allocation_requires_a_pending_portal_registration(app):
+def test_allocation_serves_an_existing_customer_without_a_portal_registration(app):
+    # ABI-341953236 replaces the old "pending registrations only" guard: any client of the branch
+    # may receive a waiting vehicle, and a client with no main vehicle gets it as the main one.
     plain_id = make_plain_client(app)
     with app.app_context():
         waiting_id = vehicles.save_waiting_vehicle(scan_form())
-        with pytest.raises(ValueError) as refused:
-            vehicles.allocate_waiting_vehicle(waiting_id, plain_id)
-    assert "pending" in str(refused.value).lower()
-    assert len(queue_rows(app)) == 1
-    assert vehicle_count(app) == 0
+        vehicle_id = vehicles.allocate_waiting_vehicle(waiting_id, plain_id)
+        assert vehicles.get_main_vehicle_id(plain_id) == vehicle_id
+        assert (
+            vehicles.get_main_vehicle(plain_id)["registration"]
+            == vehicles.get_vehicle(vehicle_id)["registration"]
+        )
+        assert vehicles.vehicle_status(vehicles.get_vehicle(vehicle_id)) == vehicles.STATUS_APPROVED
+    assert queue_rows(app) == []
+    assert vehicle_count(app) == 1
 
 
 def test_allocation_refuses_a_registration_outside_the_session_branch_scope(app):

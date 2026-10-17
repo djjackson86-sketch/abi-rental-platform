@@ -72,31 +72,16 @@
       {% if user_can('scan_vehicle') %}</a>{% else %}</div>{% endif %}
       {% if pending_registration and user_can('scan_vehicle') %}
       <div style="padding: 0 16px 12px">
-        <button class="btn" type="button" onclick="document.getElementById('allocate-waiting-dialog').showModal()">Allocate from list</button>
+        <button class="btn" type="button" onclick="document.getElementById('allocate-waiting-dialog-main').showModal()">Allocate from list</button>
       </div>
       {% endif %}
     </li>
   </ul>
   {% if pending_registration and user_can('scan_vehicle') %}
-  <dialog id="allocate-waiting-dialog" aria-labelledby="allocate-waiting-title" style="width: min(32rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); box-sizing: border-box; border: 1px solid #ccc; border-radius: 12px; padding: 24px;">
-    <form method="post" action="{{ url_for('customers.allocate_from_waiting_list', customer_id=customer.id) }}">
-      <h2 id="allocate-waiting-title">Allocate from list</h2>
-      <input type="hidden" name="csrf_token" value="{{ portal_approval_csrf_token }}">
-      {% if waiting_vehicles %}
-      <label>Vehicle awaiting allocation
-        <select name="waiting_id" required style="width: 100%">
-          <option value="">Choose a vehicle</option>
-          {% for vehicle in waiting_vehicles %}<option value="{{ vehicle.id }}">{{ vehicle.registration }} — {{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}{% if vehicle.branch_name %} · {{ vehicle.branch_name }} branch{% endif %}</option>{% endfor %}
-        </select>
-      </label>
-      <p>This becomes the main vehicle. Existing main vehicle details will not be replaced.</p>
-      {% else %}<p>No vehicles awaiting allocation at this branch. Scan a vehicle and place it on the waiting list first.</p>{% endif %}
-      <div class="form-actions">
-        <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
-        {% if waiting_vehicles %}<button class="btn primary" type="submit">Allocate vehicle</button>{% endif %}
-      </div>
-    </form>
-  </dialog>
+  {# One allocate dialog for the whole app (ABI-341953236): the same partial serves this panel and
+     the Main client vehicle section, so a client with a main vehicle always gets the
+     keep-or-replace choice instead of a refusal. #}
+  {% include "admin/customers/_allocate_waiting_dialog.html" %}
   {% endif %}
   {% if user_can('new_order') %}
   <div class="portal-order-actions">

@@ -1,10 +1,19 @@
-<section class="form-section customer-main-vehicle">
+<section class="form-section customer-main-vehicle" id="main-vehicle">
   <h2>Custom customer details</h2>
   <h3>Main client vehicle</h3>
   {% if custom_fields.get('vehicle_licence_disk_expiry') and custom_fields.get('vehicle_licence_disk_expiry') < business_today %}<p class="scan-expiry-warning" role="alert">Warning: the main vehicle licence disk expired on {{ custom_fields.get('vehicle_licence_disk_expiry') }}. Scan the renewed disk to update its expiry date.</p>{% endif %}
   <p class="form-help">This is the client's main vehicle and the vehicle shown on invoices. Scan its licence disk to fill these details, or enter them manually.</p>
   {% if customer and user_can('scan_vehicle') %}
-    <p><a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id, vehicle_role='main') }}">Scan main vehicle disk</a></p>
+    <div class="main-vehicle-actions">
+      <a class="btn ghost" href="{{ url_for('vehicles.scan_vehicle', customer_id=customer.id, vehicle_role='main') }}">Scan main vehicle disk</a>
+      {# Ticket ABI-341953236: give a vehicle that is already waiting at this branch to this
+         (existing) client, choosing whether it replaces the main vehicle or is added beside it.
+         The dialog itself lives outside the customer form (see form.html). A pending portal
+         client already gets the same control in the verification panel above. #}
+      {% if not pending_registration and waiting_vehicles %}
+        <button class="btn" type="button" onclick="document.getElementById('allocate-waiting-dialog-main').showModal()">Allocate from list</button>
+      {% endif %}
+    </div>
   {% endif %}
   {% set main_vehicle_fields = [
     ('vehicle_make', 'Vehicle Make', 'text'),

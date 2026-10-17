@@ -1,0 +1,52 @@
+{# Allocate a scanned vehicle from "Vehicles awaiting allocation" to this client — ABI-341953236.
+
+   The owner's request: the button must let staff give a vehicle that is waiting at this branch to
+   an **existing** client, and choose whether that vehicle becomes the client's main (invoiced)
+   vehicle or is added beside the one they already have.
+
+   * ``waiting_vehicles`` is the client's own branch queue (already narrowed by the session's
+     branch scope); nothing is offered when it is empty.
+   * ``current_main_registration`` is the plate the client's invoices print today (the mirrored
+     ``vehicle_*`` field). When there is one, the two choices are shown and **keep main** is the
+     default; when there is none the scan simply becomes the main vehicle and no choice is asked.
+   * The form posts to ``customers.allocate_from_waiting_list`` with the same scoped CSRF token
+     the pending approval panel uses (``portal_approval``).
+
+   This markup must sit OUTSIDE the customer <form> — HTML must never nest one form inside another.
+   Expected context: customer, waiting_vehicles, portal_approval_csrf_token,
+   main_vehicle_registration, allocate_dialog_id (optional). #}
+{% set dialog_id = allocate_dialog_id or 'allocate-waiting-dialog-main' %}
+{% set current_main_registration = main_vehicle_registration if main_vehicle_registration is defined else '' %}
+<dialog id="{{ dialog_id }}" aria-labelledby="{{ dialog_id }}-title" style="width: min(34rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); max-height: 90dvh; overflow-y: auto; box-sizing: border-box; border: 1px solid #ccc; border-radius: 12px; padding: 24px;">
+  <form method="post" action="{{ url_for('customers.allocate_from_waiting_list', customer_id=customer.id) }}">
+    <h2 id="{{ dialog_id }}-title">Allocate from list</h2>
+    <input type="hidden" name="csrf_token" value="{{ portal_approval_csrf_token }}">
+    {% if waiting_vehicles %}
+    <label>Vehicle awaiting allocation
+      <select name="waiting_id" required style="width: 100%">
+        <option value="">Choose a vehicle</option>
+        {% for vehicle in waiting_vehicles %}<option value="{{ vehicle.id }}">{{ vehicle.registration }} — {{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}{% if vehicle.branch_name %} · {{ vehicle.branch_name }} branch{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    {% if current_main_registration %}
+    <fieldset class="allocate-waiting-choice" style="margin: 16px 0 0; padding: 0; border: 0;">
+      <legend style="font-weight: 600; padding: 0 0 8px;">Main client vehicle is <b>{{ current_main_registration }}</b>. What should happen to it?</legend>
+      <label class="choice-card" style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px;">
+        <input type="radio" name="mode" value="additional" checked>
+        <span><strong>Keep the main vehicle and add this one</strong><span class="form-help" style="display: block;">{{ current_main_registration }} stays the main vehicle on invoices. The selected vehicle is recorded as an additional vehicle.</span></span>
+      </label>
+      <label class="choice-card" style="display: flex; gap: 8px; align-items: flex-start;">
+        <input type="radio" name="mode" value="replace_main">
+        <span><strong>Replace the main vehicle with this one</strong><span class="form-help" style="display: block;">The selected vehicle becomes the main vehicle on invoices. {{ current_main_registration }} is kept on the client as an additional vehicle.</span></span>
+      </label>
+    </fieldset>
+    {% else %}
+    <p class="form-help">This becomes the client's main vehicle (it is the vehicle shown on invoices).</p>
+    {% endif %}
+    {% else %}<p>No vehicles awaiting allocation at this branch. Scan a vehicle and place it on the waiting list first.</p>{% endif %}
+    <div class="form-actions" style="margin-top: 16px;">
+      <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+      {% if waiting_vehicles %}<button class="btn primary" type="submit">Allocate vehicle</button>{% endif %}
+    </div>
+  </form>
+</dialog>

@@ -40,6 +40,12 @@
   {% endif %}
   <div class="form-actions"><button class="btn primary">Save customer</button></div>
 </form>
+{% if customer and not pending_registration and user_can('scan_vehicle') and waiting_vehicles %}
+{# "Allocate from list" for an existing client (ABI-341953236) — the dialog sits OUTSIDE the
+   customer form above, because it carries its own form and HTML must never nest one in another.
+   A self-registered (pending) client already gets the same dialog from the verification panel. #}
+{% include "admin/customers/_allocate_waiting_dialog.html" %}
+{% endif %}
 {% if customer %}
 {# Vehicle details live with the customer record, right where the client is edited — the old
    separate Vehicles panel on the customer page is gone. These forms sit OUTSIDE the customer
