@@ -479,6 +479,30 @@ def test_two_threads_cannot_allocate_the_same_scan_twice(app):
         assert vehicles.get_main_vehicle_id(pending_id) == outcomes[0]
 
 
+def test_allocation_accepts_turso_row_interface(app, monkeypatch):
+    pending_id = make_pending_client(app)
+    original = vehicles.get_waiting_vehicle
+
+    class TursoRow:
+        def __init__(self, row):
+            self.data = dict(row)
+        def __getitem__(self, key):
+            return self.data[key]
+        def asdict(self):
+            return self.data
+
+    def read(waiting_id):
+        row = original(waiting_id)
+        return TursoRow(row) if row is not None else None
+
+    with app.app_context():
+        wid = vehicles.save_waiting_vehicle(scan_form("TURSO 230"))
+        monkeypatch.setattr(vehicles, "get_waiting_vehicle", read)
+        vid = vehicles.allocate_waiting_vehicle(wid, pending_id)
+        assert vehicles.get_main_vehicle_id(pending_id) == vid
+        assert vehicles.list_waiting_vehicles() == []
+
+
 def test_two_waiting_scans_cannot_replace_each_other_on_one_customer(app):
     pending_id = make_pending_client(app)
     with app.app_context():

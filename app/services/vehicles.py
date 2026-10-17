@@ -1054,7 +1054,8 @@ def allocate_waiting_vehicle(waiting_id, customer_id):
 
         # A plate recorded for somebody between scanning and allocation is refused by
         # create_vehicle's own duplicate guard; the rollback puts the scan back on the list.
-        vehicle_id = create_vehicle(dict(waiting), customer_id=target)
+        from app.services.reports import row_dict
+        vehicle_id = create_vehicle(row_dict(waiting), customer_id=target)
         set_vehicle_status(vehicle_id, STATUS_APPROVED)
         promote_main_vehicle(target, vehicle_id)
     return int(vehicle_id)
