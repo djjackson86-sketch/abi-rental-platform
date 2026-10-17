@@ -236,10 +236,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_registration ON vehicles(registra
 -- a licence disc can be scanned before the client exists (or before staff have finished a pending
 -- portal sign-up), so the queue holds the validated scan values with **no customer and no
 -- allocation**. Same column shape as ``vehicles`` (minus the owner) so allocation copies a row
--- across unchanged, plus ``slot``: the counter may hold at most THREE waiting vehicles, and that cap
--- is a property of the table (slot is NOT NULL, CHECK 1..3 and UNIQUE), so two simultaneous saves
--- still cannot write a fourth row. ``status`` records the vehicle's approval state at scan time;
--- an allocated vehicle is written to ``vehicles`` as ``approved``.
+-- across unchanged, plus ``slot``: each BRANCH's counter may hold at most THREE waiting vehicles,
+-- and that cap is a property of the table (slot is NOT NULL, CHECK 1..3 and one row per
+-- branch+slot), so two simultaneous saves still cannot write a fourth row for the same branch
+-- (ticket ABI-341953235). ``branch_id`` is the branch the scan was queued at — the scanning
+-- user's selected/primary branch — so the queue, its 3-vehicle cap and the allocation are all
+-- per depot. ``status`` records the vehicle's approval state at scan time; an allocated vehicle is
+-- written to ``vehicles`` as ``approved``.
 CREATE TABLE IF NOT EXISTS vehicle_waiting_list (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     slot INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 3),
@@ -262,11 +265,15 @@ CREATE TABLE IF NOT EXISTS vehicle_waiting_list (
     source TEXT NOT NULL DEFAULT 'scan',
     status TEXT NOT NULL DEFAULT 'approved',
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_slot ON vehicle_waiting_list(slot);
+-- Three waiting vehicles PER BRANCH: slots 1..3 are unique inside a branch, not across the
+-- business. The indexes that enforce that are created in ``run_migrations`` (below), after the
+-- ``branch_id`` column has been ensured on an existing database -- creating them here would fail
+-- on a database whose table predates the column.
 -- Spacing-/case-insensitive duplicate guard inside the queue itself: ``NB 72 XMGP`` and
 -- ``NB72XMGP`` are the same vehicle to a traffic officer, so the queue cannot hold both.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_registration
@@ -1436,15 +1443,43 @@ def run_migrations(db):
         source TEXT NOT NULL DEFAULT 'scan',
         status TEXT NOT NULL DEFAULT 'approved',
         created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )""")
-    # The cap (at most three waiting vehicles) is enforced by the table itself: only slots
-    # 1..3 exist and each may be used once, so a fourth row cannot be written even when
-    # two requests save at the same moment.
+    # --- Three waiting vehicles PER BRANCH (ABI-341953235) -------------------
+    # The queue belongs to the depot that queued the scan: the scanning user's selected (or
+    # primary) branch is recorded on the row, and the 3-vehicle cap is per branch instead of one
+    # business-wide cap. Additive and self-healing on an existing database:
+    #   * the column is added when missing (legacy rows start NULL);
+    #   * legacy rows take their creator's branch, so an existing queue keeps its place;
+    #   * the old global slot index is dropped and replaced by one unique (branch_id, slot) per
+    #     branch, plus a slot index for branch-less rows (SQLite treats NULLs as distinct, so the
+    #     two cannot share one index). All of it is idempotent -- a restart changes nothing.
+    had_branch_column = "branch_id" in {
+        row["name"] for row in db.execute("PRAGMA table_info(vehicle_waiting_list)").fetchall()
+    }
+    ensure_column(db, "vehicle_waiting_list", "branch_id", "INTEGER REFERENCES branches(id) ON DELETE SET NULL")
+    db.execute("DROP INDEX IF EXISTS idx_vehicle_waiting_list_slot")
+    if not had_branch_column:
+        # One-off backfill, only when the column has just been created: a waiting scan belongs to
+        # the depot of the user who queued it. Rows whose user has gone (or has no branch) stay
+        # NULL -- they remain visible to all-branch accounts and keep the branch-less slot index.
+        db.execute(
+            "UPDATE vehicle_waiting_list SET branch_id = ("
+            "SELECT u.branch_id FROM users u WHERE u.id = vehicle_waiting_list.created_by_user_id"
+            ") WHERE branch_id IS NULL"
+        )
+    # The cap (at most three waiting vehicles per branch) is enforced by the table itself: only
+    # slots 1..3 exist and each may be used once per branch, so a fourth row for a branch cannot
+    # be written even when two requests save at the same moment.
     db.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_slot "
-        "ON vehicle_waiting_list(slot)"
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_branch_slot "
+        "ON vehicle_waiting_list(branch_id, slot) WHERE branch_id IS NOT NULL"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_unassigned_slot "
+        "ON vehicle_waiting_list(slot) WHERE branch_id IS NULL"
     )
     db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_waiting_list_registration "

@@ -680,7 +680,16 @@ a.pending-check-link:active{background:#e7f0ff}
 .pending-queue-row .pending-queue-meta{display:grid;justify-items:end;gap:2px;text-align:right}
 .pending-queue-age{color:var(--muted-2)}
 .pending-queue-card .movement-foot span{color:var(--muted);font-size:13px;font-weight:600}
+/* Per-branch waiting queue (ticket ABI-341953235): one heading per depot, with its own n / 3
+   counter, so an all-branch viewer can never read a combined total as one branch's cap. */
+.schedule-branch-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:14px 0 6px}
+.schedule-branch-head:first-child{margin-top:0}
+.schedule-branch-head b{color:var(--ink-2);font-weight:850}
 @media(max-width:620px){
+  /* On a phone the branch label must not push the row wider than the card. */
+  .pending-queue-card .movement-row{flex-wrap:wrap;align-items:flex-start;gap:4px}
+  .pending-queue-card .movement-row>span{min-width:0}
+  .pending-queue-card .movement-row small{display:block;overflow-wrap:anywhere}
   .pending-queue-row{flex-wrap:wrap}
   .pending-queue-row .pending-queue-meta{justify-items:start;text-align:left}
   .pending-actions{flex-direction:column}

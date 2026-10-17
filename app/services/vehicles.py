@@ -24,7 +24,12 @@ import re
 import sqlite3
 
 from app.db import get_db, now, scan_write_transaction
-from app.services.access import current_session_user_id
+from app.services.access import (
+    current_session_user_id,
+    session_active_branch_id,
+    session_branch_scope_ids,
+    session_primary_branch_id,
+)
 
 SOURCE_MANUAL = "manual"
 SOURCE_SCAN = "scan"
@@ -264,6 +269,34 @@ def _customer_exists(customer_id):
         return None
     row = get_db().execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
     return int(row["id"]) if row else None
+
+
+def _customer_branch_id(customer_id):
+    """The branch a client is recorded against, or None when they have none."""
+    try:
+        customer_id = int(customer_id)
+    except (TypeError, ValueError):
+        return None
+    row = get_db().execute(
+        "SELECT branch_id FROM customers WHERE id = ?", (customer_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    value = _row_field(row, "branch_id")
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _branch_label(branch_id):
+    """A branch's name for a refusal, or "another branch" when it cannot be read."""
+    try:
+        branch_id = int(branch_id)
+    except (TypeError, ValueError):
+        return "another branch"
+    row = get_db().execute("SELECT name FROM branches WHERE id = ?", (branch_id,)).fetchone()
+    return _text(_row_field(row, "name", "")) or "another branch"
 
 
 def _registration_owner(registration, exclude_vehicle_id=None):
@@ -821,20 +854,26 @@ def delete_vehicles_for_customer(customer_id):
 #
 # ``vehicles.customer_id`` is NOT NULL, so a licence disc scanned before the client exists (or
 # before staff have finished verifying a pending portal sign-up) cannot be recorded against
-# anybody yet. The counter therefore parks up to THREE validated scans in this separate queue and
-# allocates one to a client later. A waiting row carries **no customer**: it is never a
-# half-allocated vehicle, and nothing here touches the ``vehicles`` table until allocation.
+# anybody yet. The counter therefore parks up to THREE validated scans **per branch** in this
+# separate queue and allocates one to a client later. A waiting row carries **no customer**: it is
+# never a half-allocated vehicle, and nothing here touches the ``vehicles`` table until allocation.
 #
-# The cap is a property of the table, not of the caller: ``slot`` is NOT NULL, CHECK 1..3 and
-# UNIQUE, and the insert is conditional on that slot being free, so two simultaneous saves can
-# never write a fourth row. Duplicate protection compares plates on :func:`registration_key`
-# (case and spacing ignored), against both this queue and the recorded vehicles — matching how
-# ``vehicles`` itself behaves.
+# The cap is a property of the table, not of the caller: ``slot`` is NOT NULL and CHECK 1..3, and
+# one row per ``(branch_id, slot)`` is UNIQUE, while the insert is conditional on that slot being
+# free *in that branch*, so two simultaneous saves can never write a fourth row for one branch
+# (ticket ABI-341953235 — the cap used to be business-wide, which starved a second depot).
+# ``branch_id`` is the branch the scan was queued at: the scanning user's selected branch for this
+# sign-in, else their primary branch — the same rule ``customers.customer_branch_id()`` uses — so
+# scanning and allocating stay inside one depot. Duplicate protection compares plates on
+# :func:`registration_key` (case and spacing ignored), against both this queue and the recorded
+# vehicles — matching how ``vehicles`` itself behaves. A plate is unique across the whole business,
+# not per branch: one vehicle cannot wait at two depots.
 
 WAITING_LIST_SLOTS = (1, 2, 3)
+WAITING_LIST_CAPACITY = len(WAITING_LIST_SLOTS)
 WAITING_LIST_FULL_MESSAGE = (
-    "The scanned-vehicle waiting list is full (3 vehicles). Allocate or remove one before "
-    "scanning another."
+    "The scanned-vehicle waiting list is full for this branch (3 vehicles). Allocate or remove "
+    "one before scanning another."
 )
 WAITING_LIST_NO_REGISTRATION_MESSAGE = (
     "A registration number is required before a scanned vehicle can wait for a client."
@@ -842,6 +881,17 @@ WAITING_LIST_NO_REGISTRATION_MESSAGE = (
 WAITING_LIST_STALE_MESSAGE = (
     "That scanned vehicle is no longer waiting — it may already have been allocated or removed."
 )
+
+
+def waiting_branch_id():
+    """The branch a scan queued right now belongs to — the scanning user's depot, or None.
+
+    The same rule ``customers.customer_branch_id()`` uses: the branch this sign-in chose to
+    manage, else the account's own primary branch. None means "no branch recorded" (a public or
+    background context, or an account with no branch), which keeps the historic behaviour: the
+    row lands in the branch-less bucket, visible to every all-branch viewer.
+    """
+    return session_active_branch_id() or session_primary_branch_id()
 
 
 def _waiting_columns():
@@ -852,16 +902,90 @@ def _waiting_columns():
         "source",
         "status",
         "created_by_user_id",
+        "branch_id",
         "created_at",
         "updated_at",
     )
 
 
-def list_waiting_vehicles():
-    """Every scanned vehicle waiting for a client, in counter order (slot 1 first)."""
-    return get_db().execute(
-        "SELECT * FROM vehicle_waiting_list ORDER BY slot, id"
-    ).fetchall()
+def _waiting_select():
+    """The one SELECT shape for the queue: the row plus its branch's name, for labelling."""
+    return (
+        "SELECT w.*, b.name AS branch_name FROM vehicle_waiting_list w "
+        "LEFT JOIN branches b ON b.id = w.branch_id"
+    )
+
+
+def _waiting_order():
+    return " ORDER BY CASE WHEN b.name IS NULL THEN 1 ELSE 0 END, b.name, w.branch_id, w.slot, w.id"
+
+
+def list_waiting_vehicles(branch_ids=None):
+    """Scanned vehicles waiting for a client, in branch then counter order (slot 1 first).
+
+    ``branch_ids`` narrows the list to those depots. When it is omitted the session's own branch
+    scope applies — ``session_branch_scope_ids()`` returns None for an all-branch account (which
+    therefore sees every depot's queue, labelled), a list for branch-limited staff (who see only
+    their own). An explicit list can only ever narrow that scope, never widen it, so a crafted
+    ``branch_ids`` cannot show a staff member another depot's scans.
+    """
+    scope = session_branch_scope_ids()
+    ids = None
+    if branch_ids is not None:
+        ids = []
+        for value in branch_ids:
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if value not in ids:
+                ids.append(value)
+        if scope is not None:
+            ids = [value for value in ids if value in scope]
+    elif scope is not None:
+        ids = list(scope)
+    sql = _waiting_select()
+    params = []
+    if ids is not None:
+        if not ids:
+            return []
+        sql += f" WHERE w.branch_id IN ({', '.join('?' for _ in ids)})"
+        params.extend(ids)
+    sql += _waiting_order()
+    return get_db().execute(sql, params).fetchall()
+
+
+def waiting_vehicle_groups(rows=None):
+    """Group waiting rows by branch, in display order: one dict per branch.
+
+    Each group is ``{branch_id, branch_name, capacity, count, rows}``. A branch-less row (queued
+    before this column existed, by a user with no branch) forms its own group with an empty name,
+    which the templates render as "Branch not recorded".
+    """
+    if rows is None:
+        rows = list_waiting_vehicles()
+    groups = []
+    by_branch = {}
+    for row in rows:
+        raw = _row_field(row, "branch_id")
+        try:
+            key = int(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            key = None
+        group = by_branch.get(key)
+        if group is None:
+            group = {
+                "branch_id": key,
+                "branch_name": _text(_row_field(row, "branch_name", "")),
+                "capacity": WAITING_LIST_CAPACITY,
+                "count": 0,
+                "rows": [],
+            }
+            by_branch[key] = group
+            groups.append(group)
+        group["rows"].append(row)
+        group["count"] += 1
+    return groups
 
 
 def get_waiting_vehicle(waiting_id):
@@ -871,28 +995,35 @@ def get_waiting_vehicle(waiting_id):
     except (TypeError, ValueError):
         return None
     return get_db().execute(
-        "SELECT * FROM vehicle_waiting_list WHERE id = ?", (waiting_id,)
+        f"{_waiting_select()} WHERE w.id = ?", (waiting_id,)
     ).fetchone()
 
 
 def _waiting_for_registration(registration):
-    """The waiting row already holding this plate (spacing/case ignored), if any."""
+    """The waiting row already holding this plate (spacing/case ignored), if any.
+
+    Deliberately **not** branch-limited: a plate is one vehicle across the whole business, so it
+    cannot be waiting at two depots at once.
+    """
     key = registration_key(registration)
     if not key:
         return None
     return get_db().execute(
-        "SELECT * FROM vehicle_waiting_list "
-        "WHERE REPLACE(UPPER(registration), ' ', '') = ? ORDER BY slot, id LIMIT 1",
+        f"{_waiting_select()} WHERE REPLACE(UPPER(w.registration), ' ', '') = ? "
+        "ORDER BY w.slot, w.id LIMIT 1",
         (key,),
     ).fetchone()
 
 
 def _waiting_duplicate_error(registration, queued):
-    """The one 'that plate is already waiting' refusal, naming the slot it sits in."""
+    """The one 'that plate is already waiting' refusal, naming its slot (and branch)."""
+    where = f"slot {_row_field(queued, 'slot', '?')}"
+    branch = _text(_row_field(queued, "branch_name", ""))
+    if branch:
+        where += f" at {branch}"
     return ValueError(
-        f"Registration {registration} is already waiting on the list "
-        f"(slot {_row_field(queued, 'slot', '?')}) — allocate or remove that scanned "
-        "vehicle instead of adding it again."
+        f"Registration {registration} is already waiting on the list ({where}) — allocate or "
+        "remove that scanned vehicle instead of adding it again."
     )
 
 
@@ -904,19 +1035,20 @@ def _is_constraint_error(exc):
 
 
 def _insert_waiting(values, timestamp):
-    """Write one waiting row into the first free slot, or refuse when all three are taken.
+    """Write one waiting row into the first free slot **of its branch**, or refuse when full.
 
-    The INSERT is conditional on the slot being free and the slot is UNIQUE, so the check and
-    the write are one statement — two requests cannot both claim slot 2, and no fourth row can
-    ever exist (the CHECK makes slots 1..3 the only possibilities). A constraint refusal means a
-    concurrent save won the race: a duplicate plate is refused with the normal clear message,
-    any other slot conflict simply tries the next slot.
+    The INSERT is conditional on that slot being free in that branch and (branch_id, slot) is
+    UNIQUE, so the check and the write are one statement — two requests cannot both claim slot 2
+    of one depot, and no fourth row can exist for a branch (the CHECK makes slots 1..3 the only
+    possibilities). A constraint refusal means a concurrent save won the race: a duplicate plate
+    is refused with the normal clear message, any other slot conflict simply tries the next slot.
     """
     columns = _waiting_columns()
     sql = (
         f"INSERT INTO vehicle_waiting_list ({', '.join(columns)}) "
         f"SELECT {', '.join(':' + column for column in columns)} "
-        "WHERE NOT EXISTS (SELECT 1 FROM vehicle_waiting_list WHERE slot = :slot)"
+        "WHERE NOT EXISTS (SELECT 1 FROM vehicle_waiting_list "
+        "WHERE branch_id IS :branch_id AND slot = :slot)"
     )
     params = {
         **{field: values.get(field, "") for field in TEXT_FIELDS},
@@ -924,6 +1056,7 @@ def _insert_waiting(values, timestamp):
         "source": values.get("source") or SOURCE_SCAN,
         "status": STATUS_APPROVED,
         "created_by_user_id": current_session_user_id(),
+        "branch_id": values.get("branch_id"),
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -966,6 +1099,9 @@ def save_waiting_vehicle(form):
         raise ValueError(WAITING_LIST_NO_REGISTRATION_MESSAGE)
 
     timestamp = now()
+    # The depot that queued this scan. Its own 3-vehicle counter is what fills up, so a busy
+    # branch can no longer block a second depot's scans (ticket ABI-341953235).
+    values["branch_id"] = waiting_branch_id()
     with scan_write_transaction():
         queued = _waiting_for_registration(values["registration"])
         if queued is not None:
@@ -1029,6 +1165,24 @@ def allocate_waiting_vehicle(waiting_id, customer_id):
             )
         if not portal_registrations.branch_in_session_scope(pending):
             raise ValueError("That portal registration is outside the branches you can access.")
+
+        # A branch's queue feeds that branch's clients (ticket ABI-341953235). The scan was taken
+        # at the depot that queued it, so handing it to a client of a different depot would let
+        # one branch's counter fill up another branch's vehicles. Compared only when both sides
+        # have a branch recorded — a legacy row (or a client with no branch) is still allocatable.
+        waiting_branch = _row_field(waiting, "branch_id")
+        target_branch = _customer_branch_id(target)
+        if waiting_branch is not None and target_branch is not None:
+            try:
+                same_branch = int(waiting_branch) == int(target_branch)
+            except (TypeError, ValueError):
+                same_branch = False
+            if not same_branch:
+                raise ValueError(
+                    f"That scanned vehicle is waiting at {_branch_label(waiting_branch)}, but this "
+                    f"client belongs to {_branch_label(target_branch)} — allocate it to a client "
+                    "of its own branch."
+                )
 
         if get_main_vehicle_id(target) is not None:
             raise ValueError(

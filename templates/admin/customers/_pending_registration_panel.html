@@ -86,11 +86,11 @@
       <label>Vehicle awaiting allocation
         <select name="waiting_id" required style="width: 100%">
           <option value="">Choose a vehicle</option>
-          {% for vehicle in waiting_vehicles %}<option value="{{ vehicle.id }}">{{ vehicle.registration }} — {{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}</option>{% endfor %}
+          {% for vehicle in waiting_vehicles %}<option value="{{ vehicle.id }}">{{ vehicle.registration }} — {{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}{% if vehicle.branch_name %} · {{ vehicle.branch_name }} branch{% endif %}</option>{% endfor %}
         </select>
       </label>
       <p>This becomes the main vehicle. Existing main vehicle details will not be replaced.</p>
-      {% else %}<p>No vehicles are awaiting allocation. Scan a vehicle and place it on the waiting list first.</p>{% endif %}
+      {% else %}<p>No vehicles awaiting allocation at this branch. Scan a vehicle and place it on the waiting list first.</p>{% endif %}
       <div class="form-actions">
         <button class="btn" type="button" onclick="this.closest('dialog').close()">Cancel</button>
         {% if waiting_vehicles %}<button class="btn primary" type="submit">Allocate vehicle</button>{% endif %}

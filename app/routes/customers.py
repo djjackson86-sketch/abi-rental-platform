@@ -14,7 +14,12 @@ from app.services.settings import get_company_settings
 from app.services.credit_limits import facility_summary
 from app.services.customer_credits import customer_credit_balance, customer_credit_entries
 from app.services.legacy_balances import legacy_balance_summary, record_legacy_payment
-from app.services.vehicles import list_vehicles, list_waiting_vehicles, allocate_waiting_vehicle
+from app.services.vehicles import (
+    allocate_waiting_vehicle,
+    list_vehicles,
+    list_waiting_vehicles,
+    waiting_vehicle_groups,
+)
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
 
@@ -65,6 +70,26 @@ def _display_limit():
     return max(PAGE_SIZE, min(requested, 5000))
 
 
+def _waiting_vehicles_for_customer(customer):
+    """The waiting scans the allocate dialog may offer this client — their own branch's queue.
+
+    A scan belongs to the depot that queued it (ticket ABI-341953235), so a client is only ever
+    offered vehicles waiting at *their* branch. ``list_waiting_vehicles`` still narrows by the
+    session's own branch scope, so a branch-limited viewer can never see another depot's queue
+    through this. A client with no branch recorded keeps the historic behaviour (every visible
+    vehicle) rather than being locked out of allocation.
+    """
+    branch_id = None
+    if customer is not None:
+        try:
+            branch_id = customer["branch_id"]
+        except (KeyError, IndexError, TypeError):
+            branch_id = None
+    if branch_id in (None, ""):
+        return list_waiting_vehicles()
+    return list_waiting_vehicles(branch_ids=[branch_id])
+
+
 def _pending_registration_context(customer_id, customer=None):
     """The self-registration verification panel's context for one client.
 
@@ -86,7 +111,7 @@ def _pending_registration_context(customer_id, customer=None):
         "portal_pending_delete_csrf_token": csrf.issue_token("portal_pending_delete"),
         "pending_id_verified": portal_registrations.id_verified(customer),
         "pending_vehicle_captured": portal_registrations.main_vehicle_recorded(customer_id),
-        "waiting_vehicles": list_waiting_vehicles(),
+        "waiting_vehicles": _waiting_vehicles_for_customer(customer),
     }
 
 
@@ -99,6 +124,10 @@ def index():
     display_limit = _display_limit()
     customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, limit=display_limit)
     total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing)
+    # Vehicles awaiting allocation, branch-scoped: a depot-limited account sees only its own
+    # queue; an all-branch account sees every depot's, grouped and labelled. Each branch has its
+    # own 3-vehicle counter (ticket ABI-341953235).
+    waiting_vehicles = list_waiting_vehicles()
     return render_template(
         "admin/customers/index.html",
         settings=get_company_settings(),
@@ -115,7 +144,8 @@ def index():
         # list (client instruction). Each row: id / reference / customer_id / name / email /
         # phone / branch_name / created_at.
         pending_registrations=portal_registrations.list_pending_registrations(),
-        waiting_vehicles=list_waiting_vehicles(),
+        waiting_vehicles=waiting_vehicles,
+        waiting_vehicle_groups=waiting_vehicle_groups(waiting_vehicles),
     )
 
 

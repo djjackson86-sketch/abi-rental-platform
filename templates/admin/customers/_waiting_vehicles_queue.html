@@ -1,19 +1,44 @@
+{# Vehicles awaiting allocation — the scan queue, PER BRANCH (ABI-341953235).
+
+   Three vehicles may wait for a client at each branch, and a scan belongs to the depot that
+   queued it. A branch-limited account sees just its own depot's queue (no headings needed — the
+   badge is that branch's own n / 3 counter); an all-branch account sees every depot's queue with
+   a heading and its own n / 3 counter per branch, so a combined "5 / 3" can never appear.
+
+   Expected context: waiting_vehicles (flat, branch-scoped rows carrying branch_name) and
+   waiting_vehicle_groups (waiting_vehicle_groups() output: branch_id / branch_name / count /
+   capacity / rows). #}
+{% set groups = waiting_vehicle_groups or [] %}
+{% set grouped = groups|length > 1 %}
+{% set single = groups[0] if groups|length == 1 else None %}
 <article class="panel movement-card pending-queue-card" id="vehicles-awaiting-allocation">
   <div class="movement-head">
     <h2>Vehicles awaiting allocation</h2>
+    {% if grouped %}
+    <span class="badge status-payment_due">{{ waiting_vehicles|length }} vehicles · {{ groups|length }} branches</span>
+    {% else %}
     <span class="badge status-payment_due">{{ waiting_vehicles|length }} / 3 vehicles</span>
+    {% endif %}
   </div>
   <div class="movement-body">
     {% if waiting_vehicles %}
-    <div class="schedule-list">
-      {% for vehicle in waiting_vehicles %}
-      <div class="schedule-row movement-row">
-        <span><b>{{ vehicle.registration }}</b><small>{{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}</small></span>
-        <span><small>Approved · no customer allocated</small></span>
+      {% for group in groups %}
+      {% if grouped %}
+      <div class="schedule-branch-head">
+        <b>{{ group.branch_name or 'Branch not recorded' }}</b>
+        <span class="badge status-{% if group.count >= group.capacity %}payment_due{% else %}paid{% endif %}">{{ group.count }} / {{ group.capacity }} vehicles</span>
+      </div>
+      {% endif %}
+      <div class="schedule-list">
+        {% for vehicle in group.rows %}
+        <div class="schedule-row movement-row">
+          <span><b>{{ vehicle.registration }}</b><small>{{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}</small></span>
+          <span><small>Approved · no customer allocated</small>{% if grouped %}<small>Branch: {{ vehicle.branch_name or 'not recorded' }}</small>{% endif %}</span>
+        </div>
+        {% endfor %}
       </div>
       {% endfor %}
-    </div>
     {% else %}<p>No vehicles awaiting allocation.</p>{% endif %}
   </div>
-  <div class="movement-foot"><span>Maximum 3 vehicles. Use “Allocate from list” under a pending customer's Main vehicle to assign one.</span></div>
+  <div class="movement-foot"><span>Maximum 3 vehicles per branch{% if single and single.branch_name %} · Branch: {{ single.branch_name }}{% endif %}. Use “Allocate from list” under a pending customer's Main vehicle to assign one.</span></div>
 </article>
