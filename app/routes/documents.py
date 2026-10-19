@@ -31,6 +31,7 @@ from app.services.settings import get_company_settings
 from app.services.email_delivery import build_invoice_email_subject, build_outlook_draft_eml, render_email_template
 from app.services.pdf_documents import DOCUMENT_LOGO_STATIC_PATH, document_pdf_bytes, document_pdf_filename
 from app.services.customers import custom_fields_for
+from app.services.customer_emails import document_copy_emails
 from app.services.access import user_can_access_order
 
 # Email-sized signature logo (360px wide) so clients that ignore CSS sizing
@@ -126,7 +127,7 @@ def _prepare_email_draft(document_id, to_email, message=None):
         body,
         pdf_bytes,
         pdf_filename,
-        cc_email=(settings['email'] or '').strip() or 'info@sanotrailers.co.za',
+        cc_email=document_copy_emails(document, (settings['email'] or '').strip() or 'info@sanotrailers.co.za', to_email),
         signature=signature,
         logo_bytes=_invoice_email_logo_bytes(settings),
     )
@@ -219,6 +220,7 @@ def detail(document_id):
         document_datetime=document_datetime,
         effective_document_date=effective_document_date,
         rental_days_label=rental_days_label(document),
+        email_copies=document_copy_emails(document, (settings['email'] or '').strip() or 'info@sanotrailers.co.za', document['customer_email']),
         email_message=email_message,
         email_signature=email_signature,
         email_signature_include_logo=bool(settings['invoice_email_signature_include_logo']),

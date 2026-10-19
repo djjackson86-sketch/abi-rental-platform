@@ -40,6 +40,7 @@ VEHICLE_CUSTOM_FIELD_KEYS = (
     "vehicle_color",
 )
 VISIBLE_CUSTOM_FIELD_LABELS = {
+    "other_email_addresses": "Other email addresses",
     "vehicle_make": "Vehicle Make",
     "vehicle_reg_no": "Veh Reg No",
     "vehicle_registration_number": "NaTIS registration number",
@@ -69,7 +70,7 @@ VISIBLE_CUSTOM_FIELD_ORDER = [
     "vat_number",
     "company_reg_no",
 ]
-CUSTOM_FIELD_FORM_KEYS = list(VISIBLE_CUSTOM_FIELD_ORDER)
+CUSTOM_FIELD_FORM_KEYS = list(VISIBLE_CUSTOM_FIELD_ORDER) + ["other_email_addresses"]
 
 # Ticket ABI-341953028: the "Block Customer" checkbox and its reason live on the
 # customer form only. _clean() is shared — the new/edit ORDER form's attached
@@ -494,6 +495,15 @@ def _clean(form, existing_custom_fields=None):
     if customer_type not in VALID_TYPES:
         customer_type = "individual"
     custom_fields = dict(existing_custom_fields or {})
+    if customer_type != "company":
+        custom_fields.pop("other_email_addresses", None)
+    elif "other_email_addresses" in form:
+        from app.services.customer_emails import additional_emails
+        copies = additional_emails(form.get("other_email_addresses"), form.get("email", ""))
+        if copies:
+            custom_fields["other_email_addresses"] = "; ".join(copies)
+        else:
+            custom_fields.pop("other_email_addresses", None)
     submitted_custom_fields = {
         "vehicle_make": form.get("vehicle_make", "").strip() or form.get("vehicle_details", "").strip(),
         "vehicle_model": form.get("vehicle_model", "").strip(),
@@ -1195,6 +1205,8 @@ def custom_fields_for(customer):
         visible["vehicle_make"] = visible["vehicle_details"]
     if visible.get("alternative_contact") and not visible.get("alternative_contact_name"):
         visible["alternative_contact_name"] = visible["alternative_contact"]
+    if _customer_row_value(customer, "customer_type") != "company":
+        visible.pop("other_email_addresses", None)
     visible.pop("vehicle_details", None)
     visible.pop("alternative_contact", None)
     ordered = {}

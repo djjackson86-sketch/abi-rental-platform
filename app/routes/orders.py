@@ -56,7 +56,10 @@ CUSTOMER_EDIT_FIELD_KEYS = [
 
 
 def _submitted_customer_values(form):
-    return {key: (form.get(key) or "") for key in CUSTOMER_EDIT_FIELD_KEYS}
+    values = {key: (form.get(key) or "") for key in CUSTOMER_EDIT_FIELD_KEYS}
+    if "other_email_addresses" in form:
+        values["other_email_addresses"] = form.get("other_email_addresses") or ""
+    return values
 
 
 # Ticket ABI-341953196. The order form's customer picker lists the whole client

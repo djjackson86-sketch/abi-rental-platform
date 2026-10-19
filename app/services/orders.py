@@ -1289,11 +1289,11 @@ def draft_order_form(order_id):
         # new-order form does, so the customer's block state rides along with the
         # summary built from the order's joined customer columns.
         block_row = get_db().execute(
-            "SELECT is_blocked, blocked_reason FROM customers WHERE id = ?", (order["customer_id"],)
+            "SELECT customer_type, is_blocked, blocked_reason FROM customers WHERE id = ?", (order["customer_id"],)
         ).fetchone()
         customer_summary = customer_summary_for({
             "id": order["customer_id"],
-            "customer_type": "individual",
+            "customer_type": block_row["customer_type"] if block_row else "individual",
             "name": order["customer_name"],
             "email": order["customer_email"],
             "phone": order["customer_phone"],

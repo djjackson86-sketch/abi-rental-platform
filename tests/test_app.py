@@ -3497,7 +3497,7 @@ def test_generated_email_cc_falls_back_to_sano_office_when_settings_email_blank(
 
     invoice = client.post(f'/orders/{order_id}/documents', data={'document_type': 'invoice'}, follow_redirects=True)
     assert invoice.status_code == 200
-    assert b'info@sanotrailers.co.za is always copied' in invoice.data
+    assert b'Cc when sent to the customer email: info@sanotrailers.co.za' in invoice.data
 
     draft = client.post('/documents/1/send-email', data={'to_email': 'order@example.com'}, follow_redirects=False)
     assert draft.status_code == 200

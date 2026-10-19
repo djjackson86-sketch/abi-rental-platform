@@ -437,6 +437,9 @@ def submission_values(form):
         values.update(first_names=first_names, surname=surname)
     for key in PORTAL_CUSTOM_FIELD_KEYS:
         values[key] = str(form.get(key) or "").strip()
+    if customer_type == "company":
+        from app.services.customer_emails import additional_emails
+        values["other_email_addresses"] = "; ".join(additional_emails(form.get("other_email_addresses"), values["email"]))
     # Company-only: website. A crafted ``website`` on an individual is dropped here rather
     # than stored, so the field really is "visible only for Company" server-side too.
     values["website"] = (
