@@ -101,7 +101,8 @@ def test_existing_debt_and_lowered_limit_allow_repayment(client,app):
         unchanged=h.order_payload(cid)
         update_draft_order(a,unchanged)  # harmless edit while existing exposure exceeds limit
         with pytest.raises(ValueError,match='credit limit'):order(cid)
-        with pytest.raises(ValueError,match='credit limit'):finalize_document(create_document(a,'invoice'))
+        # ABI-341953238: issuing the invoice adds no exposure, even after a limit reduction.
+        assert finalize_document(create_document(a,'invoice'))
         record_payment(a,{'method':'eft','amount':'115'})
         record_payment(b,{'method':'cash','amount':'50'})
         assert facility_summary(cid)['available']==35

@@ -73,9 +73,8 @@ def ensure_invoice_finalisation(order_id):
     if round(float(row['total']) - payment_total(order_id), 2) > 0:
         if not row['credit_allowed']:
             raise ValueError(PAYMENT_REQUIRED_ERROR)
-        facility = facility_summary(row['customer_id'])
-        if facility['used'] > round(facility['limit'], 2):
-            raise ValueError(CREDIT_LIMIT_ERROR)
+        # Finalisation only issues a document for an existing order. It neither
+        # increases reserved credit nor records payment, even above a reduced limit.
 
 
 def execute_credit_checked(db, sql, params):
@@ -143,10 +142,6 @@ def install_credit_guards(db):
         SELECT CASE WHEN EXISTS (SELECT 1 FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
             WHERE o.id=NEW.order_id AND {unpaid} AND COALESCE(c.credit_allowed,0)<>1)
             THEN RAISE(ABORT, '{PAYMENT_REQUIRED_ERROR}') END;
-        SELECT CASE WHEN EXISTS (SELECT 1 FROM orders o JOIN customers c ON c.id=o.customer_id
-            WHERE o.id=NEW.order_id AND {unpaid} AND c.credit_allowed=1
-            AND ROUND({debt_sql('o.customer_id')},2)>ROUND(c.credit_limit,2))
-            THEN RAISE(ABORT, '{CREDIT_LIMIT_ERROR}') END;
         SELECT CASE WHEN EXISTS (SELECT 1 FROM documents d WHERE d.order_id=NEW.order_id
             AND d.document_type='invoice' AND d.status='finalized' AND d.id<>NEW.id)
             THEN RAISE(ABORT, '{DUPLICATE_INVOICE_ERROR}') END;

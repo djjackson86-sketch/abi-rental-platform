@@ -152,3 +152,38 @@ def test_archived_deleted_refund_only_or_zero_net_payments_do_not_satisfy_invoic
         row = document_row(db, invoice_id)
         assert row['status'] == 'draft'
         assert row['number'] == ''
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_341953238_finalise_route_uses_current_customer_facility(client, app, enabled):
+    login(client)
+    with app.app_context():
+        db = get_db()
+        cid = db.execute("INSERT INTO customers(name,created_at) VALUES ('Ticket credit customer',?)", (now(),)).lastrowid
+        oid = seed_order(db, 'ORD-341953238-ROUTE')
+        db.execute('UPDATE orders SET customer_id=? WHERE id=?', (cid, oid))
+        # Finalisation must read the current flag, not an old order snapshot.
+        db.execute('UPDATE customers SET credit_allowed=?,credit_limit=1 WHERE id=?', (int(enabled), cid))
+        db.commit()
+        did = create_document(oid, 'invoice')
+    response = client.post(f'/documents/{did}/finalize', follow_redirects=True)
+    assert response.status_code == 200
+    with app.app_context():
+        db = get_db()
+        row = document_row(db, did)
+        assert row['status'] == ('finalized' if enabled else 'draft')
+        assert bool(row['number']) == enabled
+        number = row['number']
+        balance = db.execute('SELECT due_total,payment_status FROM orders WHERE id=?', (oid,)).fetchone()
+        assert tuple(balance) == (500, 'payment_due')
+        assert db.execute('SELECT COUNT(*) FROM payments WHERE order_id=?', (oid,)).fetchone()[0] == 0
+    if enabled:
+        assert b'paid-stamp' not in response.data
+        assert b'Amount due' in response.data and b'R500.00' in response.data
+        assert client.post(f'/documents/{did}/finalize').status_code == 302
+        with app.app_context():
+            assert document_row(get_db(), did)['number'] == number
+        pdf = client.get(f'/documents/{did}/download.pdf')
+        assert pdf.status_code == 200 and pdf.data.startswith(b'%PDF')
+    else:
+        assert b'Pay the invoice balance in full' in response.data

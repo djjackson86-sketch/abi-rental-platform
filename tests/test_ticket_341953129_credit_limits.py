@@ -177,3 +177,32 @@ def test_credit_form_and_invoice_html(client,app):
     with app.app_context():did=create_document(order(cid),'invoice')
     page=client.get(f'/documents/{did}')
     assert page.status_code==200 and b'active credit facility' in page.data
+
+
+@pytest.mark.parametrize('direct_sql', [False, True])
+def test_341953238_over_limit_finalisation_preserves_balances(client, app, direct_sql):
+    cid = setup_customer(client, app, 230)
+    with app.app_context():
+        db = get_db()
+        oid = order(cid)
+        did = create_document(oid, 'invoice')
+        # Existing debt may exceed a subsequently reduced facility limit.
+        db.execute('UPDATE customers SET credit_limit=50 WHERE id=?', (cid,))
+        db.commit()
+        before = tuple(db.execute('SELECT total,due_total,payment_status FROM orders WHERE id=?', (oid,)).fetchone())
+        usage = outstanding_debt(cid)
+        payments = [tuple(r) for r in db.execute('SELECT * FROM payments').fetchall()]
+        if direct_sql:
+            db.execute("UPDATE documents SET status='finalized' WHERE id=?", (did,))
+            db.commit()
+        else:
+            finalize_document(did)
+        number = get_document(did)['number']
+        assert finalize_document(did) == did
+        assert get_document(did)['number'] == number
+        assert get_document(did)['status'] == 'finalized'
+        assert tuple(db.execute('SELECT total,due_total,payment_status FROM orders WHERE id=?', (oid,)).fetchone()) == before
+        assert outstanding_debt(cid) == usage == 115
+        assert [tuple(r) for r in db.execute('SELECT * FROM payments').fetchall()] == payments
+        with pytest.raises(ValueError, match='credit limit'):
+            order(cid)
