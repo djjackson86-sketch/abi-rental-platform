@@ -499,7 +499,7 @@ def _clean(form, existing_custom_fields=None):
         custom_fields.pop("other_email_addresses", None)
     elif "other_email_addresses" in form:
         from app.services.customer_emails import additional_emails
-        copies = additional_emails(form.get("other_email_addresses"), form.get("email", ""))
+        copies = additional_emails(form.get("other_email_addresses"), form.get("email", ""), max_addresses=3)
         if copies:
             custom_fields["other_email_addresses"] = "; ".join(copies)
         else:

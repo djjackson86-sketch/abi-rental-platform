@@ -439,7 +439,7 @@ def submission_values(form):
         values[key] = str(form.get(key) or "").strip()
     if customer_type == "company":
         from app.services.customer_emails import additional_emails
-        values["other_email_addresses"] = "; ".join(additional_emails(form.get("other_email_addresses"), values["email"]))
+        values["other_email_addresses"] = "; ".join(additional_emails(form.get("other_email_addresses"), values["email"], max_addresses=3))
     # Company-only: website. A crafted ``website`` on an individual is dropped here rather
     # than stored, so the field really is "visible only for Company" server-side too.
     values["website"] = (

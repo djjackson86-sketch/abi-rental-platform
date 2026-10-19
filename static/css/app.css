@@ -1,4 +1,6 @@
 /* Sano Trailers — clean rental-SaaS design system inspired by Booqable workflows, implemented with original styling. */
+/* ABI-341953240: separate company copy addresses from the main email. */
+label[data-other-emails], label[data-edit-other-emails], label[data-inline-other-emails]{margin-top:16px}
 :root{
   --bg:#edf1f5;
   --surface:#ffffff;

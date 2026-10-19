@@ -42,7 +42,8 @@ def test_standalone_create_edit_roundtrip(client, app):
         assert customer_form_values_for(customer)['other_email_addresses'] == 'cc@example.test; second@example.test'
     page = client.get('/customers/1/edit')
     assert b'cc@example.test; second@example.test</textarea>' in page.data
-    assert b'Enter additional email addresses separated by semicolons (;).' in page.data
+    assert b'Enter additional email addresses separated by semicolons (;).' not in page.data
+    assert b'placeholder="e.g. accounts@abc.com; cindy@abc.com"' in page.data
     client.post('/customers/1/edit', data=dict(name='Company renamed', customer_type='company', email='main@example.test'))
     with app.app_context():
         assert raw_custom_fields_for(get_customer(1))['other_email_addresses'] == 'cc@example.test; second@example.test'
@@ -106,10 +107,13 @@ def test_generated_eml_copies_company_only_and_keeps_pdf(client, app, kind):
     assert str(parsed['Cc']) == 'info@abi-solutions.local'
 
 
-def test_thousand_recipient_storage_and_eml_roundtrip():
+def test_legacy_thousand_recipient_eml_roundtrip():
     from app.services.email_delivery import build_outlook_draft_eml
     addresses = [f'copy{i}@example.test' for i in range(1000)]
-    cleaned = _clean(dict(name='Company', customer_type='company', email='main@example.test', other_email_addresses='; '.join(addresses)))
+    # Legacy data is retained and still usable, but new oversized submissions are refused.
+    with pytest.raises(ValueError, match='maximum of 3'):
+        _clean(dict(name='Company', customer_type='company', email='main@example.test', other_email_addresses='; '.join(addresses)))
+    cleaned = {'custom_fields_json': json.dumps({'other_email_addresses': '; '.join(addresses)})}
     document = dict(customer_type='company', customer_email='main@example.test', custom_fields_json=cleaned['custom_fields_json'])
     eml = build_outlook_draft_eml('main@example.test', 'Test', 'Review only', b'%PDF-test', 'test.pdf', cc_email=document_copy_emails(document, 'office@example.test', 'main@example.test'))
     parsed = BytesParser(policy=policy.default).parsebytes(eml)

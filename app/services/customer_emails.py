@@ -3,7 +3,7 @@ from email.headerregistry import Address
 from email.errors import MessageError
 
 
-def additional_emails(value, primary=''):
+def additional_emails(value, primary='', *, max_addresses=None):
     """Parse semicolon-separated bare addresses; reject unsafe/ambiguous input."""
     value = str(value or '')
     if any(ord(char) < 32 or ord(char) == 127 or char in '\u0085\u2028\u2029' for char in value):
@@ -23,6 +23,8 @@ def additional_emails(value, primary=''):
         if address.lower() not in seen:
             seen.add(address.lower())
             result.append(address.lower())
+    if max_addresses is not None and len(result) > max_addresses:
+        raise ValueError('Enter a maximum of 3 other email addresses, excluding the main email.')
     return result
 
 
