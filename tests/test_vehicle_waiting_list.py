@@ -413,9 +413,9 @@ def test_a_plate_recorded_meanwhile_leaves_the_scan_waiting(app):
         vehicles.create_vehicle(scan_form("CA123456"), customer_id=owner_id)
         with pytest.raises(ValueError):
             vehicles.allocate_waiting_vehicle(waiting_id, pending_id)
-        # The failed claim rolled back: the scan is still waiting and no vehicle was added.
-        remaining = [dict(r) for r in vehicles.list_waiting_vehicles()]
-        assert [r["id"] for r in remaining] == [waiting_id]
+        # The failed claim rolled back, but an allocated plate is never advertised as available.
+        assert vehicles.get_waiting_vehicle(waiting_id) is not None
+        assert vehicles.list_waiting_vehicles() == []
     assert vehicle_count(app, pending_id) == 0
 
 

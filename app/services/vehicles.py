@@ -29,6 +29,7 @@ from app.services.access import (
     session_active_branch_id,
     session_branch_scope_ids,
     session_primary_branch_id,
+    is_main_session,
 )
 
 SOURCE_MANUAL = "manual"
@@ -891,6 +892,10 @@ def waiting_branch_id():
     background context, or an account with no branch), which keeps the historic behaviour: the
     row lands in the branch-less bucket, visible to every all-branch viewer.
     """
+    from flask import has_request_context, session
+
+    if has_request_context() and is_main_session(session):
+        return None  # Head-office scans form a shared pool, even with a selected branch.
     return session_active_branch_id() or session_primary_branch_id()
 
 
@@ -908,11 +913,27 @@ def _waiting_columns():
     )
 
 
-def _waiting_select():
-    """The one SELECT shape for the queue: the row plus its branch's name, for labelling."""
+def _shared_waiting_sql():
+    # NULL alone is not authority: unknown legacy scans remain restricted.
+    return "(w.branch_id IS NULL AND u.role = 'owner')"
+
+
+def _available_waiting_sql():
     return (
-        "SELECT w.*, b.name AS branch_name FROM vehicle_waiting_list w "
-        "LEFT JOIN branches b ON b.id = w.branch_id"
+        "w.status = 'approved' AND NOT EXISTS (SELECT 1 FROM vehicles v "
+        "WHERE REPLACE(UPPER(v.registration), ' ', '') = "
+        "REPLACE(UPPER(w.registration), ' ', ''))"
+    )
+
+
+def _waiting_select():
+    """Queue metadata only; sharing never joins or exposes customer details."""
+    return (
+        f"SELECT w.*, {_shared_waiting_sql()} AS shared_pool, "
+        f"CASE WHEN {_shared_waiting_sql()} THEN 'Head office · all branches' "
+        "ELSE b.name END AS branch_name FROM vehicle_waiting_list w "
+        "LEFT JOIN branches b ON b.id = w.branch_id "
+        "LEFT JOIN users u ON u.id = w.created_by_user_id"
     )
 
 
@@ -944,12 +965,13 @@ def list_waiting_vehicles(branch_ids=None):
             ids = [value for value in ids if value in scope]
     elif scope is not None:
         ids = list(scope)
-    sql = _waiting_select()
+    sql = _waiting_select() + " WHERE " + _available_waiting_sql()
     params = []
     if ids is not None:
         if not ids:
             return []
-        sql += f" WHERE w.branch_id IN ({', '.join('?' for _ in ids)})"
+        sql += (f" AND (w.branch_id IN ({', '.join('?' for _ in ids)}) "
+                f"OR {_shared_waiting_sql()})")
         params.extend(ids)
     sql += _waiting_order()
     return get_db().execute(sql, params).fetchall()
@@ -1061,6 +1083,13 @@ def _insert_waiting(values, timestamp):
         "updated_at": timestamp,
     }
     db = get_db()
+    # A direct client scan can have recorded a queued plate without using this allocator.
+    # Such rows are no longer available and must not consume one of the three slots.
+    db.execute(
+        "DELETE FROM vehicle_waiting_list WHERE EXISTS (SELECT 1 FROM vehicles v "
+        "WHERE REPLACE(UPPER(v.registration), ' ', '') = "
+        "REPLACE(UPPER(vehicle_waiting_list.registration), ' ', ''))"
+    )
     for slot in WAITING_LIST_SLOTS:
         params["slot"] = slot
         try:
@@ -1228,8 +1257,13 @@ def allocate_waiting_vehicle(waiting_id, customer_id, mode=None):
         # Two different waiting scans allocated to the same client must serialize too.
         get_db().execute("UPDATE vehicle_waiting_list SET slot = slot WHERE id = ?", (waiting_id,))
         waiting = get_waiting_vehicle(waiting_id)
-        if waiting is None:
+        if (waiting is None or vehicle_status(waiting) != STATUS_APPROVED
+                or get_vehicle_by_registration(_row_field(waiting, "registration", "")) is not None):
             raise ValueError(WAITING_LIST_STALE_MESSAGE)
+        if not _row_field(waiting, "shared_pool", False):
+            scope = session_branch_scope_ids()
+            if scope is not None and _row_field(waiting, "branch_id") not in scope:
+                raise ValueError("That scanned vehicle is outside the branches you can access.")
         target = _customer_exists(customer_id)
         if target is None:
             raise ValueError("Choose the client this scanned vehicle belongs to.")

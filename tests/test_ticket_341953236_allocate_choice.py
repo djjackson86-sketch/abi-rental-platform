@@ -296,7 +296,9 @@ def test_a_duplicate_plate_leaves_the_scan_waiting(app, branches):
     with pytest.raises(ValueError):
         allocate(app, waiting_id, customer_id, "additional")
 
-    assert len(queued(app)) == 1
+    assert queued(app) == []  # An allocated plate is not available after a failed claim.
+    with app.app_context():
+        assert vehicles.get_waiting_vehicle(waiting_id) is not None
     assert vehicles_for(app, customer_id) == []
 
 
