@@ -76,6 +76,13 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
 .mobile-nav{display:none}.page-header{min-height:100px;margin:0 -40px 30px;padding:0 40px;display:flex;align-items:center;justify-content:space-between;gap:18px;background:#fff;border-bottom:1px solid var(--line)}
 .page-header h1{margin:0;font-size:28px;line-height:1.12;letter-spacing:-.04em;font-weight:760}.page-header p{margin:8px 0 0;color:var(--muted);font-size:15px}.eyebrow{margin:0 0 8px!important;color:var(--brand)!important;text-transform:none;font-size:13px!important;font-weight:760;letter-spacing:.01em}.header-actions,.form-actions,.document-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.inline-form{display:inline-flex}
 .flashes{margin:18px 0}.flash{padding:12px 14px;border-radius:var(--radius);border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-weight:650}.flash.error{border-color:#fecaca;background:var(--danger-soft);color:var(--danger)}.flash.success{border-color:#bbf7d0;background:var(--success-soft);color:#047857}
+/* Ticket ABI-341953249: the day-report over/short reasons pop up as a modal. */
+.cash-variance-dialog{width:min(34rem,calc(100% - 2rem));max-width:calc(100% - 2rem);max-height:90dvh;overflow-y:auto;box-sizing:border-box;border:1px solid #fecaca;border-radius:12px;padding:24px;background:var(--surface);color:var(--text)}
+.cash-variance-dialog::backdrop{background:rgba(15,23,42,.45)}
+.cash-variance-dialog h2{margin:0 0 10px;font-size:20px;font-weight:760;color:var(--danger)}
+.cash-variance-dialog p{margin:0 0 12px;color:var(--muted);font-size:15px}
+.cash-variance-list{margin:0 0 18px;padding-left:20px;font-weight:650;color:var(--danger)}
+.cash-variance-list li{margin:0 0 6px}
 
 .panel,.setup-card,.feature-grid>article,.product-card,.empty-state,.rental-period,.product-detail-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm)}
 .panel{padding:22px}.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.panel h2,.setup-card h2{margin:0 0 14px;font-size:16px;letter-spacing:-.02em}.panel h3{margin:16px 0 10px;font-size:14px}.panel-title a{color:var(--brand);font-weight:750}

@@ -69,7 +69,25 @@
       </div>
       <p class="push-hint" data-push-hint hidden></p>
     </div>
-    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+    {# Ticket ABI-341953249: the over/short day-report reasons are shown as a
+       pop-up, not in the inline strip, so they are split out here. Every other
+       flash category still renders exactly as before. #}
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% set flash_ns = namespace(inline=[], variance=[]) %}{% for category, message in messages %}{% if category == 'cash-variance' %}{% set flash_ns.variance = flash_ns.variance + [message] %}{% else %}{% set flash_ns.inline = flash_ns.inline + [(category, message)] %}{% endif %}{% endfor %}{% if flash_ns.inline %}<div class="flashes">{% for category, message in flash_ns.inline %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% if flash_ns.variance %}<dialog class="cash-variance-dialog" id="cash-variance-dialog" aria-labelledby="cash-variance-dialog-title">
+      <h2 id="cash-variance-dialog-title">Day report not submitted</h2>
+      <p>The day report cannot be submitted until the reason is written in the notes of the cash up that is over or short.</p>
+      <ul class="cash-variance-list">
+        {% for message in flash_ns.variance %}<li>{{ message }}</li>{% endfor %}
+      </ul>
+      <form method="dialog"><button class="btn primary" type="submit">Close</button></form>
+    </dialog>
+    <script>
+    (function(){
+      var dialog = document.getElementById('cash-variance-dialog');
+      if(!dialog){ return; }
+      if(typeof dialog.showModal === 'function'){ if(!dialog.open){ dialog.showModal(); } }
+      else { dialog.setAttribute('open', ''); }
+    })();
+    </script>{% endif %}{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}
   </main>
 </div>

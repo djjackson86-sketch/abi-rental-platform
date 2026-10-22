@@ -354,10 +354,32 @@ def _variance_label(variance, cashed_up):
     return 'Balanced'
 
 
-# Ticket ABI-341953248: a day report may not be submitted while a Cash up or POS
-# Cashup is over or short and that panel's own Notes box is still empty. This is
-# the wording the client asked for, flashed verbatim by the submit route.
-VARIANCE_NOTE_ERROR = 'POS Cashup or Cash up is over or short - write the reason on notes'
+# Ticket ABI-341953249: a day report may not be submitted while a Cash up or POS
+# Cashup is over or short and that panel's own Notes box is still empty. The
+# client asked for one exact message per side and direction; the submit route
+# flashes every applicable one and the dashboard shows them as a pop-up.
+VARIANCE_NOTE_ERROR_POS_OVER = 'POS Cashup is over - write reason on notes'
+VARIANCE_NOTE_ERROR_POS_SHORT = 'POS Cashup is short - write reason on notes'
+VARIANCE_NOTE_ERROR_CASH_OVER = 'Cash up is over - write reason on notes'
+VARIANCE_NOTE_ERROR_CASH_SHORT = 'Cash up is short - write reason on notes'
+
+# The order the client listed the four messages in: POS over, POS short,
+# Cash up over, Cash up short.
+VARIANCE_NOTE_ERRORS = {
+    ('pos', 'over'): VARIANCE_NOTE_ERROR_POS_OVER,
+    ('pos', 'short'): VARIANCE_NOTE_ERROR_POS_SHORT,
+    ('cash', 'over'): VARIANCE_NOTE_ERROR_CASH_OVER,
+    ('cash', 'short'): VARIANCE_NOTE_ERROR_CASH_SHORT,
+}
+VARIANCE_NOTE_ERROR_ORDER = (
+    ('pos', 'over'), ('pos', 'short'), ('cash', 'over'), ('cash', 'short'),
+)
+
+# Internal marker for the submit gate. It is never shown to a user (the route
+# renders ``variance_note_errors()`` instead) and is filtered out of the human
+# "complete these sections" list, so the existing section wording and ordering
+# stay exactly as they were.
+VARIANCE_NOTE_GATE = 'Cash up and POS Cashup reason notes'
 
 # Same ±R0.005 tolerance the variance labels and ``_variance_text`` use, so a
 # one-cent float rounding artefact still counts as balanced.
@@ -397,6 +419,32 @@ def _variance_note_gaps(summary):
             gaps.append(f'{label} ({note_required[0].upper()}{note_required[1:]})')
     return gaps
 
+
+
+def _variance_direction(note_required):
+    """``'over'`` / ``'short'`` for a ``_variance_note_required`` value, else ``''``."""
+    text = str(note_required or '').strip().lower()
+    if text.startswith('over'):
+        return 'over'
+    if text.startswith('short'):
+        return 'short'
+    return ''
+
+
+def variance_note_errors(summary):
+    """Every over/short reason still owed by one summary, in the client's order.
+
+    Ticket ABI-341953249: one exact sentence per offending side, e.g.
+    ``'POS Cashup is short - write reason on notes'``. ``[]`` when both sides are
+    balanced, not cashed up, or already carry the reason in their own notes box.
+    """
+    summary = summary or {}
+    errors = []
+    for side, direction in VARIANCE_NOTE_ERROR_ORDER:
+        if _variance_direction(summary.get(f'{side}_note_required')) != direction:
+            continue
+        errors.append(VARIANCE_NOTE_ERRORS[(side, direction)])
+    return errors
 
 
 def day_summary(day=None, branch_id=None):
@@ -487,8 +535,9 @@ def day_summary(day=None, branch_id=None):
         },
         'has_day_row': day_row is not None,
     }
-    # Ticket ABI-341953248: the labels the day report submit gate flashes.
+    # Ticket ABI-341953248/249: the labels the day report submit gate flashes.
     summary['variance_note_gaps'] = _variance_note_gaps(summary)
+    summary['variance_note_errors'] = variance_note_errors(summary)
     return summary
 
 
@@ -554,6 +603,12 @@ def aggregate_day_summary(day=None, branch_ids=None):
     for summary in summaries:
         for gap in summary.get('variance_note_gaps') or []:
             variance_note_gaps.append(f"{summary['branch_name']}: {gap}")
+    # Ticket ABI-341953249: the same four client messages, named per depot, so an
+    # All branches view can never hide whose cash up still owes a reason.
+    variance_note_errors = []
+    for summary in summaries:
+        for error in summary.get('variance_note_errors') or []:
+            variance_note_errors.append(f"{summary['branch_name']}: {error}")
     cash_note_required = next(
         (summary['cash_note_required'] for summary in summaries
          if summary.get('cash_note_required')), '')
@@ -620,6 +675,7 @@ def aggregate_day_summary(day=None, branch_ids=None):
         'cash_note_required': cash_note_required,
         'pos_note_required': pos_note_required,
         'variance_note_gaps': variance_note_gaps,
+        'variance_note_errors': variance_note_errors,
         'notes': '\n'.join(notes),
         'interactions': {
             'calls': sum(summary['interactions']['calls'] for summary in summaries),
@@ -988,10 +1044,11 @@ def missing_day_report_required_sections(report):
         missing.append('POS Cashup')
     # Ticket ABI-341953248: an over or short Cash up / POS Cashup must carry the
     # reason in that panel's own Notes box before the day report may be submitted.
-    # The route flashes VARIANCE_NOTE_ERROR for this entry; it is appended here so
-    # the existing section ordering above is untouched.
+    # The route renders ``variance_note_errors()`` for this entry (ticket
+    # ABI-341953249); it is appended here so the existing section ordering above
+    # is untouched.
     if cash_summary.get('variance_note_gaps'):
-        missing.append(VARIANCE_NOTE_ERROR)
+        missing.append(VARIANCE_NOTE_GATE)
     spare_rows = report.get('spare_wheels') or []
     if not spare_rows or any(not row.get('counted') for row in spare_rows):
         missing.append('Spare wheel count')

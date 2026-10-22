@@ -1375,7 +1375,28 @@ def test_zero_values_count_as_filled_when_required_sections_are_saved(client, ap
 # until the reason is written in that panel's own Notes box.
 # --------------------------------------------------------------------------- #
 
-VARIANCE_NOTE_ERROR = 'POS Cashup or Cash up is over or short - write the reason on notes'
+# Ticket ABI-341953249: the client's own four messages, verbatim. One per side
+# (POS Cashup / Cash up) and direction (over / short), in the order asked for.
+POS_OVER = 'POS Cashup is over - write reason on notes'
+POS_SHORT = 'POS Cashup is short - write reason on notes'
+CASH_OVER = 'Cash up is over - write reason on notes'
+CASH_SHORT = 'Cash up is short - write reason on notes'
+ALL_VARIANCE_MESSAGES = (POS_OVER, POS_SHORT, CASH_OVER, CASH_SHORT)
+
+
+def _popup_messages(body):
+    """The lines inside the over/short pop-up, in document order (``[]`` = none)."""
+    marker = 'class="cash-variance-list"'
+    if marker not in body:
+        return []
+    inside = body.split(marker, 1)[1].split('</ul>', 1)[0]
+    return [re.sub(r'\s+', ' ', line).strip() for line in re.findall(r'<li>(.*?)</li>', inside, re.S)]
+
+
+def _assert_no_inline_variance_banner(body):
+    """The reasons must be a pop-up, never the inline flash strip."""
+    assert 'flash cash-variance' not in body
+    assert 'class="flash cash-variance"' not in body
 
 
 def _fill_sections(client, day=TODAY, branch='1', counted_cash='0', counted_card='0',
@@ -1426,7 +1447,8 @@ def test_a_short_cash_up_without_a_note_blocks_the_day_report(client, app, monke
 
     body = _submit_day_report(client).get_data(as_text=True)
 
-    assert VARIANCE_NOTE_ERROR in body
+    assert _popup_messages(body) == [CASH_SHORT], 'the client wording, on its own'
+    _assert_no_inline_variance_banner(body)
     assert 'Note required: short by R20.00' in body, 'the panel names the drift'
     assert sent['called'] is False, 'nothing may be sent'
     assert _recorded_submissions(app) == 0, 'a blocked submit is never recorded'
@@ -1455,6 +1477,7 @@ def test_writing_the_cash_up_note_releases_the_block(client, app, monkeypatch):
     assert 'Day report sent on Telegram for Branch 1' in body
     assert sent['called'] is True
     assert _recorded_submissions(app) == 1
+    assert _popup_messages(body) == [], 'no pop-up once the reason is written'
 
 
 def test_an_over_pos_cashup_without_a_note_blocks_the_day_report(client, app, monkeypatch):
@@ -1472,7 +1495,8 @@ def test_an_over_pos_cashup_without_a_note_blocks_the_day_report(client, app, mo
     _fill_sections(client, counted_cash='0', counted_card='510')
 
     body = _submit_day_report(client).get_data(as_text=True)
-    assert VARIANCE_NOTE_ERROR in body
+    assert _popup_messages(body) == [POS_OVER]
+    _assert_no_inline_variance_banner(body)
     assert 'Note required: over by R10.00' in body
     assert sent['called'] is False
     assert _recorded_submissions(app) == 0
@@ -1507,7 +1531,7 @@ def test_an_end_of_day_note_does_not_excuse_a_short_cash_up(client, app, monkeyp
 
     body = _submit_day_report(client).get_data(as_text=True)
 
-    assert VARIANCE_NOTE_ERROR in body
+    assert _popup_messages(body) == [CASH_SHORT]
     assert sent['called'] is False
     assert _recorded_submissions(app) == 0
 
@@ -1527,7 +1551,7 @@ def test_a_whitespace_only_note_still_counts_as_no_note(client, app, monkeypatch
 
     body = _submit_day_report(client).get_data(as_text=True)
 
-    assert VARIANCE_NOTE_ERROR in body
+    assert _popup_messages(body) == [CASH_SHORT]
     assert sent['called'] is False
     assert _recorded_submissions(app) == 0
 
@@ -1548,7 +1572,9 @@ def test_a_balanced_cash_up_and_pos_needs_no_note(client, app, monkeypatch):
 
     body = _submit_day_report(client).get_data(as_text=True)
 
-    assert VARIANCE_NOTE_ERROR not in body
+    assert _popup_messages(body) == []
+    for message in ALL_VARIANCE_MESSAGES:
+        assert message not in body, 'nothing is owed, so nothing is shown'
     assert 'Day report sent on Telegram for Branch 1' in body
     assert sent['called'] is True
 
@@ -1562,6 +1588,90 @@ def test_the_sub_cent_tolerance_is_the_one_the_variance_labels_use(app):
         assert cash._variance_note_required(True, -0.01, '') == 'short by R0.01'
         assert cash._variance_note_required(False, None, '') == ''
         assert cash._variance_note_required(True, -20.0, 'R20 diesel') == ''
+        # ... and the four client messages follow the same tolerance exactly.
+        assert cash.variance_note_errors({'cash_note_required': '', 'pos_note_required': ''}) == []
+        assert cash.variance_note_errors({'cash_note_required': 'short by R0.01'}) == [CASH_SHORT]
+        assert cash.variance_note_errors({'pos_note_required': 'over by R0.01'}) == [POS_OVER]
+
+
+def test_each_of_the_four_messages_belongs_to_its_own_condition(app):
+    """No condition may borrow the other side's or the other direction's wording."""
+    with app.app_context():
+        assert cash.variance_note_errors({'cash_note_required': 'over by R20.00'}) == [CASH_OVER]
+        assert cash.variance_note_errors({'cash_note_required': 'short by R20.00'}) == [CASH_SHORT]
+        assert cash.variance_note_errors({'pos_note_required': 'over by R10.00'}) == [POS_OVER]
+        assert cash.variance_note_errors({'pos_note_required': 'short by R10.00'}) == [POS_SHORT]
+        # Ticket order: POS over, POS short, Cash up over, Cash up short.
+        assert cash.variance_note_errors({
+            'pos_note_required': 'short by R10.00',
+            'cash_note_required': 'over by R20.00',
+        }) == [POS_SHORT, CASH_OVER]
+        # Balanced, not cashed up and not-present all mean nothing is owed.
+        assert cash.variance_note_errors({}) == []
+        assert cash.variance_note_errors(None) == []
+
+
+def test_both_sides_off_show_both_messages_in_the_popup(client, app, monkeypatch):
+    """POS over + Cash up short, neither with a note: both lines, client's order."""
+    sent = {'called': False}
+
+    def fake_send(*_args, **_kwargs):
+        sent['called'] = True
+        return {'ok': True, 'sent': True, 'status': 200}
+
+    from app.routes import cash as cash_routes
+    monkeypatch.setattr(cash_routes, '_send_document', fake_send)
+    login(client)
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1)
+    _seed_payment(app, 300.0, method='card', day=TODAY, branch_id=1, number='ORD-90002')
+    # R500 expected in cash, R480 counted -> R20 short; R300 on card, R310 -> R10 over.
+    _fill_sections(client, counted_cash='480', counted_card='310')
+
+    body = _submit_day_report(client).get_data(as_text=True)
+
+    assert _popup_messages(body) == [POS_OVER, CASH_SHORT]
+    _assert_no_inline_variance_banner(body)
+    assert sent['called'] is False
+    assert _recorded_submissions(app) == 0
+
+    # Filling only the POS note leaves the cash up's own reason owed.
+    client.post('/cash-up/pos', data={
+        'day': TODAY, 'branch': '1', 'counted_card': '310',
+        'pos_cash_up_notes': 'Card slip reversed and re-rung.',
+    }, follow_redirects=True)
+    body = _submit_day_report(client).get_data(as_text=True)
+    assert _popup_messages(body) == [CASH_SHORT]
+    assert sent['called'] is False
+
+    # Filling both releases the submit.
+    client.post('/cash-up', data={
+        'day': TODAY, 'branch': '1', 'counted_cash': '480',
+        'cash_up_notes': 'R20 on diesel.',
+    }, follow_redirects=True)
+    body = _submit_day_report(client).get_data(as_text=True)
+    assert _popup_messages(body) == []
+    assert sent['called'] is True
+
+
+def test_the_blocked_submit_renders_a_real_popup_not_a_banner(client, app, monkeypatch):
+    """The reasons arrive in a <dialog> that auto-opens, with a Close button."""
+    monkeypatch.setattr(
+        __import__('app.routes.cash', fromlist=['cash']), '_send_document',
+        lambda *_args, **_kwargs: {'ok': True, 'sent': True, 'status': 200},
+    )
+    login(client)
+    _seed_payment(app, 500.0, method='cash', day=TODAY, branch_id=1)
+    _fill_sections(client, counted_cash='480')
+
+    body = _submit_day_report(client).get_data(as_text=True)
+
+    assert 'id="cash-variance-dialog"' in body
+    assert '<dialog class="cash-variance-dialog"' in body
+    assert 'showModal()' in body, 'it opens itself on the page the submit lands on'
+    assert '<button class="btn primary" type="submit">Close</button>' in body
+    assert 'class="cash-variance-list"' in body
+    # Only the four reasons live in the pop-up; nothing is duplicated into a banner.
+    _assert_no_inline_variance_banner(body)
 
 
 def test_the_dashboard_hints_at_the_note_without_blocking_the_forms(client, app):
@@ -1588,14 +1698,17 @@ def test_the_all_branches_summary_names_the_depot_that_owes_a_reason(client, app
     with app.app_context():
         summary = cash.aggregate_day_summary(day=TODAY, branch_ids=[1, 2])
         assert summary['variance_note_gaps'] == ['Branch 1: Cash up (Short by R20.00)']
+        # Ticket ABI-341953249: the four client messages, named per depot.
+        assert summary['variance_note_errors'] == ['Branch 1: ' + CASH_SHORT]
         # ... and the submit gate reads it, so a depot's gap cannot hide in the sum.
         report = {'cash': summary, 'spare_wheels': [{'counted': True}]}
-        assert cash.missing_day_report_required_sections(report) == [cash.VARIANCE_NOTE_ERROR]
+        assert cash.missing_day_report_required_sections(report) == [cash.VARIANCE_NOTE_GATE]
 
         cash.save_cash_up(TODAY, '480', branch_id=1,
                           cash_up_notes='R20 was used for diesel.')
         satisfied = cash.aggregate_day_summary(day=TODAY, branch_ids=[1, 2])
         assert satisfied['variance_note_gaps'] == []
+        assert satisfied['variance_note_errors'] == []
         assert cash.missing_day_report_required_sections(
             {'cash': satisfied, 'spare_wheels': [{'counted': True}]}) == []
 
