@@ -912,7 +912,19 @@ def _build_order_payload(form, allow_blocked_customer_id=None, allow_pending_cus
             if product_under_maintenance(product):
                 raise ValueError(under_maintenance_error(product))
             if collect_branch_id and product["branch_id"] and product["branch_id"] != collect_branch_id:
-                raise ValueError("Selected product is not assigned to the collection branch")
+                # A trailer may be owned by another depot but explicitly stocked
+                # at the collecting branch (product_branch_stock). The order
+                # picker lists those allocated units, and the enquiry handoff
+                # pre-fills them, so saving the draft must accept the same
+                # allocation. Require real stock at the collecting branch; an
+                # empty or missing allocation is still the old hard block.
+                allocated = product_branch_stock(product["id"]).get(int(collect_branch_id), 0)
+                try:
+                    allocated = float(allocated or 0)
+                except (TypeError, ValueError):
+                    allocated = 0
+                if allocated <= 0:
+                    raise ValueError("Selected product is not assigned to the collection branch")
             line = calculate_line(product, quantity, days, settings["tax_mode"], custom_price)
             line["billing_mode"] = "catalog"
             snapshot = description or (product["description"] or "").strip()

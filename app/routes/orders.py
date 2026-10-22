@@ -192,7 +192,7 @@ def _products():
     else:
         marks = ",".join("?" for _ in scope_ids)
         scope_sql = (f" AND (p.branch_id IN ({marks}) OR p.branch_id IS NULL "
-                     f"OR EXISTS (SELECT 1 FROM product_branch_stock ps WHERE ps.product_id=p.id AND ps.branch_id IN ({marks})))")
+                     f"OR EXISTS (SELECT 1 FROM product_branch_stock ps WHERE ps.product_id=p.id AND ps.branch_id IN ({marks}) AND COALESCE(ps.quantity,0)>0))")
         params = list(scope_ids) + list(scope_ids)
     return get_db().execute(f"""
         SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,

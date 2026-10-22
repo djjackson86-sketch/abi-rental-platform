@@ -139,6 +139,23 @@ def test_enquiry_can_prepare_stock_allocated_from_another_owner_branch(app,clien
     assert 'Cross-owned bulk stock — CROSS-STOCK' in html
     assert f'class="product-id" value="{product}"' in html
 
+    # Saving the pre-filled draft must accept the allocation the picker just
+    # offered. Regression: the picker allowed it but create_order rejected the
+    # cross-owned line, making the handoff cosmetic.
+    public_form=rental_form(stock_branch,product,request_key='cross-owned-save')
+    customer=customers.create_customer({'customer_type':'individual','name':public_form['customer_name'],'email':public_form['customer_email'],'phone':public_form['customer_phone']},branch_id=stock_branch,notify=False)
+    with client.session_transaction() as s:token=s['_csrf_tokens']['shop_enquiry_convert']
+    data={'shop_enquiry_id':str(result['enquiry_id']),'csrf_token':token,'customer_id':str(customer),
+          'booking_type':'return','collect_branch_id':str(stock_branch),'return_branch_id':str(stock_branch),
+          'product_id':str(product),'quantity':'2','custom_name':'','custom_unit_price':'','custom_billing_mode':'rental_day',
+          'start_date':public_form['start_date'],'start_time':'09:00','end_date':public_form['end_date'],'end_time':'15:00'}
+    saved=client.post('/orders/new?enquiry_id='+str(result['enquiry_id']),data=data)
+    assert saved.status_code==302,saved.get_data(as_text=True)[:800]
+    order_id=int(re.search(r'/orders/(\d+)$',saved.location).group(1))
+    line_row=get_db().execute('SELECT product_id,quantity FROM order_items WHERE order_id=?',(order_id,)).fetchone()
+    assert line_row['product_id']==product and line_row['quantity']==2
+    assert shop_enquiries.get_enquiry(result['enquiry_id'])['linked_order_id']==order_id
+
 
 def test_trusted_proxy_only_uses_one_forwarded_ip_hop_not_forwarded_host(tmp_path):
     from app import create_app
