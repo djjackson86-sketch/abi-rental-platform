@@ -182,6 +182,16 @@
     {% if cash_day.cash_up_notes|trim %}
     <div class="cash-note recorded-cashup-note"><strong>Cash up notes</strong><p style="white-space: pre-wrap">{{ cash_day.cash_up_notes }}</p></div>
     {% endif %}
+    {# Ticket ABI-341953248: non-blocking hint only - the submit gate itself lives
+       in the service/route. "All branches" names each depot that still owes a
+       reason on either side. #}
+    {% if cash_day.aggregate and cash_day.variance_note_gaps %}
+    {% for gap in cash_day.variance_note_gaps %}
+    <p class="cash-note" style="color:#b42318;font-weight:600">Note required: {{ gap }} — write the reason before that depot submits its day report.</p>
+    {% endfor %}
+    {% elif cash_day.cash_note_required %}
+    <p class="cash-note" style="color:#b42318;font-weight:600">Note required: {{ cash_day.cash_note_required }} — write the reason in the Cash up notes below before submitting the day report.</p>
+    {% endif %}
     {% if cash_day.aggregate %}
     <p class="cash-note">All branch cash-up figures are read-only totals. Select a branch in the top Branch filter to enter counted cash.</p>
     {% elif not day_is_today %}
@@ -211,6 +221,10 @@
     </div>
     {% if cash_day.pos_cash_up_notes|trim %}
     <div class="cash-note recorded-cashup-note"><strong>POS Cashup notes</strong><p style="white-space: pre-wrap">{{ cash_day.pos_cash_up_notes }}</p></div>
+    {% endif %}
+    {# Ticket ABI-341953248: POS-side hint; the All branches list is on the Cash up panel. #}
+    {% if not cash_day.aggregate and cash_day.pos_note_required %}
+    <p class="cash-note" style="color:#b42318;font-weight:600">Note required: {{ cash_day.pos_note_required }} — write the reason in the POS Cashup notes below before submitting the day report.</p>
     {% endif %}
     {% if cash_day.aggregate %}
     <p class="cash-note">All branch POS/card cash-up figures are read-only totals. Select a branch in the top Branch filter to enter counted POS/card payments.</p>

@@ -149,9 +149,18 @@ def add_depot_staff(client, app, name, branch_id, password='staff123'):
 
 
 def cash_up(app, day, branch_id, counted):
+    """A depot's day with every dashboard section filled in.
+
+    Since ticket ABI-341953248 the day report gate refuses a submit while the
+    drawer or the POS is over or short and that panel's Notes box is empty, so
+    this fixture always writes a reason on both sides - these tests are about the
+    combined-report send, not about the note rule (tests/test_cash_up.py covers it).
+    """
     with app.app_context():
-        cash.save_cash_up(day, counted, branch_id=branch_id)
-        cash.save_pos_cash_up(day, '0', branch_id=branch_id)
+        cash.save_cash_up(day, counted, branch_id=branch_id,
+                          cash_up_notes='Drawer counted twice by the depot clerk.')
+        cash.save_pos_cash_up(day, '0', branch_id=branch_id,
+                              pos_cash_up_notes='POS batch checked against the slip.')
         cash.save_interactions(day, '0', '0', '0', '0', '', branch_id=branch_id)
         spare_wheels.save_actual_counts(
             day,

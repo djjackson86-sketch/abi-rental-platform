@@ -394,7 +394,16 @@ def submit_report_telegram():
     branch_name = cash_summary["branch_name"] or "this depot"
     missing = cash.missing_day_report_required_sections(report)
     if missing:
-        flash(f"Complete these sections before submitting the day report: {', '.join(missing)}", "error")
+        if cash.VARIANCE_NOTE_ERROR in missing:
+            # Ticket ABI-341953248: an over/short cash up or POS Cashup with an
+            # empty note box blocks the submit, with the client's own wording.
+            others = [item for item in missing if item != cash.VARIANCE_NOTE_ERROR]
+            message = cash.VARIANCE_NOTE_ERROR
+            if others:
+                message = f"{message}. Also complete: {', '.join(others)}"
+            flash(message, "error")
+        else:
+            flash(f"Complete these sections before submitting the day report: {', '.join(missing)}", "error")
         return redirect(_dashboard_url(branch_id))
     filename = _report_filename(branch_name, day, cash_summary.get("branch_id"))
     caption = f"Day report — {branch_name} — {day}"
