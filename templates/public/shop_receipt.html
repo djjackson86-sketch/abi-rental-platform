@@ -1,0 +1,27 @@
+{% extends "public/shop_shell.html" %}
+{% block title %}Enquiry received | {{ settings.company_name }}{% endblock %}
+{% block shop_body %}
+<section><div class="wrap"><div class="shop-summary">
+    <p class="eyebrow">Enquiry received</p>
+    <h1>Thank you — {{ receipt.branch_name or 'your branch' }} has your enquiry.</h1>
+    <p class="shop-receipt-copy">
+      We have sent this to the branch team. Someone will be in touch on the contact details you gave us.
+      Nothing has been booked or charged yet.
+    </p>
+    <dl class="shop-receipt-facts">
+      <div><dt>Reference</dt><dd><code class="shop-reference">{{ receipt.receipt_token }}</code></dd></div>
+      <div><dt>Enquiry type</dt><dd>{{ receipt.type_label }}</dd></div>
+      <div><dt>Branch</dt><dd>{{ receipt.branch_name or '—' }}</dd></div>
+      <div><dt>Received</dt><dd>{{ display_local_date(receipt.created_at) }}</dd></div>
+      <div><dt>Status</dt><dd>{{ receipt.status_label }}</dd></div>
+    </dl>
+    <p class="shop-receipt-hint">
+      Keep this reference. It is the only thing this page shows — no personal details are repeated here,
+      so it is safe to leave open on a shared device.
+    </p>
+    <div class="shop-receipt-actions">
+      <a class="btn primary" href="{{ store_url }}">Keep browsing</a>
+      {% if privacy_url %}<a class="btn ghost" href="{{ privacy_url }}">Privacy notice</a>{% endif %}
+    </div>
+</div></div></section>
+{% endblock %}

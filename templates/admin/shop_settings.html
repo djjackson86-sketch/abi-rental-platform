@@ -1,0 +1,100 @@
+{% extends "admin/layout.html" %}
+{% set title='Shop home images' %}
+{% block admin_body %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/shop-admin.css') }}">
+<header class="page-header shop-header">
+  <div class="module-title">
+    <span class="module-icon">⌂</span>
+    <div>
+      <p class="eyebrow">Online store</p>
+      <h1>Shop home images</h1>
+      <p class="shop-lede">The three pictures on the shop's home page: trailer hire, buying a trailer, and repairs &amp; service. Stored in the database, so they survive every deploy.</p>
+    </div>
+  </div>
+  <div class="shop-header-actions">
+    <a class="btn ghost" href="{{ url_for('shop_admin.listings') }}">Shop listings</a>
+    <a class="btn ghost" href="{{ url_for('admin.online_store') }}">Store settings</a>
+    <a class="btn ghost" href="{{ url_for('public.store') }}" target="_blank" rel="noopener">Open shop</a>
+  </div>
+</header>
+
+<section class="panel shop-link-panel">
+  <div>
+    <strong>Shop link</strong>
+    <p class="muted">Send this to customers. It is the same storefront the website is linked to.</p>
+  </div>
+  <div class="shop-link-row">
+    <input type="text" id="shop-link" value="{{ shop_url }}" readonly aria-label="Shop link">
+    <button type="button" class="btn primary" data-copy-shop-link>Copy shop link</button>
+    <span class="shop-copy-status" data-copy-status role="status" aria-live="polite"></span>
+  </div>
+</section>
+
+<form method="post" action="{{ url_for('shop_admin.shop_settings') }}" enctype="multipart/form-data" class="shop-home-form">
+  <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+  <div class="shop-home-grid">
+    {% for slot in slots %}
+    <section class="panel shop-home-card">
+      <header>
+        <h2>{{ slot.label }}</h2>
+        <code>{{ slot.slot }}</code>
+      </header>
+      <div class="shop-home-preview">
+        {% if slot.url %}
+          <img src="{{ slot.url }}" alt="{{ slot.label }}">
+        {% else %}
+          <span class="shop-home-empty">No image — the shop shows the text card</span>
+        {% endif %}
+      </div>
+      <label class="shop-field">
+        <span>{{ 'Replace image' if slot.url else 'Upload image' }}</span>
+        <input type="file" name="image_{{ slot.slot }}" accept="image/png,image/jpeg,image/webp">
+      </label>
+      {% if slot.url %}
+      <label class="shop-check">
+        <input type="checkbox" name="remove_{{ slot.slot }}" value="1">
+        <span>Remove this image</span>
+      </label>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+  <div class="shop-home-actions">
+    <button class="btn primary" type="submit">Save home images</button>
+    <p class="muted">PNG, JPEG or WebP up to 6&nbsp;MB. Photos are resized and compressed before they are stored.</p>
+  </div>
+</form>
+
+<script>
+(function () {
+  var button = document.querySelector('[data-copy-shop-link]');
+  if (!button) { return; }
+  var field = document.getElementById('shop-link');
+  var status = document.querySelector('[data-copy-status]');
+  function done(ok) {
+    if (!status) { return; }
+    status.textContent = ok ? 'Copied' : 'Select the link and copy it';
+    status.className = 'shop-copy-status ' + (ok ? 'is-ok' : 'is-warn');
+    window.setTimeout(function () { status.textContent = ''; }, 4000);
+  }
+  function legacy() {
+    if (!field) { done(false); return; }
+    field.removeAttribute('readonly');
+    field.select();
+    field.setSelectionRange(0, field.value.length);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    field.setAttribute('readonly', 'readonly');
+    done(ok);
+  }
+  button.addEventListener('click', function () {
+    var text = field ? field.value : '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, legacy);
+    } else {
+      legacy();
+    }
+  });
+})();
+</script>
+{% endblock %}

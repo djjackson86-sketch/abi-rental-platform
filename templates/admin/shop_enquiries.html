@@ -1,0 +1,95 @@
+{% extends "admin/layout.html" %}
+{% set title = 'Store enquiries' %}
+{% block admin_body %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/shop-enquiries.css') }}">
+<header class="page-header shop-enquiries-head">
+  <div>
+    <p class="eyebrow">Online store</p>
+    <h1>Store enquiries{% if new_badge %} <span class="shop-badge new">{{ new_badge }} new</span>{% endif %}</h1>
+    <p>Rental, purchase and repair requests sent from the storefront. Nothing here has touched stock, customers or the books.</p>
+  </div>
+  <a class="btn ghost" href="{{ url_for('admin.online_store') }}">Online store settings</a>
+</header>
+
+<section class="panel shop-enquiries-filters">
+  <form method="get" action="{{ url_for('shop_enquiries.index') }}" class="shop-filter-row">
+    <label>Branch
+      <select name="branch">
+        <option value="">All branches I can see</option>
+        {% for branch in branch_options %}
+        <option value="{{ branch.id }}" {% if selected_branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Type
+      <select name="type">
+        <option value="">All types</option>
+        {% for type in enquiry_types %}
+        <option value="{{ type }}" {% if selected_type == type %}selected{% endif %}>{{ type_labels.get(type, type) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Status
+      <select name="status">
+        <option value="">Any status</option>
+        {% for status in statuses %}
+        <option value="{{ status }}" {% if selected_status == status %}selected{% endif %}>{{ status_labels.get(status, status) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="shop-query">Search
+      <input type="search" name="query" value="{{ query }}" placeholder="Name, email, phone or reference">
+    </label>
+    <button class="btn primary" type="submit">Filter</button>
+    {% if selected_branch or selected_status or selected_type or query %}
+    <a class="btn ghost" href="{{ url_for('shop_enquiries.index') }}">Clear</a>
+    {% endif %}
+  </form>
+  <div class="shop-status-chips" aria-label="Enquiries by status">
+    <a class="shop-chip {% if not selected_status %}active{% endif %}" href="{{ url_for('shop_enquiries.index', branch=selected_branch or None, type=selected_type or None, query=query or None) }}">All <b>{{ total }}</b></a>
+    {% for status in statuses %}
+    <a class="shop-chip {% if selected_status == status %}active{% endif %}" href="{{ url_for('shop_enquiries.index', branch=selected_branch or None, status=status, type=selected_type or None, query=query or None) }}">
+      {{ status_labels.get(status, status) }} <b>{{ counts.get(status, 0) }}</b>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+{% if enquiries %}
+<div class="shop-enquiries-table-wrap panel">
+  <table class="shop-enquiries-table">
+    <thead>
+      <tr>
+        <th scope="col">Received</th>
+        <th scope="col">Type</th>
+        <th scope="col">Customer</th>
+        <th scope="col">Branch</th>
+        <th scope="col">Lines</th>
+        <th scope="col">Status</th>
+        <th scope="col">Assigned</th>
+        <th scope="col"><span class="visually-hidden">Open</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for enquiry in enquiries %}
+      <tr class="{% if enquiry.status == 'new' %}is-new{% endif %}">
+        <td><span class="shop-when">{{ display_local_datetime(enquiry.created_at) }}</span><span class="shop-ref">{{ enquiry.receipt_token[:10] }}</span></td>
+        <td><span class="shop-type {{ enquiry.enquiry_type }}">{{ enquiry.type_label }}</span></td>
+        <td>{{ enquiry.customer_name }}<span class="shop-sub">{{ enquiry.email }}</span></td>
+        <td>{{ enquiry.branch_name or '—' }}</td>
+        <td>{{ enquiry.line_count }} line{{ '' if enquiry.line_count == 1 else 's' }} · {{ enquiry.units_total }} unit{{ '' if enquiry.units_total == 1 else 's' }}</td>
+        <td><span class="shop-badge {{ enquiry.status }}">{{ enquiry.status_label }}</span></td>
+        <td>{{ enquiry.assigned_name or '—' }}</td>
+        <td><a class="btn ghost" href="{{ url_for('shop_enquiries.detail', enquiry_id=enquiry.id) }}">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<section class="panel empty-state">
+  <h2>No enquiries match</h2>
+  <p>{% if new_badge %}There {{ 'is 1 new enquiry' if new_badge == 1 else 'are ' ~ new_badge ~ ' new enquiries' }} waiting under “New”.{% else %}New storefront requests will appear here, and the branch's staff get a push notification.{% endif %}</p>
+</section>
+{% endif %}
+{% endblock %}

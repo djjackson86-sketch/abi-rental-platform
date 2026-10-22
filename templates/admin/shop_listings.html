@@ -1,0 +1,151 @@
+{% extends "admin/layout.html" %}
+{% set title='Shop listings' %}
+{% block admin_body %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/shop-admin.css') }}">
+<header class="page-header shop-header">
+  <div class="module-title">
+    <span class="module-icon">⌂</span>
+    <div>
+      <p class="eyebrow">Online store</p>
+      <h1>Shop listings</h1>
+      <p class="shop-lede">Every item here is an existing inventory product. Editing the shop copy or a photo never changes a price, a deposit, a tax profile or a stock count.</p>
+    </div>
+  </div>
+  <div class="shop-header-actions">
+    <a class="btn ghost" href="{{ url_for('shop_admin.shop_settings') }}">Home-page images</a>
+    <a class="btn ghost" href="{{ url_for('public.store') }}" target="_blank" rel="noopener">Open shop</a>
+  </div>
+</header>
+
+<section class="panel shop-link-panel">
+  <div>
+    <strong>Shop link</strong>
+    <p class="muted">Send this to customers. It is the same storefront the website is linked to.</p>
+  </div>
+  <div class="shop-link-row">
+    <input type="text" id="shop-link" value="{{ shop_url }}" readonly aria-label="Shop link">
+    <button type="button" class="btn primary" data-copy-shop-link>Copy shop link</button>
+    <span class="shop-copy-status" data-copy-status role="status" aria-live="polite"></span>
+  </div>
+</section>
+
+<section class="shop-filters panel">
+  <div class="shop-filter-group">
+    <strong>Type</strong>
+    <a class="shop-chip {% if not type_filter %}active{% endif %}" href="{{ url_for('shop_admin.listings', state=state_filter or None) }}">All ({{ counts.all }})</a>
+    {% for key, label in [('rental', 'Rental'), ('sale', 'Sale'), ('service', 'Service')] %}
+      <a class="shop-chip {% if type_filter == key %}active{% endif %}" href="{{ url_for('shop_admin.listings', type=key, state=state_filter or None) }}">{{ label }} ({{ type_counts.get(key, 0) }})</a>
+    {% endfor %}
+  </div>
+  <div class="shop-filter-group">
+    <strong>State</strong>
+    <a class="shop-chip {% if not state_filter %}active{% endif %}" href="{{ url_for('shop_admin.listings', type=type_filter or None) }}">All</a>
+    <a class="shop-chip {% if state_filter == 'live' %}active{% endif %}" href="{{ url_for('shop_admin.listings', type=type_filter or None, state='live') }}">Live ({{ counts.live }})</a>
+    <a class="shop-chip {% if state_filter == 'hidden' %}active{% endif %}" href="{{ url_for('shop_admin.listings', type=type_filter or None, state='hidden') }}">Hidden ({{ counts.hidden }})</a>
+    <a class="shop-chip {% if state_filter == 'featured' %}active{% endif %}" href="{{ url_for('shop_admin.listings', type=type_filter or None, state='featured') }}">Featured</a>
+    <a class="shop-chip {% if state_filter == 'missing_image' %}active{% endif %}" href="{{ url_for('shop_admin.listings', type=type_filter or None, state='missing_image') }}">No photo ({{ counts.missing_image }})</a>
+  </div>
+</section>
+
+<section class="panel shop-table-panel">
+  {% if products %}
+  <table class="shop-table">
+    <thead>
+      <tr>
+        <th scope="col">Photo</th>
+        <th scope="col">Shop title</th>
+        <th scope="col">Inventory name</th>
+        <th scope="col">Type</th>
+        <th scope="col">Price</th>
+        <th scope="col">Deposit</th>
+        <th scope="col">Category</th>
+        <th scope="col">State</th>
+        <th scope="col"><span class="visually-hidden">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for product in products %}
+      <tr>
+        <td>
+          <div class="shop-thumb">
+            {% if product.store_images %}
+              <img src="{{ product.store_images[0].url }}" alt="{{ product.store_images[0].alt or product.store_title }}">
+            {% elif product.category_image_url %}
+              <img src="{{ product.category_image_url }}" alt="{{ product.category_name }}">
+              <span class="shop-thumb-note">Category</span>
+            {% else %}
+              <span class="shop-thumb-empty">No photo</span>
+            {% endif %}
+          </div>
+        </td>
+        <td>
+          <a class="shop-row-title" href="{{ url_for('shop_admin.listing_detail', product_id=product.id) }}">{{ product.store_title }}</a>
+          {% if product.featured %}<span class="badge shop-badge-featured">Featured</span>{% endif %}
+        </td>
+        <td class="shop-muted-cell">{{ product.name }}</td>
+        <td><span class="shop-type">{{ product.product_type|capitalize }}</span></td>
+        <td>R{{ '%.2f'|format(product.price_amount or 0) }}<span class="shop-unit"> / {{ product.price_unit }}</span></td>
+        <td>R{{ '%.2f'|format(product.security_deposit or 0) }}</td>
+        <td>{{ product.category_name or '—' }}</td>
+        <td>
+          {% if product.store_public %}
+            <span class="badge shop-badge-live">Live</span>
+          {% else %}
+            <span class="badge shop-badge-hidden">Hidden</span>
+          {% endif %}
+          {% if product.store_visibility_issues %}
+            <span class="shop-issue" title="{{ product.store_visibility_issues|join(' · ') }}">{{ product.store_visibility_issues[0] }}</span>
+          {% endif %}
+        </td>
+        <td class="shop-row-actions">
+          <a class="btn ghost small" href="{{ url_for('shop_admin.listing_detail', product_id=product.id) }}">Edit</a>
+          <form method="post" action="{{ url_for('shop_admin.publish_listing', product_id=product.id) }}">
+            <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+            <input type="hidden" name="public_visible" value="{{ '0' if product.store_public else '1' }}">
+            <button type="submit" class="btn ghost small">{{ 'Hide' if product.store_public else 'Publish' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="shop-empty">No products match this filter. Products are created in Inventory — the shop only presents them.</p>
+  {% endif %}
+</section>
+
+<script>
+(function () {
+  var button = document.querySelector('[data-copy-shop-link]');
+  if (!button) { return; }
+  var field = document.getElementById('shop-link');
+  var status = document.querySelector('[data-copy-status]');
+  function done(ok) {
+    if (!status) { return; }
+    status.textContent = ok ? 'Copied' : 'Select the link and copy it';
+    status.className = 'shop-copy-status ' + (ok ? 'is-ok' : 'is-warn');
+    window.setTimeout(function () { status.textContent = ''; }, 4000);
+  }
+  button.addEventListener('click', function () {
+    var text = field ? field.value : '';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { legacy(); });
+    } else {
+      legacy();
+    }
+  });
+  function legacy() {
+    // Clipboard API needs HTTPS/focus; the fallback keeps the button working on
+    // a plain-HTTP counter machine.
+    if (!field) { done(false); return; }
+    field.removeAttribute('readonly');
+    field.select();
+    field.setSelectionRange(0, field.value.length);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    field.setAttribute('readonly', 'readonly');
+    done(ok);
+  }
+})();
+</script>
+{% endblock %}

@@ -72,6 +72,11 @@ def _store_sections():
 
 @bp.route("/store")
 def store():
+    from app.routes.shop_front import home
+    return home()
+
+
+def _legacy_store_render():
     settings = get_company_settings()
     if not settings["store_enabled"]:
         return render_template("public/store_unavailable.html", settings=settings)
@@ -102,6 +107,11 @@ def category_image(group_id):
 
 @bp.route("/store/products/<int:product_id>")
 def product_detail(product_id):
+    from app.routes.shop_front import product_page
+    return product_page(product_id)
+
+
+def _legacy_product_detail(product_id):
     settings = get_company_settings()
     if not settings["store_enabled"]:
         return render_template("public/store_unavailable.html", settings=settings)
@@ -114,6 +124,11 @@ def product_detail(product_id):
 
 @bp.post("/store/products/<int:product_id>/book")
 def book_product(product_id):
+    # Legacy checkout no longer writes customers/orders. Review the enquiry form first.
+    return redirect(url_for("shop_front.hire", product_id=product_id), code=303)
+
+
+def _legacy_book_product(product_id):
     settings = get_company_settings()
     if not settings["store_enabled"]:
         return render_template("public/store_unavailable.html", settings=settings), 403
@@ -161,6 +176,11 @@ def book_product(product_id):
 
 @bp.route("/store/booking/<int:order_id>")
 def booking_confirmation(order_id):
+    # Sequential IDs are not a public authorisation token.
+    return redirect(url_for("public.store"))
+
+
+def _legacy_booking_confirmation(order_id):
     order = get_order(order_id)
     if not order:
         flash("Booking request not found", "error")

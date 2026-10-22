@@ -18,6 +18,9 @@ from .routes.cash import bp as cash_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
 from .routes.push import bp as push_bp
 from .routes.pwa import bp as pwa_bp
+from .routes.shop_front import bp as shop_front_bp
+from .routes.shop_admin import bp as shop_admin_bp
+from .routes.shop_enquiries import bp as shop_enquiries_bp
 from .services.access import is_main_session, module_for_endpoint, session_active_branch, user_can_module
 from .services.timezone import display_local_date, display_local_datetime
 
@@ -84,9 +87,14 @@ def create_app(test_config=None):
         PUBLIC_BASE_URL=os.environ.get("PUBLIC_BASE_URL", ""),
         BUSINESS_TIMEZONE=os.environ.get("BUSINESS_TIMEZONE", "Africa/Johannesburg"),
         CURRENCY_SYMBOL=os.environ.get("CURRENCY_SYMBOL", "R"),
+        TRUST_PROXY_HEADERS=_truthy_env('RENDER'),
     )
     if test_config:
         app.config.update(test_config)
+    if app.config.get('TRUST_PROXY_HEADERS'):
+        # Render supplies one trusted forwarding hop. Never trust forwarded host values.
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0)
     _validate_production_config(app)
     os.makedirs(app.instance_path, exist_ok=True)
     init_db_app(app)
@@ -106,6 +114,9 @@ def create_app(test_config=None):
     app.register_blueprint(public_bp)
     app.register_blueprint(push_bp)
     app.register_blueprint(pwa_bp)
+    app.register_blueprint(shop_front_bp)
+    app.register_blueprint(shop_admin_bp)
+    app.register_blueprint(shop_enquiries_bp)
 
     # Human-visible date-times always render through this helper so the ISO "T"
     # between the date and the time can never leak into a template (ticket
@@ -125,6 +136,20 @@ def create_app(test_config=None):
         if user_can_module(session, module):
             return None
         return abort(403)
+
+    @app.context_processor
+    def inject_shop_enquiry_badge():
+        count = 0
+        if session.get('user_id') and (user_can_module(session, 'orders') or user_can_module(session, 'online_store')):
+            try:
+                from .routes.shop_enquiries import _live_account, _account_branch_ids
+                from .services.shop_enquiries import count_new_enquiries
+                account = _live_account()
+                count = count_new_enquiries(_account_branch_ids(account))
+            except Exception:
+                # Badge availability may not break existing accounting/customer pages.
+                count = 0
+        return {'shop_new_enquiry_count': count}
 
     @app.context_processor
     def inject_access_helpers():

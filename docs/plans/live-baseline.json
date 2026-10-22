@@ -1,0 +1,20 @@
+{
+  "live_deploys": [
+    {
+      "status": "live",
+      "commit": "05c435b637b7a920e98a873253351d6419331d28"
+    },
+    {
+      "status": "deactivated",
+      "commit": "357de28a47a5fc145dab76683db7a5ef7d8f7e32"
+    },
+    {
+      "status": "deactivated",
+      "commit": "5646671b1c17fff4f6fc6f534fda3dee5fb8de82"
+    },
+    {
+      "status": "deactivated",
+      "commit": "1acb2ec208e0fbd388f3a0dab4f76e5e7fb58b1d"
+    }
+  ]
+}

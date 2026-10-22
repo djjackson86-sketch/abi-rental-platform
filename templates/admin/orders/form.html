@@ -6,6 +6,7 @@
 {% block admin_body %}
 <header class="page-header"><div><p class="eyebrow">Orders</p><h1>{{ 'Edit order' if editing else 'New order' }}</h1>{% if editing %}<p>Update this order without changing its status.</p>{% endif %}</div><a class="btn ghost" href="{{ url_for('orders.detail', order_id=order_form.order.id) if editing else url_for('orders.index') }}">{{ 'Back to order' if editing else 'Back to orders' }}</a></header>
 <form method="post" action="{{ form_action or url_for('orders.new') }}" class="settings-form panel order-form">
+  {% if shop_enquiry_id %}<input type="hidden" name="shop_enquiry_id" value="{{ shop_enquiry_id }}"><input type="hidden" name="csrf_token" value="{{ shop_enquiry_csrf }}"><p class="flash success">Prepared from <a href="/online-store/enquiries/{{ shop_enquiry_id }}">shop enquiry #{{ shop_enquiry_id }}</a>. Review the details and save normally. No booking was confirmed by the customer's submission.</p>{% endif %}
   <section class="form-section order-customer-section">
     <h2 class="order-section-heading">CUSTOMER INFORMATION</h2>
     <input type="hidden" name="customer_id" id="customer-id" value="{{ selected_customer_id or '' }}">

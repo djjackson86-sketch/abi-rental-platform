@@ -405,42 +405,25 @@ def test_a_branch_without_saved_hours_still_books(client, app):
     assert order_count(app) == 1
 
 
-def test_the_public_store_booking_respects_the_collection_branch_hours(client, app):
-    """The storefront funnel goes through the same payload check."""
+def test_the_public_shop_enquiry_respects_the_collection_branch_hours(client, app):
+    """The public enquiry parses the same saved branch hours before writing."""
+    import pytest
     login(client)
     branch_id = branch_id_by_name(app, 'Branch 1')
     product_id = create_rental_product(client, app, sku='CBT-STORE', name='Store Trailer')
-    payload = hours_payload()
-    payload['closed_3'] = '1'
+    payload = hours_payload(); payload['closed_3'] = '1'
     client.post(f'/branches/{branch_id}/hours', data=payload, follow_redirects=True)
     client.post('/logout')
-
-    # The store's default collection branch is the first active branch.
-    closed_day = client.post(f'/store/products/{product_id}/book', data={
-        'customer_name': 'Store Client',
-        'customer_email': 'store.client@example.test',
-        'quantity': '1',
-        'start_date': '2026-08-05',
-        'start_time': '10:00',
-        'end_date': '2026-08-06',
-        'end_time': '10:00',
-    }, follow_redirects=True)
-    assert closed_day.status_code == 400
-    assert b'is closed on Wednesday' in closed_day.data
+    from app.services import shop_enquiries
+    form = {'enquiry_type':'rental','branch_id':str(branch_id),'customer_name':'Store Client','customer_email':'store.client@example.test','customer_phone':'0825550101','notes':'Testing branch hours',
+            'product_id':str(product_id),'quantity':'1','start_date':'2027-07-07','start_time':'10:00','end_date':'2027-07-08','end_time':'10:00'}
+    with app.app_context():
+        with pytest.raises(ValueError, match='closed on Wednesday'):
+            shop_enquiries.parse_submission(form)
+        parsed = shop_enquiries.parse_submission(dict(form, start_date='2027-07-08', end_date='2027-07-09'))
+    assert parsed['branch_id'] == branch_id and parsed['items'][0]['product_id'] == product_id
     assert order_count(app) == 0
-    # The refused store booking creates no customer either.
     assert customer_count(app) == 0
-
-    open_day = client.post(f'/store/products/{product_id}/book', data={
-        'customer_name': 'Store Client',
-        'customer_email': 'store.client@example.test',
-        'quantity': '1',
-        'start_date': '2026-08-06',
-        'start_time': '10:00',
-        'end_date': '2026-08-07',
-        'end_time': '10:00',
-    }, follow_redirects=True)
-    assert order_count(app) == 1
 
 
 def test_pickup_hours_error_helper_reads_the_saved_week(app):

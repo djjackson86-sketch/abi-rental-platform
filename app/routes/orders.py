@@ -191,8 +191,9 @@ def _products():
         scope_sql, params = " AND 0=1", []
     else:
         marks = ",".join("?" for _ in scope_ids)
-        scope_sql = f" AND (p.branch_id IN ({marks}) OR p.branch_id IS NULL)"
-        params = list(scope_ids)
+        scope_sql = (f" AND (p.branch_id IN ({marks}) OR p.branch_id IS NULL "
+                     f"OR EXISTS (SELECT 1 FROM product_branch_stock ps WHERE ps.product_id=p.id AND ps.branch_id IN ({marks})))")
+        params = list(scope_ids) + list(scope_ids)
     return get_db().execute(f"""
         SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
                p.description, p.security_deposit, p.hourly_extra_rate, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
@@ -361,6 +362,27 @@ def index():
 def new():
     settings = get_company_settings()
     selected_customer_id = request.args.get("customer_id", "")
+    shop_prefill = None
+    shop_enquiry_id = None
+    raw_enquiry_id = request.args.get('enquiry_id') or request.form.get('shop_enquiry_id')
+    if raw_enquiry_id:
+        try:
+            shop_enquiry_id = int(raw_enquiry_id)
+        except (TypeError, ValueError):
+            abort(400)
+        from app.services.shop_order_bridge import prefill as shop_order_prefill
+        from app.services import csrf as shop_csrf
+        if request.method == 'POST':
+            shop_csrf.validate('shop_enquiry_convert')
+        try:
+            shop_prefill = shop_order_prefill(shop_enquiry_id, selected_customer_id or None, products=_products())
+        except ValueError as exc:
+            flash(str(exc), 'error')
+            return redirect('/online-store/enquiries/' + str(shop_enquiry_id))
+        if shop_prefill.get('linked_order_id'):
+            return redirect(url_for('orders.detail', order_id=shop_prefill['linked_order_id']))
+        if request.method != 'POST':
+            selected_customer_id = str(shop_prefill.get('customer_id') or '')
     submitted_customer_values = None
     if request.method == "POST":
         selected_customer_id = (request.form.get("customer_id") or "").strip()
@@ -409,7 +431,11 @@ def new():
                 # (notify=False). The "New order" message is sent by the status
                 # change below (Save as Sales/Repairs) or later from
                 # transition_order() when the order is reserved / picked up.
-                order_id = create_order(form, notify=False)
+                if shop_enquiry_id:
+                    from app.services.shop_order_bridge import create_linked_order
+                    order_id = create_linked_order(form, shop_enquiry_id)
+                else:
+                    order_id = create_order(form, notify=False)
                 if _wants_sales_repairs(form, order_id):
                     # "Save as Sales/Repairs" on the form: the order is stored as
                     # a draft first, then the real Sales/Repairs status is applied
@@ -427,6 +453,9 @@ def new():
     default_start_time = adjusted_pickup_time_for_branch(default_branch, slot)
     customers = _customers()
     selected_customer_summary = _selected_customer_summary(customers, selected_customer_id)
+    if shop_prefill and selected_customer_summary:
+        # Exact option label keeps the browser picker from clearing its selected ID.
+        shop_prefill['customer_display'] = selected_customer_summary['display']
     # On POST errors keep the typed customer card values; otherwise the template
     # falls back to the stored summary's own form values for GET rendering.
     if request.method != "POST" or submitted_customer_values is None:
@@ -447,7 +476,10 @@ def new():
         default_branch_id=default_branch,
         branch_hours=branch_hours_summaries(),
         form_mode="new",
-        form_action=url_for("orders.new"),
+        form_action=url_for("orders.new", enquiry_id=shop_enquiry_id) if shop_enquiry_id else url_for("orders.new"),
+        order_form=shop_prefill,
+        shop_enquiry_id=shop_enquiry_id,
+        shop_enquiry_csrf=shop_csrf.issue_token('shop_enquiry_convert') if shop_enquiry_id else '',
         custom_field_label=custom_field_label,
         # A brand-new order is always a draft, so Sales/Repairs can be selected
         # straight away (ticket ABI-341952962); "Save as draft" stays beside it.

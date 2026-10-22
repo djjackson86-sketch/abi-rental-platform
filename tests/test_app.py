@@ -268,8 +268,9 @@ def test_inclusive_vat_never_drifts_a_cent(client, app):
 def test_store_empty_state(client):
     res = client.get('/store')
     assert res.status_code == 200
-    assert b'No products' in res.data
-    assert b'Select a rental period' in res.data
+    assert b'What do you need today?' in res.data
+    assert res.data.count(b'class="split-card"') == 3
+    assert b'No products' not in res.data
 
 
 def test_online_store_settings_persist_and_drive_public_store(client):
@@ -292,9 +293,8 @@ def test_online_store_settings_persist_and_drive_public_store(client):
 
     public = client.get('/store')
     assert b'ABI Event Rentals' in public.data
-    assert b'Choose equipment, dates and request a booking online.' in public.data
-    assert b'Reliable trailers and event gear for your next job.' in public.data
-    assert b'bookings@abi.test' in public.data
+    assert b'What do you need today?' in public.data
+    assert b'<footer' not in public.data
 
 
 def test_online_store_can_be_disabled(client):
@@ -311,8 +311,10 @@ def test_online_store_can_be_disabled(client):
 
     public = client.get('/store')
     assert public.status_code == 200
-    assert b'Online booking is temporarily unavailable' in public.data
+    assert b'Online enquiries are temporarily closed' in public.data
     assert b'Should not be visible while disabled.' not in public.data
+    assert client.get('/store/shop').status_code == 200
+    assert b'Online enquiries are temporarily closed' in client.get('/store/shop').data
 
 
 def test_online_store_setup_lists_inventory_categories_and_products(client):
@@ -427,7 +429,8 @@ def test_online_store_category_description_saves_and_reaches_public_store(client
     assert b'Rugged trailers for weekends away and site runs.' in saved.data
 
     store = client.get('/store').get_data(as_text=True)
-    assert 'Rugged trailers for weekends away and site runs.' in store
+    hire_page = client.get('/store/hire').get_data(as_text=True)
+    assert 'Rugged trailers for weekends away and site runs.' in hire_page
 
     with app.app_context():
         row = get_db().execute(
@@ -537,9 +540,9 @@ def test_inventory_product_crud_and_public_store(client):
     assert b'TRL-BOX-001' in res.data
     assert b'Visible' in res.data
 
-    res = client.get('/store')
+    res = client.get('/store/hire')
     assert b'Box Trailer' in res.data
-    assert b'R450.00 / day' in res.data
+    assert b'R450.00/day' in res.data
 
 
 
@@ -780,11 +783,11 @@ def test_untracked_product_saves_without_a_stock_count_and_reads_not_tracked(cli
     calendar = client.get('/calendar')
     assert b'Not tracked' in calendar.data
 
-    store = client.get('/store')
-    assert b'Available on request' in store.data
+    store = client.get('/store/hire')
+    assert b'Always Bookable Trailer' in store.data
 
     detail = client.get(f'/store/products/{product_id}')
-    assert b'Available on request.' in detail.data
+    assert detail.status_code == 302
 
 
 def test_untracked_product_is_never_blocked_by_availability(client, app):
@@ -3975,55 +3978,27 @@ def test_generated_document_pdfs_are_a4_portrait(client, app):
             assert b'/MediaBox [0 0 842 595]' not in pdf
 
 
-def test_public_store_checkout_creates_draft_order(client):
+def test_public_legacy_checkout_no_longer_creates_customer_or_order(client, app):
     login(client)
     seed_customer_and_product(client)
-
     store = client.get('/store')
-    assert b'Order Trailer' in store.data
-    assert b'Book now' in store.data
-
-    product_page = client.get('/store/products/1')
-    assert product_page.status_code == 200
-    assert b'Book Order Trailer' in product_page.data
-    assert b'Pickup date' in product_page.data
-
-    confirmation = client.post('/store/products/1/book', data={
-        'customer_name': 'Public Booker',
-        'customer_email': 'public@example.test',
-        'customer_phone': '+270****0003',
-        'quantity': '1',
-        'start_date': '2026-10-01',
-        'start_time': '09:00',
-        'end_date': '2026-10-03',
-        'end_time': '15:00',
-        'notes': 'Public booking request',
-    }, follow_redirects=True)
-    assert confirmation.status_code == 200
-    assert b'Booking request received' in confirmation.data
-    assert b'ORD-10145' in confirmation.data
-    assert b'Order Trailer' in confirmation.data
-    assert b'R600.00' in confirmation.data
-
-    login(client)
-    orders = client.get('/orders?query=Public+Booker')
-    assert b'ORD-10145' in orders.data
-    assert b'Public Booker' in orders.data
+    assert b'What do you need today?' in store.data
+    assert b'Book now' not in store.data
+    with app.app_context():
+        before=(get_db().execute('SELECT COUNT(*) FROM customers').fetchone()[0],get_db().execute('SELECT COUNT(*) FROM orders').fetchone()[0])
+    response = client.post('/store/products/1/book', data={'customer_name':'Public Booker','customer_email':'public@example.test','quantity':'1','start_date':'2026-10-01','start_time':'09:00','end_date':'2026-10-03','end_time':'15:00'})
+    assert response.status_code==303 and '/store/hire' in response.headers['Location']
+    with app.app_context():
+        assert (get_db().execute('SELECT COUNT(*) FROM customers').fetchone()[0],get_db().execute('SELECT COUNT(*) FROM orders').fetchone()[0])==before
 
 
-def test_public_checkout_validates_required_fields(client):
-    login(client)
-    seed_customer_and_product(client)
-
-    response = client.post('/store/products/1/book', data={
-        'customer_name': '',
-        'customer_email': '',
-        'quantity': '1',
-        'start_date': '2026-10-01',
-        'end_date': '2026-10-03',
-    }, follow_redirects=True)
-    assert b'Name and email are required' in response.data
-    assert b'Book Order Trailer' in response.data
+def test_public_legacy_checkout_requires_no_second_validation_route(client, app):
+    with app.app_context():
+        before=(get_db().execute('SELECT COUNT(*) FROM customers').fetchone()[0],get_db().execute('SELECT COUNT(*) FROM orders').fetchone()[0])
+    response = client.post('/store/products/1/book', data={'customer_name':'','customer_email':'','quantity':'1'})
+    assert response.status_code==303
+    with app.app_context():
+        assert (get_db().execute('SELECT COUNT(*) FROM customers').fetchone()[0],get_db().execute('SELECT COUNT(*) FROM orders').fetchone()[0])==before
 
 
 def test_order_manual_payments_update_payment_status_and_history(client, app):
@@ -6704,26 +6679,14 @@ def test_order_customer_forms_place_verification_and_marketing_after_alternative
     ])
 
 
-def test_public_booking_creates_an_unverified_client(client, app):
-    login(client)
-    seed_customer_and_product(client)
-
-    res = client.post('/store/products/1/book', data={
-        'customer_name': 'Public Booking Client',
-        'customer_email': 'public@example.test',
-        'quantity': '1',
-        'start_date': '2026-08-03',
-        'start_time': '09:00',
-        'end_date': '2026-08-04',
-        'end_time': '09:00',
-    }, follow_redirects=True)
-    assert res.status_code == 200
+def test_public_enquiry_does_not_create_an_unverified_client(client, app):
+    login(client);seed_customer_and_product(client)
+    with app.app_context():before=get_db().execute('SELECT COUNT(*) FROM customers').fetchone()[0]
+    res = client.post('/store/products/1/book', data={'customer_name':'Public Booking Client','customer_email':'public@example.test','quantity':'1','start_date':'2026-08-03','start_time':'09:00','end_date':'2026-08-04','end_time':'09:00'})
+    assert res.status_code==303
+    with app.app_context():assert get_db().execute('SELECT COUNT(*) FROM customers').fetchone()[0]==before
     with app.app_context():
-        row = get_db().execute(
-            "SELECT client_verified FROM customers WHERE name = 'Public Booking Client'"
-        ).fetchone()
-        assert row is not None
-        assert row['client_verified'] is None
+        assert get_db().execute("SELECT id FROM customers WHERE name='Public Booking Client'").fetchone() is None
 
 
 def test_customer_csv_export_includes_client_verified(client, app):

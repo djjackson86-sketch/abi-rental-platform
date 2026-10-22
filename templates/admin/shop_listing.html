@@ -1,0 +1,150 @@
+{% extends "admin/layout.html" %}
+{% set title='Shop listing' %}
+{% block admin_body %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/shop-admin.css') }}">
+{% set unsaved = product.shop_unsaved or {} %}
+<header class="page-header shop-header">
+  <div class="module-title">
+    <span class="module-icon">⌂</span>
+    <div>
+      <p class="eyebrow"><a href="{{ url_for('shop_admin.listings') }}">Shop listings</a></p>
+      <h1>{{ product.store_title }}</h1>
+      <p class="shop-lede">Public title and copy for <strong>{{ product.name }}</strong>. Price, deposit, tax and stock are set in Inventory and cannot be changed here.</p>
+    </div>
+  </div>
+  <div class="shop-header-actions">
+    {% if product.store_public %}
+      <span class="badge shop-badge-live">Live on the shop</span>
+    {% else %}
+      <span class="badge shop-badge-hidden">Hidden from the shop</span>
+    {% endif %}
+    <a class="btn ghost" href="{{ url_for('shop_admin.listings') }}">Back to listings</a>
+  </div>
+</header>
+
+{% if product.store_visibility_issues %}
+<section class="panel shop-issues">
+  <strong>Not visible on the shop yet</strong>
+  <ul>
+    {% for issue in product.store_visibility_issues %}<li>{{ issue }}</li>{% endfor %}
+  </ul>
+  <p class="muted">Fix these in Inventory — the shop cannot override them.</p>
+</section>
+{% endif %}
+
+<div class="shop-detail-grid">
+  <section class="panel shop-facts">
+    <h2>Inventory facts</h2>
+    <p class="muted">Read-only here. These are the values an order, an invoice and a stock count use.</p>
+    <dl class="shop-fact-list">
+      <div><dt>Inventory name</dt><dd>{{ product.name }}</dd></div>
+      <div><dt>SKU</dt><dd>{{ product.sku or '—' }}</dd></div>
+      <div><dt>Type</dt><dd>{{ product.product_type|capitalize }}</dd></div>
+      <div><dt>Price</dt><dd>R{{ '%.2f'|format(product.price_amount or 0) }} / {{ product.price_unit }}</dd></div>
+      <div><dt>Security deposit</dt><dd>R{{ '%.2f'|format(product.security_deposit or 0) }}</dd></div>
+      <div><dt>Stock</dt><dd>{{ product.quantity }}</dd></div>
+      <div><dt>Category</dt><dd>{{ product.category_name or 'Ungrouped' }}{% if product.store_category_hidden %} <span class="badge shop-badge-hidden">Hidden category</span>{% endif %}</dd></div>
+      <div><dt>Branch</dt><dd>{{ product.branch_name or 'Unassigned' }}</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel shop-copy-form">
+    <h2>Shop copy</h2>
+    <form method="post" action="{{ url_for('shop_admin.listing_detail', product_id=product.id) }}">
+      <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+      <label class="shop-field">
+        <span>Shop title</span>
+        <input name="store_title" maxlength="{{ shop_max_title }}" value="{{ unsaved.store_title if unsaved else product.store_title_override }}" placeholder="{{ product.name }}">
+        <small>Leave blank to use the inventory name.</small>
+      </label>
+      <label class="shop-field">
+        <span>Shop description</span>
+        <textarea name="store_description" rows="6" maxlength="{{ shop_max_description }}" placeholder="{{ product.description }}">{{ unsaved.store_description if unsaved else product.store_description_override }}</textarea>
+        <small>Leave blank to use the inventory description.</small>
+      </label>
+      <div class="shop-field-row">
+        <label class="shop-field">
+          <span>Model key (optional)</span>
+          <input name="model_key" maxlength="64" value="{{ unsaved.model_key if unsaved else product.model_key }}" placeholder="e.g. utility-750">
+          <small>Only units with the same key and identical price, type and category are shown as one model. Each unit keeps its own product.</small>
+        </label>
+        <label class="shop-field">
+          <span>Shop order</span>
+          <input type="number" name="store_sort_order" min="-9999" max="9999" value="{{ unsaved.store_sort_order if unsaved else product.store_sort_order }}">
+          <small>Lower numbers appear first.</small>
+        </label>
+      </div>
+      <label class="shop-check">
+        <input type="checkbox" name="featured" value="1" {% if (unsaved.featured if unsaved else product.featured) %}checked{% endif %}>
+        <span>Feature at the top of the shop</span>
+      </label>
+      <label class="shop-check">
+        <input type="checkbox" name="public_visible" value="1" {% if (unsaved.public_visible if unsaved else product.public_visible) %}checked{% endif %}>
+        <input type="hidden" name="public_visible" value="0">
+        <span>Published to the shop</span>
+      </label>
+      <p class="shop-note">Publishing uses the product's own store switch. Taking it off the shop here is the same as hiding it in Inventory.</p>
+      <button class="btn primary" type="submit">Save shop listing</button>
+      <button class="btn ghost" type="submit" formaction="{{ url_for('shop_admin.preview_listing', product_id=product.id) }}" formtarget="_blank">Preview without saving</button>
+    </form>
+  </section>
+</div>
+
+<section class="panel shop-gallery">
+  <div class="shop-gallery-head">
+    <div>
+      <h2>Photos</h2>
+      <p class="muted">The cover is the card photo on the shop. Without a photo the category image is used; without either, the card shows text only. Up to {{ shop_max_images }} photos.</p>
+    </div>
+    <form method="post" action="{{ url_for('shop_admin.upload_image', product_id=product.id) }}" enctype="multipart/form-data" class="shop-upload">
+      <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+      <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+      <input type="text" name="alt_text" maxlength="200" placeholder="Alt text (optional)">
+      <button class="btn primary" type="submit" {% if product.store_images|length >= shop_max_images %}disabled{% endif %}>Add photo</button>
+    </form>
+  </div>
+
+  {% if product.store_images %}
+  <div class="shop-gallery-grid">
+    {% for image in product.store_images %}
+    <article class="shop-gallery-card {% if image.is_cover %}is-cover{% endif %}">
+      <img src="{{ image.url }}" alt="{{ image.alt or product.store_title }}">
+      <div class="shop-gallery-meta">
+        {% if image.is_cover %}<span class="badge shop-badge-live">Cover</span>{% endif %}
+        <span class="shop-gallery-alt">{{ image.alt or 'No alt text' }}</span>
+      </div>
+      <div class="shop-gallery-actions">
+        {% if not image.is_cover %}
+        <form method="post" action="{{ url_for('shop_admin.cover_listing_image', product_id=product.id, media_id=image.id) }}">
+          <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+          <button class="btn ghost small" type="submit">Make cover</button>
+        </form>
+        {% endif %}
+        <form method="post" action="{{ url_for('shop_admin.move_listing_image', product_id=product.id, media_id=image.id) }}">
+          <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+          <input type="hidden" name="direction" value="up">
+          <button class="btn ghost small" type="submit" {% if loop.first %}disabled{% endif %}>↑</button>
+        </form>
+        <form method="post" action="{{ url_for('shop_admin.move_listing_image', product_id=product.id, media_id=image.id) }}">
+          <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+          <input type="hidden" name="direction" value="down">
+          <button class="btn ghost small" type="submit" {% if loop.last %}disabled{% endif %}>↓</button>
+        </form>
+        <form method="post" action="{{ url_for('shop_admin.replace_listing_image', product_id=product.id, media_id=image.id) }}" enctype="multipart/form-data" class="shop-replace">
+          <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+          <button class="btn ghost small" type="submit">Replace</button>
+        </form>
+        <form method="post" action="{{ url_for('shop_admin.delete_listing_image', product_id=product.id, media_id=image.id) }}" onsubmit="return confirm('Remove this photo?');">
+          <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+          <button class="btn ghost small danger" type="submit">Remove</button>
+        </form>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="shop-empty">No photos yet.{% if product.category_image_url %} The shop is currently using the <strong>{{ product.category_name }}</strong> category photo.{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

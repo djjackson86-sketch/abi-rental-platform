@@ -20,6 +20,7 @@ self.addEventListener('activate', function (event) {
 var FALLBACK_TITLE = 'Sano Trailers';
 var DEFAULT_URL = '/';
 var CUSTOMER_PATH = /^\/customers\/\d+$/;
+var ENQUIRY_PATH = /^\/online-store\/enquiries\/\d+$/;
 
 function text(value, limit) {
   return typeof value === 'string' ? value.slice(0, limit) : '';
@@ -38,7 +39,7 @@ function safePath(value) {
   var candidate = typeof value === 'string' ? value.trim() : '';
   if (!candidate || candidate.charAt(0) !== '/') return DEFAULT_URL;
   if (candidate.indexOf('//') === 0 || candidate.indexOf('\\') !== -1) return DEFAULT_URL;
-  if (candidate === DEFAULT_URL || CUSTOMER_PATH.test(candidate)) return candidate;
+  if (candidate === DEFAULT_URL || CUSTOMER_PATH.test(candidate) || ENQUIRY_PATH.test(candidate)) return candidate;
   return DEFAULT_URL;
 }
 
@@ -59,7 +60,7 @@ self.addEventListener('push', function (event) {
     // Same tag replaces the previous notification about the same thing.
     tag: text(payload.tag, 64) || undefined,
     renotify: false,
-    data: { url: targetPath(payload.customer_id) }
+    data: { url: /^\d+$/.test(String(payload.enquiry_id || '')) ? '/online-store/enquiries/' + payload.enquiry_id : (payload.customer_id != null ? targetPath(payload.customer_id) : safePath(payload.url)) }
   };
 
   event.waitUntil(self.registration.showNotification(title, options));

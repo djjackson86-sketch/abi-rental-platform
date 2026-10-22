@@ -9,6 +9,19 @@
   </div>
   <a class="btn ghost" href="{{ url_for('public.store') }}" target="_blank">View public store</a>
 </header>
+<section class="panel" aria-label="Shop management">
+  <h2>Your connected online shop</h2>
+  <p>Products and prices come from this rental platform. Upload photos, publish listings and manage branch enquiries here.</p>
+  <div class="form-actions" style="display:flex;flex-wrap:wrap;gap:10px">
+    <a class="btn primary" href="/online-store/listings">Products &amp; photos</a>
+    <a class="btn ghost" href="/online-store/shop-settings">Homepage images &amp; shop link</a>
+    <a class="btn ghost" href="/online-store/enquiries">Enquiries{% if shop_new_enquiry_count %} <span class="badge">{{ shop_new_enquiry_count }} new</span>{% endif %}</a>
+    <button type="button" class="btn ghost" id="copy-shop-link">Copy shop link</button>
+  </div>
+  <label style="display:block;margin-top:12px">Public shop link<input id="shop-public-link" type="url" readonly value="{{ config.PUBLIC_BASE_URL.rstrip('/') if config.PUBLIC_BASE_URL else request.url_root.rstrip('/') }}/store" onclick="this.select()"></label>
+  <p id="shop-copy-status" role="status"></p>
+</section>
+<script>document.getElementById('copy-shop-link').addEventListener('click',function(){const field=document.getElementById('shop-public-link');field.select();if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(field.value).then(()=>document.getElementById('shop-copy-status').textContent='Shop link copied.').catch(()=>document.getElementById('shop-copy-status').textContent='Select and copy the shop link above.');}else{document.getElementById('shop-copy-status').textContent='Select and copy the shop link above.';}});</script>
 {% include "admin/settings/nav.html" %}
 <form method="post" class="settings-form panel store-settings-form">
   <section class="setting-section">

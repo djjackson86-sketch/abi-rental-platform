@@ -1518,6 +1518,13 @@ def run_migrations(db):
     )
 
 
+    # Add shop children only after every parent table/column has been migrated.
+    from app.services.shop_catalogue import init_schema as init_shop_catalogue
+    from app.services.shop_enquiries import init_schema as init_shop_enquiries
+    init_shop_catalogue(db)
+    init_shop_enquiries(db)
+
+
 def init_db():
     db = get_db()
     db.executescript(SCHEMA)
