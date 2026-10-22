@@ -8,6 +8,9 @@
   <p class="muted">Manage rentals, orders, customers, inventory and your online booking page.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
   <form method="post" class="stack">
+    {# Carries a local page the person was heading for (see app/routes/auth.py);
+       never a full URL, and empty on an ordinary sign-in. #}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     {% if users %}
     <label>Name <select name="user_id" required autofocus><option value="" selected disabled>Select your name</option>{% for account in users %}<option value="{{ account.id }}">{{ account.name }}</option>{% endfor %}</select></label>
     {% else %}

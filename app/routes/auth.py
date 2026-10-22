@@ -1,4 +1,6 @@
 from functools import wraps
+from urllib.parse import urlsplit
+
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from app.db import get_db
@@ -23,11 +25,85 @@ from app.services.settings import get_company_settings
 bp = Blueprint("auth", __name__)
 
 
+def _safe_next(value):
+    """The local path to continue to after signing in, or ``None``.
+
+    Only a single-slash local path is ever accepted: ``//host`` and ``/\\host`` are
+    protocol-relative (browsers read the backslash as a slash), so both would leave
+    the site, and a full URL is refused outright. Anything unsafe or absent is
+    ``None``, which keeps the original landing behaviour untouched — a crafted link
+    can never turn the sign-in form into an open redirect.
+    """
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or len(candidate) > 2048:
+        return None
+    # A backslash is read as a slash by browsers, so a path containing one is
+    # refused rather than normalised.
+    if chr(92) in candidate:
+        return None
+    # Control characters (a literal CR, LF, TAB or NUL) have no place in a path.
+    if any(ord(char) < 32 for char in candidate):
+        return None
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return None
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return None
+    if not parts.path.startswith("/"):
+        return None
+    # Signing in again is not somewhere to "continue" to.
+    for blocked in ("/login", "/logout"):
+        if parts.path == blocked or parts.path.startswith(blocked + "/"):
+            return None
+    return candidate
+
+
+def _requested_target():
+    """The local path this request was trying to reach, for continuation after sign-in.
+
+    Only a GET is remembered: a POST body cannot be replayed from a redirect, and
+    replaying a write silently would be worse than sending the person to the
+    dashboard.
+    """
+    if request.method != "GET":
+        return None
+    query = request.query_string.decode("utf-8", "replace")
+    return request.path + (("?" + query) if query else "")
+
+
+def _forget_push_endpoint(endpoint):
+    """Stop notifying *this browser* when its session ends.
+
+    The logout form carries the endpoint in a hidden field that push.js fills in.
+    Removal is best effort: the push service owns its table, and if it exposes no
+    removal helper (or nothing was passed) logout proceeds exactly as before. Only
+    the endpoint that posted is removed, so the same account signed in on another
+    phone keeps its notifications.
+    """
+    endpoint = (endpoint or "").strip()
+    user_id = session.get("user_id")
+    if not endpoint or not user_id:
+        return
+    try:
+        from app.services import push_notifications as push_service
+    except Exception:
+        return
+    remove = getattr(push_service, "unsubscribe", None)
+    if not callable(remove):
+        return
+    try:
+        remove(user_id, endpoint)
+    except Exception:
+        return
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not session.get("user_id"):
-            return redirect(url_for("auth.login"))
+            return redirect(url_for("auth.login", next=_requested_target()))
         return view(*args, **kwargs)
     return wrapped
 
@@ -35,6 +111,8 @@ def login_required(view):
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        # Where the person was heading before the sign-in wall, if it is local.
+        next_target = _safe_next(request.values.get("next"))
         # Accounts sign in by selecting their name; the session is still keyed to
         # the account id, so the form posts the selected user id, not the label.
         try:
@@ -74,10 +152,16 @@ def login():
                 # managing for this sign-in before it lands on a screen. The
                 # choice can only narrow what it may already reach, and skipping
                 # it simply leaves the account with all of its own depots.
-                return redirect(url_for("auth.select_branch"))
+                return redirect(url_for("auth.select_branch", next=next_target))
+            if next_target:
+                return redirect(next_target)
             return redirect(url_for("admin.dashboard"))
         flash("Invalid name or password", "error")
-    return render_template("login.html", users=login_user_options())
+    return render_template(
+        "login.html",
+        users=login_user_options(),
+        next=_safe_next(request.args.get("next")) or "",
+    )
 
 
 @bp.route("/select-branch", methods=["GET", "POST"])
@@ -90,11 +174,14 @@ def select_branch():
     own depots, exactly as before this screen existed.
     """
     if not session.get("user_id"):
-        return redirect(url_for("auth.login"))
+        return redirect(url_for("auth.login", next=_requested_target()))
     branches = session_branch_choice_options()
     if not branches:
         return redirect(url_for("admin.dashboard"))
     allowed = [branch["id"] for branch in branches]
+    # The sign-in step hands the continuation target on, so choosing a depot does
+    # not lose the page the person actually asked for.
+    next_target = _safe_next(request.values.get("next"))
     if request.method == "POST":
         try:
             branch_id = int(request.form.get("branch_id") or 0)
@@ -104,11 +191,14 @@ def select_branch():
             flash("Choose one of the branches you manage", "error")
         else:
             session["active_branch_id"] = branch_id
+            if next_target:
+                return redirect(next_target)
             return redirect(url_for("admin.dashboard"))
     return render_template(
         "select_branch.html",
         branches=branches,
         current=session.get("active_branch_id"),
+        next=next_target or "",
     )
 
 
@@ -144,5 +234,8 @@ def recovery():
 
 @bp.route("/logout", methods=["POST"])
 def logout():
+    # The hidden push_endpoint field (filled in by push.js) stops notifications for
+    # this browser only - other devices stay subscribed.
+    _forget_push_endpoint(request.form.get("push_endpoint", ""))
     session.clear()
     return redirect(url_for("auth.login"))

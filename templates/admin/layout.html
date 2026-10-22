@@ -11,6 +11,21 @@
   /* Maintenance badge on the inventory list (ticket 341953038). */
   .badge.maintenance{background:var(--danger-soft,#fff0ee);color:var(--danger,#b42318)}
   .badge.maintenance:before{opacity:1}
+  /* Notifications opt-in (customer push programme). A compact bar in the main
+     column, never in the sidebar: the sidebar links are hidden at <=860px, and
+     the control has to stay reachable on the phone where push matters most. */
+  .push-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin:0 0 16px;padding:8px 12px;border:1px solid var(--line,#e2e8f0);border-radius:999px;background:#fff;font-size:13px;color:var(--ink-2,#475569);box-shadow:none}
+  .push-controls .push-status{font-weight:750;white-space:nowrap}
+  .push-controls .push-actions{display:flex;gap:8px;margin-left:auto}
+  .push-controls .push-btn{display:inline-flex;align-items:center;justify-content:center;width:auto;min-height:32px;padding:5px 13px;font-size:13px;line-height:1.2;border-radius:999px;border:1px solid var(--line,#cbd5e1);background:#fff;color:var(--ink,#0f172a);font-weight:700;cursor:pointer}
+  .push-controls .push-btn.primary{background:var(--brand,#0b4ccc);border-color:var(--brand,#0b4ccc);color:#fff}
+  .push-controls .push-btn[hidden],.push-controls [hidden]{display:none}
+  .push-controls .push-btn:disabled{opacity:.6;cursor:default}
+  .push-controls .push-hint{margin:0;flex:1 1 100%;color:var(--muted,#64748b);font-size:12px;line-height:1.45}
+  .push-controls[data-push-state="subscribed"] .push-status{color:var(--success,#047857)}
+  .push-controls[data-push-state="denied"] .push-status,.push-controls[data-push-state="error"] .push-status{color:var(--danger,#b42318)}
+  @media(max-width:860px){.push-controls{border-radius:14px;padding:10px 12px}.push-controls .push-actions{margin-left:0;width:100%}.push-controls .push-btn{flex:1 1 auto}}
+  @media(max-width:520px){.push-controls .push-btn{width:auto;min-height:36px}}
 </style>
   <aside class="sidebar">
     <a class="logo" href="{{ url_for('admin.dashboard') }}"><img src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers"></a>
@@ -30,7 +45,10 @@
     {% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}"><span>▩</span><span>Scan to return</span></a>{% endif %}
     {% if user_can('settings') %}<a href="{{ url_for('settings.general') }}"><span>⚙</span><span>Settings</span></a>{% endif %}
     {% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}"><span>⌂</span><span>Branch: {{ active_branch['name'] }} · Change</span></a>{% endif %}
-    <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><button type="submit"><span>↩</span><span>Log out</span></button></form>
+    {# push_endpoint lets logout stop notifications for *this browser* only: push.js
+       fills it in before the form posts, and the same account stays subscribed on
+       every other device. #}
+    <form method="post" action="{{ url_for('auth.logout') }}" class="logout"><input type="hidden" name="push_endpoint" value=""><button type="submit"><span>↩</span><span>Log out</span></button></form>
   </aside>
   <main class="main">
     {# Phone navigation: one uniform chip shape per module; the depot chip is
@@ -38,8 +56,20 @@
     <nav class="mobile-nav">
       {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('customers') %}<a href="{{ url_for('customers.index') }}">Customers</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if user_can('payments') %}<a href="{{ url_for('payments.index') }}">Payments</a>{% endif %}{% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}">Reports</a>{% endif %}{% if user_can('online_store') %}<a href="{{ url_for('admin.online_store') }}">Online store</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.portal_index') }}">Customer portal</a>{% endif %}{% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}">Scan vehicle</a>{% endif %}{% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}">Returns</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}
     </nav>
+    {# Opt-in lives here, in the main column, so it is visible on a phone where the
+       sidebar links are hidden. push.js is deliberate-gesture only: nothing is
+       subscribed and no permission prompt appears until the button is tapped. #}
+    <div class="push-controls" data-push-controls data-push-state="loading">
+      <span class="push-status" data-push-status role="status" aria-live="polite">Notifications</span>
+      <div class="push-actions">
+        <button type="button" class="push-btn primary" data-push-enable hidden>Enable notifications</button>
+        <button type="button" class="push-btn" data-push-test hidden>Test notification</button>
+      </div>
+      <p class="push-hint" data-push-hint hidden></p>
+    </div>
     {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}
   </main>
 </div>
+<script src="{{ url_for('static', filename='js/push.js') }}" defer></script>
 {% endblock %}

@@ -16,6 +16,8 @@ from .routes.payments import bp as payments_bp
 from .routes.branches import bp as branches_bp
 from .routes.cash import bp as cash_bp
 from .routes.internal_telegram import bp as internal_telegram_bp
+from .routes.push import bp as push_bp
+from .routes.pwa import bp as pwa_bp
 from .services.access import is_main_session, module_for_endpoint, session_active_branch, user_can_module
 from .services.timezone import display_local_date, display_local_datetime
 
@@ -76,6 +78,9 @@ def create_app(test_config=None):
         # Optional: post the combined report to a different chat (e.g. a managers
         # group) instead of the depot group the bot already posts to.
         TELEGRAM_ALL_BRANCHES_CHAT_ID=os.environ.get("TELEGRAM_ALL_BRANCHES_CHAT_ID", ""),
+        VAPID_PUBLIC_KEY=os.environ.get("VAPID_PUBLIC_KEY", ""),
+        VAPID_PRIVATE_KEY=os.environ.get("VAPID_PRIVATE_KEY", ""),
+        VAPID_SUBJECT=os.environ.get("VAPID_SUBJECT", "mailto:info@sanotrailers.co.za"),
         PUBLIC_BASE_URL=os.environ.get("PUBLIC_BASE_URL", ""),
         BUSINESS_TIMEZONE=os.environ.get("BUSINESS_TIMEZONE", "Africa/Johannesburg"),
         CURRENCY_SYMBOL=os.environ.get("CURRENCY_SYMBOL", "R"),
@@ -99,6 +104,8 @@ def create_app(test_config=None):
     app.register_blueprint(cash_bp)
     app.register_blueprint(internal_telegram_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(push_bp)
+    app.register_blueprint(pwa_bp)
 
     # Human-visible date-times always render through this helper so the ISO "T"
     # between the date and the time can never leak into a template (ticket

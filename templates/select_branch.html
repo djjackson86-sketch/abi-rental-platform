@@ -8,6 +8,8 @@
   <p class="muted">Choose the depot for this sign-in. Your dashboard, orders, inventory, calendar and reports will show that branch only until you change it.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
   <form method="post" class="stack">
+    {# The page the sign-in asked for, handed on so the depot choice does not lose it. #}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
     <label>Branch <select name="branch_id" required autofocus><option value="" {% if not current %}selected{% endif %} disabled>Select a branch</option>{% for branch in branches %}<option value="{{ branch['id'] }}" {% if current and current|int == branch['id'] %}selected{% endif %}>{{ branch['name'] }}</option>{% endfor %}</select></label>
     <button class="btn primary" type="submit">Continue</button>
   </form>

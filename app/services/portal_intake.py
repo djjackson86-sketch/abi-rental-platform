@@ -769,6 +769,19 @@ def create_or_link_customer(form, branch_id, decision, slug=None, portal_duplica
         from flask import current_app
 
         current_app.logger.exception("Customer portal notification failed")
+    # Web Push, beside the Telegram alert and *once*: this line is reached only by the
+    # request that actually wrote the customer (a replay returned above), and the branch
+    # is re-read from the saved row by the service, never taken from this request. The
+    # call is best-effort — a push failure (or a host without pywebpush) must never undo
+    # or refuse a client's submission that is already durable.
+    try:
+        from app.services.push_notifications import notify_portal_submission
+
+        notify_portal_submission(result["customer_id"])
+    except Exception:
+        from flask import current_app
+
+        current_app.logger.exception("Customer portal push notification failed")
     return result
 
 

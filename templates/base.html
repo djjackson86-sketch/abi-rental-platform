@@ -4,6 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Sano Trailers{% endblock %}</title>
+  {# Installed-app metadata: "Sano Trailers" opens standalone from the Home Screen.
+     /manifest.webmanifest and /sw.js are served from the site root (see
+     app/routes/pwa.py) so the worker's scope covers the whole app. #}
+  <link rel="manifest" href="{{ url_for('pwa.manifest') }}">
+  <meta name="theme-color" content="#0b4ccc">
+  <meta name="application-name" content="Sano Trailers">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Sano">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">

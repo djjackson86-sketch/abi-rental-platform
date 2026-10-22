@@ -10,3 +10,6 @@ Pillow==12.3.0
 qrcode==7.4.2
 # Wrapped A4 privacy notices and the simplified Sano–Jackapp agreement download.
 reportlab==5.0.1
+# Staff Web Push notifications (optional at import time: the app runs without it).
+# Sends portal-submission alerts to subscribed branch staff via VAPID.
+pywebpush==2.0.3

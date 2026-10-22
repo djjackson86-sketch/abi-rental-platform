@@ -1400,6 +1400,36 @@ def run_migrations(db):
         "ON portal_submission_claims(scope, request_key)"
     )
 
+    # --- Web Push subscriptions for staff (additive) -------------------------
+    # One row per browser endpoint: the UNIQUE index on ``endpoint`` is what binds a
+    # device to exactly one account (re-subscribing as another account re-binds the row
+    # instead of duplicating it). Empty on an existing database and read by nobody until
+    # a staff member subscribes, so no customer/order/product row is touched. A NULL
+    # ``disabled_at`` means live; a 404/410 from the push service deletes the row, and
+    # repeated other failures switch it off rather than retrying forever.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            endpoint TEXT NOT NULL,
+            p256dh TEXT NOT NULL DEFAULT '',
+            auth TEXT NOT NULL DEFAULT '',
+            user_agent TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            last_used_at TEXT,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            disabled_at TEXT
+        )"""
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint "
+        "ON push_subscriptions(endpoint)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user "
+        "ON push_subscriptions(user_id)"
+    )
+
     # --- Hot-path indexes for the order/payment/document screens (ABI-341953196) ---
     # Additive and idempotent: an existing database (the live Turso book included)
     # gains exactly the same three indexes a fresh install creates in SCHEMA, with
