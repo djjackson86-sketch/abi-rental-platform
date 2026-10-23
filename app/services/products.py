@@ -696,6 +696,54 @@ def update_product(product_id, form):
     return blocked_change
 
 
+def update_sale_price(product_id, amount):
+    """Change one sale product's selling price — and nothing else.
+
+    The Online store listing page owns shop copy and photos, not commercial
+    facts; this helper is the narrow, explicit exception the client asked for so
+    a trailer's price can be corrected where the rest of its listing is edited.
+    It refuses any product that is not a sale row, so a rental's daily rate and a
+    service line can never be repriced through the shop, and it writes only
+    ``price_amount`` — type, stock, deposit, tax and category are untouched.
+    """
+    try:
+        product_id = int(product_id)
+    except (TypeError, ValueError):
+        raise ValueError("Product not found")
+    text = str(amount if amount is not None else "").strip()
+    text = text.replace(" ", "").replace("R", "").replace("r", "")
+    if text.count(",") == 1 and "." not in text:
+        text = text.replace(",", ".")
+    else:
+        text = text.replace(",", "")
+    try:
+        price = round(float(text), 2)
+    except (TypeError, ValueError):
+        raise ValueError("Enter a selling price in rand, for example 24900.")
+    import math
+    if not text or not math.isfinite(price) or price < 0 or price > 10000000:
+        raise ValueError("Enter a selling price between R0 and R10 000 000.")
+    db = get_db()
+    row = db.execute(
+        "SELECT product_type FROM products WHERE id = ?", (product_id,)
+    ).fetchone()
+    if row is None:
+        raise ValueError("Product not found")
+    if (row[0] or "") != "sale":
+        raise ValueError("Only a trailer or item for sale carries a selling price.")
+    db.execute(
+        "UPDATE products SET price_amount = ? WHERE id = ? AND product_type = 'sale'",
+        (price, product_id),
+    )
+    db.commit()
+    stored = db.execute(
+        "SELECT price_amount FROM products WHERE id = ?", (product_id,)
+    ).fetchone()
+    if stored is None or abs(float(stored[0] or 0) - price) > 0.001:
+        raise ValueError("The selling price could not be saved. Try again.")
+    return price
+
+
 def _submitted_quantity(form, fallback):
     """Total a form asks for: the sum of any per-branch boxes, else the legacy box."""
     branch_counts, present = _branch_counts_from_form(form)

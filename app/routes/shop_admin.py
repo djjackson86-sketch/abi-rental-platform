@@ -290,6 +290,33 @@ def publish_listing(product_id):
     return redirect(request.referrer or url_for("shop_admin.listings"))
 
 
+@bp.post("/online-store/listings/<int:product_id>/price")
+@shop_editor_required
+@require_csrf
+def update_listing_price(product_id):
+    """Correct a sale item's selling price from its listing page.
+
+    Deliberately narrow: sale products only, Inventory permission required, one
+    column written through ``products.update_sale_price``. Rental daily rates and
+    service lines keep their own editors.
+    """
+    product = _scoped_product(product_id)
+    if (product.get("product_type") or "") != "sale":
+        abort(404)
+    if not user_can_module(session, "inventory"):
+        flash("Changing a selling price needs Inventory access.", "error")
+        return redirect(url_for("shop_admin.listing_detail", product_id=int(product_id)))
+    from app.services.products import update_sale_price
+
+    try:
+        price = update_sale_price(product_id, request.form.get("price_amount"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+    else:
+        flash("Selling price updated to R%.2f." % price, "success")
+    return redirect(url_for("shop_admin.listing_detail", product_id=int(product_id)))
+
+
 # ---------------------------------------------------------------------------
 # gallery
 # ---------------------------------------------------------------------------

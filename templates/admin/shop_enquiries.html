@@ -1,11 +1,11 @@
 {% extends "admin/layout.html" %}
-{% set title = 'Store enquiries' %}
+{% set title = 'Online enquiries' %}
 {% block admin_body %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/shop-enquiries.css') }}">
 <header class="page-header shop-enquiries-head">
   <div>
     <p class="eyebrow">Online store</p>
-    <h1>Store enquiries{% if new_badge %} <span class="shop-badge new">{{ new_badge }} new</span>{% endif %}</h1>
+    <h1>Online enquiries{% if new_badge %} <span class="shop-badge new">{{ new_badge }} new</span>{% endif %}</h1>
     <p>Rental, purchase and repair requests sent from the storefront. Nothing here has touched stock, customers or the books.</p>
   </div>
   <a class="btn ghost" href="{{ url_for('admin.online_store') }}">Online store settings</a>
@@ -45,7 +45,7 @@
     <a class="btn ghost" href="{{ url_for('shop_enquiries.index') }}">Clear</a>
     {% endif %}
   </form>
-  <div class="shop-status-chips" aria-label="Enquiries by status">
+  <div class="shop-status-chips" aria-label="Online enquiries by status">
     <a class="shop-chip {% if not selected_status %}active{% endif %}" href="{{ url_for('shop_enquiries.index', branch=selected_branch or None, type=selected_type or None, query=query or None) }}">All <b>{{ total }}</b></a>
     {% for status in statuses %}
     <a class="shop-chip {% if selected_status == status %}active{% endif %}" href="{{ url_for('shop_enquiries.index', branch=selected_branch or None, status=status, type=selected_type or None, query=query or None) }}">
@@ -88,7 +88,7 @@
 </div>
 {% else %}
 <section class="panel empty-state">
-  <h2>No enquiries match</h2>
+  <h2>No online enquiries match</h2>
   <p>{% if new_badge %}There {{ 'is 1 new enquiry' if new_badge == 1 else 'are ' ~ new_badge ~ ' new enquiries' }} waiting under “New”.{% else %}New storefront requests will appear here, and the branch's staff get a push notification.{% endif %}</p>
 </section>
 {% endif %}

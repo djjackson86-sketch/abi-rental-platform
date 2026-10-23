@@ -134,6 +134,20 @@ SCHEMA = (
         updated_at TEXT NOT NULL DEFAULT ''
     )
     """,
+    # One-time seed provenance for listings imported from an external catalogue
+    # (the original Sano sale-trailer price list). A seed row is the *only*
+    # durable identity a rerun may trust: it is never shown in an editor and is
+    # never rewritten, so staff copy, photos, prices and publish state stay
+    # theirs. ``ON DELETE CASCADE`` means deleting the product also forgets the
+    # seed, and a deliberate re-import can then create it again.
+    """
+    CREATE TABLE IF NOT EXISTS shop_listing_seeds (
+        product_id INTEGER PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+        source_key TEXT NOT NULL UNIQUE,
+        source_ref TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT ''
+    )
+    """,
 )
 
 
@@ -737,6 +751,64 @@ def set_public(product_id, public):
     )
     db.commit()
     return bool(public)
+
+
+# ---------------------------------------------------------------------------
+# one-time seed provenance
+# ---------------------------------------------------------------------------
+
+
+def seed_source_key(product_id):
+    """The immutable import key bound to a product, or ``''`` when it has none."""
+    row = get_db().execute(
+        "SELECT source_key FROM shop_listing_seeds WHERE product_id = ?",
+        [int(product_id)],
+    ).fetchone()
+    data = row_dict(row) or {}
+    return str(data.get("source_key") or "")
+
+
+def seed_product_id(source_key):
+    """The product a seed key was created for, or ``None``."""
+    key = str(source_key or "").strip()
+    if not key:
+        return None
+    row = get_db().execute(
+        "SELECT product_id FROM shop_listing_seeds WHERE source_key = ?", [key]
+    ).fetchone()
+    data = row_dict(row) or {}
+    value = data.get("product_id")
+    return int(value) if value is not None else None
+
+
+def record_seed(product_id, source_key, source_ref=""):
+    """Bind a product to its import key exactly once.
+
+    Returns ``True`` when the row was written. A rerun of the importer calls this
+    only for a product it has just created or adopted, so staff edits are never
+    revisited: the seed row stores provenance, not a copy of the catalogue.
+    """
+    product_id = int(product_id)
+    key = str(source_key or "").strip()
+    if not key:
+        raise ShopListingError("A seed needs a source key.")
+    if not _product_exists(product_id):
+        raise ShopListingError("Product not found")
+    existing = seed_product_id(key)
+    if existing is not None:
+        if existing == product_id:
+            return False
+        raise ShopListingError("That source key is already bound to another product.")
+    if seed_source_key(product_id):
+        raise ShopListingError("That product is already bound to another source key.")
+    db = get_db()
+    db.execute(
+        "INSERT INTO shop_listing_seeds (product_id, source_key, source_ref, created_at) "
+        "VALUES (?, ?, ?, ?)",
+        [product_id, key, str(source_ref or "")[:200], now()],
+    )
+    db.commit()
+    return True
 
 
 # ---------------------------------------------------------------------------

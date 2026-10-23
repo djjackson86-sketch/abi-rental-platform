@@ -30,7 +30,7 @@
     {% if user_can('payments') %}<a href="{{ url_for('payments.index') }}"><span>▤</span><span>Payments</span></a>{% endif %}
     {% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}"><span>≋</span><span>Reports</span></a>{% endif %}
     {% if user_can('online_store') %}<a href="{{ url_for('admin.online_store') }}"><span>⌂</span><span>Online store</span></a>{% endif %}
-    {% if user_can('orders') or user_can('online_store') %}<a href="/online-store/enquiries"><span>✉</span><span>Enquiries{% if shop_new_enquiry_count %} · {{ shop_new_enquiry_count }} new{% endif %}</span></a>{% endif %}
+    {% if user_can('orders') or user_can('online_store') %}<a href="/online-store/enquiries"><span>✉</span><span>Online enquiries{% if shop_new_enquiry_count %} · {{ shop_new_enquiry_count }} new{% endif %}</span></a>{% endif %}
     {% if user_can('settings') %}<a href="{{ url_for('settings.portal_index') }}"><span>▤</span><span>Customer portal</span></a>{% endif %}
     {% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}"><span>▦</span><span>Scan a vehicle disk</span></a>{% endif %}
     {% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}"><span>▩</span><span>Scan to return</span></a>{% endif %}
@@ -45,7 +45,7 @@
     {# Phone navigation: one uniform chip shape per module; the depot chip is
        placed last and spans the full row so a long depot name stays readable. #}
     <nav class="mobile-nav">
-      {% if user_can('orders') or user_can('online_store') %}<a href="/online-store/enquiries">Enquiries{% if shop_new_enquiry_count %} · {{ shop_new_enquiry_count }}{% endif %}</a>{% endif %}
+      {% if user_can('orders') or user_can('online_store') %}<a href="/online-store/enquiries">Online enquiries{% if shop_new_enquiry_count %} · {{ shop_new_enquiry_count }}{% endif %}</a>{% endif %}
       {% if user_can('dashboard') %}<a href="{{ url_for('admin.dashboard') }}">Dashboard</a>{% endif %}{% if user_can('orders') %}<a href="{{ url_for('orders.index') }}">Orders</a>{% endif %}{% if user_can('customers') %}<a href="{{ url_for('customers.index') }}">Customers</a>{% endif %}{% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}">Inventory</a>{% endif %}{% if user_can('payments') %}<a href="{{ url_for('payments.index') }}">Payments</a>{% endif %}{% if user_can('reports') %}<a href="{{ url_for('admin.reports') }}">Reports</a>{% endif %}{% if user_can('online_store') %}<a href="{{ url_for('admin.online_store') }}">Online store</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.portal_index') }}">Customer portal</a>{% endif %}{% if user_can('scan_vehicle') %}<a href="{{ url_for('vehicles.scan_vehicle') }}">Scan vehicle</a>{% endif %}{% if user_can('scan_return') %}<a href="{{ url_for('returns.scan_return') }}">Returns</a>{% endif %}{% if user_can('settings') %}<a href="{{ url_for('settings.general') }}">Settings</a>{% endif %}{% if active_branch %}<a class="branch-context" href="{{ url_for('auth.select_branch') }}">Branch: {{ active_branch['name'] }} · Change</a>{% endif %}
     </nav>
     {# Ordinary navigation to this account's notification settings, in the main column

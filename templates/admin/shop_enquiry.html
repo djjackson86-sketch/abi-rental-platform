@@ -1,10 +1,10 @@
 {% extends "admin/layout.html" %}
-{% set title = 'Store enquiry' %}
+{% set title = 'Online enquiry' %}
 {% block admin_body %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/shop-enquiries.css') }}">
 <header class="page-header shop-enquiry-head">
   <div>
-    <p class="eyebrow"><a href="{{ url_for('shop_enquiries.index') }}">Store enquiries</a> · {{ enquiry.type_label }}</p>
+    <p class="eyebrow"><a href="{{ url_for('shop_enquiries.index') }}">Online enquiries</a> · {{ enquiry.type_label }}</p>
     <h1>{{ enquiry.customer_name }}</h1>
     <p>
       <span class="shop-badge {{ enquiry.status }}">{{ enquiry.status_label }}</span>
@@ -12,7 +12,7 @@
       <span class="shop-when">Received {{ display_local_datetime(enquiry.created_at) }}</span>
     </p>
   </div>
-  <a class="btn ghost" href="{{ url_for('shop_enquiries.index') }}">All enquiries</a>
+  <a class="btn ghost" href="{{ url_for('shop_enquiries.index') }}">All online enquiries</a>
 </header>
 
 <div class="shop-enquiry-grid">

@@ -15,7 +15,7 @@
   <div class="form-actions" style="display:flex;flex-wrap:wrap;gap:10px">
     <a class="btn primary" href="/online-store/listings">Products &amp; photos</a>
     <a class="btn ghost" href="/online-store/shop-settings">Homepage images &amp; shop link</a>
-    <a class="btn ghost" href="/online-store/enquiries">Enquiries{% if shop_new_enquiry_count %} <span class="badge">{{ shop_new_enquiry_count }} new</span>{% endif %}</a>
+    <a class="btn ghost" href="/online-store/enquiries">Online enquiries{% if shop_new_enquiry_count %} <span class="badge">{{ shop_new_enquiry_count }} new</span>{% endif %}</a>
     <button type="button" class="btn ghost" id="copy-shop-link">Copy shop link</button>
   </div>
   <label style="display:block;margin-top:12px">Public shop link<input id="shop-public-link" type="url" readonly value="{{ config.PUBLIC_BASE_URL.rstrip('/') if config.PUBLIC_BASE_URL else request.url_root.rstrip('/') }}/store" onclick="this.select()"></label>

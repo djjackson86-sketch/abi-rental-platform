@@ -9,7 +9,7 @@
     <div>
       <p class="eyebrow"><a href="{{ url_for('shop_admin.listings') }}">Shop listings</a></p>
       <h1>{{ product.store_title }}</h1>
-      <p class="shop-lede">Public title and copy for <strong>{{ product.name }}</strong>. Price, deposit, tax and stock are set in Inventory and cannot be changed here.</p>
+      <p class="shop-lede">Public title and copy for <strong>{{ product.name }}</strong>. Deposit, tax and stock are set in Inventory.{% if product.product_type == 'sale' %} The selling price can be corrected below.{% endif %}</p>
     </div>
   </div>
   <div class="shop-header-actions">
@@ -46,6 +46,22 @@
       <div><dt>Category</dt><dd>{{ product.category_name or 'Ungrouped' }}{% if product.store_category_hidden %} <span class="badge shop-badge-hidden">Hidden category</span>{% endif %}</dd></div>
       <div><dt>Branch</dt><dd>{{ product.branch_name or 'Unassigned' }}</dd></div>
     </dl>
+    {% if product.product_type == 'sale' %}
+    <h3>Selling price</h3>
+    {% if user_can('inventory') %}
+    <form method="post" action="{{ url_for('shop_admin.update_listing_price', product_id=product.id) }}" class="shop-price-form">
+      <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
+      <label class="shop-field">
+        <span>Selling price (R)</span>
+        <input name="price_amount" inputmode="decimal" value="{{ '%.2f'|format(product.price_amount or 0) }}" required>
+        <small>Changes only this product’s selling price. It is the price shown on the shop card, the detail page and the purchase enquiry. Hire rates and deposits are not affected.</small>
+      </label>
+      <button class="btn primary" type="submit">Update selling price</button>
+    </form>
+    {% else %}
+    <p class="muted">Changing a selling price needs Inventory access. Ask an inventory user to update it.</p>
+    {% endif %}
+    {% endif %}
   </section>
 
   <section class="panel shop-copy-form">
