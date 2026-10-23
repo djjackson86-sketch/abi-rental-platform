@@ -53,6 +53,29 @@ SUMMARY_VALUE_RIGHT_EDGE = INVOICE_TABLE_RIGHT_EDGE - 9
 # both drawing paths — the block that shares the totals' page and the block that
 # drops onto a page of its own — so the two can never drift apart.
 BANKING_THANK_YOU_GAP = 22
+# Ticket ABI-341953250: optional Purchase Order reference. Invoice-only - a quote
+# never carries one, and a quote's header must keep the exact geometry it had.
+# It prints in a labelled box in the right-hand detail column, under the
+# number/date stack and above Order. The box is measured from its own wrapped
+# value, so a long (or unbroken) reference pushes the Order block and the item
+# table down instead of printing over them; item rows that no longer fit on page
+# 1 continue on page 2 through the normal pagination, so nothing is lost.
+PURCHASE_ORDER_LABEL = 'Purchase Order'
+# The documents.purchase_order column is capped at 500 characters by the form.
+# The renderer applies the same cap defensively, so a post that bypassed the
+# form cannot turn the header into a column of text over the line items.
+PURCHASE_ORDER_MAX_CHARS = 500
+PURCHASE_ORDER_LEFT_X = 300
+# The box may step right to clear a long issuer/Bill To line, but never so far
+# that the value column becomes a word-per-line sliver.
+PURCHASE_ORDER_MAX_LEFT_X = 360
+PURCHASE_ORDER_TOP_Y = 716
+PURCHASE_ORDER_PAD = 6
+PURCHASE_ORDER_LABEL_SIZE = 7.5
+PURCHASE_ORDER_VALUE_SIZE = 8.5
+PURCHASE_ORDER_LEADING = 11
+PURCHASE_ORDER_FILL = '0.965 0.976 0.992'
+PURCHASE_ORDER_STROKE = '0.82 0.86 0.91'
 
 
 def _pdf_text(value):
@@ -546,6 +569,47 @@ def _pdf_wrap(text, size: int | float, width, bold=False, max_lines=2):
     return lines
 
 
+def _pdf_wrap_hard(text, size: int | float, width, bold=False):
+    """Wrap every character of ``text`` inside ``width`` — no ellipsis, no spill.
+
+    ``_pdf_wrap`` is right for a fixed-height card: it ellipsises once
+    ``max_lines`` is reached and lets one word longer than the line run past the
+    edge. The invoice's Purchase Order box (ticket ABI-341953250) is the
+    opposite contract — the box grows to fit, so the reference must be printed in
+    full, and a pasted value with no spaces must be broken rather than crossing
+    the border. Widths are the real Helvetica glyph widths, i.e. what the viewer
+    draws, not the flat character estimate.
+    """
+    limit = float(width)
+    lines = []
+    for paragraph in str(text or '').split('\n'):
+        words = paragraph.split()
+        if not words:
+            lines.append('')
+            continue
+        line = ''
+        for word in words:
+            candidate = f'{line} {word}' if line else word
+            if _pdf_exact_text_width(candidate, size, bold) <= limit:
+                line = candidate
+                continue
+            if line:
+                lines.append(line)
+                line = ''
+            # A single token wider than the box (a 60-character order number with
+            # no spaces) is cut on the character that genuinely fits.
+            while _pdf_exact_text_width(word, size, bold) > limit:
+                cut = len(word)
+                while cut > 1 and _pdf_exact_text_width(word[:cut], size, bold) > limit:
+                    cut -= 1
+                lines.append(word[:cut])
+                word = word[cut:]
+            line = word
+        if line:
+            lines.append(line)
+    return lines or ['']
+
+
 def _report_row_entries(rows, label_width):
     """Wrap each row's label so the page budget can count the real drawn lines."""
     return [{
@@ -906,6 +970,64 @@ def _main_vehicle_lines(custom_fields):
     return lines
 
 
+def _document_purchase_order(document):
+    """The optional Purchase Order reference to print, or ``''``.
+
+    Invoice-only (ticket ABI-341953250): a proforma is a draft, unnumbered
+    invoice, so ``document_type == 'invoice'`` already covers it, while a quote's
+    header stays exactly as it was. Read through ``_doc_value`` because the column
+    is new and older row dicts (and the layout fixtures) simply do not have the
+    key. Whitespace - including a pasted newline or tab - is folded to single
+    spaces: the page stream draws one string per line, so a raw line break would
+    otherwise print as a missing glyph.
+    """
+    if _doc_value(document, 'document_type', '') != 'invoice':
+        return ''
+    value = ' '.join(str(_doc_value(document, 'purchase_order', '') or '').split())
+    if len(value) > PURCHASE_ORDER_MAX_CHARS:
+        value = f'{value[:PURCHASE_ORDER_MAX_CHARS - 3].rstrip()}...'
+    return value
+
+
+def _purchase_order_left_x(*line_groups):
+    """Left edge of the Purchase Order box that clears the left-hand text blocks.
+
+    The box lives in the right-hand detail column, but it grows downward into the
+    band the issuer and Bill To blocks occupy, so a long address line must not end
+    up behind it. Measuring the widest drawn line of both blocks keeps a real gap;
+    the clamp keeps the value column wide enough to stay readable.
+    """
+    widest = 0.0
+    for lines in line_groups:
+        for line in lines:
+            if line:
+                widest = max(widest, LEFT_BLOCK_X + _pdf_exact_text_width(line, 8.5))
+    return min(max(PURCHASE_ORDER_LEFT_X, widest + 16), PURCHASE_ORDER_MAX_LEFT_X)
+
+
+def _purchase_order_box(text, left_x, top_y):
+    """Geometry and wrapped lines for the Purchase Order box.
+
+    Height is derived from the number of wrapped lines rather than fixed, which is
+    what lets the Order block below follow it down without overlapping. The box's
+    right edge is the invoice table's, so the header keeps one straight edge.
+    """
+    width = INVOICE_TABLE_RIGHT_EDGE - left_x
+    lines = _pdf_wrap_hard(text, PURCHASE_ORDER_VALUE_SIZE, width - (2 * PURCHASE_ORDER_PAD))
+    label_y = top_y - 12
+    first_value_y = label_y - 13
+    bottom = first_value_y - ((len(lines) - 1) * PURCHASE_ORDER_LEADING) - 5
+    return {
+        'x': left_x,
+        'width': width,
+        'top': top_y,
+        'bottom': bottom,
+        'label_y': label_y,
+        'first_value_y': first_value_y,
+        'lines': lines,
+    }
+
+
 def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     display_label = display_document_label(document)
     display_number = display_document_number(document)
@@ -962,7 +1084,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
 
     text_commands = ['BT']
     # Top-left brand/address, matching the supplied template.
-    _add_pdf_lines(text_commands, LEFT_BLOCK_X, 715, [
+    issuer_lines = [
         issuer_name,
         *[line for line in [issuer_phone, issuer_email] if line],
         *[line for line in [
@@ -970,7 +1092,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
             f'Company Reg No: {issuer_company_reg_no}' if issuer_company_reg_no else '',
         ] if line],
         *[line for line in issuer_address if line],
-    ], size=8.2, leading=10, max_lines=9)
+    ]
+    _add_pdf_lines(text_commands, LEFT_BLOCK_X, 715, issuer_lines, size=8.2, leading=10, max_lines=9)
 
     # Top-right invoice and order stack.
     detail_x = 455
@@ -980,16 +1103,10 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         invoice_lines.append(display_number)
     invoice_lines.extend([f'{display_label} date:', effective_document_date(document)])
     _add_pdf_lines(text_commands, detail_x, 746, invoice_lines, size=8.5, leading=14)
-
-    text_commands.append(_pdf_text_command(detail_x, 625, 'Order', size=8.5, font='F2'))
-    order_lines = [f'Order: {document["order_number"]}']
-    if document_has_rental_items(items):
-        order_lines.extend([
-            f'Pickup: {document_datetime(document["start_at"])}',
-            f'Return: {document_datetime(document["end_at"])}',
-            rent_label,
-        ])
-    _add_pdf_lines(text_commands, detail_x, 611, order_lines, size=8.5, leading=14)
+    # Where the last invoice-date line sits, so the Purchase Order box can hang
+    # directly under it (a proforma prints no number, so its date sits one line
+    # higher than a finalized invoice's).
+    invoice_date_bottom_y = 746 - ((len(invoice_lines) - 1) * 14)
 
     customer_lines = [
         'Bill To:',
@@ -1015,6 +1132,53 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         alt_lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
     if alt_lines:
         customer_lines.extend(['', *alt_lines])
+
+    # Ticket ABI-341953250: the optional Purchase Order, in its own labelled box
+    # between the number/date stack and Order. Only a non-blank invoice (or
+    # proforma) gets it; a quote's header geometry is untouched.
+    purchase_order_text = _document_purchase_order(document)
+    purchase_order_box = None
+    if purchase_order_text:
+        purchase_order_box = _purchase_order_box(
+            purchase_order_text,
+            _purchase_order_left_x(issuer_lines, customer_lines),
+            min(PURCHASE_ORDER_TOP_Y, invoice_date_bottom_y - 14),
+        )
+        draw_commands.append(_pdf_rect(
+            purchase_order_box['x'], purchase_order_box['bottom'], purchase_order_box['width'],
+            purchase_order_box['top'] - purchase_order_box['bottom'],
+            fill=PURCHASE_ORDER_FILL, stroke=PURCHASE_ORDER_STROKE, line_width=0.6,
+        ))
+        text_commands.append(_pdf_text_command(
+            purchase_order_box['x'] + PURCHASE_ORDER_PAD, purchase_order_box['label_y'],
+            PURCHASE_ORDER_LABEL, size=PURCHASE_ORDER_LABEL_SIZE, font='F2',
+        ))
+        _add_pdf_lines(
+            text_commands, purchase_order_box['x'] + PURCHASE_ORDER_PAD,
+            purchase_order_box['first_value_y'], purchase_order_box['lines'],
+            size=PURCHASE_ORDER_VALUE_SIZE, leading=PURCHASE_ORDER_LEADING,
+            max_lines=len(purchase_order_box['lines']),
+        )
+
+    # The Order block only moves when the Purchase Order box needs the room: it
+    # keeps its historical 625 heading for a short reference and drops below the
+    # box (22pt of white) for a long one, so a two-line PO cannot print across
+    # the Order heading.
+    order_heading_y = 625
+    if purchase_order_box:
+        order_heading_y = min(625, purchase_order_box['bottom'] - 22)
+    text_commands.append(_pdf_text_command(detail_x, order_heading_y, 'Order', size=8.5, font='F2'))
+    order_lines = [f'Order: {document["order_number"]}']
+    if document_has_rental_items(items):
+        order_lines.extend([
+            f'Pickup: {document_datetime(document["start_at"])}',
+            f'Return: {document_datetime(document["end_at"])}',
+            rent_label,
+        ])
+    order_first_line_y = order_heading_y - 14
+    _add_pdf_lines(text_commands, detail_x, order_first_line_y, order_lines, size=8.5, leading=14)
+    order_block_bottom_y = order_first_line_y - ((len(order_lines) - 1) * 14)
+
     # Invoice table and totals.
     # Move the table up under the address blocks. Page 1 takes as many rows as
     # genuinely fit above the summary/banking floor (instead of the earlier
@@ -1076,6 +1240,12 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Table starts just below the address block, never lower than the page-1 cap
     # so even a short address still gives the table its full run of rows.
     table_y = min(545, customer_bottom_y - 28)
+    if purchase_order_box:
+        # The Purchase Order box pushed Order down, so the first item row and its
+        # black heading band have to start below it. Page 1 then takes fewer rows
+        # and the rest continue on page 2 through the normal take_rows() loop -
+        # the reference costs page-1 capacity, never an item line.
+        table_y = min(table_y, order_block_bottom_y - 20)
 
     def add_table_header(draw, text, header_y):
         draw.append(_pdf_rect(INVOICE_TABLE_X, header_y - 5, INVOICE_TABLE_RIGHT_EDGE - INVOICE_TABLE_X, 18, fill='0 0 0'))
@@ -1506,6 +1676,12 @@ def document_pdf_bytes(document_id):
     lines = [f'{display_label} {display_number}']
     if document['document_type'] == 'invoice':
         lines.append(f'Invoice date: {effective_document_date(document)}')
+        # Ticket ABI-341953250: the plain-text fallback carries the same optional
+        # reference as the invoice template, in the same place (right after the
+        # invoice date, before Order) so the two copies of a document agree.
+        purchase_order_text = _document_purchase_order(document)
+        if purchase_order_text:
+            lines.append(f'Purchase Order: {purchase_order_text}')
     lines.append(f'Issuer: {issuer_name}')
     if issuer_email:
         lines.append(f'Issuer email: {issuer_email}')

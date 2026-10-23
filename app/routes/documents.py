@@ -13,6 +13,7 @@ from app.services.documents import (
     document_datetime,
     effective_document_date,
     save_document_date,
+    save_purchase_order,
     document_filter_counts,
     document_has_rental_items,
     document_paid_stamp,
@@ -33,6 +34,7 @@ from app.services.pdf_documents import DOCUMENT_LOGO_STATIC_PATH, document_pdf_b
 from app.services.customers import custom_fields_for
 from app.services.customer_emails import document_copy_emails
 from app.services.access import user_can_access_order
+from app.services.csrf import issue_token, validate as validate_csrf
 
 # Email-sized signature logo (360px wide) so clients that ignore CSS sizing
 # still show a sane logo instead of the full 1200px document artwork.
@@ -219,6 +221,7 @@ def detail(document_id):
         document_date=document_date,
         document_datetime=document_datetime,
         effective_document_date=effective_document_date,
+        purchase_order_csrf=issue_token("document_purchase_order") if document["document_type"] == "invoice" else "",
         rental_days_label=rental_days_label(document),
         email_copies=document_copy_emails(document, (settings['email'] or '').strip() or 'info@sanotrailers.co.za', document['customer_email']),
         email_message=email_message,
@@ -276,6 +279,22 @@ def finalize(document_id):
     except ValueError as exc:
         flash(str(exc), "error")
     return redirect(url_for("documents.detail", document_id=document_id))
+
+
+@bp.post("/<int:document_id>/purchase-order")
+@login_required
+def save_purchase_order_route(document_id):
+    document = get_document(document_id)
+    if not document:
+        abort(404)
+    _ensure_document_access(document)
+    validate_csrf('document_purchase_order')
+    try:
+        save_purchase_order(document_id, request.form.get('purchase_order'))
+        flash('Purchase Order saved', 'success')
+    except ValueError as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('documents.detail', document_id=document_id))
 
 
 @bp.post("/<int:document_id>/date")

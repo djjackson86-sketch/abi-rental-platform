@@ -997,6 +997,7 @@ def run_migrations(db):
             f"ON {_table}(source_system, source_id) WHERE source_id <> ''"
         )
     ensure_column(db, "documents", "document_date", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "documents", "purchase_order", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "sent_at", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "sent_to", "TEXT NOT NULL DEFAULT ''")
     ensure_column(db, "documents", "email_status", "TEXT NOT NULL DEFAULT 'not_sent'")

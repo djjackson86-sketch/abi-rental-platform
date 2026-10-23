@@ -227,6 +227,23 @@ def effective_document_date(document):
     return _row_get(document, 'document_date') or document_date(document['created_at'])
 
 
+PURCHASE_ORDER_MAX_LENGTH = 500
+
+
+def save_purchase_order(document_id, value):
+    document = get_document(document_id)
+    if not document:
+        raise ValueError('Document not found')
+    if document['document_type'] != 'invoice':
+        raise ValueError('Purchase Order is available for invoices only')
+    value = (value or '').strip()
+    if len(value) > PURCHASE_ORDER_MAX_LENGTH:
+        raise ValueError('Purchase Order must be 500 characters or fewer')
+    db = get_db()
+    db.execute('UPDATE documents SET purchase_order = ? WHERE id = ?', (value, document_id))
+    db.commit()
+
+
 def save_document_date(document_id, value):
     document = get_document(document_id)
     if not document:
