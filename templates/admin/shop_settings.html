@@ -48,7 +48,8 @@
       </div>
       <label class="shop-field">
         <span>{{ 'Replace image' if slot.url else 'Upload image' }}</span>
-        <input type="file" name="image_{{ slot.slot }}" accept="image/png,image/jpeg,image/webp">
+        <input type="file" name="image_{{ slot.slot }}" accept="image/png,image/jpeg,image/webp" data-shrink-image>
+        <small class="shop-upload-note" data-shrink-status>Scaled to 1280px before upload.</small>
       </label>
       {% if slot.url %}
       <label class="shop-check">
@@ -97,4 +98,5 @@
   });
 })();
 </script>
+<script src="{{ url_for('static', filename='js/shop-image-shrink.js') }}" defer></script>
 {% endblock %}

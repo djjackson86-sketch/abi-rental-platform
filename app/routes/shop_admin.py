@@ -55,13 +55,17 @@ from app.services.shop_catalogue import (
     clear_home_image,
     delete_image,
     editable_products,
+    editable_listing_counts,
     get_product,
     home_image_bytes,
+    home_image_record,
     home_image_url,
     home_slots,
     image_bytes,
     image_row,
+    media_record,
     move_image,
+    page_editable_products,
     product_is_public,
     replace_image,
     save_listing,
@@ -194,48 +198,37 @@ def _scoped_product(product_id):
 @bp.route("/online-store/listings")
 @shop_editor_required
 def listings():
-    """Every product this session may see, with its shop state beside it."""
-    products = editable_products()
+    """A bounded page of products this session may see, with shop state."""
     from app.routes.shop_enquiries import _live_account, _account_branch_ids
     current_scope = _account_branch_ids(_live_account(required_modules='online_store'))
-    if current_scope is not None:
-        products = [p for p in products if current_scope and (p.get('branch_id') is None or int(p['branch_id']) in current_scope)]
     type_filter = (request.args.get("type") or "").strip()
     state_filter = (request.args.get("state") or "").strip()
+    page_number = request.args.get("page", "1")
+    result = page_editable_products(
+        product_type=type_filter,
+        state=state_filter,
+        page=page_number,
+        branch_ids=current_scope,
+    )
+    counts, type_counts = editable_listing_counts(branch_ids=current_scope)
 
-    def matches(product):
-        ptype = product.get("product_type") or "rental"
-        if type_filter and ptype != type_filter:
-            return False
-        if state_filter == "live":
-            return bool(product.get("store_public"))
-        if state_filter == "hidden":
-            return not product.get("store_public")
-        if state_filter == "missing_image":
-            return not product.get("store_images")
-        if state_filter == "missing_description":
-            return not (product.get("store_description") or "").strip()
-        if state_filter == "featured":
-            return bool(product.get("featured"))
-        return True
+    def page_url(target):
+        return url_for(
+            "shop_admin.listings",
+            page=target,
+            type=type_filter or None,
+            state=state_filter or None,
+        )
 
-    visible = [product for product in products if matches(product)]
-    counts = {
-        "all": len(products),
-        "live": sum(1 for p in products if p.get("store_public")),
-        "hidden": sum(1 for p in products if not p.get("store_public")),
-        "with_image": sum(1 for p in products if p.get("store_images")),
-        "missing_image": sum(1 for p in products if not p.get("store_images")),
-    }
-    type_counts = {}
-    for product in products:
-        key = product.get("product_type") or "rental"
-        type_counts[key] = type_counts.get(key, 0) + 1
-
+    next_url = page_url(result["next_page"]) if result["has_next"] else ""
+    prev_url = page_url(result["prev_page"]) if result["has_prev"] else ""
     shop_url = shop_public_url(url_for("public.store", _external=True))
     return render_template(
         "admin/shop_listings.html",
-        products=visible,
+        products=result["items"],
+        pagination=result,
+        next_url=next_url,
+        prev_url=prev_url,
         counts=counts,
         type_counts=type_counts,
         type_filter=type_filter,
@@ -475,18 +468,41 @@ def remove_home_image(slot):
 @bp.route("/store/media/<int:media_id>")
 def media(media_id):
     """Serve one listing photo's sanitised bytes from the database."""
-    row = image_row(media_id)
-    if row is None:
+    return _serve_media(media_id, thumbnail=False)
+
+
+@bp.route("/store/media/<int:media_id>/thumb")
+def media_thumb(media_id):
+    """Serve the small card thumbnail generated when the photo was uploaded."""
+    return _serve_media(media_id, thumbnail=True)
+
+
+def _serve_media(media_id, thumbnail=False):
+    """Authorise and serve one media object in a single database read.
+
+    ``media_record`` returns the bytes together with public eligibility, the
+    shop switch and the owning branch, so a public image costs one round trip
+    (previously four: settings, image row, eligibility and bytes). That matters
+    on Render: the database is remote and one synchronous worker used to queue
+    every other request behind a gallery burst.
+
+    Authorisation is unchanged: a photo is public only while its product is
+    eligible *and* the shop is enabled. Otherwise it needs an active staff
+    account with the Online store module inside the product's depot, and it is
+    served ``private, no-store``.
+    """
+    record = media_record(media_id, thumbnail=thumbnail)
+    if record is None:
         abort(404)
-    product_id = int(row.get("product_id") or 0)
-    from app.services.settings import get_company_settings
-    is_public = bool(get_company_settings()['store_enabled']) and product_is_public(product_id)
-    if not is_public and not _preview_allowed(product_id):
+    is_public = record["store_enabled"] and record["is_public"]
+    if not is_public and not _preview_allowed_branch(record["branch_id"]):
         abort(404)
-    data, mime, version, _owner = image_bytes(media_id)
-    if data is None:
-        abort(404)
-    response = _image_response(data, mime, f"shop-media-{media_id}-{version}")
+    kind = "t" if thumbnail else "f"
+    response = _image_response(
+        record["data"],
+        record["mime"],
+        f"shop-media-{record['id']}-{record['version']}-{kind}",
+    )
     if not is_public:
         response.headers['Cache-Control'] = 'private, no-store, max-age=0'
     return response
@@ -495,17 +511,18 @@ def media(media_id):
 @bp.route("/store/home-image/<slot>")
 def home_image(slot):
     """Serve one home-page slot's artwork from the database."""
-    from app.services.settings import get_company_settings
-    is_public = bool(get_company_settings()['store_enabled'])
+    record = home_image_record(slot)
+    if record is None:
+        abort(404)
+    is_public = record["store_enabled"]
     if not is_public:
         if _active_user() is None:
             abort(404)
         from app.routes.shop_enquiries import _live_account
         _live_account(required_modules='online_store')
-    data, mime, version = home_image_bytes(slot)
-    if data is None:
-        abort(404)
-    response = _image_response(data, mime, f"shop-home-{slot}-{version}")
+    response = _image_response(
+        record["data"], record["mime"], f"shop-home-{slot}-{record['version']}"
+    )
     if not is_public:
         response.headers['Cache-Control'] = 'private, no-store, max-age=0'
     return response
@@ -515,7 +532,9 @@ def _image_response(data, mime, etag):
     response = make_response(data)
     response.headers["Content-Type"] = mime or "image/jpeg"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Cache-Control"] = "public, max-age=3600"
+    # Keep a short public lifetime: a staff member can unpublish a listing.
+    # A year-long immutable response would bypass that later visibility change.
+    response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
     response.set_etag(etag)
     try:
         response = response.make_conditional(request)
@@ -524,28 +543,32 @@ def _image_response(data, mime, etag):
     return response
 
 
-def _preview_allowed(product_id):
-    """Signed in, active, allowed the shop module, and inside this product's depot."""
+def _preview_allowed_branch(branch_id):
+    """Active staff + Online store module + this product's depot, without refetching it."""
     if _active_user() is None:
         return False
     if not user_can_module(session, MODULE_KEY):
         return False
     from app.routes.shop_enquiries import _live_account, _account_branch_ids
     scope = _account_branch_ids(_live_account(required_modules='online_store'))
-    product = get_product(product_id)
-    if product is None:
-        return False
     if scope is None:
         return True
     if len(scope) == 0:
         return False
-    branch_id = product.get("branch_id")
     if branch_id is None:
         return True
     try:
         return int(branch_id) in [int(value) for value in scope]
     except (TypeError, ValueError):
         return False
+
+
+def _preview_allowed(product_id):
+    """Signed in, active, allowed the shop module, and inside this product's depot."""
+    product = get_product(product_id)
+    if product is None:
+        return False
+    return _preview_allowed_branch(product.get("branch_id"))
 
 
 @bp.route('/online-store/listings/<int:product_id>/preview', methods=['GET','POST'])

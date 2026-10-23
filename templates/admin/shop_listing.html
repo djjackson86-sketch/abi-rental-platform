@@ -114,9 +114,10 @@
     </div>
     <form method="post" action="{{ url_for('shop_admin.upload_image', product_id=product.id) }}" enctype="multipart/form-data" class="shop-upload">
       <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
-      <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+      <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required data-shrink-image>
       <input type="text" name="alt_text" maxlength="200" placeholder="Alt text (optional)">
       <button class="btn primary" type="submit" {% if product.store_images|length >= shop_max_images %}disabled{% endif %}>Add photo</button>
+      <small class="shop-upload-note" data-shrink-status>Large photos are scaled to 1280px in your browser before upload.</small>
     </form>
   </div>
 
@@ -124,7 +125,7 @@
   <div class="shop-gallery-grid">
     {% for image in product.store_images %}
     <article class="shop-gallery-card {% if image.is_cover %}is-cover{% endif %}">
-      <img src="{{ image.url }}" alt="{{ image.alt or product.store_title }}">
+      <img src="{{ image.thumb_url or image.url }}" alt="{{ image.alt or product.store_title }}" loading="lazy" decoding="async">
       <div class="shop-gallery-meta">
         {% if image.is_cover %}<span class="badge shop-badge-live">Cover</span>{% endif %}
         <span class="shop-gallery-alt">{{ image.alt or 'No alt text' }}</span>
@@ -148,7 +149,7 @@
         </form>
         <form method="post" action="{{ url_for('shop_admin.replace_listing_image', product_id=product.id, media_id=image.id) }}" enctype="multipart/form-data" class="shop-replace">
           <input type="hidden" name="{{ shop_csrf_field }}" value="{{ shop_csrf_token() }}">
-          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required data-shrink-image>
           <button class="btn ghost small" type="submit">Replace</button>
         </form>
         <form method="post" action="{{ url_for('shop_admin.delete_listing_image', product_id=product.id, media_id=image.id) }}" onsubmit="return confirm('Remove this photo?');">
@@ -163,4 +164,5 @@
   <p class="shop-empty">No photos yet.{% if product.category_image_url %} The shop is currently using the <strong>{{ product.category_name }}</strong> category photo.{% endif %}</p>
   {% endif %}
 </section>
+<script src="{{ url_for('static', filename='js/shop-image-shrink.js') }}" defer></script>
 {% endblock %}

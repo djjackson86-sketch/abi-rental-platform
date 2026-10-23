@@ -40,8 +40,11 @@ caller must never read columns off the raw row.
 
 import io
 import re
+import threading
 
-from flask import current_app, has_app_context, has_request_context, url_for
+_IMAGE_DECODE_LOCK = threading.BoundedSemaphore(1)
+
+from flask import current_app, g, has_app_context, has_request_context, url_for
 from PIL import Image, ImageOps
 
 from app.db import get_db, now
@@ -50,16 +53,36 @@ from app.db import get_db, now
 MAX_IMAGES = 6
 
 #: Generous for a phone photo, small enough that a stray video is refused early.
-MAX_UPLOAD_BYTES = 6 * 1024 * 1024
+#: Staff browsers downscale before upload (see the listing/settings templates);
+#: this cap is the server's backstop for scripts and older browsers.
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 #: Longest edge of a stored photo. ``thumbnail`` scales only down, never up.
-MAX_IMAGE_EDGE = 1600
+MAX_IMAGE_EDGE = 1280
+
+#: Longest edge of the small card thumbnail generated at upload time. Cards ask
+#: for this instead of the full photo, so a catalogue page is a few hundred KB.
+THUMB_EDGE = 480
+
+#: Refuse an absurd pixel count *before* Pillow decodes it, so a tiny compressed
+#: "decompression bomb" cannot tie up a worker's memory.
+MAX_IMAGE_PIXELS = 24_000_000
+MAX_SOURCE_EDGE = 12_000
 
 #: Checked before Pillow is asked to decode anything.
 ALLOWED_MIME = frozenset({"image/png", "image/jpeg", "image/jpg", "image/webp"})
 
-JPEG_QUALITY = 84
-WEBP_QUALITY = 84
+JPEG_QUALITY = 78
+WEBP_QUALITY = 78
+THUMB_JPEG_QUALITY = 72
+THUMB_WEBP_QUALITY = 72
+
+#: Server-side page sizes. Both listings page in SQL — the old code loaded every
+#: product (and every gallery row) and sliced in Python, which is what made one
+#: request expensive on a remote database.
+PUBLIC_PAGE_SIZE = 12
+ADMIN_PAGE_SIZE = 20
+MAX_PAGE = 10_000
 
 MAX_ALT_TEXT = 200
 MAX_STORE_TITLE = 120
@@ -82,6 +105,7 @@ _MODEL_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 #: Route literals (not ``url_for``) so a decorated dict can be produced outside a
 #: request context — scripts, tests and the storefront preview all need this.
 MEDIA_ROUTE = "/store/media/{media_id}"
+THUMB_ROUTE = "/store/media/{media_id}/thumb"
 HOME_IMAGE_ROUTE = "/store/home-image/{slot}"
 CATEGORY_IMAGE_ROUTE = "/store/category-image/{group_id}"
 
@@ -121,6 +145,20 @@ SCHEMA = (
     """
     CREATE INDEX IF NOT EXISTS idx_shop_listing_images_product
         ON shop_listing_images(product_id, is_cover DESC, sort_order, id)
+    """,
+    # Thumbnails live in their own additive table rather than new columns on the
+    # gallery table: creating a table is safe on every boot and on Turso, while
+    # ALTER TABLE would need a migration pass. One row per gallery photo; the
+    # row disappears with its photo (``ON DELETE CASCADE``).
+    """
+    CREATE TABLE IF NOT EXISTS shop_listing_thumbnails (
+        image_id INTEGER PRIMARY KEY REFERENCES shop_listing_images(id) ON DELETE CASCADE,
+        image_blob BLOB,
+        image_mime TEXT NOT NULL DEFAULT '',
+        width INTEGER NOT NULL DEFAULT 0,
+        height INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT ''
+    )
     """,
     """
     CREATE TABLE IF NOT EXISTS shop_home_images (
@@ -234,8 +272,20 @@ def _float(value, default=0.0):
 # reading
 # ---------------------------------------------------------------------------
 
-_SELECT = """
-SELECT p.*,
+#: Every column the shop reads, named explicitly. ``products`` has no binary
+#: column today, but ``p.*`` also silently drags any column a future migration
+#: adds — including a BLOB — into every listing query. Keeping the list explicit
+#: is what bounds a listing response to text.
+_PRODUCT_COLUMNS = (
+    "p.id, p.name, p.product_type, p.description, p.sku, p.active, p.public_visible,"
+    " p.price_amount, p.price_unit, p.security_deposit, p.hourly_extra_rate,"
+    " p.registration, p.licence_number, p.registration_number, p.tax_profile_id,"
+    " p.product_group_id, p.quantity, p.tracking_method, p.wheel_size,"
+    " p.under_maintenance, p.branch_id, p.created_at"
+)
+
+_SELECT = f"""
+SELECT {_PRODUCT_COLUMNS},
        g.name AS meta_group_name,
        g.active AS meta_group_active,
        g.becomes_store_visible AS meta_group_store_visible,
@@ -249,25 +299,118 @@ SELECT p.*,
        m.model_key AS meta_model_key,
        m.featured AS meta_featured,
        m.store_sort_order AS meta_sort_order,
-       m.updated_at AS meta_updated_at
+       m.updated_at AS meta_updated_at,
+       s.source_key AS meta_source_key
 FROM products p
 LEFT JOIN product_groups g ON g.id = p.product_group_id
 LEFT JOIN branches b ON b.id = p.branch_id
 LEFT JOIN shop_listing_meta m ON m.product_id = p.id
+LEFT JOIN shop_listing_seeds s ON s.product_id = p.id
 WHERE 1=1
 """
 
-#: Public eligibility: the same meaning as the public store routes (active,
-#: published, not under maintenance) plus a visible category. A product whose
-#: category is hidden is excluded outright — it is never re-labelled into an
-#: "Other" bucket, because that would keep selling something the shop hid.
-_PUBLIC_SQL = (
-    " AND p.active = 1"
+#: The FROM/JOIN tail alone, for counting and paginating queries built around a
+#: window function (which needs the joins without the leading ``SELECT``).
+_FROM_SQL = _SELECT[_SELECT.index("FROM products p"):]
+
+#: The ``SELECT`` list without its FROM tail (product columns + meta aliases),
+#: reused by the paginated query so both paths expose identical names.
+_LIST_COLUMNS = _SELECT[_SELECT.index("SELECT ") + len("SELECT "):_SELECT.index("FROM products p")].strip().rstrip(",")
+
+#: One SQL predicate, used for public reads and for the shop editor's "Live"
+#: filter, so a listing cannot be live on one screen and hidden on the other.
+_PUBLIC_CONDITION = (
+    "p.active = 1"
     " AND p.public_visible = 1"
     " AND COALESCE(p.under_maintenance, 0) = 0"
     " AND (p.product_group_id IS NULL"
     "      OR (COALESCE(g.active, 0) = 1 AND COALESCE(g.becomes_store_visible, 0) = 1))"
 )
+
+#: Public eligibility: the same meaning as the public store routes (active,
+#: published, not under maintenance) plus a visible category. A product whose
+#: category is hidden is excluded outright — it is never re-labelled into an
+#: "Other" bucket, because that would keep selling something the shop hid.
+_PUBLIC_SQL = f" AND {_PUBLIC_CONDITION}"
+
+#: The provenance prefix of a one-time import seed, ``sale/<model>/<code>`` →
+#: ``sale/<model>``. This is the *sale presentation* model family: the original
+#: price list sold one model line in several sizes, and those sizes belong on one
+#: card. It is deliberately narrow — the literal ``sale/`` namespace of the
+#: durable ``shop_listing_seeds`` table, written once by the importer and never by
+#: the storefront — so no same-name guess can fold two trailers together, and a
+#: rental unit (which never carries a sale seed) can never be pulled in. The
+#: source manifest is never read at runtime; only the saved seed row is.
+_SALE_FAMILY_SQL = (
+    "CASE WHEN p.product_type = 'sale'"
+    " AND COALESCE(s.source_key, '') LIKE 'sale/%'"
+    " AND INSTR(SUBSTR(s.source_key, 6), '/') > 0"
+    " THEN SUBSTR(s.source_key, 1, INSTR(SUBSTR(s.source_key, 6), '/') + 4)"
+    " ELSE '' END"
+)
+
+#: Public cards are per *model group*, not per row. Sizes of one imported sale
+#: model line collapse through :data:`_SALE_FAMILY_SQL`; otherwise units the
+#: operator declared compatible collapse as before. The same expression is used
+#: to COUNT, page and de-duplicate, so a page boundary can never drop or
+#: duplicate a card.
+#:
+#: The ``model_key`` signature below is the rental *unit allocation* contract and
+#: is deliberately unchanged: it still demands the same type, category, price,
+#: price unit, deposit and tax profile. Sale size variants are grouped by seed
+#: family instead, precisely so a different price never blocks a size.
+_GROUP_KEY_SQL = (
+    f"CASE WHEN ({_SALE_FAMILY_SQL}) <> '' THEN 'm:' || ({_SALE_FAMILY_SQL})"
+    " WHEN COALESCE(m.model_key, '') <> '' THEN"
+    " 'k:' || m.model_key || '|' || p.product_type || '|' || COALESCE(p.product_group_id, -1)"
+    " || '|' || printf('%.2f', p.price_amount) || '|' || p.price_unit"
+    " || '|' || printf('%.2f', p.security_deposit) || '|' || COALESCE(p.tax_profile_id, -1)"
+    " ELSE 'p:' || p.id END"
+)
+
+#: Cheapest size first, so a model card opens the variant whose price it shows.
+_GROUP_ROW_ORDER_SQL = (
+    "p.price_amount ASC, COALESCE(m.store_sort_order, 0) ASC,"
+    " COALESCE(m.featured, 0) DESC, p.id ASC"
+)
+
+#: A size/dimension tail on a saved title: ``Model — 1.8m x 1.2m (CODE)``. The
+#: separator needs surrounding whitespace, so ``un-braked`` is never split.
+_VARIANT_RE = re.compile(
+    r"^(?P<model>.+?)\s+[\u2014\u2013-]\s+(?P<size>.+?)(?:\s*\((?P<code>[^()]+)\))?\s*$"
+)
+
+
+def _clamp_page(page, per_page):
+    """A safe ``(page, per_page, offset)`` from untrusted query-string values."""
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(per_page)
+    except (TypeError, ValueError):
+        per_page = PUBLIC_PAGE_SIZE
+    page = max(1, min(page, MAX_PAGE))
+    per_page = max(1, min(per_page, 100))
+    return page, per_page, (page - 1) * per_page
+
+
+def _paginated(items, total, page, per_page):
+    total = max(0, _int(total))
+    pages = (total + per_page - 1) // per_page if total else 0
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": pages,
+        "has_next": page < pages,
+        "has_prev": page > 1,
+        "next_page": page + 1 if page < pages else 0,
+        "prev_page": page - 1 if page > 1 else 0,
+    }
+
 
 _ORDER_SQL = (
     " ORDER BY COALESCE(m.featured, 0) DESC,"
@@ -287,6 +430,10 @@ def decorate_product(row):
     category has one).
     """
     product = row_dict(row) or {}
+    # Paginated queries add internal ordering/partition helpers; they are never
+    # part of a product dict a template or caller can see.
+    product.pop("_group_key", None)
+    product.pop("_rn", None)
     group_name = product.pop("meta_group_name", None)
     group_description = product.pop("meta_group_description", "") or ""
     group_has_image = bool(product.pop("meta_group_has_image", 0))
@@ -300,6 +447,10 @@ def decorate_product(row):
     featured = _int(product.pop("meta_featured", 0))
     sort_order = _int(product.pop("meta_sort_order", 0))
     updated_at = product.pop("meta_updated_at", "") or ""
+    source_key = str(product.pop("meta_source_key", "") or "").strip()
+    sale_family = _sale_family_of(source_key, product.get("product_type"))
+    variant_model, variant_size = _variant_parts(title or product.get("name") or "")
+    variant_code = str(product.get("sku") or "").strip() or _seed_code(source_key)
 
     if not product.get("product_type"):
         # A legacy or imported row can carry a blank type. The storefront picks a
@@ -339,9 +490,67 @@ def decorate_product(row):
             "branch_name": branch_name or "",
             "store_public": _is_public_row(product, group_active, group_store_visible),
             "store_visibility_issues": _visibility_issues(product, group_active, group_store_visible),
+            # Sale model-family presentation. Empty on a product with no import
+            # seed, which is every rental, service line and parts row.
+            "sale_family": sale_family,
+            "variant_model": variant_model,
+            "variant_size": variant_size,
+            "variant_code": variant_code,
+            "model_family": "",
+            "model_variants": [],
+            "variant_count": 1,
+            "price_from": _float(product.get("price_amount")),
+            "price_varies": False,
+            "size_range": "",
         }
     )
     return product
+
+
+def _sale_family_of(source_key, product_type):
+    """``sale/<model>`` for an imported sale size, else ``''``.
+
+    Only the ``sale/`` namespace of a durable seed is a family. Anything else —
+    a rental with a ``model_key``, a spare part with no seed, a seed written for
+    a different catalogue — is left alone, so this can never fold inventory the
+    operator did not import as one sale price list.
+    """
+    key = str(source_key or "").strip()
+    if (product_type or "") != "sale" or not key.startswith("sale/"):
+        return ""
+    head, sep, _tail = key[len("sale/"):].partition("/")
+    if not sep or not head:
+        return ""
+    return "sale/" + head
+
+
+def _seed_code(source_key):
+    """The trailing ``<code>`` of ``sale/<model>/<code>``, or ``''``."""
+    key = str(source_key or "").strip()
+    if "/" not in key:
+        return ""
+    return key.rsplit("/", 1)[-1].strip()
+
+
+def _variant_parts(title):
+    """Split a saved title into ``(model line, size)`` without inventing either.
+
+    ``"Single axle un-braked utility trailers — 1.8m x 1.2m (ST1.8-900UBU)"``
+    becomes ``("Single axle un-braked utility trailers", "1.8m x 1.2m")``. A
+    title with no such tail keeps its whole text as the model line and an empty
+    size, so a staff-written title is never mangled into a fake dimension.
+    """
+    text = " ".join(str(title or "").split())
+    if not text:
+        return "", ""
+    match = _VARIANT_RE.match(text)
+    if not match:
+        return text, ""
+    model = (match.group("model") or "").strip()
+    size = (match.group("size") or "").strip()
+    if not model or not size:
+        return text, ""
+    return model, size
 
 
 def _visibility_issues(product, group_active=None, group_store_visible=None):
@@ -397,6 +606,23 @@ def _query_clause(query):
     )
 
 
+def _public_where(product_type=None, query="", category=""):
+    """Shared WHERE tail for public reads, so list and page cannot drift apart."""
+    sql = _PUBLIC_SQL
+    params = []
+    ptype = (product_type or "").strip()
+    if ptype in PRODUCT_TYPES:
+        sql += " AND p.product_type = ?"
+        params.append(ptype)
+    clause, clause_params = _query_clause(query)
+    sql += clause
+    params.extend(clause_params)
+    clause, clause_params = _category_clause(category)
+    sql += clause
+    params.extend(clause_params)
+    return sql, params
+
+
 def list_public_products(product_type=None, query="", category=""):
     """Public shop items, as plain dicts — the storefront's one read path.
 
@@ -411,25 +637,74 @@ def list_public_products(product_type=None, query="", category=""):
     ``model_units`` lists the separately-stocked units that share an explicitly
     declared ``model_key`` *and* identical compatible metadata. Units are never
     merged: every entry keeps its own product id and name.
+
+    Unbounded by design for callers that need the whole live set (tests,
+    validation helpers). Request handlers use :func:`page_public_products`,
+    which bounds the query and the de-duplication in SQL.
     """
-    sql = _SELECT + _PUBLIC_SQL
-    params = []
-    ptype = (product_type or "").strip()
-    if ptype in PRODUCT_TYPES:
-        sql += " AND p.product_type = ?"
-        params.append(ptype)
-    clause, clause_params = _query_clause(query)
-    sql += clause
-    params.extend(clause_params)
-    clause, clause_params = _category_clause(category)
-    sql += clause
-    params.extend(clause_params)
-    sql += _ORDER_SQL
+    where, params = _public_where(product_type, query, category)
+    sql = _SELECT + where + _ORDER_SQL
     rows = get_db().execute(sql, params).fetchall()
     products = [decorate_product(row) for row in rows]
     _attach_images(products)
     _attach_model_units(products)
     return [_public_card(product) for product in products]
+
+
+def page_public_products(
+    product_type=None, query="", category="", page=1, per_page=PUBLIC_PAGE_SIZE
+):
+    """One bounded page of public cards, with an exact total.
+
+    De-duplication happens in SQL: exactly one row is chosen per model group
+    (``ROW_NUMBER()`` over the same key the COUNT uses), so walking every page
+    yields each model exactly once and the totals agree with the rows. The only
+    images read are gallery *metadata* for the page's products — never a BLOB.
+    """
+    where, params = _public_where(product_type, query, category)
+    page, per_page, offset = _clamp_page(page, per_page)
+    db = get_db()
+    count_row = db.execute(
+        f"SELECT COUNT(*) AS c FROM (SELECT {_GROUP_KEY_SQL} AS k"
+        f" {_FROM_SQL}{where} GROUP BY k)",
+        params,
+    ).fetchone()
+    total = _int(_first(count_row, "c"))
+    if not total:
+        return _paginated([], 0, page, per_page)
+    rows = db.execute(
+        "SELECT * FROM ("
+        f"SELECT {_LIST_COLUMNS}, {_GROUP_KEY_SQL} AS _group_key,"
+        f" ROW_NUMBER() OVER (PARTITION BY {_GROUP_KEY_SQL} ORDER BY {_GROUP_ROW_ORDER_SQL}) AS _rn"
+        f" {_FROM_SQL}{where}"
+        ") q WHERE q._rn = 1"
+        " ORDER BY CASE WHEN LOWER(COALESCE(q.meta_group_name, '')) LIKE '%trailer%' THEN 0 ELSE 1 END ASC, COALESCE(q.meta_featured, 0) DESC,"
+        " COALESCE(q.meta_sort_order, 0) ASC,"
+        " COALESCE(q.meta_group_sort_order, 999999) ASC,"
+        " COALESCE(q.meta_group_name, '') ASC, q.name ASC, q.id ASC"
+        " LIMIT ? OFFSET ?",
+        params + [per_page, offset],
+    ).fetchall()
+    products = [decorate_product(row) for row in rows]
+    _attach_images(products)
+    # All units of the page's model groups, so a card's "other sizes" list is
+    # complete even when its siblings sit on another page. Costs one bounded
+    # metadata query and only runs when a model key is actually in use.
+    keys = sorted({(p.get("model_key") or "").strip() for p in products} - {""})
+    extra_units = []
+    if keys:
+        marks = ",".join("?" for _ in keys)
+        extra_rows = get_db().execute(
+            _SELECT + _PUBLIC_SQL + f" AND m.model_key IN ({marks}) ORDER BY p.id ASC",
+            keys,
+        ).fetchall()
+        extra_units = [decorate_product(row) for row in extra_rows]
+    _attach_model_units(products, extra_units)
+    # One bounded, text-only query for the sizes of the sale model families on
+    # this page (never the catalogue, never a BLOB), so a card can say how many
+    # sizes it covers and show the lowest current price.
+    _attach_sale_families(products)
+    return _paginated([_page_card(product) for product in products], total, page, per_page)
 
 
 def compatible_public_unit_ids(product_id):
@@ -463,6 +738,140 @@ def _public_card(product):
     }
 
 
+def _page_card(product):
+    """A catalogue-page card: the documented contract plus presentation extras.
+
+    ``list_public_products`` keeps returning exactly the documented keys; the
+    page path adds the thumbnail URL, the sale model family name, its size count,
+    its size range and the lowest current price, so one card can stand for a
+    model line whose sizes are priced differently.
+    """
+    card = _public_card(product)
+    thumbs = [
+        image.get("thumb_url") or ""
+        for image in product.get("store_images") or []
+        if image.get("thumb_url")
+    ]
+    card["thumb_url"] = thumbs[0] if thumbs else ""
+    card["model_family"] = product.get("model_family") or ""
+    card["variant_count"] = max(1, _int(product.get("variant_count"), 1))
+    card["price_from"] = _float(product.get("price_from"), card["price_amount"])
+    card["price_varies"] = bool(product.get("price_varies"))
+    card["size_range"] = product.get("size_range") or ""
+    return card
+
+
+def _sale_family_where(families):
+    marks = ",".join("?" for _ in families)
+    return f" AND ({_SALE_FAMILY_SQL}) IN ({marks})", list(families)
+
+
+def _attach_sale_families(products):
+    """Fill each sale card's size family from the saved rows, in one query.
+
+    A family is the ``sale/<model>`` prefix of the durable import seed, so the
+    membership rule is: live (active, published, not under maintenance, visible
+    category) **and** the same seed family. Hidden sizes therefore disappear from
+    the selector and from the "from" price, and a crafted ``/store/products/<id>``
+    URL for one still 404s through :func:`get_public_product`.
+
+    Only text columns are read; the selector needs a code, a dimension and a
+    saved price, never a photo blob. Nothing here reads the source manifest.
+    """
+    if not products:
+        return
+    families = sorted(
+        {
+            str(product.get("sale_family") or "")
+            for product in products
+            if product.get("sale_family")
+        }
+    )
+    if not families:
+        return
+    where, params = _sale_family_where(families)
+    rows = get_db().execute(
+        _SELECT + _PUBLIC_SQL + where + " ORDER BY " + _GROUP_ROW_ORDER_SQL,
+        params,
+    ).fetchall()
+    by_family = {}
+    for row in rows:
+        sibling = decorate_product(row)
+        family = sibling.get("sale_family") or ""
+        if family:
+            by_family.setdefault(family, []).append(sibling)
+
+    for product in products:
+        family = product.get("sale_family") or ""
+        variants = by_family.get(family) or []
+        if not family or not variants:
+            continue
+        prices = [_float(variant.get("price_amount")) for variant in variants]
+        product["model_variants"] = [_variant_view(variant) for variant in variants]
+        product["variant_count"] = len(variants)
+        product["price_from"] = min(prices)
+        product["price_varies"] = len({round(price, 2) for price in prices}) > 1
+        product["model_family"] = _family_title(variants)
+        product["size_range"] = _size_range(variants)
+
+
+def _variant_view(product):
+    """One selectable size: real product id, saved code, saved price, saved size."""
+    size = product.get("variant_size") or ""
+    title = product.get("store_title") or product.get("name") or ""
+    return {
+        "id": _int(product.get("id")),
+        "code": product.get("variant_code") or "",
+        "size": size,
+        "label": size or title,
+        "title": title,
+        "price_amount": _float(product.get("price_amount")),
+        "price_unit": product.get("price_unit") or "",
+    }
+
+
+def _family_title(variants):
+    """The shared model line of a family, taken from the saved titles only.
+
+    When every size saved the same model line, that is the card title. When they
+    differ (staff renamed one size), the longest shared prefix — trimmed to a
+    whole word — is used, and if there is no shared prefix at all the cheapest
+    size's own title is shown rather than an invented name.
+    """
+    titles = [variant.get("store_title") or variant.get("name") or "" for variant in variants]
+    models = [variant.get("variant_model") or "" for variant in variants]
+    models = [model for model in models if model]
+    if models and len(set(models)) == 1:
+        return models[0]
+    if models:
+        prefix = models[0]
+        for model in models[1:]:
+            limit = min(len(prefix), len(model))
+            index = 0
+            while index < limit and prefix[index] == model[index]:
+                index += 1
+            prefix = prefix[:index]
+        prefix = prefix.rstrip()
+        cut = prefix.rfind(" ")
+        if cut > 0:
+            prefix = prefix[:cut]
+        if len(prefix) >= 12:
+            return prefix
+    return titles[0] if titles else ""
+
+
+def _size_range(variants):
+    """``"1.8m x 1.2m – 3.0m x 1.5m"`` for the saved sizes, cheapest first."""
+    sizes = []
+    for variant in variants:
+        size = variant.get("variant_size") or ""
+        if size and size not in sizes:
+            sizes.append(size)
+    if len(sizes) > 1:
+        return f"{sizes[0]} – {sizes[-1]}"
+    return sizes[0] if sizes else ""
+
+
 def get_public_product(product_id):
     """One public item with its full gallery, or ``None`` when it is not live.
 
@@ -484,7 +893,42 @@ def get_public_product(product_id):
     product = decorate_product(row)
     _attach_images([product])
     _attach_model_units([product])
+    # The size selector on the detail page: every live sibling of the same saved
+    # sale model family, with its own id, code, dimension and saved price.
+    _attach_sale_families([product])
     return product
+
+
+def _editable_where(branch_ids=None):
+    """Scope + optional explicit depot list for an editor query."""
+    from app.services.access import product_branch_clause
+
+    branch_sql, branch_params = product_branch_clause("p", include_unassigned=True)
+    sql, params = branch_sql, list(branch_params)
+    if branch_ids is not None:
+        try:
+            ids = [int(value) for value in branch_ids]
+        except (TypeError, ValueError):
+            ids = []
+        if not ids:
+            sql += " AND 0=1"
+        else:
+            marks = ",".join("?" for _ in ids)
+            sql += f" AND (p.branch_id IS NULL OR p.branch_id IN ({marks}))"
+            params.extend(ids)
+    return sql, params
+
+
+#: State filters are SQL predicates, not a Python pass over every product.
+_ADMIN_STATE_SQL = {
+    "live": f" AND ({_PUBLIC_CONDITION})",
+    "hidden": f" AND NOT ({_PUBLIC_CONDITION})",
+    "missing_image": " AND NOT EXISTS (SELECT 1 FROM shop_listing_images i WHERE i.product_id = p.id)",
+    "missing_description": (
+        " AND TRIM(COALESCE(NULLIF(m.store_description, ''), p.description, '')) = ''"
+    ),
+    "featured": " AND COALESCE(m.featured, 0) = 1",
+}
 
 
 def editable_products():
@@ -494,16 +938,72 @@ def editable_products():
     from ``product_branch_clause``, the helper that page already uses, so nobody
     can reach a product in the shop editor that they cannot see in Inventory.
     Authorisation itself (the ``online_store`` module) is the route's job.
-    """
-    from app.services.access import product_branch_clause
 
-    branch_sql, branch_params = product_branch_clause("p", include_unassigned=True)
-    sql = _SELECT + branch_sql + _ORDER_SQL
-    rows = get_db().execute(sql, branch_params).fetchall()
+    Kept unbounded for callers that need the whole editor set; the listings
+    screen uses :func:`page_editable_products`.
+    """
+    where, params = _editable_where()
+    sql = _SELECT + where + _ORDER_SQL
+    rows = get_db().execute(sql, params).fetchall()
     products = [decorate_product(row) for row in rows]
     _attach_images(products)
     _attach_model_units(products)
     return products
+
+
+def page_editable_products(
+    product_type="", state="", page=1, per_page=ADMIN_PAGE_SIZE, branch_ids=None
+):
+    """One bounded page of editor rows; filters and counts run in SQL."""
+    where, params = _editable_where(branch_ids)
+    if (product_type or "").strip() in PRODUCT_TYPES:
+        where += " AND p.product_type = ?"
+        params.append(product_type.strip())
+    state_sql = _ADMIN_STATE_SQL.get((state or "").strip())
+    if state_sql:
+        where += state_sql
+    page, per_page, offset = _clamp_page(page, per_page)
+    db = get_db()
+    count_row = db.execute(
+        f"SELECT COUNT(*) AS c {_FROM_SQL}{where}", params
+    ).fetchone()
+    total = _int(_first(count_row, "c"))
+    rows = db.execute(
+        _SELECT + where + _ORDER_SQL + " LIMIT ? OFFSET ?",
+        params + [per_page, offset],
+    ).fetchall()
+    products = [decorate_product(row) for row in rows]
+    _attach_images(products)
+    _attach_model_units(products)
+    return _paginated(products, total, page, per_page)
+
+
+def editable_listing_counts(branch_ids=None):
+    """Chip counts for the listings screen in one aggregate query."""
+    where, params = _editable_where(branch_ids)
+    rows = get_db().execute(
+        "SELECT COALESCE(p.product_type, 'rental') AS ptype, COUNT(*) AS all_count,"
+        f" SUM(CASE WHEN {_PUBLIC_CONDITION} THEN 1 ELSE 0 END) AS live_count,"
+        f" SUM(CASE WHEN NOT ({_PUBLIC_CONDITION}) THEN 1 ELSE 0 END) AS hidden_count,"
+        " SUM(CASE WHEN EXISTS (SELECT 1 FROM shop_listing_images i"
+        "     WHERE i.product_id = p.id) THEN 1 ELSE 0 END) AS with_image_count,"
+        " SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM shop_listing_images i"
+        "     WHERE i.product_id = p.id) THEN 1 ELSE 0 END) AS missing_image_count"
+        f" {_FROM_SQL}{where} GROUP BY ptype",
+        params,
+    ).fetchall()
+    counts = {"all": 0, "live": 0, "hidden": 0, "with_image": 0, "missing_image": 0}
+    type_counts = {}
+    for row in rows:
+        data = row_dict(row) or {}
+        total = _int(data.get("all_count"))
+        counts["all"] += total
+        counts["live"] += _int(data.get("live_count"))
+        counts["hidden"] += _int(data.get("hidden_count"))
+        counts["with_image"] += _int(data.get("with_image_count"))
+        counts["missing_image"] += _int(data.get("missing_image_count"))
+        type_counts[data.get("ptype") or "rental"] = total
+    return counts, type_counts
 
 
 def get_product(product_id):
@@ -530,30 +1030,44 @@ def product_is_public(product_id):
     except (TypeError, ValueError, OverflowError):
         return False
     row = get_db().execute(
-        _SELECT + _PUBLIC_SQL + " AND p.id = ?", [product_id]
+        "SELECT 1 AS ok FROM products p"
+        " LEFT JOIN product_groups g ON g.id = p.product_group_id"
+        f" WHERE p.id = ? AND {_PUBLIC_CONDITION}",
+        [product_id],
     ).fetchone()
     return row is not None
 
 
 def _attach_images(products):
-    """Fill gallery metadata for a page of products in one query, cover first."""
+    """Fill gallery metadata for a page of products in one query, cover first.
+
+    Only text columns and a thumbnail *presence* flag are selected: a listing
+    never transfers an image BLOB. Cards use ``thumb_url`` when a thumbnail
+    exists and fall back to the full photo for old rows.
+    """
     ids = [_int(product.get("id")) for product in products if product.get("id") is not None]
     if not ids:
         return
     marks = ",".join("?" for _ in ids)
     rows = get_db().execute(
-        "SELECT id, product_id, alt_text, is_cover, sort_order, version "
-        f"FROM shop_listing_images WHERE product_id IN ({marks}) "
-        "ORDER BY is_cover DESC, sort_order ASC, id ASC",
+        "SELECT i.id, i.product_id, i.alt_text, i.is_cover, i.sort_order, i.version,"
+        " CASE WHEN t.image_id IS NULL THEN 0 ELSE 1 END AS has_thumb "
+        "FROM shop_listing_images i "
+        "LEFT JOIN shop_listing_thumbnails t ON t.image_id = i.id "
+        f"WHERE i.product_id IN ({marks}) "
+        "ORDER BY i.is_cover DESC, i.sort_order ASC, i.id ASC",
         ids,
     ).fetchall()
     by_product = {}
     for row in rows:
         data = row_dict(row) or {}
+        media_id = _int(data.get("id"))
+        version = _int(data.get("version"), 1) or 1
         by_product.setdefault(_int(data.get("product_id")), []).append(
             {
-                "id": _int(data.get("id")),
-                "url": media_url(data.get("id"), data.get("version")),
+                "id": media_id,
+                "url": media_url(media_id, version),
+                "thumb_url": thumb_url(media_id, version) if _int(data.get("has_thumb")) else "",
                 "alt": data.get("alt_text") or "",
                 "is_cover": bool(_int(data.get("is_cover"))),
             }
@@ -565,16 +1079,21 @@ def _attach_images(products):
             product["image_url"] = images[0]["url"]
 
 
-def _attach_model_units(products):
+def _attach_model_units(products, extra_units=None):
     """Group units only where the operator declared compatibility explicitly.
 
     A unit joins a model group when it carries the same non-empty ``model_key``
     **and** the same operational identity: product type, category, price, price
     unit and deposit. Two physical trailers with the same name but no declared
     key are never merged, and every unit keeps its own product id.
+
+    ``extra_units`` are additional decorated rows that belong to the same
+    groups but are not on this page (a paginated read); they contribute to the
+    unit list without becoming cards.
     """
+    pool = list({int(p['id']): p for p in list(extra_units or []) + list(products)}.values())
     buckets = {}
-    for product in products:
+    for product in pool:
         key = (product.get("model_key") or "").strip()
         if not key:
             continue
@@ -624,6 +1143,11 @@ def _attach_model_units(products):
 def media_url(media_id, version=1):
     """Versioned URL for a gallery photo, so a replacement busts browser caches."""
     return f"{MEDIA_ROUTE.format(media_id=_int(media_id))}?v={_int(version, 1) or 1}"
+
+
+def thumb_url(media_id, version=1):
+    """Versioned URL for the small card thumbnail of a gallery photo."""
+    return f"{THUMB_ROUTE.format(media_id=_int(media_id))}?v={_int(version, 1) or 1}"
 
 
 # ---------------------------------------------------------------------------
@@ -836,22 +1360,80 @@ def read_upload(file_storage):
     if not data:
         raise ShopImageError("That image file was empty — choose the photo again.")
     if len(data) > MAX_UPLOAD_BYTES:
-        raise ShopImageError("That photo is larger than 6 MB — choose a smaller one.")
+        limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        raise ShopImageError(f"That photo is larger than {limit_mb} MB — choose a smaller one.")
     return data
 
 
-def _prepare_image(data, source_mime):
-    """Validate, orient, downscale and re-encode one photo.
+def _encode_image(image, mime):
+    """Encode one already-oriented image, choosing a mode each format supports."""
+    buffer = io.BytesIO()
+    if mime == "image/webp":
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA")
+        image.save(buffer, format="WEBP", quality=WEBP_QUALITY, method=4)
+    else:
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return buffer.getvalue()
 
+
+def _encode_thumb(image, mime):
+    """Encode the small card thumbnail from the full-size stored image."""
+    thumb = image.copy()
+    thumb.thumbnail((THUMB_EDGE, THUMB_EDGE), Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    if mime == "image/webp":
+        if thumb.mode not in ("RGB", "RGBA"):
+            thumb = thumb.convert("RGBA")
+        thumb.save(buffer, format="WEBP", quality=THUMB_WEBP_QUALITY, method=4)
+    else:
+        if thumb.mode not in ("RGB", "L"):
+            thumb = thumb.convert("RGB")
+        thumb.save(buffer, format="JPEG", quality=THUMB_JPEG_QUALITY, optimize=True)
+    return buffer.getvalue(), thumb.width, thumb.height
+
+
+def _prepare_image(data, source_mime):
+    # Large phone inputs can briefly need several decoded copies (orientation,
+    # resize, thumbnail). Keep concurrent uploads from multiplying that peak.
+    with _IMAGE_DECODE_LOCK:
+        return _prepare_image_unlocked(data, source_mime)
+
+
+def _prepare_image_unlocked(data, source_mime):
+    """Validate, orient, downscale and re-encode one photo, plus its thumbnail.
+
+    Returns ``(bytes, mime, width, height, thumb_bytes, thumb_width, thumb_height)``.
     Nothing is written until this returns, so a refused file leaves the existing
     gallery (or home slot) exactly as it was.
+
+    The pixel count is checked from the header *before* ``load()`` decodes the
+    image, so a small file that expands to an enormous bitmap is refused without
+    allocating the bitmap — the decompression-bomb guard.
     """
     mime = (source_mime or "").lower()
     if mime and mime not in ALLOWED_MIME:
         raise ShopImageError(f"That file is a {mime} file, not a PNG, JPEG or WebP image.")
     try:
         with Image.open(io.BytesIO(data)) as probe:
+            width, height = probe.size
+            if width < 1 or height < 1:
+                raise ShopImageError("That image has no usable pixels.")
+            if max(width, height) > MAX_SOURCE_EDGE:
+                raise ShopImageError(
+                    f"That photo is {width}×{height} pixels — the longest side must be "
+                    f"{MAX_SOURCE_EDGE} pixels or less."
+                )
+            if width * height > MAX_IMAGE_PIXELS:
+                raise ShopImageError(
+                    f"That photo is {width}×{height} pixels, which is too large to process. "
+                    "Choose a smaller copy."
+                )
             probe.verify()
+    except ShopImageError:
+        raise
     except Exception:
         raise ShopImageError(
             "That file is not a readable image. Choose a PNG, JPEG or WebP photo."
@@ -872,16 +1454,22 @@ def _prepare_image(data, source_mime):
         pass
     image.thumbnail((MAX_IMAGE_EDGE, MAX_IMAGE_EDGE), Image.Resampling.LANCZOS)
     output_mime = "image/webp" if mime == "image/webp" else "image/jpeg"
-    buffer = io.BytesIO()
-    if output_mime == "image/webp":
-        if image.mode not in ("RGB", "RGBA"):
-            image = image.convert("RGBA")
-        image.save(buffer, format="WEBP", quality=WEBP_QUALITY)
-    else:
-        if image.mode not in ("RGB", "L"):
-            image = image.convert("RGB")
-        image.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
-    return buffer.getvalue(), output_mime, image.width, image.height
+    stored = _encode_image(image, output_mime)
+    thumb, thumb_width, thumb_height = _encode_thumb(image, output_mime)
+    return stored, output_mime, image.width, image.height, thumb, thumb_width, thumb_height
+
+
+def _save_thumbnail(image_id, thumb, mime, width, height):
+    """Upsert the card thumbnail for one gallery photo."""
+    get_db().execute(
+        "INSERT INTO shop_listing_thumbnails "
+        "(image_id, image_blob, image_mime, width, height, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(image_id) DO UPDATE SET image_blob = excluded.image_blob, "
+        "image_mime = excluded.image_mime, width = excluded.width, "
+        "height = excluded.height, created_at = excluded.created_at",
+        [int(image_id), thumb, mime, int(width), int(height), now()],
+    )
 
 
 def _image_rows(product_id):
@@ -896,10 +1484,24 @@ def _image_rows(product_id):
 
 def product_images(product_id):
     """Gallery metadata for one listing (no bytes), cover first."""
+    ids = [_int(row.get("id")) for row in _image_rows(product_id)]
+    with_thumb = set()
+    if ids:
+        marks = ",".join("?" for _ in ids)
+        with_thumb = {
+            _int(_first(row, "image_id"))
+            for row in get_db().execute(
+                f"SELECT image_id FROM shop_listing_thumbnails WHERE image_id IN ({marks})",
+                ids,
+            ).fetchall()
+        }
     return [
         {
             "id": _int(row.get("id")),
             "url": media_url(row.get("id"), row.get("version")),
+            "thumb_url": thumb_url(row.get("id"), row.get("version"))
+            if _int(row.get("id")) in with_thumb
+            else "",
             "alt": row.get("alt_text") or "",
             "is_cover": bool(_int(row.get("is_cover"))),
             "mime": row.get("image_mime") or "",
@@ -921,7 +1523,9 @@ def add_image(product_id, file_storage, alt_text=""):
     if len(existing) >= MAX_IMAGES:
         raise ShopImageError(f"A listing can carry at most {MAX_IMAGES} photos. Remove one first.")
     data = read_upload(file_storage)
-    stored, mime, width, height = _prepare_image(data, getattr(file_storage, "mimetype", ""))
+    stored, mime, width, height, thumb, thumb_width, thumb_height = _prepare_image(
+        data, getattr(file_storage, "mimetype", "")
+    )
     is_cover = 0 if existing else 1
     next_order = max([_int(row.get("sort_order")) for row in existing] + [0]) + 1
     timestamp = now()
@@ -945,15 +1549,20 @@ def add_image(product_id, file_storage, alt_text=""):
             timestamp,
         ],
     )
+    media_id = _int(getattr(cursor, "lastrowid", 0))
+    if media_id:
+        _save_thumbnail(media_id, thumb, mime, thumb_width, thumb_height)
     db.commit()
-    return _int(getattr(cursor, "lastrowid", 0))
+    return media_id
 
 
 def replace_image(media_id, product_id, file_storage, alt_text=""):
     """Replace one photo's bytes in place, keeping its gallery position."""
     row = _owned_image(media_id, product_id)
     data = read_upload(file_storage)
-    stored, mime, width, height = _prepare_image(data, getattr(file_storage, "mimetype", ""))
+    stored, mime, width, height, thumb, thumb_width, thumb_height = _prepare_image(
+        data, getattr(file_storage, "mimetype", "")
+    )
     db = get_db()
     db.execute(
         "UPDATE shop_listing_images SET image_blob = ?, image_mime = ?, image_filename = ?, "
@@ -971,6 +1580,7 @@ def replace_image(media_id, product_id, file_storage, alt_text=""):
             int(product_id),
         ],
     )
+    _save_thumbnail(media_id, thumb, mime, thumb_width, thumb_height)
     db.commit()
     return _int(row.get("version"), 1) + 1
 
@@ -1052,6 +1662,64 @@ def image_row(media_id):
     )
 
 
+def media_record(media_id, thumbnail=False):
+    """Everything the media route needs, in **one** database round trip.
+
+    On the live app the database is remote (Turso over HTTPS), so each extra
+    query was a full network round trip — the old route made four per image.
+    This returns the bytes *and* the two facts used to authorise them:
+
+    ``is_public``   the product is currently eligible for the public shop
+    ``store_enabled`` the shop itself is switched on
+    ``branch_id``   for the staff-preview depot check
+
+    ``thumbnail=True`` reads the small card image instead of the full photo.
+    Returns ``None`` when the photo (or its thumbnail) does not exist.
+    """
+    try:
+        media_id = int(media_id)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if media_id < 1:
+        return None
+    if thumbnail:
+        sql = (
+            "SELECT i.id, i.product_id, i.version, t.image_mime AS image_mime,"
+            " t.image_blob AS image_blob, p.branch_id,"
+            " (SELECT store_enabled FROM company_settings WHERE id = 1) AS store_enabled,"
+            f" CASE WHEN {_PUBLIC_CONDITION} THEN 1 ELSE 0 END AS is_public "
+            "FROM shop_listing_thumbnails t "
+            "JOIN shop_listing_images i ON i.id = t.image_id "
+            "JOIN products p ON p.id = i.product_id "
+            "LEFT JOIN product_groups g ON g.id = p.product_group_id "
+            "WHERE t.image_id = ? AND t.image_blob IS NOT NULL"
+        )
+    else:
+        sql = (
+            "SELECT i.id, i.product_id, i.version, i.image_mime, i.image_blob,"
+            " p.branch_id,"
+            " (SELECT store_enabled FROM company_settings WHERE id = 1) AS store_enabled,"
+            f" CASE WHEN {_PUBLIC_CONDITION} THEN 1 ELSE 0 END AS is_public "
+            "FROM shop_listing_images i "
+            "JOIN products p ON p.id = i.product_id "
+            "LEFT JOIN product_groups g ON g.id = p.product_group_id "
+            "WHERE i.id = ? AND i.image_blob IS NOT NULL"
+        )
+    data = row_dict(get_db().execute(sql, [media_id]).fetchone())
+    if not data or data.get("image_blob") is None:
+        return None
+    return {
+        "id": _int(data.get("id")),
+        "product_id": _int(data.get("product_id")),
+        "version": _int(data.get("version"), 1) or 1,
+        "mime": data.get("image_mime") or "image/jpeg",
+        "data": data.get("image_blob"),
+        "branch_id": data.get("branch_id"),
+        "store_enabled": bool(_int(data.get("store_enabled"))),
+        "is_public": bool(_int(data.get("is_public"))),
+    }
+
+
 def image_bytes(media_id):
     """``(bytes, mime, version, product_id)`` for a photo, or ``(None, …)``."""
     row = row_dict(
@@ -1076,6 +1744,33 @@ def image_bytes(media_id):
 # ---------------------------------------------------------------------------
 
 
+def _home_image_versions():
+    """Slot -> version for slots that have artwork, cached for this request.
+
+    The old helper selected the whole ``image_blob`` three times per home page
+    just to test for NULL. This reads versions only, once per request, so a home
+    render costs one small query rather than three BLOB transfers.
+    """
+    if not has_app_context():
+        return {}
+    cached = getattr(g, "_shop_home_image_versions", None)
+    if cached is None:
+        cached = {}
+        try:
+            rows = get_db().execute(
+                "SELECT slot, version FROM shop_home_images"
+            ).fetchall()
+        except Exception:
+            rows = []
+        for row in rows:
+            data = row_dict(row) or {}
+            key = str(data.get("slot") or "")
+            if key in HOME_SLOT_KEYS:
+                cached[key] = _int(data.get("version"), 1) or 1
+        g._shop_home_image_versions = cached
+    return cached
+
+
 def home_image_url(slot):
     """Public URL for a home slot's artwork, or ``''`` when it has none.
 
@@ -1086,17 +1781,10 @@ def home_image_url(slot):
     key = (slot or "").strip().lower()
     if key not in HOME_SLOT_KEYS or not has_app_context():
         return ""
-    try:
-        row = row_dict(
-            get_db().execute(
-                "SELECT image_blob, version FROM shop_home_images WHERE slot = ?", [key]
-            ).fetchone()
-        )
-    except Exception:
+    version = _home_image_versions().get(key)
+    if not version:
         return ""
-    if not row or row.get("image_blob") is None:
-        return ""
-    return f"{HOME_IMAGE_ROUTE.format(slot=key)}?v={_int(row.get('version'), 1) or 1}"
+    return f"{HOME_IMAGE_ROUTE.format(slot=key)}?v={version}"
 
 
 def home_slots():
@@ -1113,7 +1801,9 @@ def set_home_image(slot, file_storage):
     if key not in HOME_SLOT_KEYS:
         raise ShopImageError("Unknown home-page slot.")
     data = read_upload(file_storage)
-    stored, mime, width, height = _prepare_image(data, getattr(file_storage, "mimetype", ""))
+    stored, mime, width, height, _thumb, _tw, _th = _prepare_image(
+        data, getattr(file_storage, "mimetype", "")
+    )
     db = get_db()
     timestamp = now()
     existing = db.execute(
@@ -1133,6 +1823,8 @@ def set_home_image(slot, file_storage):
             [stored, mime, _safe_filename(file_storage), width, height, timestamp, key],
         )
     db.commit()
+    if has_app_context():
+        g.pop("_shop_home_image_versions", None)
     return {"slot": key, "mime": mime, "width": width, "height": height}
 
 
@@ -1143,14 +1835,40 @@ def clear_home_image(slot):
         raise ShopImageError("Unknown home-page slot.")
     db = get_db()
     row = db.execute(
-        "SELECT image_blob FROM shop_home_images WHERE slot = ?", [key]
+        "SELECT 1 AS present FROM shop_home_images WHERE slot = ? AND image_blob IS NOT NULL",
+        [key],
     ).fetchone()
-    had = bool(row) and _first(row, "image_blob") is not None
+    had = row is not None
     db.execute(
         "DELETE FROM shop_home_images WHERE slot = ?", [key]
     )
     db.commit()
+    if has_app_context():
+        g.pop("_shop_home_image_versions", None)
     return had
+
+
+def home_image_record(slot):
+    """A home slot's artwork and shop state in one round trip, or ``None``."""
+    key = (slot or "").strip().lower()
+    if key not in HOME_SLOT_KEYS:
+        return None
+    row = row_dict(
+        get_db().execute(
+            "SELECT image_blob, image_mime, version,"
+            " (SELECT store_enabled FROM company_settings WHERE id = 1) AS store_enabled"
+            " FROM shop_home_images WHERE slot = ? AND image_blob IS NOT NULL",
+            [key],
+        ).fetchone()
+    )
+    if not row or row.get("image_blob") is None:
+        return None
+    return {
+        "data": row.get("image_blob"),
+        "mime": row.get("image_mime") or "image/jpeg",
+        "version": _int(row.get("version"), 1) or 1,
+        "store_enabled": bool(_int(row.get("store_enabled"))),
+    }
 
 
 def home_image_bytes(slot):

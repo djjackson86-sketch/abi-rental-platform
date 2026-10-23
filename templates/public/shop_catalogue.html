@@ -1,1 +1,39 @@
-{% extends 'public/shop_shell.html' %}{% block title %}Shop trailers & parts | Sano Trailers{% endblock %}{% block shop_body %}<section><div class="wrap"><div class="sec-head"><p class="eyebrow">For sale</p><h1>Trailers &amp; parts</h1><p>Browse Sano’s published inventory. Your branch confirms stock, lead time and the final quote before payment.</p></div><form class="shop-search" method="get"><label>Search<input type="search" name="q" value="{{ query }}" placeholder="Trailer, part or product code"></label><button class="btn btn-primary">Search →</button></form><div class="shop-product-grid">{% for p in products %}<article class="shop-product"><a href="{{ url_for('public.product_detail',product_id=p.id) }}" class="shop-product-image">{% if p.image_url %}<img src="{{ p.image_url }}" alt="{{ p.store_title }}" loading="lazy">{% else %}<span>{{ p.category_name or 'Sano inventory' }}</span>{% endif %}</a><div class="shop-product-body"><p class="tag">{{ p.category_name or 'For sale' }}</p><h2><a href="{{ url_for('public.product_detail',product_id=p.id) }}">{{ p.store_title }}</a></h2><p>{{ p.store_description|truncate(200) }}</p>{% if settings.show_prices and p.price_amount %}<strong>R{{ '{:,.2f}'.format(p.price_amount) }}</strong>{% else %}<strong>Request a quote</strong>{% endif %}<a class="btn" href="{{ url_for('public.product_detail',product_id=p.id) }}">View details →</a></div></article>{% else %}<div class="shop-empty"><h2>No products found</h2><p>Only published stock appears here. Try another search or contact your branch.</p></div>{% endfor %}</div></div></section>{% endblock %}
+{% extends 'public/shop_shell.html' %}{% block title %}Shop trailers & parts | Sano Trailers{% endblock %}{% block shop_body %}<link rel="stylesheet" href="{{ url_for('static',filename='css/shop-paging.css') }}"><section><div class="wrap"><div class="sec-head"><p class="eyebrow">For sale</p><h1>Trailers &amp; parts</h1></div><form class="shop-search" method="get"><label>Filter<select name="category"><option value="">All categories</option>{% for option in categories %}<option value="{{ option.id }}" {% if category|string == option.id|string %}selected{% endif %}>{{ option.name }}</option>{% endfor %}</select></label><label>Search<input type="search" name="q" value="{{ query }}" placeholder="Trailer, part or product code"></label><button class="btn btn-primary">Search →</button></form><div class="shop-product-grid" data-shop-grid>{% include 'public/_shop_cards.html' %}{% if not products %}<div class="shop-empty"><h2>No products found</h2><p>Only published stock appears here. Try another search or contact your branch.</p></div>{% endif %}</div><div class="shop-paging" data-shop-paging><p class="shop-small" data-shop-count>{{ pagination.total }} item{{ '' if pagination.total == 1 else 's' }}{% if pagination.pages > 1 %} · page {{ pagination.page }} of {{ pagination.pages }}{% endif %}</p><div class="shop-paging-links">{% if prev_url %}<a class="btn ghost" rel="prev" href="{{ prev_url }}">← Previous</a>{% endif %}{% if next_url %}<a class="btn" rel="next" href="{{ next_url }}" data-shop-more>Next page →</a>{% endif %}</div></div></div></section><script>
+(function () {
+  var more = document.querySelector('[data-shop-more]');
+  var grid = document.querySelector('[data-shop-grid]');
+  if (!more || !grid || !window.fetch || !window.URLSearchParams) { return; }
+  more.textContent = 'Load more';
+  more.addEventListener('click', function (event) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) { return; }
+    event.preventDefault();
+    if (more.dataset.busy) { return; }
+    var next = more.getAttribute('href');
+    more.dataset.busy = '1';
+    more.setAttribute('aria-busy', 'true');
+    var url = new URL(next, window.location.href);
+    url.searchParams.set('format', 'fragment');
+    fetch(url.toString(), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function (response) {
+        if (!response.ok) { throw new Error('load failed'); }
+        return response.json();
+      })
+      .then(function (data) {
+        var holder = document.createElement('div');
+        holder.innerHTML = data.html;
+        while (holder.firstChild) { grid.appendChild(holder.firstChild); }
+        var counter = document.querySelector('[data-shop-count]');
+        if (counter && data.total) {
+          counter.textContent = grid.querySelectorAll('.shop-product').length + ' of ' + data.total + ' items';
+        }
+        if (data.next_url) {
+          more.setAttribute('href', data.next_url);
+        } else {
+          more.remove();
+        }
+      })
+      .catch(function () { window.location.href = next; })
+      .then(function () { delete more.dataset.busy; more.removeAttribute('aria-busy'); });
+  });
+})();
+</script>{% endblock %}

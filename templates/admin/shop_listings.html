@@ -2,6 +2,7 @@
 {% set title='Shop listings' %}
 {% block admin_body %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/shop-admin.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/shop-paging.css') }}">
 <header class="page-header shop-header">
   <div class="module-title">
     <span class="module-icon">⌂</span>
@@ -69,7 +70,7 @@
         <td>
           <div class="shop-thumb">
             {% if product.store_images %}
-              <img src="{{ product.store_images[0].url }}" alt="{{ product.store_images[0].alt or product.store_title }}">
+              <img src="{{ product.store_images[0].thumb_url or product.store_images[0].url }}" alt="{{ product.store_images[0].alt or product.store_title }}" loading="lazy" decoding="async">
             {% elif product.category_image_url %}
               <img src="{{ product.category_image_url }}" alt="{{ product.category_name }}">
               <span class="shop-thumb-note">Category</span>
@@ -112,6 +113,13 @@
   {% else %}
   <p class="shop-empty">No products match this filter. Products are created in Inventory — the shop only presents them.</p>
   {% endif %}
+  <div class="shop-paging">
+    <p class="shop-small" data-shop-count>{{ pagination.total }} listing{{ '' if pagination.total == 1 else 's' }}{% if pagination.pages > 1 %} · page {{ pagination.page }} of {{ pagination.pages }}{% endif %}</p>
+    <div class="shop-paging-links">
+      {% if prev_url %}<a class="btn ghost small" rel="prev" href="{{ prev_url }}">← Previous</a>{% endif %}
+      {% if next_url %}<a class="btn ghost small" rel="next" href="{{ next_url }}">Next page →</a>{% endif %}
+    </div>
+  </div>
 </section>
 
 <script>

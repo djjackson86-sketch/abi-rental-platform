@@ -409,17 +409,26 @@ def test_first_import_creates_the_catalogue_and_rerun_preserves_ids(app, client,
         for seed in seeds
     )
 
-    # The storefront really serves them: 52 separate public cards, with the
-    # imported copy and price, and the photo bytes readable over HTTP.
-    cards = shop_catalogue.list_public_products(product_type="sale")
-    assert len(cards) == 52
-    assert {card["id"] for card in cards} == {p["id"] for p in products}
-    card_by_name = {card["name"]: card for card in cards}
+    # The storefront serves the restored catalogue as 19 model cards — the
+    # original price list sold one model line in several sizes — and every card
+    # opens a real saved product. All 52 variants stay separate products with
+    # their own imported copy and price.
+    page = shop_catalogue.page_public_products(product_type="sale", per_page=100)
+    assert page["total"] == 19
+    assert len(page["items"]) == 19
+    assert sum(card["variant_count"] for card in page["items"]) == 52
+    by_name = {
+        item["name"]: shop_catalogue.get_public_product(
+            shop_catalogue.seed_product_id(item["source_key"])
+        )
+        for item in manifest["items"]
+    }
     for item in manifest["items"]:
-        card = card_by_name[item["name"]]
-        assert card["store_title"] == item["name"]
-        assert abs(float(card["price_amount"]) - float(item["price"])) < 0.005
-        assert card["image_url"]
+        product = by_name[item["name"]]
+        assert product is not None
+        assert product["store_title"] == item["name"]
+        assert abs(float(product["price_amount"]) - float(item["price"])) < 0.005
+        assert product["image_url"]
 
     first_image = images[0]
     media = client.get("/store/media/%d" % first_image["id"])

@@ -1,0 +1,6 @@
+/* Paging controls only. The storefront's black/white look is unchanged. */
+.shop-paging{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;margin-top:28px;padding-top:18px;border-top:1px solid #333}
+.shop-paging .shop-small{margin:0}
+.shop-paging-links{display:flex;flex-wrap:wrap;gap:12px}
+.shop-paging .btn{display:inline-flex;margin:0}
+.shop-paging .btn[aria-busy="true"]{opacity:.65;cursor:wait}
