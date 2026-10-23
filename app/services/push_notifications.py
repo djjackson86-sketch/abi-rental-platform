@@ -21,7 +21,9 @@ Scope of this module (deliberately narrow):
   is that branch or who were explicitly granted access to it. The owner (who sees every
   branch) and every other branch are deliberately excluded: a portal submission is a
   depot's work, not a company-wide alert. When the customer has no branch recorded, nobody
-  is notified — an unknown branch is not "all branches".
+  is notified — an unknown branch is not "all branches". Each recipient's own
+  ``notification_preferences`` row then decides whether *they* want customer alerts; a
+  missing row means the type's default (ON), so existing subscribers keep their alerts.
 * **Minimal PII.** The payload carries a title, a branch label and the admin URL
   ``/customers/<id>``. No name, phone, email or address ever leaves in a push payload.
 
@@ -42,6 +44,7 @@ from urllib.parse import urlsplit
 from flask import current_app, has_app_context
 
 from app.db import get_db, now
+from app.services import notification_preferences
 
 #: The CSRF scope the push form/token pair uses (see app/services/csrf.py).
 CSRF_SCOPE = "push"
@@ -463,22 +466,9 @@ def send_to_users(user_ids, payload):
     return counts
 
 
-def send_test(user_id):
-    """Send the "test notification" the settings screen offers. Same safe path."""
-    payload = {
-        "title": "ABI notifications are on",
-        "body": "This device will receive customer portal alerts for your branch.",
-        "url": "/",
-        "tag": "push-test",
-    }
-    return send_to_users([user_id], payload)
-
-
 # ----------------------------------------------------------------- portal recipients
 
 #: The exact SQL that decides who hears about a portal submission.
-#:
-#: * ``active = 1`` — a disabled account never receives work.
 #: * ``role = 'staff'`` — the owner is excluded by the role test itself (an owner's
 #:   ``can_view_all_branches`` must never turn one depot's submission into a broadcast).
 #: * the customer's **persisted** branch, either as the staff member's primary branch or
@@ -547,6 +537,16 @@ def notify_portal_submission(customer_id):
         counts["branch_id"] = int(branch_id) if branch_id else 0
         if not recipients:
             return counts
+        # Each person's own settings decide whether they hear about customer alerts. A
+        # missing preference row means the type's default (ON), so existing subscribers
+        # keep the alerts they already receive.
+        wanted = notification_preferences.enabled_user_ids(
+            recipients, notification_preferences.CUSTOMER_NOTIFICATIONS
+        )
+        counts["recipients"] = len(wanted)
+        if not wanted:
+            return counts
+        recipients = wanted
         payload = {
             "title": "New customer portal submission",
             "body": f"A client submitted their details at {branch_name or 'your branch'}.",

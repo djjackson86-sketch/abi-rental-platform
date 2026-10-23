@@ -1,20 +1,24 @@
 /* Sano Trailers — staff push notifications, opt-in on a deliberate tap only.
  *
- * Rules this file follows, because they are easy to get wrong:
+ * The controls live on Settings -> Notifications, not in the global chrome: the chrome
+ * carries an ordinary "Notifications" button that navigates there. This file therefore
+ * has two jobs, and only the second one needs those controls to exist:
  *
- * 1. Nothing is subscribed, and no permission prompt is shown, unless a staff
- *    member taps "Enable notifications". iOS refuses a prompt that is not tied
- *    to a gesture, and a silent push opt-in surprises everyone else.
- * 2. Permission is never requested on page load. The only load-time network
- *    activity is a plain GET /push/config and - when permission is already
- *    granted - an idempotent re-register of the same subscription, so a device
- *    that was signed out and back in starts receiving again without a prompt.
- * 3. On iPhone/iPad the guidance comes before capability checks: Safari in a
- *    normal tab has no PushManager at all, so "not supported" would be wrong
- *    when the real fix is adding the app to the Home Screen.
- * 4. Logging out unsubscribes *this browser only*: the server is told the
- *    endpoint (before the session goes away) and the provider subscription is
- *    dropped, leaving the same account's other devices untouched.
+ * 1. Logout housekeeping, on every admin page: stop *this browser* being notified when
+ *    the session ends, leaving the same account's other devices untouched.
+ * 2. Device setup, only where [data-push-controls] is rendered:
+ *    - nothing is subscribed, and no permission prompt is shown, unless a staff member
+ *      taps "Enable notifications". iOS refuses a prompt that is not tied to a gesture.
+ *    - permission is never requested on page load. When permission is already granted
+ *      the page re-registers the same subscription silently, so a device that signed out
+ *      and back in starts receiving again without a prompt.
+ *    - on iPhone/iPad the guidance comes before capability checks: Safari in a normal tab
+ *      has no PushManager at all, so "not supported" would be wrong when the real fix is
+ *      adding the app to the Home Screen.
+ *
+ * There is no test-send control and no test endpoint: this page proves itself by
+ * subscribing, and the only notification ever sent is a real customer alert the account
+ * asked to receive.
  */
 (function () {
   'use strict';
@@ -24,10 +28,8 @@
   var CONFIG_URL = '/push/config';
   var SUBSCRIBE_URL = '/push/subscribe';
   var UNSUBSCRIBE_URL = '/push/unsubscribe';
-  var TEST_URL = '/push/test';
   var SW_URL = '/sw.js';
   var SW_SCOPE = '/';
-  var ICON_URL = '/static/img/favicon-180.png';
   var UNSUBSCRIBE_TIMEOUT_MS = 1200;
 
   var LABELS = {
@@ -41,13 +43,12 @@
     error: 'Notifications off'
   };
 
+  /* Present only on Settings -> Notifications. Every other admin page gets the logout
+     housekeeping below and no permission/subscription work. */
   var root = document.querySelector('[data-push-controls]');
-  if (!root) return;
-
-  var statusEl = root.querySelector('[data-push-status]');
-  var hintEl = root.querySelector('[data-push-hint]');
-  var enableBtn = root.querySelector('[data-push-enable]');
-  var testBtn = root.querySelector('[data-push-test]');
+  var statusEl = root ? root.querySelector('[data-push-status]') : null;
+  var hintEl = root ? root.querySelector('[data-push-hint]') : null;
+  var enableBtn = root ? root.querySelector('[data-push-enable]') : null;
 
   var state = 'loading';
   var config = null;
@@ -55,6 +56,7 @@
 
   function setState(next, message) {
     state = next;
+    if (!root) return;
     root.setAttribute('data-push-state', next);
     if (statusEl) statusEl.textContent = LABELS[next] || LABELS.off;
     if (hintEl) {
@@ -67,7 +69,6 @@
       enableBtn.textContent = retry ? 'Try again' : 'Enable notifications';
       enableBtn.disabled = busy;
     }
-    if (testBtn) testBtn.hidden = next !== 'subscribed';
   }
 
   function isIOS() {
@@ -244,30 +245,6 @@
       });
   }
 
-  function sendTestNotification(event) {
-    if (event) event.preventDefault();
-    if (busy) return;
-    busy = true;
-    if (enableBtn) enableBtn.disabled = true;
-    if (testBtn) testBtn.disabled = true;
-
-    postJson(TEST_URL, {})
-      .then(function (response) {
-        if (response && response.ok) return true;
-        throw new Error('Server push delivery failed');
-      })
-      .then(function () {
-        busy = false;
-        if (testBtn) testBtn.disabled = false;
-        setState('subscribed', 'Test notification sent.');
-      })
-      .catch(function () {
-        busy = false;
-        if (testBtn) testBtn.disabled = false;
-        setState('error', 'The test notification could not be shown.');
-      });
-  }
-
   function withTimeout(promise, ms) {
     return new Promise(function (resolve) {
       var timer = setTimeout(resolve, ms);
@@ -337,7 +314,13 @@
     if (!form || form.getAttribute('data-push-leaving') === '1') return;
     event.preventDefault();
     var endpointField = form.querySelector('input[name="push_endpoint"]');
-    leavePush(endpointField).then(function () {
+    // Config carries the scoped CSRF token. It is normally already loaded by init();
+    // fetch it once here when a page skipped that (or the fetch was still in flight),
+    // so logout can still remove this endpoint from the account.
+    var ready = config ? Promise.resolve() : loadConfig().then(adoptConfig);
+    ready.then(function () {
+      return leavePush(endpointField);
+    }).then(function () {
       form.setAttribute('data-push-leaving', '1');
       form.submit();
     });
@@ -351,6 +334,18 @@
   }
 
   function init() {
+    if (!root) {
+      // No controls on this page: only the config (CSRF token) is needed, for logout.
+      loadConfig().then(function (payload) {
+        if (!adoptConfig(payload)) return;
+        // Restore the signed-in account's device binding after logout/login on
+        // any staff page, without ever prompting for permission here.
+        if (supported() && (!isIOS() || isStandalone()) && Notification.permission === 'granted') {
+          return registerSubscription().catch(function () { return null; });
+        }
+      });
+      return;
+    }
     // Home-screen guidance first: on iOS in a browser tab the Push API is absent.
     if (isIOS() && !isStandalone()) {
       setState(
@@ -392,7 +387,6 @@
   }
 
   if (enableBtn) enableBtn.addEventListener('click', enableNotifications);
-  if (testBtn) testBtn.addEventListener('click', sendTestNotification);
   watchLogoutForms();
   init();
 })();

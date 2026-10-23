@@ -117,6 +117,16 @@ _ENDPOINT_MODULE_RULES = [
 ]
 
 
+#: Endpoints every signed-in account may use whatever modules it holds. Notification
+#: preferences are personal (each person's own alerts), so they are not a company
+#: ``settings`` function and must not be locked behind that module grant.
+_ALWAYS_ALLOWED_ENDPOINTS = frozenset(
+    {
+        "settings.notifications",
+    }
+)
+
+
 def module_for_endpoint(endpoint):
     """Return the module key that gates this endpoint, or None if ungated."""
     if not endpoint:
@@ -124,6 +134,8 @@ def module_for_endpoint(endpoint):
     if endpoint.startswith(_OPEN_ENDPOINT_PREFIXES):
         return None
     if endpoint == "admin.index" or endpoint == "admin.health":
+        return None
+    if endpoint in _ALWAYS_ALLOWED_ENDPOINTS:
         return None
     for prefix, module in _ENDPOINT_MODULE_RULES:
         if endpoint == prefix.rstrip(".") or endpoint.startswith(prefix):

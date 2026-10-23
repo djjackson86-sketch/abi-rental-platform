@@ -1,0 +1,68 @@
+{% extends "admin/layout.html" %}
+{% set title='Notifications' %}
+{% block admin_body %}
+<style>
+  /* The alert-type list reuses the standard check-row; only the help line and the
+     device row need a little page-local spacing. No pill styling: the entry point on
+     every other page is an ordinary button and this page uses ordinary controls. */
+  .notification-type-list{display:grid;border:1px solid var(--line-soft);border-radius:14px;margin:0 0 18px;overflow:hidden}
+  .notification-type-list .check-row{grid-template-columns:28px minmax(0,1fr);cursor:pointer}
+  .notification-type-list .check-row small{display:block;margin-top:4px;color:var(--muted);font-weight:600;line-height:1.45}
+  .notification-device .push-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:6px}
+  .notification-device .push-status{font-weight:750}
+  .notification-device .push-actions .btn{width:auto}
+  .notification-device .push-hint{margin:0;flex:1 1 100%;color:var(--muted);font-size:13px;line-height:1.45}
+  .notification-device[data-push-state="subscribed"] .push-status,
+  .notification-device [data-push-state="subscribed"] .push-status{color:var(--success,#047857)}
+  .notification-device [data-push-state="denied"] .push-status,
+  .notification-device [data-push-state="error"] .push-status{color:var(--danger,#b42318)}
+</style>
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Settings</p>
+    <h1>Notifications</h1>
+    <p>Choose which alerts this account receives, and turn notifications on for this device.</p>
+  </div>
+</header>
+{% if user_can('settings') %}{% include "admin/settings/nav.html" %}{% endif %}
+
+<form method="post" class="settings-form panel" action="{{ url_for('settings.notifications') }}">
+  {# Scoped token from the signed session; a cross-site POST cannot carry it. There is
+     deliberately no user id field: the route always saves the signed-in account. #}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2>Alerts for {{ current_user_name or 'your account' }}</h2>
+  <p class="form-help">These follow your account on every device you sign in on.</p>
+  <div class="notification-type-list">
+    {% for type in notification_types %}
+      <label class="check-row" for="notify-{{ type.key }}">
+        <input id="notify-{{ type.key }}" type="checkbox" name="{{ type.key }}" value="1" {% if preferences.get(type.key) %}checked{% endif %}>
+        <span>
+          <strong>{{ type.label }}</strong>
+          <small>{{ type.description }}</small>
+        </span>
+      </label>
+    {% endfor %}
+  </div>
+  <button class="btn primary" type="submit">Save</button>
+</form>
+
+<section class="panel notification-device">
+  <h2>This device</h2>
+  <p class="form-help">
+    Device notifications also need permission from this browser. Nothing is asked for until
+    you tap Enable notifications, and once permission is granted this device re-registers
+    by itself after a sign-out. On iPhone or iPad, add Sano Trailers to your Home Screen
+    first, then open it from there.
+  </p>
+  {% if not push_configured %}
+    <p class="form-help">Notifications are not set up for this site yet. Your saved choices still apply.</p>
+  {% endif %}
+  <div class="push-controls" data-push-controls data-push-state="loading">
+    <span class="push-status" data-push-status role="status" aria-live="polite">Notifications</span>
+    <div class="push-actions">
+      <button type="button" class="btn" data-push-enable hidden>Enable notifications</button>
+    </div>
+    <p class="push-hint" data-push-hint hidden></p>
+  </div>
+</section>
+{% endblock %}

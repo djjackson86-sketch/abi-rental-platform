@@ -457,17 +457,12 @@ def test_a_server_key_fault_does_not_disable_the_device(app, monkeypatch):
     assert stored[0]["disabled_at"] is None
 
 
-def test_an_unsendable_test_endpoint_reports_the_reason(app, client, monkeypatch):
+def test_there_is_no_test_send_endpoint(app, client):
+    """Device setup no longer offers a test send: the route is gone, not just hidden."""
     branch = add_branch(app, "Alpha Depot")
-    user_id = add_user(app, "Counter", branch_id=branch)
-    sign_in(client, user_id)
-    client.post("/push/subscribe", json=subscription(), headers={"X-CSRF-Token": token(client)})
-    monkeypatch.setattr(push, "library_available", lambda: False)
-
+    sign_in(client, add_user(app, "Counter", branch_id=branch))
     response = client.post("/push/test", headers={"X-CSRF-Token": token(client)})
-    assert response.status_code == 502
-    assert response.get_json()["ok"] is False
-    assert response.get_json()["counts"]["skipped"] == 1
+    assert response.status_code == 404
 
 
 # ------------------------------------------------------------ the portal trigger

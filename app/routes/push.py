@@ -1,9 +1,12 @@
-"""Staff Web Push endpoints: ``/push/config``, ``/push/subscribe``, ``/push/unsubscribe``,
-``/push/test``.
+"""Staff Web Push endpoints: ``/push/config``, ``/push/subscribe``, ``/push/unsubscribe``.
 
-All four are staff-only and speak JSON. They deliberately do **not** use
+All three are staff-only and speak JSON. They deliberately do **not** use
 ``login_required`` (which redirects to the login page): a background/API caller asking
 for config should get a 401 it can act on, not an HTML login form.
+
+There is deliberately **no test-send endpoint**: device setup on
+``/settings/notifications`` proves itself by subscribing and re-registering, and the only
+push that ever goes out is a real customer alert the recipient asked to receive.
 
 Every POST validates the session's scoped CSRF token (``app/services/csrf.py``, scope
 ``push``) *before* anything is written, and the account is re-read from the database —
@@ -144,38 +147,3 @@ def unsubscribe():
             "subscription_count": push.subscription_count(user["id"]),
         }
     )
-
-
-@bp.route("/test", methods=["POST"])
-def test_notification():
-    """Send one notification to the signed-in account's own devices.
-
-    Nothing about a customer is included: this is a device check, so the payload is fixed
-    text and the root URL.
-    """
-    user, refusal = _require_user()
-    if refusal is not None:
-        return refusal
-    try:
-        csrf.validate(push.CSRF_SCOPE)
-    except Exception:
-        return _refuse(
-            "Your session token is missing or has expired. Reload the page and try again.",
-            400,
-        )
-    if not push.vapid_configured():
-        return _refuse("Push notifications are not configured on this server.", 400)
-    result = push.send_test(user["id"])
-    if not result.get("sent"):
-        # Report the real reason rather than a cheerful "sent" the device never saw.
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": "No notification could be delivered to this account's devices.",
-                    "counts": result,
-                }
-            ),
-            502,
-        )
-    return jsonify({"ok": True, "counts": result})

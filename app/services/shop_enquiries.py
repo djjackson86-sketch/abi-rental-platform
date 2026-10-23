@@ -685,8 +685,16 @@ def notify_new_enquiry(enquiry_id):
         recipients = recipient_user_ids(enquiry["branch_id"])
         if not recipients:
             return None
-        from app.services import push_notifications
+        from app.services import notification_preferences, push_notifications
 
+        # The shop enquiry is the same kind of customer alert as a portal submission,
+        # so it honours the one 'Customer notifications' preference. Absence of a row
+        # means that type's default (ON), preserving the alerts staff already receive.
+        recipients = notification_preferences.enabled_user_ids(
+            recipients, notification_preferences.CUSTOMER_NOTIFICATIONS
+        )
+        if not recipients:
+            return None
         payload = {
             "title": "New store enquiry",
             "body": (

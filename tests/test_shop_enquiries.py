@@ -188,6 +188,10 @@ def next_days():
     from datetime import date
 
     start = date.fromisoformat(today) + timedelta(days=1)
+    # Ordinary enquiry tests need an open weekday, not tomorrow's incidental
+    # weekend. Closed-day behaviour has dedicated branch-hours tests.
+    while start.weekday() >= 5:
+        start += timedelta(days=1)
     return start.isoformat(), (start + timedelta(days=2)).isoformat()
 
 

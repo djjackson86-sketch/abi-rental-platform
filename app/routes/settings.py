@@ -27,6 +27,7 @@ from app.services.settings import (
 from app.services.branches import branch_options
 from app.services.branches import get_branch
 from app.services import popia_pack, popia_wizard, portal, portal_intake
+from app.services import notification_preferences
 from app.services import csrf
 from app.services.pdf_documents import report_pdf_bytes
 
@@ -227,6 +228,48 @@ def rental_period():
         flash("Rental period settings saved", "success")
         return redirect(url_for("settings.rental_period"))
     return render_template("admin/settings/rental_period.html", settings=get_company_settings(), hours=list_operating_hours())
+
+
+# --- Notifications (per-account, deliberately not module-gated) ---------------
+#
+# Every signed-in staff member owns their own alert choices, so this page is reachable
+# without the ``settings`` module that gates the company-wide screens. That is why
+# ``access.module_for_endpoint`` exempts this exact endpoint instead of relying on the
+# ``settings.`` prefix. The page carries the two halves in one place: the alert types the
+# account wants (persisted per user) and this browser's device permission/subscription
+# (handled by push.js against /push/config, /push/subscribe). There is no test-send
+# button: nothing is ever pushed except a real alert the account asked to receive.
+
+NOTIFICATION_PREFS_CSRF_SCOPE = "notification_preferences"
+
+
+@bp.route("/notifications", methods=["GET", "POST"])
+@login_required
+def notifications():
+    try:
+        user_id = int(session.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if user_id <= 0:
+        return redirect(url_for("auth.login"))
+
+    if request.method == "POST":
+        # Scoped CSRF: a refused token writes nothing. There is no user id field — the
+        # write is always for the signed-in account, so one person cannot change another's.
+        csrf.validate(NOTIFICATION_PREFS_CSRF_SCOPE)
+        notification_preferences.save_preferences(user_id, request.form)
+        flash("Notification settings saved", "success")
+        return redirect(url_for("settings.notifications"))
+
+    from app.services import push_notifications
+
+    return render_template(
+        "admin/settings/notifications.html",
+        notification_types=notification_preferences.NOTIFICATION_TYPES,
+        preferences=notification_preferences.preferences_for(user_id),
+        csrf_token=csrf.issue_token(NOTIFICATION_PREFS_CSRF_SCOPE),
+        push_configured=push_notifications.vapid_configured(),
+    )
 
 
 # --- Customer portal management (feature B §B3) ------------------------------

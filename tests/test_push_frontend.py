@@ -214,12 +214,16 @@ def test_the_opt_in_needs_a_deliberate_tap():
     source = PUSH_JS.read_text(encoding="utf-8")
     # Exactly one permission prompt, inside the button handler - never on load.
     assert source.count("Notification.requestPermission") == 1
-    handler = source[source.find("function enableNotifications") : source.find("function sendTestNotification")]
+    handler = source[source.find("function enableNotifications") : source.find("function withTimeout")]
     assert "Notification.requestPermission" in handler
     before = source[: source.find("function enableNotifications")]
     assert "Notification.requestPermission" not in before
     # And the button is the only thing wired to it.
     assert "enableBtn.addEventListener('click', enableNotifications)" in source
+    # No test-send control or endpoint survives anywhere in the browser code.
+    assert "/push/test" not in source
+    assert "sendTestNotification" not in source
+    assert "testBtn" not in source
 
 
 def test_nothing_is_subscribed_on_page_load_unless_permission_is_already_granted():
@@ -270,24 +274,38 @@ def test_logout_unsubscribes_this_browser_only(client, app):
         assert "user_id" not in sess
 
 
-def test_the_control_is_in_the_main_column_so_a_phone_can_reach_it(client, app):
+def test_the_global_control_is_an_ordinary_notifications_button(client, app):
     sign_in(client, app)
     html = client.get("/dashboard").get_data(as_text=True)
 
     main = main_column(html)
-    assert 'data-push-controls' in main
-    assert 'data-push-enable' in main and "Enable notifications" in main
-    assert 'data-push-test' in main and "Test notification" in main
+    # An ordinary link styled like the other standard buttons, pointing at the page.
+    assert 'href="/settings/notifications"' in main
+    assert ">Notifications</a>" in main
+    assert 'class="btn ghost"' in main
+    # The old pill bar and its live controls are gone from the global chrome.
+    assert "data-push-controls" not in main
+    assert "data-push-enable" not in main
+    assert "data-push-test" not in main
+    assert "Test notification" not in html
     # Never only in the sidebar: its links are hidden at <=860px.
-    assert "data-push-controls" not in sidebar_column(html)
-    # The behaviour ships with the page.
+    assert "/settings/notifications" not in sidebar_column(html)
+    # Logout housekeeping still ships with every page.
     assert "js/push.js" in html
 
-    style = html[html.find("<style>") : html.find("</style>")]
-    mobile = re.search(r"@media\(max-width:860px\)\{(.*?)\}\s*@media", style, re.S)
-    assert mobile, "the compact bar needs a phone rule"
-    assert ".push-controls" in mobile.group(1)
-    assert "display:none" not in mobile.group(1)
+
+def test_device_setup_lives_on_the_notifications_page(client, app):
+    sign_in(client, app)
+    response = client.get("/settings/notifications")
+    assert response.status_code == 200
+    page = response.get_data(as_text=True)
+
+    assert "data-push-controls" in page
+    assert "data-push-enable" in page and "Enable notifications" in page
+    # No test-send control anywhere on the setup page.
+    assert "data-push-test" not in page
+    assert "Test notification" not in page
+    assert "push.js" in page
 
 
 def test_the_layout_does_not_prompt_or_subscribe_by_itself():

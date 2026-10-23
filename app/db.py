@@ -1430,6 +1430,26 @@ def run_migrations(db):
         "ON push_subscriptions(user_id)"
     )
 
+    # --- Per-account notification preferences (additive) ---------------------
+    # Which kinds of staff alert EACH account wants. A missing row means the type's
+    # registry default (ON for customer notifications), so staff who already receive
+    # alerts keep receiving them after deploy with no backfill; switching a type off
+    # writes an explicit enabled = 0 row that the dispatch filters honour.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS notification_preferences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            notification_type TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, notification_type)
+        )"""
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notification_preferences_user "
+        "ON notification_preferences(user_id)"
+    )
+
     # --- Hot-path indexes for the order/payment/document screens (ABI-341953196) ---
     # Additive and idempotent: an existing database (the live Turso book included)
     # gains exactly the same three indexes a fresh install creates in SCHEMA, with
