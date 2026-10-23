@@ -164,9 +164,10 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .total-row b,.estimate-grand-total strong,.metrics b,.document-type-invoice .totals .total-row b{font-weight:600}
 
 /* Optional invoice reference: follows the date, never overflows the detail column. */
-.invoice-purchase-order{border:1px solid var(--line);background:#f6f9fd;border-radius:6px;padding:10px;min-width:0;width:100%;box-sizing:border-box;overflow-wrap:anywhere}
-.invoice-purchase-order h3{margin:0 0 5px;font-size:12px}
-.invoice-purchase-order p{margin:0;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.document-purchase-order-label{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.document-purchase-order-label input{width:12ch;min-width:0;max-width:100%;padding:4px 0;border:0;border-radius:0;background:transparent;box-shadow:none;font:inherit}
+.document-purchase-order-label input:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+.invoice-detail-stack .invoice-purchase-order{margin:0;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
 @media print{
   .document-view .sidebar,.document-view .main > :not(.document-page){display:none!important}
   .document-view .app-shell{display:block}

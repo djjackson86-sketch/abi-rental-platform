@@ -19,7 +19,7 @@
   {% if document.document_type == 'invoice' %}
   <form method="post" action="{{ url_for('documents.save_purchase_order_route', document_id=document.id) }}" class="form-grid document-purchase-order-form">
     <input type="hidden" name="csrf_token" value="{{ purchase_order_csrf }}">
-    <label for="purchase-order" class="span-2">Purchase Order<textarea id="purchase-order" name="purchase_order" rows="2" maxlength="500">{{ document.purchase_order or '' }}</textarea></label>
+    <label for="purchase-order" class="span-2 document-purchase-order-label">Purchase Order: <input id="purchase-order" name="purchase_order" type="text" size="10" maxlength="500" value="{{ document.purchase_order or '' }}"></label>
     <p class="form-help span-2">Optional. Shown below the invoice date only when filled. Clear and save to remove it.</p>
     <div class="form-actions span-2"><button class="btn primary" type="submit">Save Purchase Order</button></div>
   </form>
@@ -51,7 +51,7 @@
       </div>
       <div class="invoice-detail-stack">
         <div class="invoice-number-block"><strong>{{ display_label }}</strong><span>{{ display_number }}</span><br><small class="invoice-date-line"><strong>{{ display_label }} date:</strong> {{ effective_document_date(document) }}</small></div>
-        {% if document.document_type == 'invoice' and (document.purchase_order or '')|trim %}<article class="invoice-purchase-order"><h3>Purchase Order</h3><p>{{ document.purchase_order|trim }}</p></article>{% endif %}
+        {% if document.document_type == 'invoice' and (document.purchase_order or '')|trim %}<p class="invoice-purchase-order">Purchase Order: {{ document.purchase_order|trim }}</p>{% endif %}
         <article class="invoice-order-block"><h3>Order</h3><p><strong>{{ document.order_number }}</strong>{% if has_rental_items %}<br>Pickup: {{ document_datetime(document.start_at) }}<br>Return: {{ document_datetime(document.end_at) }}<br><strong>{{ rental_days_label }}</strong>{% endif %}</p></article>
       </div>
     </div>

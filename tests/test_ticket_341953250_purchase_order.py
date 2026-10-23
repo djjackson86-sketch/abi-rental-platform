@@ -35,7 +35,7 @@ def test_persistence_pdf_email_and_accounting_unchanged(client, app, status):
     pdf = client.get(f'/documents/{doc_id}/download.pdf')
     assert pdf.status_code == 200
     text = '\n'.join(run['text'] for page in pdf_pages(pdf.data) for run in page['runs'])
-    assert 'Purchase Order' in text and 'PO-123 / Client & Sons' in text
+    assert 'Purchase Order: PO-123 / Client & Sons' in ' '.join(text.split())
     draft = client.post(f'/documents/{doc_id}/send-email', data={'to_email': 'po@example.test'})
     message = email.message_from_bytes(draft.data, policy=policy.default)
     attachment = next(p for p in message.walk() if p.get_content_type() == 'application/pdf')
@@ -88,13 +88,13 @@ def test_independent_invoices_escaping_and_length(client, app):
     assert text.count('W') == 500
     assert 'Amount due' in text
     runs = pages[0]['runs']
-    label = next(run for run in runs if run['text'] == 'Purchase Order')
+    label = next(run for run in runs if run['text'].startswith('Purchase Order:'))
     date = next(run for run in runs if run['text'] == '2026-10-02')
     order_heading = next(run for run in runs if run['text'] == 'Order')
     assert label['y'] < date['y']
     reference_runs = [run for run in runs if run['text'].startswith('WW')]
     assert reference_runs[-1]['y'] > order_heading['y']
-    assert all(drawn_right_edge(run) < 566 for run in reference_runs)
+    assert all(drawn_right_edge(run) <= 569.1 for run in reference_runs)
 
 
 @pytest.mark.parametrize('kind', ['quote', 'contract', 'packing_slip'])

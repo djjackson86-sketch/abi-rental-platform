@@ -53,29 +53,11 @@ SUMMARY_VALUE_RIGHT_EDGE = INVOICE_TABLE_RIGHT_EDGE - 9
 # both drawing paths — the block that shares the totals' page and the block that
 # drops onto a page of its own — so the two can never drift apart.
 BANKING_THANK_YOU_GAP = 22
-# Ticket ABI-341953250: optional Purchase Order reference. Invoice-only - a quote
-# never carries one, and a quote's header must keep the exact geometry it had.
-# It prints in a labelled box in the right-hand detail column, under the
-# number/date stack and above Order. The box is measured from its own wrapped
-# value, so a long (or unbroken) reference pushes the Order block and the item
-# table down instead of printing over them; item rows that no longer fit on page
-# 1 continue on page 2 through the normal pagination, so nothing is lost.
-PURCHASE_ORDER_LABEL = 'Purchase Order'
-# The documents.purchase_order column is capped at 500 characters by the form.
-# The renderer applies the same cap defensively, so a post that bypassed the
-# form cannot turn the header into a column of text over the line items.
+# Optional invoice-only reference, inline with the document metadata (ABI-341953252).
+# Keep the existing 500-character storage limit, not a ten-character validation cap.
 PURCHASE_ORDER_MAX_CHARS = 500
-PURCHASE_ORDER_LEFT_X = 300
-# The box may step right to clear a long issuer/Bill To line, but never so far
-# that the value column becomes a word-per-line sliver.
-PURCHASE_ORDER_MAX_LEFT_X = 360
-PURCHASE_ORDER_TOP_Y = 716
-PURCHASE_ORDER_PAD = 6
-PURCHASE_ORDER_LABEL_SIZE = 7.5
 PURCHASE_ORDER_VALUE_SIZE = 8.5
 PURCHASE_ORDER_LEADING = 11
-PURCHASE_ORDER_FILL = '0.965 0.976 0.992'
-PURCHASE_ORDER_STROKE = '0.82 0.86 0.91'
 
 
 def _pdf_text(value):
@@ -989,45 +971,6 @@ def _document_purchase_order(document):
     return value
 
 
-def _purchase_order_left_x(*line_groups):
-    """Left edge of the Purchase Order box that clears the left-hand text blocks.
-
-    The box lives in the right-hand detail column, but it grows downward into the
-    band the issuer and Bill To blocks occupy, so a long address line must not end
-    up behind it. Measuring the widest drawn line of both blocks keeps a real gap;
-    the clamp keeps the value column wide enough to stay readable.
-    """
-    widest = 0.0
-    for lines in line_groups:
-        for line in lines:
-            if line:
-                widest = max(widest, LEFT_BLOCK_X + _pdf_exact_text_width(line, 8.5))
-    return min(max(PURCHASE_ORDER_LEFT_X, widest + 16), PURCHASE_ORDER_MAX_LEFT_X)
-
-
-def _purchase_order_box(text, left_x, top_y):
-    """Geometry and wrapped lines for the Purchase Order box.
-
-    Height is derived from the number of wrapped lines rather than fixed, which is
-    what lets the Order block below follow it down without overlapping. The box's
-    right edge is the invoice table's, so the header keeps one straight edge.
-    """
-    width = INVOICE_TABLE_RIGHT_EDGE - left_x
-    lines = _pdf_wrap_hard(text, PURCHASE_ORDER_VALUE_SIZE, width - (2 * PURCHASE_ORDER_PAD))
-    label_y = top_y - 12
-    first_value_y = label_y - 13
-    bottom = first_value_y - ((len(lines) - 1) * PURCHASE_ORDER_LEADING) - 5
-    return {
-        'x': left_x,
-        'width': width,
-        'top': top_y,
-        'bottom': bottom,
-        'label_y': label_y,
-        'first_value_y': first_value_y,
-        'lines': lines,
-    }
-
-
 def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     display_label = display_document_label(document)
     display_number = display_document_number(document)
@@ -1103,7 +1046,7 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
         invoice_lines.append(display_number)
     invoice_lines.extend([f'{display_label} date:', effective_document_date(document)])
     _add_pdf_lines(text_commands, detail_x, 746, invoice_lines, size=8.5, leading=14)
-    # Where the last invoice-date line sits, so the Purchase Order box can hang
+    # Where the last invoice-date line sits, so the Purchase Order can follow
     # directly under it (a proforma prints no number, so its date sits one line
     # higher than a finalized invoice's).
     invoice_date_bottom_y = 746 - ((len(invoice_lines) - 1) * 14)
@@ -1133,40 +1076,26 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     if alt_lines:
         customer_lines.extend(['', *alt_lines])
 
-    # Ticket ABI-341953250: the optional Purchase Order, in its own labelled box
-    # between the number/date stack and Order. Only a non-blank invoice (or
-    # proforma) gets it; a quote's header geometry is untouched.
+    # Plain inline reference, left-aligned with Invoice and Order. Hard wrapping
+    # keeps legacy long/unbroken references inside the page without losing text.
     purchase_order_text = _document_purchase_order(document)
-    purchase_order_box = None
+    purchase_order_bottom_y = None
     if purchase_order_text:
-        purchase_order_box = _purchase_order_box(
-            purchase_order_text,
-            _purchase_order_left_x(issuer_lines, customer_lines),
-            min(PURCHASE_ORDER_TOP_Y, invoice_date_bottom_y - 14),
+        reference_lines = _pdf_wrap_hard(
+            f'Purchase Order: {purchase_order_text}', PURCHASE_ORDER_VALUE_SIZE,
+            569 - detail_x,
         )
-        draw_commands.append(_pdf_rect(
-            purchase_order_box['x'], purchase_order_box['bottom'], purchase_order_box['width'],
-            purchase_order_box['top'] - purchase_order_box['bottom'],
-            fill=PURCHASE_ORDER_FILL, stroke=PURCHASE_ORDER_STROKE, line_width=0.6,
-        ))
-        text_commands.append(_pdf_text_command(
-            purchase_order_box['x'] + PURCHASE_ORDER_PAD, purchase_order_box['label_y'],
-            PURCHASE_ORDER_LABEL, size=PURCHASE_ORDER_LABEL_SIZE, font='F2',
-        ))
+        reference_y = invoice_date_bottom_y - 18
         _add_pdf_lines(
-            text_commands, purchase_order_box['x'] + PURCHASE_ORDER_PAD,
-            purchase_order_box['first_value_y'], purchase_order_box['lines'],
+            text_commands, detail_x, reference_y, reference_lines,
             size=PURCHASE_ORDER_VALUE_SIZE, leading=PURCHASE_ORDER_LEADING,
-            max_lines=len(purchase_order_box['lines']),
+            max_lines=len(reference_lines),
         )
+        purchase_order_bottom_y = reference_y - (len(reference_lines) - 1) * PURCHASE_ORDER_LEADING
 
-    # The Order block only moves when the Purchase Order box needs the room: it
-    # keeps its historical 625 heading for a short reference and drops below the
-    # box (22pt of white) for a long one, so a two-line PO cannot print across
-    # the Order heading.
     order_heading_y = 625
-    if purchase_order_box:
-        order_heading_y = min(625, purchase_order_box['bottom'] - 22)
+    if purchase_order_bottom_y is not None:
+        order_heading_y = min(order_heading_y, purchase_order_bottom_y - 22)
     text_commands.append(_pdf_text_command(detail_x, order_heading_y, 'Order', size=8.5, font='F2'))
     order_lines = [f'Order: {document["order_number"]}']
     if document_has_rental_items(items):
@@ -1240,11 +1169,8 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Table starts just below the address block, never lower than the page-1 cap
     # so even a short address still gives the table its full run of rows.
     table_y = min(545, customer_bottom_y - 28)
-    if purchase_order_box:
-        # The Purchase Order box pushed Order down, so the first item row and its
-        # black heading band have to start below it. Page 1 then takes fewer rows
-        # and the rest continue on page 2 through the normal take_rows() loop -
-        # the reference costs page-1 capacity, never an item line.
+    if purchase_order_bottom_y is not None:
+        # A long reference may move Order down; pagination preserves every item.
         table_y = min(table_y, order_block_bottom_y - 20)
 
     def add_table_header(draw, text, header_y):
