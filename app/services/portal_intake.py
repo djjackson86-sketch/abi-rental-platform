@@ -140,7 +140,7 @@ PORTAL_REQUIRED_FIELDS = (
     ("suburb", "Please enter your suburb."),
     ("city", "Please enter your city."),
     ("province", "Please enter your province."),
-    ("postal_code", "Please enter your postal code."),
+    # Postal code is optional on the customer portal (ABI-341953255).
     ("alternative_contact_name", "Please enter the alternative contact's name."),
     ("alternative_contact_number", "Please enter the alternative contact's number."),
     ("alternative_contact_relationship", "Please enter the alternative contact's relationship."),

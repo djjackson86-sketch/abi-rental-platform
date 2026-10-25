@@ -83,7 +83,7 @@ SUBMISSION = {
 }
 
 REQUIRED_FIELDS = (
-    "first_names", "surname", "email", "phone", "address_line1", "suburb", "city", "province", "postal_code",
+    "first_names", "surname", "email", "phone", "address_line1", "suburb", "city", "province",
     "alternative_contact_name", "alternative_contact_number", "alternative_contact_relationship",
 )
 

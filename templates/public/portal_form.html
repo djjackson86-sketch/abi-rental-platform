@@ -94,7 +94,7 @@
           <label><span class="field-label">Suburb <span class="req-star" aria-hidden="true">*</span></span><input name="suburb" required value="{{ form_values.get('suburb', '') }}"></label>
           <label><span class="field-label">City <span class="req-star" aria-hidden="true">*</span></span><input name="city" required autocomplete="address-level2" value="{{ form_values.get('city', '') }}"></label>
           <label><span class="field-label">Province <span class="req-star" aria-hidden="true">*</span></span>{{ province_select(form_values.get('province'), required=true) }}</label>
-          <label><span class="field-label">Postal code <span class="req-star" aria-hidden="true">*</span></span><input name="postal_code" required inputmode="numeric" autocomplete="postal-code" value="{{ form_values.get('postal_code', '') }}"></label>
+          <label><span class="field-label">Postal code</span><input name="postal_code" inputmode="numeric" autocomplete="postal-code" value="{{ form_values.get('postal_code', '') }}"></label>
         </div>
       </section>
 
