@@ -267,3 +267,144 @@ def test_only_the_orders_due_by_today_carry_time_lines(seeded):
     assert with_slots == {'ORD-10817', 'ORD-10780', 'ORD-10803'}
     # Everything gets a Balance Due figure, with or without a list.
     assert all(row['balance_due'] is not None for row in rows.values())
+
+
+# --- ABI-341953263: the list is the day's tariff, not a live quote ---------------
+
+REPORT_MOMENTS = [
+    datetime(2026, 11, 1, 8, 0),    # before the shop opens
+    datetime(2026, 11, 1, 12, 0),   # mid-window
+    datetime(2026, 11, 1, 17, 45),  # just after the 17:30 close
+    datetime(2026, 11, 1, 20, 0),   # the evening print the client reported
+    datetime(2026, 11, 1, 22, 0),   # late at night
+    datetime(2026, 11, 2, 6, 0),    # next morning, before the shop opens
+]
+# The moments that fall on ORD-10819's own due date, for the still-out rule.
+REPORT_MOMENTS_ON_DUE_DATE = [moment for moment in REPORT_MOMENTS
+                              if moment.date() == datetime(2026, 11, 1).date()]
+
+
+@pytest.mark.parametrize('moment', REPORT_MOMENTS)
+def test_a_hire_due_today_lists_the_same_hours_at_any_clock_time(seeded, monkeypatch, moment):
+    """The list is the day's tariff: 20:00 must print what 09:00 prints.
+
+    Before ABI-341953263 every slot past the clock was skipped, so an evening
+    print showed no hourly lines at all — the client's report.
+    """
+    monkeypatch.setattr(reports_service, 'local_now', lambda: moment)
+    slots = slots_for(seeded, 'ORD-10817')
+    if moment.date() == datetime(2026, 11, 1).date():
+        assert slots == [
+            ('13:00', 20.0),
+            ('14:00', 40.0),
+            ('15:00', 60.0),
+            ('16:00', 80.0),
+            ('17:00', 100.0),
+        ]
+        assert report_rows(seeded)['ORD-10817']['balance_slots_date'] == '2026-11-01'
+    else:
+        # On 02-11 the same hire is a late return: still one hour after its own
+        # due time, so 13:00 to 17:00, each adding the trailer's R20 rate.
+        assert [label for label, _ in slots] == [
+            '13:00', '14:00', '15:00', '16:00', '17:00',
+        ]
+        deltas = [round(second - first, 2) for (_l1, first), (_l2, second) in zip(slots, slots[1:])]
+        assert deltas == [20.0] * 4
+        assert report_rows(seeded)['ORD-10817']['balance_slots_date'] == '2026-11-02'
+
+
+@pytest.mark.parametrize('moment', REPORT_MOMENTS)
+def test_an_overdue_hire_still_lists_the_window_at_any_clock_time(seeded, monkeypatch, moment):
+    monkeypatch.setattr(reports_service, 'local_now', lambda: moment)
+    row = report_rows(seeded)['ORD-10803']
+    assert [label for label, _ in row['balance_slots']] == [
+        '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+    ]
+    assert row['balance_slots_date'] == moment.date().isoformat()
+
+
+@pytest.mark.parametrize('moment', REPORT_MOMENTS_ON_DUE_DATE)
+def test_a_later_hire_stays_single_line_whatever_the_clock_says(seeded, monkeypatch, moment):
+    """ABI-341953262's rule is untouched: only the evening skip changed."""
+    monkeypatch.setattr(reports_service, 'local_now', lambda: moment)
+    row = report_rows(seeded)['ORD-10819']
+    assert row['balance_slots'] == []
+    assert row['balance_slots_date'] == ''
+    assert row['balance_slots_note'] == ''
+    assert round(row['balance_due'], 2) == -395.0
+
+
+def test_the_evening_pdf_still_draws_the_afternoon_hours(seeded, monkeypatch):
+    """The client's own case: generating the PDF at 20:00 must show the lines."""
+    monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 11, 1, 20, 0))
+    client = seeded.test_client()
+    login(client)
+    text = re.sub(r'\n+', '\n', drawn_text(client.get('/orders/started-orders-report.pdf').data))
+
+    assert re.search(
+        r'Order No: ORD-10817\n'
+        r'   Trailer: 040 - KT 77 JY GP\n'
+        r'   Expected Date: 2026-11-01\n'
+        r'   Expected Time: 12:00\n'
+        r'   Available Deposit: N/A\n'
+        r'   Damage Waiver: Yes\n'
+        r'   Balance Due: R0\.00\n'
+        r'      @13:00 - R20\.00\n'
+        r'      @14:00 - R40\.00\n'
+        r'      @15:00 - R60\.00\n'
+        r'      @16:00 - R80\.00\n'
+        r'      @17:00 - R100\.00\n',
+        text,
+    ), text
+    # ...and the hire due 02-11 still has none, in the same report.
+    assert '@02-11' not in text
+
+
+def test_a_due_time_late_in_the_window_quotes_the_closing_time(seeded):
+    """A 16:45 or 17:15 return leaves no whole hour before 17:30 (ABI-341953263).
+
+    Live examples: ORD-10826/10827 due 16:45 and ORD-10798 due 17:15, which
+    used to get no list at any hour of the day.
+    """
+    with seeded.app_context():
+        db = get_db()
+        db.execute("UPDATE orders SET end_at = '2026-11-01T16:45' WHERE order_number = 'ORD-10817'")
+        db.commit()
+    row = report_rows(seeded)['ORD-10817']
+    assert [label for label, _ in row['balance_slots']] == ['17:30']
+    assert round(row['balance_slots'][0][1], 2) > 0
+    assert row['balance_slots_date'] == '2026-11-01'
+
+    with seeded.app_context():
+        db = get_db()
+        db.execute("UPDATE orders SET end_at = '2026-11-01T17:15' WHERE order_number = 'ORD-10817'")
+        db.commit()
+    row = report_rows(seeded)['ORD-10817']
+    assert [label for label, _ in row['balance_slots']] == ['17:30']
+
+
+def test_a_hire_due_at_the_close_gets_no_closing_slot(seeded):
+    """17:30 is the due time itself, so there is nothing late to quote."""
+    with seeded.app_context():
+        db = get_db()
+        db.execute("UPDATE orders SET end_at = '2026-11-01T17:30' WHERE order_number = 'ORD-10817'")
+        db.commit()
+    assert report_rows(seeded)['ORD-10817']['balance_slots'] == []
+
+
+def test_a_hire_due_after_the_close_still_gets_nothing(seeded):
+    """An 18:00 return is outside the staffed window — no invented slot."""
+    with seeded.app_context():
+        db = get_db()
+        db.execute("UPDATE orders SET end_at = '2026-11-01T18:00' WHERE order_number = 'ORD-10817'")
+        db.commit()
+    assert report_rows(seeded)['ORD-10817']['balance_slots'] == []
+
+def test_the_later_hire_starts_quoting_on_its_own_date(seeded, monkeypatch):
+    """On 02-11 ORD-10819 is due that day, so its hours appear (unchanged)."""
+    monkeypatch.setattr(reports_service, 'local_now', lambda: datetime(2026, 11, 2, 6, 0))
+    row = report_rows(seeded)['ORD-10819']
+    assert [label for label, _ in row['balance_slots']] == [
+        '13:45', '14:45', '15:45', '16:45',
+    ]
+    assert row['balance_slots_date'] == '2026-11-02'

@@ -822,7 +822,12 @@ def _started_order_slot_times(order):
 
     Slots are one hour apart from one hour after the expected return clock time,
     and only times from 12:00 to 17:30 count — the shop's staffed return window.
-    A hire due at or after 17:30, and one whose window already closed, has none.
+    A hire due at or after 17:30 has none.
+
+    The list is the day's return tariff, not a live quote (ABI-341953263): the
+    shop closes at 17:30, so a report printed in the evening used to come out
+    with no hourly lines at all. Every slot in the window is printed whatever
+    the clock says; only the hours before the due time are left out.
 
     Only a hire due on the report's own date, or already overdue, gets a list
     (ABI-341953262): a trailer still booked out until a later date is left with
@@ -853,9 +858,16 @@ def _started_order_slot_times(order):
         slot_at = datetime.combine(slot_date, time(minutes // 60, minutes % 60))
         if same_day_due and slot_at <= due_at:
             continue
-        if slot_at <= now or (start_at and slot_at <= start_at):
+        if start_at and slot_at <= start_at:
             continue
         slots.append((slot_at, slot_at.strftime("%H:%M")))
+    if not slots and first <= due_minutes < last:
+        # A due time late in the window (16:45, 17:15) leaves no whole hour
+        # before 17:30 closes; quote the closing time itself rather than
+        # nothing at all (ABI-341953263).
+        close_at = datetime.combine(slot_date, STARTED_ORDERS_SLOT_LAST)
+        if not start_at or close_at > start_at:
+            slots.append((close_at, close_at.strftime("%H:%M")))
     return slots
 
 
@@ -966,8 +978,9 @@ def started_orders_report_rows(branch_id=None):
             cache[order_id] = {
                 'balance_due': started_order_balance_due_today(row, items=items, tax_mode=tax_mode),
                 'balance_slots': slots,
-                # Every slot is quoted for the report's own day (ABI-341953260).
-                'balance_slots_date': local_now().date().isoformat() if slot_times else '',
+                # Every slot is quoted for the report's own day (ABI-341953260);
+                # only claim that date when the list actually prints (ABI-341953263).
+                'balance_slots_date': local_now().date().isoformat() if slots else '',
                 # A window with no hourly rate would quote a day price per hour.
                 'balance_slots_note': STARTED_ORDERS_SLOT_RATE_NOTE if (slot_times and hourly_rate is None) else '',
             }

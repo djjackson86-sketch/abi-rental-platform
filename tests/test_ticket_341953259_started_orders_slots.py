@@ -371,3 +371,58 @@ def test_every_block_still_lands_whole_on_one_page(app, monkeypatch):
         lines = [line for line in block if line.strip()]
         containing = [index for index, page in enumerate(pages) if all(line in page for line in lines)]
         assert len(containing) == 1, (block, containing)
+
+
+# --- ABI-341953263: the shop closing must not empty the list ---------------------
+
+EVENING = datetime(2026, 11, 1, 20, 0)
+
+
+def test_the_evening_report_still_quotes_the_hours_it_quotes_at_nine(app, monkeypatch):
+    """The client reported no hourly lines; they were being skipped as "past"."""
+    monkeypatch.setattr(reports_service, 'local_now', today_today)
+    seed(app)
+    morning = slots_for(app, 'ORD-10817')
+
+    monkeypatch.setattr(reports_service, 'local_now', lambda: EVENING)
+    evening = slots_for(app, 'ORD-10817')
+
+    assert morning == evening == [
+        ('13:00', 20.0),
+        ('14:00', 40.0),
+        ('15:00', 60.0),
+        ('16:00', 80.0),
+        ('17:00', 100.0),
+    ]
+
+
+def test_a_hire_due_late_in_the_window_gets_the_closing_time(app, monkeypatch):
+    """Due 16:45 or 17:15: one hour later is past 17:30, so 17:30 itself."""
+    monkeypatch.setattr(reports_service, 'local_now', today_today)
+    seed(app)
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE orders SET end_at = '2026-11-01T16:45' WHERE order_number = 'ORD-10817'")
+        db.execute("UPDATE orders SET end_at = '2026-11-01T17:15' WHERE order_number = 'ORD-10851'")
+        db.commit()
+
+    rows = report_rows(app)
+    assert [label for label, _ in rows['ORD-10817']['balance_slots']] == ['17:30']
+    assert [label for label, _ in rows['ORD-10851']['balance_slots']] == ['17:30']
+    # The part-paid hire still carries its R85 plus the half hour of hire.
+    assert round(rows['ORD-10851']['balance_slots'][0][1], 2) > 85.0
+
+    client = app.test_client()
+    login(client)
+    text = drawn_text(client.get('/orders/started-orders-report.pdf').data)
+    assert '      @17:30 - R' in text
+
+
+def test_a_trailer_without_a_rate_does_not_claim_a_slot_date(app, monkeypatch):
+    """No lines means no date: the row must not advertise a list it lacks."""
+    monkeypatch.setattr(reports_service, 'local_now', today_today)
+    seed(app)
+    row = report_rows(app)['ORD-10852']
+    assert row['balance_slots'] == []
+    assert row['balance_slots_note'] == 'Rates not set'
+    assert row['balance_slots_date'] == ''
