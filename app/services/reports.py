@@ -655,22 +655,24 @@ def _report_return_at(order):
     return datetime.combine(local_now().date(), expected_t)
 
 
-def started_order_balance_due_today(order):
-    """Projected amount due if a started hire is returned today before its expected time."""
-    from app.services.orders import computed_discount, line_uses_order_days, rental_days
+# Ticket ABI-341953259: the Started Orders Report quotes a customer what they
+# would owe if the trailer came back at a given time, so each order lists one
+# projected balance per whole hour inside the shop's return window.
+STARTED_ORDERS_SLOT_FIRST = time(12, 0)
+STARTED_ORDERS_SLOT_LAST = time(17, 30)
+STARTED_ORDERS_SLOT_RATE_NOTE = 'Rates not set'
 
-    order_id = order.get("id")
-    start_at = parse_iso_datetime(order.get("start_at"))
-    return_at = _report_return_at(order)
-    if not order_id or not start_at or not return_at:
-        return money(order.get("due_total"))
 
-    days = rental_days(start_at, return_at)
-    db = get_db()
-    settings = db.execute("SELECT tax_mode FROM company_settings WHERE id = 1").fetchone()
-    tax_mode = settings["tax_mode"] if settings else "exclusive"
-    items = [row_dict(row) for row in db.execute(
-        """SELECT oi.*, p.product_type, p.price_unit, COALESCE(t.rate, 0) AS tax_rate
+def _started_order_tax_mode():
+    settings = get_db().execute("SELECT tax_mode FROM company_settings WHERE id = 1").fetchone()
+    return settings["tax_mode"] if settings else "exclusive"
+
+
+def _started_order_items(order_id):
+    """The order's hire lines with the columns the re-price maths needs."""
+    return [row_dict(row) for row in get_db().execute(
+        """SELECT oi.*, p.product_type, p.price_unit, p.hourly_extra_rate,
+                  COALESCE(t.rate, 0) AS tax_rate
         FROM order_items oi
         LEFT JOIN products p ON p.id = oi.product_id
         LEFT JOIN tax_profiles t ON t.id = p.tax_profile_id
@@ -679,6 +681,27 @@ def started_order_balance_due_today(order):
         ORDER BY oi.id""",
         (order_id,),
     ).fetchall()]
+
+
+def _started_order_hourly_rate(items):
+    """The trailer's own extra-hour rate, or None when the product has none set.
+
+    ``orders.return_charge_defaults`` falls back to the day price when
+    ``hourly_extra_rate`` is unset. Billing a real late return that way is a
+    staff decision, but quoting it as an hourly projection would print a day
+    rate per hour, so those orders say the rate is not set instead.
+    """
+    for item in items:
+        if not item.get("product_id"):
+            continue
+        rate = float(item.get("hourly_extra_rate") or 0)
+        if rate > 0:
+            return round(rate, 2)
+    return None
+
+
+def _started_order_lines_total(items, days, tax_mode):
+    from app.services.orders import line_uses_order_days
 
     subtotal = tax_total = line_total = 0.0
     for item in items:
@@ -700,7 +723,36 @@ def started_order_balance_due_today(order):
         subtotal += round(subtotal_line, 2)
         tax_total += round(tax, 2)
         line_total += round(total, 2)
+    return subtotal, tax_total, line_total
 
+
+def _started_order_extra_hours_total(items, extra_hours, hourly_rate, tax_mode):
+    """The extra-hours line a return revision would add, taxed the same way."""
+    amount = round(float(extra_hours or 0) * float(hourly_rate or 0), 2)
+    if amount <= 0:
+        return 0.0, 0.0, 0.0
+    rate = 0.0
+    for item in items:
+        if item.get("product_id"):
+            rate = (float(item.get("tax_rate") or 0) or _stored_line_tax_rate(item)) / 100
+            break
+    if tax_mode == "inclusive" and rate:
+        tax = amount - (amount / (1 + rate))
+        return round(amount - tax, 2), round(tax, 2), amount
+    return amount, round(amount * rate, 2), round(amount + (amount * rate), 2)
+
+
+def _started_order_balance_due(order, days, extra_hours, items, tax_mode, hourly_rate):
+    """Order total at ``days`` + ``extra_hours``, less what has been paid."""
+    from app.services.orders import computed_discount
+
+    subtotal, tax_total, line_total = _started_order_lines_total(items, days, tax_mode)
+    if extra_hours:
+        extra_subtotal, extra_tax, extra_total = _started_order_extra_hours_total(
+            items, extra_hours, hourly_rate, tax_mode)
+        subtotal += extra_subtotal
+        tax_total += extra_tax
+        line_total += extra_total
     discount_total = float(order.get("discount_total") or 0)
     if (order.get("discount_mode") or "") in {"percent", "amount"}:
         discount_total = computed_discount(order.get("discount_mode"), order.get("discount_value"), subtotal, tax_total)
@@ -712,7 +764,103 @@ def started_order_balance_due_today(order):
         2,
     )
     paid_total = float(order.get("paid_total") or 0)
-    return round(projected_total - paid_total, 2)
+    # A balance due is never negative: an overpayment is credit, not money owed.
+    return max(0.0, round(projected_total - paid_total, 2))
+
+
+def started_order_balance_due_today(order, items=None, tax_mode=None):
+    """Projected amount due if a started hire is returned today before its expected time."""
+    from app.services.orders import rental_days
+
+    order_id = order.get("id")
+    start_at = parse_iso_datetime(order.get("start_at"))
+    return_at = _report_return_at(order)
+    if not order_id or not start_at or not return_at:
+        return money(order.get("due_total"))
+
+    items = _started_order_items(order_id) if items is None else items
+    tax_mode = _started_order_tax_mode() if tax_mode is None else tax_mode
+    return _started_order_balance_due(order, rental_days(start_at, return_at), 0.0, items, tax_mode, 0.0)
+
+
+def started_order_balance_due_at(order, return_at, items=None, tax_mode=None):
+    """Projected balance due if the hire is actually returned at ``return_at``.
+
+    Same maths as ``orders.revise_started_return``: whole 24h blocks plus the
+    remaining hours at the trailer's extra-hour rate, this VAT mode, the order
+    discount, the refundable deposit and the damage waiver, less what is paid.
+    """
+    from app.services.orders import late_return_breakdown
+
+    order_id = order.get("id")
+    start_at = parse_iso_datetime(order.get("start_at"))
+    if not order_id or not start_at or not return_at:
+        return money(order.get("due_total"))
+
+    items = _started_order_items(order_id) if items is None else items
+    tax_mode = _started_order_tax_mode() if tax_mode is None else tax_mode
+    breakdown = late_return_breakdown(start_at, return_at)
+    return _started_order_balance_due(
+        order, breakdown["days"], breakdown["extra_hours"], items, tax_mode,
+        _started_order_hourly_rate(items),
+    )
+
+
+def _started_order_slot_times(order):
+    """(slot datetime, 'HH:MM') for each hourly return time inside the window.
+
+    Slots are one hour apart from one hour after the expected return time, and
+    only times from 12:00 to 17:30 count — the shop's staffed return window. A
+    hire due at or after 17:30, and one whose window already closed, has none.
+    An overdue hire's slots sit on today, because that is when the customer
+    would actually bring it back.
+    """
+    due_at = parse_iso_datetime(order.get("end_at"))
+    start_at = parse_iso_datetime(order.get("start_at"))
+    if not due_at:
+        return []
+    slot_date = max(due_at.date(), local_now().date())
+    first = STARTED_ORDERS_SLOT_FIRST.hour * 60 + STARTED_ORDERS_SLOT_FIRST.minute
+    last = STARTED_ORDERS_SLOT_LAST.hour * 60 + STARTED_ORDERS_SLOT_LAST.minute
+    due_minutes = due_at.hour * 60 + due_at.minute
+    slots = []
+    for step in range(1, 24):
+        minutes = due_minutes + step * 60
+        if minutes > last:
+            break
+        if minutes < first:
+            continue
+        slot_at = datetime.combine(slot_date, time(minutes // 60, minutes % 60))
+        if slot_at <= due_at or (start_at and slot_at <= start_at):
+            continue
+        slots.append((slot_at, slot_at.strftime("%H:%M")))
+    return slots
+
+
+def _started_order_slot_balances(order, items, tax_mode, hourly_rate):
+    from app.services.orders import late_return_breakdown
+
+    start_at = parse_iso_datetime(order.get("start_at"))
+    balances = []
+    for slot_at, label in _started_order_slot_times(order):
+        breakdown = late_return_breakdown(start_at, slot_at) if start_at else {"days": 1, "extra_hours": 0.0}
+        balances.append((
+            label,
+            _started_order_balance_due(order, breakdown["days"], breakdown["extra_hours"], items, tax_mode, hourly_rate),
+        ))
+    return balances
+
+
+def started_orders_report_balance_slots(order):
+    """[(time label, projected balance)] at the hourly return times, or []."""
+    order_id = order.get("id")
+    if not order_id:
+        return []
+    items = _started_order_items(order_id)
+    hourly_rate = _started_order_hourly_rate(items)
+    if hourly_rate is None:
+        return []
+    return _started_order_slot_balances(order, items, _started_order_tax_mode(), hourly_rate)
 
 def orders_export_rows(start_date=None, end_date=None, branch_id=None):
     db = get_db()
@@ -784,13 +932,37 @@ def started_orders_report_rows(branch_id=None):
         [*TRAILER_GROUPS_EXCLUDED, *scope_params],
     ).fetchall()
     materialised = [row_dict(row) for row in rows]
-    balances = {}
+    tax_mode = _started_order_tax_mode()
+    cache = {}
     for row in materialised:
         order_id = row.get('id')
-        if order_id not in balances:
-            balances[order_id] = started_order_balance_due_today(row)
-        row['balance_due'] = balances[order_id]
+        if order_id not in cache:
+            items = _started_order_items(order_id) if order_id else []
+            hourly_rate = _started_order_hourly_rate(items)
+            slot_times = _started_order_slot_times(row)
+            slots = _started_order_slot_balances(row, items, tax_mode, hourly_rate) if hourly_rate is not None else []
+            cache[order_id] = {
+                'balance_due': started_order_balance_due_today(row, items=items, tax_mode=tax_mode),
+                'balance_slots': slots,
+                'balance_slots_date': slot_times[0][0].date().isoformat() if slot_times else '',
+                # A window with no hourly rate would quote a day price per hour.
+                'balance_slots_note': STARTED_ORDERS_SLOT_RATE_NOTE if (slot_times and hourly_rate is None) else '',
+            }
+        row.update(cache[order_id])
     return materialised
+
+
+def _balance_slot_lines(row):
+    """The indented 'if returned at HH:MM' amounts under one order's Balance Due."""
+    slots = row.get('balance_slots') or []
+    if not slots:
+        note = row.get('balance_slots_note') or ''
+        return [f"      {note}"] if note else []
+    slot_date = row.get('balance_slots_date') or ''
+    prefix = ''
+    if slot_date and slot_date != local_now().date().isoformat():
+        prefix = slot_date[8:10] + '-' + slot_date[5:7] + ' '
+    return [f"      @{prefix}{label} - R{float(amount or 0):.2f}" for label, amount in slots]
 
 
 def started_orders_report_pdf_blocks(branch_label=None, branch_id=None):
@@ -808,7 +980,7 @@ def started_orders_report_pdf_blocks(branch_label=None, branch_id=None):
     for index, row in enumerate(rows, start=1):
         deposit = row.get('available_deposit')
         deposit_text = 'N/A' if deposit is None else f"R{float(deposit or 0):.2f}"
-        blocks.append([
+        block = [
             f"{index}. Customer Name: {row.get('customer_name') or 'No customer'}",
             f"   Order No: {row.get('order_number') or ''}",
             f"   Trailer: {row.get('trailer_sku') or ''}",
@@ -817,8 +989,10 @@ def started_orders_report_pdf_blocks(branch_label=None, branch_id=None):
             f"   Available Deposit: {deposit_text}",
             f"   Damage Waiver: {row.get('damage_waiver') or 'No'}",
             f"   Balance Due: R{float(row.get('balance_due') or 0):.2f}",
-            '',
-        ])
+        ]
+        block.extend(_balance_slot_lines(row))
+        block.append('')
+        blocks.append(block)
     return blocks
 
 
