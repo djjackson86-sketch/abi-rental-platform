@@ -265,8 +265,12 @@ def test_the_pdf_prints_the_slots_indented_under_balance_due(app, monkeypatch):
     assert stream.count('1.00 0.96 0.72 rg') == 5
 
 
-def test_slots_on_a_later_date_carry_the_date_prefix(app, monkeypatch):
-    """A hire due tomorrow quotes tomorrow's times, so the date must show."""
+def test_a_hire_due_tomorrow_quotes_todays_times(app, monkeypatch):
+    """ABI-341953260: the report dates every slot on the day it is generated.
+
+    ORD-10817 due 02-11 12:00, report run 01-11: the slots are today's hours,
+    quoted as an early return — not tomorrow's hours with a date prefix.
+    """
     monkeypatch.setattr(reports_service, 'local_now', today_today)
     with app.app_context():
         seed(app)
@@ -276,15 +280,61 @@ def test_slots_on_a_later_date_carry_the_date_prefix(app, monkeypatch):
         rows = {row['order_number']: row for row in reports_service.started_orders_report_rows()}
     labels = [label for label, _ in rows['ORD-10817']['balance_slots']]
     assert labels == ['13:00', '14:00', '15:00', '16:00', '17:00']
-    assert rows['ORD-10817']['balance_slots_date'] == '2026-11-02'
+    assert rows['ORD-10817']['balance_slots_date'] == '2026-11-01'
 
     client = app.test_client()
     login(client)
     text = drawn_text(client.get('/orders/started-orders-report.pdf').data)
-    # Keeping it until tomorrow is a second rental day: 2 x R385 + one R20 hour, less R385 paid.
-    assert '@02-11 13:00 - R405.00' in text
+    assert '@02-11' not in text
+    # Returning at 13:00 is 25h: one day plus one hour, R405 against R385 paid.
+    assert '      @13:00 - R20.00' in text
     # The orders due today keep a bare time, so the two cannot be confused.
     assert '      @13:00 - R105.00' in text
+
+
+def seed_early_return(app, paid=770.0):
+    """ORD-10829: two days booked and paid (31-10 10:00 -> 02-11 10:00)."""
+    with app.app_context():
+        db = get_db()
+        db.execute("""INSERT INTO orders (id, order_number, customer_id, collect_branch_id, return_branch_id,
+                                          status, payment_status, start_at, end_at, deposit_total, deposit_option,
+                                          damage_waiver_amount, deposit_applied_amount, deposit_refund_amount,
+                                          total, due_total, created_at)
+                      VALUES (805, 'ORD-10829', 900, 501, 501, 'started', 'paid',
+                              '2026-10-31T10:00', '2026-11-02T10:00', 0, 'damage_waiver',
+                              0, 0, 0, 770, 0, '2026-10-31')""")
+        for product_id, price in ((700, 345), (702, 40)):
+            db.execute("""INSERT INTO order_items (order_id, product_id, quantity, unit_price, billing_mode,
+                                                   line_subtotal, line_tax, line_total)
+                          VALUES (805, ?, 1, ?, 'catalog', 0, 0, 0)""", (product_id, price))
+        if paid:
+            db.execute("""INSERT INTO payments (order_id, amount, method, status, payment_date, created_at)
+                          VALUES (805, ?, 'cash', 'paid', '2026-10-31', '2026-10-31T10:00')""", (paid,))
+        db.commit()
+
+
+def test_an_early_return_of_a_paid_up_hire_quotes_a_credit(app, monkeypatch):
+    """The ticket's ORD-10829: due 02-11, paid 2 days, report run 01-11 -> minus."""
+    monkeypatch.setattr(reports_service, 'local_now', today_today)
+    seed(app)
+    seed_early_return(app)
+
+    row = report_rows(app)['ORD-10829']
+    assert row['balance_slots_date'] == '2026-11-01'
+    slots = [(label, round(amount, 2)) for label, amount in row['balance_slots']]
+    assert [label for label, _ in slots] == ['12:00', '13:00', '14:00', '15:00', '16:00', '17:00']
+    # Returning today is at most one day plus seven hours, so every hour is a
+    # credit against the two days already paid.
+    assert all(amount < 0 for _, amount in slots), slots
+    assert round(row['balance_due'], 2) < 0
+
+    client = app.test_client()
+    login(client)
+    text = drawn_text(client.get('/orders/started-orders-report.pdf').data)
+    assert 'Order No: ORD-10829' in text
+    assert 'Balance Due: -R' in text
+    assert '      @12:00 -R' in text
+    assert '@02-11' not in text
 
 
 def test_an_overdue_hire_quotes_todays_times(app, monkeypatch):

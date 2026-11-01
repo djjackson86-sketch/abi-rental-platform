@@ -663,6 +663,14 @@ STARTED_ORDERS_SLOT_LAST = time(17, 30)
 STARTED_ORDERS_SLOT_RATE_NOTE = 'Rates not set'
 
 
+def signed_money(value):
+    """'R20.00' for money due, '-R20.00' for a credit to the customer."""
+    amount = round(float(value or 0), 2)
+    if amount < 0:
+        return f"-R{abs(amount):.2f}"
+    return f"R{amount:.2f}"
+
+
 def _started_order_tax_mode():
     settings = get_db().execute("SELECT tax_mode FROM company_settings WHERE id = 1").fetchone()
     return settings["tax_mode"] if settings else "exclusive"
@@ -764,8 +772,10 @@ def _started_order_balance_due(order, days, extra_hours, items, tax_mode, hourly
         2,
     )
     paid_total = float(order.get("paid_total") or 0)
-    # A balance due is never negative: an overpayment is credit, not money owed.
-    return max(0.0, round(projected_total - paid_total, 2))
+    # Signed: an early return can owe less than was paid, which is a credit to
+    # the customer rather than money due (ABI-341953260). The report renders the
+    # sign; nothing else consumes this.
+    return round(projected_total - paid_total, 2)
 
 
 def started_order_balance_due_today(order, items=None, tax_mode=None):
@@ -809,17 +819,23 @@ def started_order_balance_due_at(order, return_at, items=None, tax_mode=None):
 def _started_order_slot_times(order):
     """(slot datetime, 'HH:MM') for each hourly return time inside the window.
 
-    Slots are one hour apart from one hour after the expected return time, and
-    only times from 12:00 to 17:30 count — the shop's staffed return window. A
-    hire due at or after 17:30, and one whose window already closed, has none.
-    An overdue hire's slots sit on today, because that is when the customer
-    would actually bring it back.
+    Slots are one hour apart from one hour after the expected return clock time,
+    and only times from 12:00 to 17:30 count — the shop's staffed return window.
+    A hire due at or after 17:30, and one whose window already closed, has none.
+
+    Every slot is dated the day the report is generated, because that is when
+    the customer would actually bring the trailer back (ABI-341953260). For a
+    hire still due in the future that means the quoted hour is an early return,
+    so the balance on it can be a credit; on the due date itself the expected
+    clock time still rules out the hours before it.
     """
     due_at = parse_iso_datetime(order.get("end_at"))
     start_at = parse_iso_datetime(order.get("start_at"))
     if not due_at:
         return []
-    slot_date = max(due_at.date(), local_now().date())
+    now = local_now()
+    slot_date = now.date()
+    same_day_due = due_at.date() == slot_date
     first = STARTED_ORDERS_SLOT_FIRST.hour * 60 + STARTED_ORDERS_SLOT_FIRST.minute
     last = STARTED_ORDERS_SLOT_LAST.hour * 60 + STARTED_ORDERS_SLOT_LAST.minute
     due_minutes = due_at.hour * 60 + due_at.minute
@@ -831,7 +847,9 @@ def _started_order_slot_times(order):
         if minutes < first:
             continue
         slot_at = datetime.combine(slot_date, time(minutes // 60, minutes % 60))
-        if slot_at <= due_at or (start_at and slot_at <= start_at):
+        if same_day_due and slot_at <= due_at:
+            continue
+        if slot_at <= now or (start_at and slot_at <= start_at):
             continue
         slots.append((slot_at, slot_at.strftime("%H:%M")))
     return slots
@@ -944,7 +962,8 @@ def started_orders_report_rows(branch_id=None):
             cache[order_id] = {
                 'balance_due': started_order_balance_due_today(row, items=items, tax_mode=tax_mode),
                 'balance_slots': slots,
-                'balance_slots_date': slot_times[0][0].date().isoformat() if slot_times else '',
+                # Every slot is quoted for the report's own day (ABI-341953260).
+                'balance_slots_date': local_now().date().isoformat() if slot_times else '',
                 # A window with no hourly rate would quote a day price per hour.
                 'balance_slots_note': STARTED_ORDERS_SLOT_RATE_NOTE if (slot_times and hourly_rate is None) else '',
             }
@@ -958,11 +977,13 @@ def _balance_slot_lines(row):
     if not slots:
         note = row.get('balance_slots_note') or ''
         return [f"      {note}"] if note else []
-    slot_date = row.get('balance_slots_date') or ''
-    prefix = ''
-    if slot_date and slot_date != local_now().date().isoformat():
-        prefix = slot_date[8:10] + '-' + slot_date[5:7] + ' '
-    return [f"      @{prefix}{label} - R{float(amount or 0):.2f}" for label, amount in slots]
+    lines = []
+    for label, amount in slots:
+        text = signed_money(amount)
+        # Money due reads "13:00 - R20.00"; a credit carries its own minus and
+        # drops the dash so it never prints a double negative (ABI-341953260).
+        lines.append(f"      @{label} {text}" if text.startswith('-') else f"      @{label} - {text}")
+    return lines
 
 
 def started_orders_report_pdf_blocks(branch_label=None, branch_id=None):
@@ -988,7 +1009,7 @@ def started_orders_report_pdf_blocks(branch_label=None, branch_id=None):
             f"   Expected Time: {row.get('expected_time') or ''}",
             f"   Available Deposit: {deposit_text}",
             f"   Damage Waiver: {row.get('damage_waiver') or 'No'}",
-            f"   Balance Due: R{float(row.get('balance_due') or 0):.2f}",
+            f"   Balance Due: {signed_money(row.get('balance_due'))}",
         ]
         block.extend(_balance_slot_lines(row))
         block.append('')
