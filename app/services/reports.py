@@ -656,8 +656,9 @@ def _report_return_at(order):
 
 
 # Ticket ABI-341953259: the Started Orders Report quotes a customer what they
-# would owe if the trailer came back at a given time, so each order lists one
-# projected balance per whole hour inside the shop's return window.
+# would owe if the trailer came back at a given time, so each order still out
+# on or past its expected return date lists one projected balance per whole hour
+# inside the shop's return window (ABI-341953262 keeps later hires single-line).
 STARTED_ORDERS_SLOT_FIRST = time(12, 0)
 STARTED_ORDERS_SLOT_LAST = time(17, 30)
 STARTED_ORDERS_SLOT_RATE_NOTE = 'Rates not set'
@@ -823,11 +824,12 @@ def _started_order_slot_times(order):
     and only times from 12:00 to 17:30 count — the shop's staffed return window.
     A hire due at or after 17:30, and one whose window already closed, has none.
 
+    Only a hire due on the report's own date, or already overdue, gets a list
+    (ABI-341953262): a trailer still booked out until a later date is left with
+    its single Balance Due line, because that is the figure the counter shows.
     Every slot is dated the day the report is generated, because that is when
-    the customer would actually bring the trailer back (ABI-341953260). For a
-    hire still due in the future that means the quoted hour is an early return,
-    so the balance on it can be a credit; on the due date itself the expected
-    clock time still rules out the hours before it.
+    the customer would actually bring the trailer back; on the due date itself
+    the expected clock time rules out the hours before it.
     """
     due_at = parse_iso_datetime(order.get("end_at"))
     start_at = parse_iso_datetime(order.get("start_at"))
@@ -835,6 +837,8 @@ def _started_order_slot_times(order):
         return []
     now = local_now()
     slot_date = now.date()
+    if due_at.date() > slot_date:
+        return []
     same_day_due = due_at.date() == slot_date
     first = STARTED_ORDERS_SLOT_FIRST.hour * 60 + STARTED_ORDERS_SLOT_FIRST.minute
     last = STARTED_ORDERS_SLOT_LAST.hour * 60 + STARTED_ORDERS_SLOT_LAST.minute
