@@ -1359,39 +1359,51 @@ STATEMENT_SUMMARY_WIDTH = 177
 STATEMENT_SUMMARY_RIGHT = INVOICE_TABLE_RIGHT_EDGE - 9
 STATEMENT_FOOTER_Y = 40
 STATEMENT_DETAIL_X = 400
-# Column geometry for the merged table: DATE | TYPE | DETAIL | AMOUNT. Date and
-# type include legacy labels, so DETAIL is the only
-# column that can be clipped, and it is clipped with a visible ellipsis rather
-# than being allowed to run into the right-aligned money. DETAIL ends at 468pt,
-# well left of the widest realistic amount ("R1 234 567.89" right-aligned on
-# STATEMENT_RIGHT starts at ~494pt).
+# Column geometry for the merged table: DATE | TYPE | DETAIL | AMOUNT | BALANCE.
+# Ticket ABI-341953265 added the second money column, so the band carries two
+# right-aligned figures: AMOUNT ends at STATEMENT_AMOUNT_RIGHT and the running
+# BALANCE ends at STATEMENT_RIGHT. Date and type include legacy labels, so DETAIL
+# is the only column that can be clipped, and it is clipped with a visible
+# ellipsis rather than being allowed to run into the money. DETAIL ends at 426pt;
+# the widest realistic amount ("-R1 234 567.89" is 55pt) right-aligned on
+# STATEMENT_AMOUNT_RIGHT starts at ~440pt, and the widest balance right-aligned on
+# STATEMENT_RIGHT starts at ~504pt, so neither figure can touch its neighbour.
 STATEMENT_DATE_X = STATEMENT_LEFT
 STATEMENT_TYPE_X = 118
 STATEMENT_DETAIL_COLUMN_X = 198
-STATEMENT_DETAIL_COLUMN_WIDTH = 270
+STATEMENT_DETAIL_COLUMN_WIDTH = 228
+# The first money column's right edge. Leaving 64pt for the BALANCE figure plus a
+# gap keeps "BALANCE" (36.7pt at 7.5pt bold) clear of "AMOUNT" (32.9pt).
+STATEMENT_AMOUNT_RIGHT = 495
 # ACTIVITY is the single table's caption, and it is also the caption used on a
 # continuation page.
 STATEMENT_ACTIVITY_TITLE = 'ACTIVITY'
 
 
 def _statement_columns():
-    """The merged activity table's columns: DATE | TYPE | DETAIL | AMOUNT."""
+    """The activity table's columns: DATE | TYPE | DETAIL | AMOUNT | BALANCE."""
     return (
         {'label': 'DATE', 'x': STATEMENT_DATE_X},
         {'label': 'TYPE', 'x': STATEMENT_TYPE_X},
         {'label': 'DETAIL', 'x': STATEMENT_DETAIL_COLUMN_X},
-        {'label': 'AMOUNT', 'right': STATEMENT_RIGHT},
+        {'label': 'AMOUNT', 'right': STATEMENT_AMOUNT_RIGHT},
+        {'label': 'BALANCE', 'right': STATEMENT_RIGHT},
     )
 
 
 def _statement_row_cells(row):
-    """One activity row. Invoices and payments share the same four columns."""
+    """One activity row. Invoices and payments share the same five columns.
+
+    Each cell is ``(x, value, bold, right)``: a cell with a ``right`` edge is
+    right-aligned on it (the two money columns), otherwise it starts at ``x``.
+    """
     return (
-        (STATEMENT_DATE_X, row.get('date') or '', False),
-        (STATEMENT_TYPE_X, row.get('type') or '', False),
+        (STATEMENT_DATE_X, row.get('date') or '', False, None),
+        (STATEMENT_TYPE_X, row.get('type') or '', False, None),
         (STATEMENT_DETAIL_COLUMN_X,
-         _pdf_fit(row.get('detail') or '', 8, STATEMENT_DETAIL_COLUMN_WIDTH), False),
-        (None, row.get('amount_display') or '', False),
+         _pdf_fit(row.get('detail') or '', 8, STATEMENT_DETAIL_COLUMN_WIDTH), False, None),
+        (None, row.get('amount_display') or '', False, STATEMENT_AMOUNT_RIGHT),
+        (None, row.get('balance_display') or '', False, STATEMENT_RIGHT),
     )
 
 
@@ -1454,11 +1466,12 @@ def _statement_open_section(pages, page, logo_command, title):
 
 def _statement_draw_row(text, row, y):
     cells = _statement_row_cells(row)
-    for index, (x, value_text, bold) in enumerate(cells):
-        if index == len(cells) - 1:
-            text.append(_pdf_right_text(STATEMENT_RIGHT, y, value_text, size=8, font='F2' if bold else 'F1'))
+    for x, value_text, bold, right in cells:
+        font = 'F2' if bold else 'F1'
+        if right is not None:
+            text.append(_pdf_right_text(right, y, value_text, size=8, font=font))
         else:
-            text.append(_pdf_text_command(x, y, value_text, size=8, font='F2' if bold else 'F1'))
+            text.append(_pdf_text_command(x, y, value_text, size=8, font=font))
 
 
 def _statement_first_page(view, logo_command):

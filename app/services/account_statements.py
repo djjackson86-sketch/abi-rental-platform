@@ -1,6 +1,11 @@
 """Explicit facility activity using the existing customer-statement layout."""
 from app.db import get_db
-from app.services.customers import get_customer, customer_statement
+from app.services.customers import (
+    _statement_money_display,
+    _statement_signed_money_display,
+    customer_statement,
+    get_customer,
+)
 from app.services.payments import normalise_payment_date_filter
 from app.services.credit_limits import facility_summary
 
@@ -40,8 +45,16 @@ def account_statement(customer_id, date_from='', date_to=''):
             repayments += max(-delta, 0)
             activity.append({'date': day, 'type': 'Account' if row['method']=='account' else 'Repayment' if delta<0 else 'Reversal',
                 'detail': f"{row['order_number']} - {row['method']} {row['reference'] or ''}",
-                'amount': delta, 'amount_display': f'R{delta:.2f}'})
+                # ABI-341953265: a repayment is a credit, printed -R… not R-…
+                'amount': delta, 'amount_display': _statement_signed_money_display(delta)})
     closing = round(opening+charges-repayments, 2)
+    # ABI-341953265: same running BALANCE column as the customer statement, so
+    # every row shows what the facility stood at after that movement.
+    running = opening
+    for row in activity:
+        running = round(running + row['amount'], 2)
+        row['balance'] = running
+        row['balance_display'] = _statement_money_display(running)
     facility = facility_summary(customer_id)
     view.update(title='ACCOUNT STATEMENT', statement_number=f'ACCOUNT-STATEMENT-{customer_id}', activity=activity,
         activity_count=len(activity), facility=facility,

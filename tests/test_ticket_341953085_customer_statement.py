@@ -341,7 +341,10 @@ def test_activity_merges_invoices_and_payments_in_date_order(client, app):
         "INV-90002 (ORD-ST-2)",
         "Eft",
     ]
-    assert [row["amount_display"] for row in activity] == ["R1150.00", "R1150.00", "R575.00", "R300.00"]
+    # Ticket ABI-341953265: a payment now prints as a credit (-R…) and every row
+    # carries the balance it leaves behind.
+    assert [row["amount_display"] for row in activity] == ["R1150.00", "-R1150.00", "R575.00", "-R300.00"]
+    assert [row["balance_display"] for row in activity] == ["R1150.00", "R0.00", "R575.00", "R275.00"]
     # The merge never changes the money: the activity rows are the same amounts the
     # summary block reconciles (invoiced 1725.00, paid 1450.00, closing 275.00).
     assert round(sum(row["amount"] for row in activity if row["type"] == "Invoice"), 2) == view["invoiced_total"] == 1725.0
@@ -383,10 +386,12 @@ def test_statement_pdf_prints_one_activity_table_in_date_order(client, app):
         get_db().commit()
         source = pdf_source(customer_statement_pdf_bytes(customer_statement(customer_id)))
 
-    # One table, one caption, one band: DATE | TYPE | DETAIL | AMOUNT.
+    # One table, one caption, one band: DATE | TYPE | DETAIL | AMOUNT | BALANCE.
     assert source.count("(ACTIVITY)") == 1
     assert "INVOICES" not in source and "PAYMENTS" not in source
     assert "(DATE)" in source and "(TYPE)" in source and "(DETAIL)" in source and "(AMOUNT)" in source
+    # Ticket ABI-341953265: the running balance column follows the amount.
+    assert "(BALANCE)" in source
     # Order in the drawn page stream: the August invoice, then its August payment,
     # then the September invoice and payment (the old layout printed both invoices
     # first, then both payments).
@@ -395,7 +400,9 @@ def test_statement_pdf_prints_one_activity_table_in_date_order(client, app):
     # parentheses of the invoice detail are escaped in the PDF text command.
     assert "(Cash · EFT ref 88)" in source
     assert "(INV-90001 \\(ORD-ST-1\\))" in source
-    assert "(R1150.00)" in source and "(R300.00)" in source
+    assert "(R1150.00)" in source and "(-R300.00)" in source
+    # ...and the running balance closes the statement on its closing figure.
+    assert "(R275.00)" in source
 
 
 def test_statement_pdf_activity_table_shows_the_empty_state_once(client, app):

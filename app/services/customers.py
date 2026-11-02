@@ -813,6 +813,16 @@ def _statement_money_display(value):
     return f"R{_statement_money(value):.2f}"
 
 
+def _statement_signed_money_display(value):
+    """Money with the sign in front of the R: ``-R300.00``, never ``R-300.00``.
+
+    Ticket ABI-341953265: the statement prints a payment as a negative (credit)
+    amount, and the South African convention puts the minus before the currency.
+    """
+    value = _statement_money(value)
+    return f"-R{abs(value):.2f}" if value < 0 else f"R{value:.2f}"
+
+
 def _statement_setting(settings, key, default=""):
     if not settings:
         return default
@@ -940,12 +950,18 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
             "amount": amount,
             "amount_display": amount_display,
         })
+        # Ticket ABI-341953265: a payment is a credit on the account, so the
+        # activity table prints it negative. ``amount`` stays positive exactly as
+        # the ledger holds it, so the running balance and summary totals reconcile.
         activity.append({
             "date": day,
             "type": "Payment",
             "detail": f"{method} · {reference}" if reference else method,
             "amount": amount,
-            "amount_display": amount_display,
+            "amount_display": _statement_signed_money_display(-amount),
+            # A payment takes money off the balance (a refund's negative amount
+            # puts it back), so the running total subtracts ``amount``.
+            "is_credit": True,
             "type_rank": STATEMENT_ACTIVITY_PAYMENT_RANK,
             "source_id": row["payment_id"],
         })
@@ -1021,6 +1037,9 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         activity.append({
             **entry, 'type': 'Legacy payment',
             'detail': f"{method} · {reference or 'Receipt #' + str(row['id'])} (customer-level)",
+            # Ticket ABI-341953265: an imported receipt is a credit too.
+            'amount_display': _statement_signed_money_display(-amount),
+            'is_credit': True,
             'type_rank': STATEMENT_ACTIVITY_PAYMENT_RANK, 'source_id': row['id'],
         })
     payments.sort(key=lambda item: (item['date'], item.get('source_kind', 'current')))
@@ -1039,6 +1058,18 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
     paid_total = round(paid_total, 2)
     legacy_total = round(legacy_total, 2)
     closing_balance = round(opening_balance + invoiced_total + legacy_total - paid_total, 2)
+
+    # Ticket ABI-341953265: every activity row carries the balance it leaves
+    # behind (the running total from the statement's opening balance). Invoices
+    # and imported debt add; payments (and imported receipts) subtract, which is
+    # the same arithmetic behind ``closing_balance`` above — so the last row
+    # closes exactly on it.
+    running_balance = opening_balance
+    for row in activity:
+        movement = -row["amount"] if row.get("is_credit") else row["amount"]
+        running_balance = round(running_balance + movement, 2)
+        row["balance"] = running_balance
+        row["balance_display"] = _statement_money_display(running_balance)
 
     settings = get_company_settings()
     branch = _statement_branch(customer)
