@@ -263,6 +263,30 @@ def test_statement_pdf_carries_the_company_and_customer_details(client, app):
     assert "EFT ref 88" in source
     assert "Balance outstanding" in source
     assert "(R275.00)" in source
+    # Ticket ABI-341953267: the totals box is a balance box only — the Invoices,
+    # Legacy balances and Payments component rows are gone (the figures stay on
+    # the view dict, see test_ticket_341953267_statement_summary.py).
+    assert "(Invoices)" not in source
+    assert "(Legacy balances)" not in source
+    assert "(Payments)" not in source
+
+
+def test_ranged_statement_pdf_keeps_only_the_opening_and_closing_balance(client, app):
+    login(client)
+    with app.app_context():
+        customer_id = seed_ticket_ledger(get_db())
+        get_db().commit()
+        view = customer_statement(customer_id, date_from="2026-08-12", date_to="")
+        source = pdf_source(customer_statement_pdf_bytes(view))
+    # A ranged box keeps the two balance lines it always had …
+    assert "(Opening balance)" in source and "(Closing balance)" in source
+    assert "(Balance outstanding)" not in source
+    # … and no component row.
+    assert "(Invoices)" not in source and "(Payments)" not in source
+    assert "(Legacy balances)" not in source
+    assert view["opening_balance"] == 1150.0 and view["closing_balance"] == 275.0
+    assert f"({view['opening_balance_display']})" in source
+    assert f"({view['closing_balance_display']})" in source
 
 
 def test_statement_pdf_paginates_and_keeps_every_invoice_and_payment(client, app):

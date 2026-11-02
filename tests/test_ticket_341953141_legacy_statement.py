@@ -8,7 +8,7 @@ from test_ticket_341953085_customer_statement import (
 from app.db import get_db
 from app.services.customers import customer_statement
 from app.services.legacy_balances import upsert_legacy_balance, record_legacy_payment
-from app.services.pdf_documents import customer_statement_pdf_bytes
+from app.services.pdf_documents import customer_statement_pdf_bytes, _statement_summary_rows
 
 
 def balance(db, cid, ref, amount, started='2026-08-01', created=''):
@@ -104,7 +104,15 @@ def test_legacy_pdf_route_pagination_labels_and_geometry(app, client):
             assert f'OLD-REF-{i:03}' in source
         assert 'Legacy balance' in source and 'Legacy payment' in source
         assert 'RECEIPT-500' in source and 'customer-level' in source
-        assert 'Legacy balances' in source and '(R6000.00)' in source
+        # Ticket ABI-341953267: the totals box no longer prints the component
+        # rows. The label is gone from the page (the running BALANCE column can
+        # still happen to show the legacy total as a row balance, so the figure
+        # is pinned on the view dict and on the summary rows instead).
+        assert 'Legacy balances' not in source
+        assert '(Invoices)' not in source and '(Payments)' not in source
+        assert [label for label, _, _ in _statement_summary_rows(view)] == ['Balance outstanding']
+        assert view['legacy_total'] == 6500.0 and view['legacy_balance_count'] == 65
+        assert view['outstanding_balance'] == 6000.0
         assert data.count(b'/Type /Page ') >= 2
         import pymupdf
         doc = pymupdf.open(stream=data, filetype='pdf')

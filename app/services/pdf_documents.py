@@ -1520,10 +1520,9 @@ def _statement_summary_rows(view):
     ranged = bool(view.get('date_from') or view.get('date_to'))
     if ranged:
         rows.append(('Opening balance', view.get('opening_balance_display') or 'R0.00', False))
-    rows.append(('Invoices', view.get('invoiced_total_display') or 'R0.00', False))
-    if view.get('legacy_balance_count'):
-        rows.append(('Legacy balances', view.get('legacy_total_display') or 'R0.00', False))
-    rows.append(('Payments', view.get('paid_total_display') or 'R0.00', False))
+    # Ticket ABI-341953267: the customer statement's totals box is a balance box
+    # only. The Invoices / Legacy balances / Payments component rows were removed
+    # at the client's request; the figures themselves stay on the view dict.
     rows.append(('Closing balance' if ranged else 'Balance outstanding',
                  (view.get('closing_balance_display') if ranged else view.get('outstanding_balance_display')) or 'R0.00',
                  True))
