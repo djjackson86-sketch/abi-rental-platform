@@ -1468,10 +1468,18 @@ def _statement_draw_row(text, row, y):
     cells = _statement_row_cells(row)
     for x, value_text, bold, right in cells:
         font = 'F2' if bold else 'F1'
+        payment_amount = (
+            right == STATEMENT_AMOUNT_RIGHT
+            and row.get('type') in ('Payment', 'Legacy payment', 'Repayment')
+        )
+        if payment_amount:
+            text.append('0 0.45 0 rg')
         if right is not None:
             text.append(_pdf_right_text(right, y, value_text, size=8, font=font))
         else:
             text.append(_pdf_text_command(x, y, value_text, size=8, font=font))
+        if payment_amount:
+            text.append('0 0 0 rg')
 
 
 def _statement_first_page(view, logo_command):
