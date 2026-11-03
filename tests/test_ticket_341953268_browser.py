@@ -29,8 +29,9 @@ def test_desktop_mobile_suspect_workflow(app, client):
             page.locator('[name=name]').fill('Synthetic Suspect')
             page.locator('[name=email]').fill('synthetic@example.test')
             page.locator('[name=phone]').fill('0825559876')
-            page.once('dialog',lambda d:d.accept('8001015000081'))
             page.locator('#save-suspect').click()
+            page.locator('#suspect-capture-id').fill('8001015000081')
+            page.locator('#suspect-capture-form button[type=submit]').click()
             page.wait_for_url('**/customers/*')
             expect(page.locator('h1')).to_contain_text('Suspect/Fraud')
             flagged=int(page.url.rsplit('/',1)[1])
@@ -65,11 +66,9 @@ def test_desktop_mobile_suspect_workflow(app, client):
             page.screenshot(path=str(output/'flagged-record.png'),full_page=False)
             # Re-opening the capture prompt on that record prefills the stored number.
             page.goto(base+'/customers/'+str(flagged)+'/edit')
-            defaults=[]
-            page.once('dialog',lambda d:(defaults.append(d.default_value),d.dismiss()))
             page.locator('#save-suspect').click()
-            page.wait_for_timeout(500)
-            assert defaults==['8001015000081'],defaults
+            expect(page.locator('#suspect-capture-id')).to_have_value('8001015000081')
+            page.locator('#suspect-capture-cancel').click()
             # An entry with no id_number key at all (the order form's "this client is a
             # suspect" row) prints no ID text, while a matched client with nothing
             # captured says so - never a blank ' · ID '.

@@ -8,7 +8,7 @@ from app.routes.auth import login_required
 from app.services import csrf, portal_registrations
 from app.services.access import main_required, user_can_module
 from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
-from app.services.customers import customer_id_number_for, customer_is_suspect, suspect_matches
+from app.services.customers import customer_id_number_for, customer_is_suspect, customer_suspect_reason_for, suspect_matches
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
@@ -28,7 +28,7 @@ bp = Blueprint("customers", __name__, url_prefix="/customers")
 def suspect_template_helpers():
     # Ticket ABI-341953269: the customer page prints the ID number captured when
     # the client was flagged, so staff can compare it with the popup's match.
-    return {"customer_is_suspect": customer_is_suspect, "customer_id_number_for": customer_id_number_for}
+    return {"customer_is_suspect": customer_is_suspect, "customer_id_number_for": customer_id_number_for, "customer_suspect_reason_for": customer_suspect_reason_for}
 
 
 @bp.post("/suspect-check")

@@ -43,8 +43,19 @@
   <input type="hidden" name="action" id="suspect-action" value="">
   <input type="hidden" name="suspect_fraud" id="suspect-flag" value="">
   <input type="hidden" name="customer_id_number" id="suspect-id" value="">
+  <input type="hidden" name="suspect_reason" id="suspect-reason" value="">
   <p class="form-help">Suspect &amp; Fraud saves this customer and blocks rentals. An ID number is supplementary, if available.</p>
 </form>
+<dialog id="suspect-capture" class="cash-variance-dialog" aria-labelledby="suspect-capture-title" style="width:560px;max-width:calc(100vw - 32px);box-sizing:border-box">
+  <form method="dialog" id="suspect-capture-form" class="settings-form">
+    <h2 id="suspect-capture-title">Suspect/Fraud</h2>
+    <p>Save this customer and block rentals. Customer ID and reason are optional and visible to staff only.</p>
+    <label>Customer ID<input id="suspect-capture-id" maxlength="64" value="{{ posted.get('customer_id_number', customer_id_number_for(customer) if customer else '') }}"></label>
+    <label>Reason<textarea id="suspect-capture-reason" rows="4" maxlength="2000" placeholder="Why is this customer flagged?">{{ posted.get('suspect_reason', customer_suspect_reason_for(customer) if customer else '') }}</textarea></label>
+    <p class="form-help">Maximum 2000 characters. Record only relevant, factual information.</p>
+    <div class="form-actions"><button type="button" class="btn ghost" id="suspect-capture-cancel">Cancel</button><button type="submit" class="btn danger">Save Suspect/Fraud</button></div>
+  </form>
+</dialog>
 {% if customer and not pending_registration and user_can('scan_vehicle') and waiting_vehicles %}
 {# "Allocate from list" for an existing client (ABI-341953236) — the dialog sits OUTSIDE the
    customer form above, because it carries its own form and HTML must never nest one in another.
@@ -142,19 +153,23 @@
 </article>
 {% endif %}
 <script>
-document.getElementById('save-suspect').addEventListener('click', function(){
-  const form = this.form;
-  if(!form.reportValidity()) return;
-  // Prefill with the ID already captured for this client so a re-save shows it and
-  // never silently blanks it (ticket 341953269); an empty prompt still stores nothing.
-  const storedSuspectId = {{ (customer_id_number_for(customer) if customer else '')|tojson }};
-  const id = window.prompt('Suspect/Fraud: save and block rentals. Enter the customer ID number for future checks (optional), or leave blank if unavailable. Cancel to go back.', storedSuspectId);
-  if(id === null) return;
-  document.getElementById('suspect-action').value = 'save_suspect';
-  document.getElementById('suspect-flag').value = '1';
-  document.getElementById('suspect-id').value = id;
-  form.requestSubmit();
-});
+(function(){
+  const dialog = document.getElementById('suspect-capture');
+  const form = document.querySelector('form.customer-form');
+  document.getElementById('save-suspect').addEventListener('click', function(){
+    if(form.reportValidity()) dialog.showModal();
+  });
+  document.getElementById('suspect-capture-cancel').addEventListener('click', function(){ dialog.close(); });
+  document.getElementById('suspect-capture-form').addEventListener('submit', function(ev){
+    ev.preventDefault();
+    document.getElementById('suspect-action').value = 'save_suspect';
+    document.getElementById('suspect-flag').value = '1';
+    document.getElementById('suspect-id').value = document.getElementById('suspect-capture-id').value;
+    document.getElementById('suspect-reason').value = document.getElementById('suspect-capture-reason').value;
+    dialog.close();
+    form.requestSubmit();
+  });
+})();
 
 (function(){
   const companySection = document.querySelector('[data-company-details]');

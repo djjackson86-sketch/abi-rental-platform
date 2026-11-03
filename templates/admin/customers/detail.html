@@ -74,6 +74,7 @@
       {% if customer.is_blocked and customer_is_suspect(customer) %}
         {% set captured_id = customer_id_number_for(customer) %}
         <div class="detail-row"><span>Captured ID number</span><b>{% if captured_id %}{{ captured_id }}{% else %}<span class="muted">No ID number captured</span>{% endif %}</b></div>
+        <div class="detail-row"><span>Suspect/Fraud reason</span><span style="white-space:pre-wrap;overflow-wrap:anywhere">{{ customer_suspect_reason_for(customer) or 'No reason captured' }}</span></div>
       {% endif %}
       {% if customer.is_blocked %}<div class="detail-row"><span>Blocked reason</span><b>{{ customer.blocked_reason or 'No reason recorded' }}</b></div>{% endif %}
       {# Ticket ABI-341953129: the owner-only credit facility, shown read-only to everyone. #}

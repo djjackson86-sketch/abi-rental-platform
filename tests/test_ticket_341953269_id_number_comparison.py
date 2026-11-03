@@ -157,11 +157,11 @@ def test_the_edit_prompt_is_prefilled_with_the_stored_number(client, app):
     sign_in(client)
     flagged = created_id(post_suspect_form(client))
     page = client.get(f"/customers/{flagged}/edit").get_data(as_text=True)
-    assert 'const storedSuspectId = "%s";' % ID_NUMBER in page
+    assert 'id="suspect-capture-id" maxlength="64" value="%s"' % ID_NUMBER in page
 
     # A brand-new customer prompts blank (and an empty prompt still stores nothing).
     new_page = client.get("/customers/new").get_data(as_text=True)
-    assert 'const storedSuspectId = "";' in new_page
+    assert 'id="suspect-capture-id" maxlength="64" value=""' in new_page
 
 
 def test_an_anonymous_request_never_reaches_the_id(client, app):

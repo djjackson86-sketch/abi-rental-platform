@@ -27,7 +27,7 @@ HIDDEN_CUSTOM_FIELD_KEYS = {
     # staff capture with it. Both live in custom_fields_json precisely so they stay hidden from
     # the custom-field cards, form summaries and public/CSV exports; the service reads them via
     # raw_custom_fields_for / customer_is_suspect only.
-    "suspect_fraud", "customer_id_number",
+    "suspect_fraud", "customer_id_number", "suspect_reason",
 }
 #: The custom-field keys the client's main vehicle is shown under. Deliberately the eight fields
 #: staff capture on the scan screen — number plate, disc licence number, NaTIS registration number,
@@ -486,6 +486,8 @@ def _clean_credit(form):
 # any other caller can therefore never forge either field.
 SUSPECT_FLAG_KEY = "suspect_fraud"
 CUSTOMER_ID_NUMBER_KEY = "customer_id_number"
+SUSPECT_REASON_KEY = "suspect_reason"
+SUSPECT_REASON_MAX_LENGTH = 2000
 SUSPECT_FORM_ACTION = "save_suspect"
 SUSPECT_DEFAULT_BLOCK_REASON = "Suspected fraud"
 #: Stable match reasons returned by ``suspect_matches`` — never the matched value.
@@ -544,7 +546,7 @@ def suspect_fields_submitted(form):
     """
     if suspect_panel_present(form):
         return True
-    return any(_form_value(form, key) not in (None, "") for key in (SUSPECT_FLAG_KEY, CUSTOMER_ID_NUMBER_KEY))
+    return any(_form_value(form, key) not in (None, "") for key in (SUSPECT_FLAG_KEY, CUSTOMER_ID_NUMBER_KEY, SUSPECT_REASON_KEY))
 
 
 def suspect_flag_submitted(form):
@@ -570,7 +572,20 @@ def _clean_suspect(form, custom_fields):
         raise ValueError("Customer ID number must be at most 64 characters without control characters")
     if submitted_id:
         custom_fields[CUSTOMER_ID_NUMBER_KEY] = submitted_id
+    # Omitted fields preserve existing evidence; an explicit blank clears the optional reason.
+    if SUSPECT_REASON_KEY in form:
+        reason = str(_form_value(form, SUSPECT_REASON_KEY) or "").replace(chr(13) + chr(10), chr(10)).replace(chr(13), chr(10)).strip()
+        if len(reason) > SUSPECT_REASON_MAX_LENGTH:
+            raise ValueError("Suspect/Fraud reason must be at most 2000 characters")
+        if any(ord(char) < 32 and char not in "\n\t" for char in reason):
+            raise ValueError("Suspect/Fraud reason contains unsupported control characters")
+        custom_fields[SUSPECT_REASON_KEY] = reason
     return flagged
+
+
+def customer_suspect_reason_for(customer):
+    """Private staff note; never included in custom-field summaries or match payloads."""
+    return str(raw_custom_fields_for(customer).get(SUSPECT_REASON_KEY) or "")
 
 
 def customer_is_suspect(customer):
