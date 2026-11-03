@@ -6,7 +6,7 @@
     <span class="avatar large">{{ (customer.name[:2] or 'CU')|upper }}</span>
     <div>
       <p class="eyebrow">Customer</p>
-      <h1>{{ customer.name }}{% if customer.is_blocked %} <span class="badge blocked">Blocked</span>{% endif %}</h1>
+      <h1>{{ customer.name }}{% if customer.is_blocked %} <span class="badge blocked">{{ 'Suspect/Fraud' if customer_is_suspect(customer) else 'Blocked' }}</span>{% endif %}</h1>
       <p>{{ customer.email or 'No email' }}{% if customer.phone %} · {{ customer.phone }}{% endif %}</p>
     </div>
   </div>
@@ -68,7 +68,7 @@
       <div class="detail-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div>
       <div class="detail-row"><span>POPIA consent</span>{% if consent_summary %}<b class="consent-recorded">{{ consent_summary }}</b>{% else %}<b class="muted">No POPIA consent recorded</b>{% endif %}</div>
       <div class="detail-row"><span>Client Verified</span><b>{{ client_verified_label(customer.client_verified) }}</b></div>
-      <div class="detail-row"><span>Blocked</span><b>{% if customer.is_blocked %}<span class="badge blocked">Blocked</span>{% else %}No{% endif %}</b></div>
+      <div class="detail-row"><span>{{ 'Suspect/Fraud' if customer_is_suspect(customer) else 'Blocked' }}</span><b>{% if customer.is_blocked %}<span class="badge blocked">{{ 'Suspect/Fraud' if customer_is_suspect(customer) else 'Blocked' }}</span>{% else %}No{% endif %}</b></div>
       {% if customer.is_blocked %}<div class="detail-row"><span>Blocked reason</span><b>{{ customer.blocked_reason or 'No reason recorded' }}</b></div>{% endif %}
       {# Ticket ABI-341953129: the owner-only credit facility, shown read-only to everyone. #}
       <div class="detail-row"><span>Credit allowed</span><b>{% if customer.credit_allowed %}Yes{% else %}No{% endif %}</b></div>

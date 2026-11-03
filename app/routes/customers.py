@@ -8,6 +8,7 @@ from app.routes.auth import login_required
 from app.services import csrf, portal_registrations
 from app.services.access import main_required, user_can_module
 from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
+from app.services.customers import customer_is_suspect, suspect_matches
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
@@ -22,6 +23,19 @@ from app.services.vehicles import (
 )
 
 bp = Blueprint("customers", __name__, url_prefix="/customers")
+
+@bp.app_context_processor
+def suspect_template_helpers():
+    return {"customer_is_suspect": customer_is_suspect}
+
+
+@bp.post("/suspect-check")
+@login_required
+def suspect_check():
+    if not (user_can_module(session, "customers") or user_can_module(session, "orders")):
+        abort(403)
+    return jsonify(matches=suspect_matches(request.form, exclude_id=request.form.get("exclude_id")))
+
 
 PAGE_SIZE = 25
 
@@ -140,9 +154,10 @@ def index():
     query = request.args.get("query", "").strip()
     customer_type = request.args.get("customer_type", "")
     marketing = request.args.get("marketing", "")
+    blocked = request.args.get("blocked", "")
     display_limit = _display_limit()
-    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, limit=display_limit)
-    total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing)
+    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked, limit=display_limit)
+    total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked)
     # Vehicles awaiting allocation, branch-scoped: a depot-limited account sees only its own
     # queue; an all-branch account sees every depot's, grouped and labelled. Each branch has its
     # own 3-vehicle counter (ticket ABI-341953235).
@@ -157,7 +172,7 @@ def index():
         next_limit=display_limit + PAGE_SIZE,
         counts=customer_counts(),
         filter_counts=customer_filter_counts(),
-        filters={"query": query, "customer_type": customer_type, "marketing": marketing},
+        filters={"query": query, "customer_type": customer_type, "marketing": marketing, "blocked": blocked},
         client_verified_label=client_verified_label,
         # Self-registered customers awaiting verification, branch-scoped, at the top of the
         # list (client instruction). Each row: id / reference / customer_id / name / email /
@@ -230,6 +245,7 @@ def export_csv():
     query = request.args.get("query", "").strip()
     customer_type = request.args.get("customer_type", "")
     marketing = request.args.get("marketing", "")
+    blocked = request.args.get("blocked", "")
     customers = list_customers(query=query, customer_type=customer_type, marketing=marketing)
     output = StringIO()
     writer = csv.writer(output)
@@ -279,6 +295,7 @@ def detail(customer_id):
         "admin/customers/detail.html",
         settings=get_company_settings(),
         customer=customer,
+        suspect_warnings=suspect_matches(customer, exclude_id=customer_id),
         custom_fields=custom_fields_for(customer),
         orders=orders,
         consent_summary=consent_summary(customer_id),
@@ -439,7 +456,7 @@ def edit(customer_id):
         except ValueError as exc:
             flash(str(exc), "error")
     customer = get_customer(customer_id)
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit(), vehicles=list_vehicles(customer_id), **_pending_registration_context(customer_id, customer))
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=customer, suspect_warnings=suspect_matches(customer, exclude_id=customer_id), custom_fields=custom_fields_for(customer), custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit(), vehicles=list_vehicles(customer_id), **_pending_registration_context(customer_id, customer))
 
 
 @bp.post("/portal/<int:registration_id>/approve")

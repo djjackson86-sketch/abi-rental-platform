@@ -39,7 +39,11 @@
     <p class="form-help">Only the main profile can set a credit facility. When buying on account is allowed a positive credit limit is required.</p>
   </section>
   {% endif %}
-  <div class="form-actions"><button class="btn primary">Save customer</button></div>
+  <div class="form-actions"><button class="btn primary">Save customer</button><button class="btn danger" type="button" id="save-suspect" style="background:#b42318;color:white">Suspect &amp; Fraud</button></div>
+  <input type="hidden" name="action" id="suspect-action" value="">
+  <input type="hidden" name="suspect_fraud" id="suspect-flag" value="">
+  <input type="hidden" name="customer_id_number" id="suspect-id" value="">
+  <p class="form-help">Suspect &amp; Fraud saves this customer and blocks rentals. An ID number is supplementary, if available.</p>
 </form>
 {% if customer and not pending_registration and user_can('scan_vehicle') and waiting_vehicles %}
 {# "Allocate from list" for an existing client (ABI-341953236) — the dialog sits OUTSIDE the
@@ -138,6 +142,17 @@
 </article>
 {% endif %}
 <script>
+document.getElementById('save-suspect').addEventListener('click', function(){
+  const form = this.form;
+  if(!form.reportValidity()) return;
+  const id = window.prompt('Suspect/Fraud: save and block rentals. Enter the customer ID number for future checks (optional), or leave blank if unavailable. Cancel to go back.', '');
+  if(id === null) return;
+  document.getElementById('suspect-action').value = 'save_suspect';
+  document.getElementById('suspect-flag').value = '1';
+  document.getElementById('suspect-id').value = id;
+  form.requestSubmit();
+});
+
 (function(){
   const companySection = document.querySelector('[data-company-details]');
   const typeInputs = document.querySelectorAll('input[name="customer_type"]');

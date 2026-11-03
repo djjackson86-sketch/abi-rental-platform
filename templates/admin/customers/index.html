@@ -13,6 +13,7 @@
     <span>⌕</span>
     <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search customers">
     {% if filters.customer_type %}<input type="hidden" name="customer_type" value="{{ filters.customer_type }}">{% endif %}
+    {% if filters.blocked %}<input type="hidden" name="blocked" value="1">{% endif %}
     {% if filters.marketing %}<input type="hidden" name="marketing" value="{{ filters.marketing }}">{% endif %}
   </form>
   <a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a>
@@ -22,6 +23,7 @@
   <aside class="customers-filter-rail panel">
     <form method="get" class="customers-filter-form">
       {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
+      <div class="filter-group"><label><input type="checkbox" name="blocked" value="1" {% if filters.blocked %}checked{% endif %} onchange="this.form.submit()"> Blocked / Suspect &amp; Fraud</label></div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>Customer type</strong><span>⌃</span></div>
         {% for type_value,label in [('individual','Individual'),('company','Company')] %}
@@ -129,7 +131,7 @@
                   <td>
                     <a class="customer-name-cell" href="{{ url_for('customers.detail', customer_id=c.id) }}">
                       <span class="avatar">{{ (c.name[:2] or 'CU')|upper }}</span>
-                      <span><strong>{{ c.name }}</strong>{% if c.is_blocked %}<span class="badge blocked customer-blocked-label">Blocked</span>{% endif %}<small>{{ c.customer_type|title }}{% if c.phone %} · {{ c.phone }}{% endif %}</small></span>
+                      <span><strong>{{ c.name }}</strong>{% if c.is_blocked %}<span class="badge blocked customer-blocked-label">{{ 'Suspect/Fraud' if customer_is_suspect(c) else 'Blocked' }}</span>{% endif %}<small>{{ c.customer_type|title }}{% if c.phone %} · {{ c.phone }}{% endif %}</small></span>
                     </a>
                   </td>
                   <td>{{ c.email or '—' }}</td>
@@ -146,7 +148,7 @@
         </div>
         <div class="table-footer-count">Showing 1 - {{ customers|length }} of {{ total_customers }}</div>
         {% if customers|length < total_customers %}
-        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('customers.index', query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, limit=next_limit) }}#new-items">Load more customers (next 25)</a></div>
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('customers.index', query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, blocked=filters.blocked or None, limit=next_limit) }}#new-items">Load more customers (next 25)</a></div>
         {% endif %}
       {% else %}
         <div class="customers-empty-state">

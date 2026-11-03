@@ -1,8 +1,10 @@
+import difflib
 import json
 import math
 import re
+import unicodedata
 
-from flask import has_request_context, session
+from flask import g, has_request_context, session
 
 from app.db import get_db, now
 from app.services.access import current_session_user_id, is_main_session, session_active_branch_id, session_primary_branch_id
@@ -21,6 +23,11 @@ HIDDEN_CUSTOM_FIELD_KEYS = {
     # The internal pointer to the client's chosen main vehicle (feature 2026-10-10): it ties the
     # mirrored vehicle fields to a vehicle row and is never shown or edited as a custom field.
     "main_vehicle_id",
+    # Ticket ABI-341953268: the fraud-suspect classification and the supplementary ID number
+    # staff capture with it. Both live in custom_fields_json precisely so they stay hidden from
+    # the custom-field cards, form summaries and public/CSV exports; the service reads them via
+    # raw_custom_fields_for / customer_is_suspect only.
+    "suspect_fraud", "customer_id_number",
 }
 #: The custom-field keys the client's main vehicle is shown under. Deliberately the eight fields
 #: staff capture on the scan screen — number plate, disc licence number, NaTIS registration number,
@@ -103,7 +110,7 @@ def _directory_visibility_clause():
     )
 
 
-def list_customers(query="", customer_type="", marketing="", limit=None, offset=0):
+def list_customers(query="", customer_type="", marketing="", limit=None, offset=0, blocked=""):
     # Ticket ABI-341953196: ``order_count`` is a grouped LEFT JOIN, not a
     # correlated subquery per returned row. The Customers list is paged, but the
     # CSV export reads the whole book, where the per-row count billed one orders
@@ -117,6 +124,8 @@ def list_customers(query="", customer_type="", marketing="", limit=None, offset=
             ON oc.customer_id = c.id
         WHERE 1=1""" + _directory_visibility_clause()
     params = []
+    if blocked == "1":
+        sql += " AND c.is_blocked = 1"
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
         needle = f"%{query.lower()}%"
@@ -179,9 +188,11 @@ def customer_outstanding_balances(customer_ids):
     return balances
 
 
-def customer_filtered_total(query="", customer_type="", marketing=""):
+def customer_filtered_total(query="", customer_type="", marketing="", blocked=""):
     sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1" + _directory_visibility_clause()
     params = []
+    if blocked == "1":
+        sql += " AND c.is_blocked = 1"
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
         needle = f"%{query.lower()}%"
@@ -243,7 +254,7 @@ def find_customer_id_by_text(text, *, allow_pending=False):
 
     The typeahead label is resolved *first* and by exact string: the label the suggestion
     list rendered is ``name · <the client's own stored phone>``, so two clients who share a
-    name and the same digits stored differently (``+27748848822`` vs ``0748848822``) show two
+    name and the same digits stored with different SA phone prefixes show two
     different labels. The label the staff member picked therefore identifies exactly one of
     them, where the digit-normalised comparison below cannot tell them apart and refuses. A
     label that is genuinely not unique still yields ``None``, so the ambiguity guard is
@@ -374,6 +385,7 @@ def delete_customer(customer_id):
         db.execute(f"DELETE FROM {table} WHERE customer_id = ?", (customer_id,))
     cur = db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
     db.commit()
+    _clear_suspect_cache()
     return cur.rowcount > 0
 
 
@@ -454,6 +466,303 @@ def _clean_credit(form):
     if not math.isfinite(limit) or round(limit, 2) <= 0:
         raise ValueError(CREDIT_LIMIT_ERROR)
     return 1, round(limit, 2)
+
+
+# --- Suspected-fraud classification (ticket ABI-341953268) -------------------
+#
+# A client can be classified by staff as a suspected fraud. The classification is
+# expressed as the normal ``is_blocked`` block (so every existing block guard —
+# ordering, directory badge, order form banner — applies unchanged), and it is
+# created in the SAME INSERT as the customer: a suspect is never briefly orderable.
+# The suspect marker and the optional supplementary ID number ride in the already
+# hidden ``custom_fields_json`` blob, so no customer-table migration is needed and
+# neither value can reach a custom-field card, form summary or public export
+# (both keys are in HIDDEN_CUSTOM_FIELD_KEYS above).
+#
+# Like the block panel (ABI-341953028) and the credit panel (ABI-341953129), the
+# suspect inputs are read ONLY from the customer form's own blocking panel, and
+# only when the form was submitted by its ``save_suspect`` action by a signed-in
+# staff session. A public storefront post, an inline order-form customer card or
+# any other caller can therefore never forge either field.
+SUSPECT_FLAG_KEY = "suspect_fraud"
+CUSTOMER_ID_NUMBER_KEY = "customer_id_number"
+SUSPECT_FORM_ACTION = "save_suspect"
+SUSPECT_DEFAULT_BLOCK_REASON = "Suspected fraud"
+#: Stable match reasons returned by ``suspect_matches`` — never the matched value.
+SUSPECT_MATCH_REASONS = ("email", "phone", "id_number", "name")
+#: The form action the suspect panel posts. The field is named ``action`` in the
+#: customer form; ``form_action`` is accepted too so a caller's template can use
+#: either name without silently losing the protection.
+SUSPECT_ACTION_FIELDS = ("action", "form_action")
+
+
+def _truthy(value):
+    """1/True/'1'/'true'/'yes'/'on' are true; everything else (including None) is false."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def staff_request_active():
+    """True inside a signed-in staff request; False for public/background work.
+
+    The same boundary the rest of the service uses (``current_session_user_id``):
+    a request with no session — the public storefront, the client portal, a
+    background job or a unit test outside a request — is never staff.
+    """
+    return current_session_user_id() is not None
+
+
+def suspect_panel_present(form):
+    """True when the customer form's own suspect panel was submitted by staff.
+
+    All three conditions are required, so a forged field on any other path is
+    ignored rather than honoured: the blocking panel marker, the suspect form's
+    own ``save_suspect`` action, and a signed-in staff session.
+    """
+    if not blocking_panel_present(form):
+        return False
+    action = ""
+    for key in SUSPECT_ACTION_FIELDS:
+        raw = _form_value(form, key)
+        if raw not in (None, ""):
+            action = str(raw)
+            break
+    if action.strip().lower() != SUSPECT_FORM_ACTION:
+        return False
+    return staff_request_active()
+
+
+def suspect_fields_submitted(form):
+    """True when a suspect flag or ID number rode along on the POST.
+
+    Lets the customer route refuse a crafted POST outright (like
+    ``credit_fields_submitted``); the service itself ignores those fields on
+    every unauthorised path because they are keyed off the suspect panel.
+    """
+    if suspect_panel_present(form):
+        return True
+    return any(_form_value(form, key) not in (None, "") for key in (SUSPECT_FLAG_KEY, CUSTOMER_ID_NUMBER_KEY))
+
+
+def suspect_flag_submitted(form):
+    """True when an authorised suspect panel submission classifies the client."""
+    return suspect_panel_present(form) and _truthy(_form_value(form, SUSPECT_FLAG_KEY))
+
+
+def _clean_suspect(form, custom_fields):
+    """Update the hidden suspect metadata in ``custom_fields``; return the flag.
+
+    Only call this for a submission ``suspect_panel_present`` accepted. Unticking
+    the box clears the classification; the ID number is never deleted by a blank
+    field (an omitted partial post must not wipe evidence staff recorded), and a
+    supplied value is stored trimmed.
+    """
+    flagged = _truthy(_form_value(form, SUSPECT_FLAG_KEY))
+    if flagged:
+        custom_fields[SUSPECT_FLAG_KEY] = 1
+    else:
+        custom_fields.pop(SUSPECT_FLAG_KEY, None)
+    submitted_id = str(_form_value(form, CUSTOMER_ID_NUMBER_KEY) or "").strip()
+    if len(submitted_id) > 64 or any(ord(char) < 32 for char in submitted_id):
+        raise ValueError("Customer ID number must be at most 64 characters without control characters")
+    if submitted_id:
+        custom_fields[CUSTOMER_ID_NUMBER_KEY] = submitted_id
+    return flagged
+
+
+def customer_is_suspect(customer):
+    """True when the client is classified as a suspected fraud (ticket ABI-341953268)."""
+    return _truthy(raw_custom_fields_for(customer).get(SUSPECT_FLAG_KEY))
+
+
+def customer_id_number_for(customer):
+    """The hidden supplementary ID number staff captured, or '' (staff surfaces only)."""
+    return str(raw_custom_fields_for(customer).get(CUSTOMER_ID_NUMBER_KEY) or "").strip()
+
+
+def _mapping_value(mapping, key, default=None):
+    """Read ``key`` from a form (MultiDict/dict) or a customer row (sqlite3.Row)."""
+    if mapping is None:
+        return default
+    try:
+        value = mapping[key]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        try:
+            value = mapping.get(key, default)
+        except AttributeError:
+            return default
+    return default if value is None else value
+
+
+def _mapping_custom_fields(mapping):
+    raw = _mapping_value(mapping, "custom_fields_json", None)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+    nested = _mapping_value(mapping, "custom_fields", None)
+    return nested if isinstance(nested, dict) else {}
+
+
+def _normalised_email(value):
+    """Lower-cased email, or '' when it is blank/not an address (never matches on blank)."""
+    text = str(value or "").strip().lower()
+    return text if "@" in text and len(text) >= 3 else ""
+
+
+def _normalised_phone(value):
+    """The last nine digits of an SA number, so +27 82…, 082… and 0027 82… agree."""
+    digits = _phone_digits(value)
+    return digits[-9:] if len(digits) >= 9 else ""
+
+
+def _normalised_id_number(value):
+    """Whitespace-free ID number for exact comparison (never fuzzy-matched)."""
+    return re.sub(r"\s+", "", str(value or "")).strip().upper()
+
+
+def _name_tokens(value):
+    """Lower-case alphanumeric name tokens with accents folded and punctuation split."""
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return [token for token in re.split(r"[^0-9a-z]+", text.lower()) if token]
+
+
+def _names_match(left, right):
+    """Conservative full-name comparison: both sides need a first AND last name.
+
+    A blank name or a lone first name never matches (two different "John"s are
+    not evidence). Otherwise the tokens are compared order-insensitively — so
+    "Smith John" matches "John Smith" — and each token may differ by one typo or
+    one character, but never by a different initial. Middle names must agree:
+    "John Peter Smith" is not "John Smith".
+    """
+    left_tokens = sorted(_name_tokens(left))
+    right_tokens = sorted(_name_tokens(right))
+    if len(left_tokens) < 2 or len(left_tokens) != len(right_tokens):
+        return False
+    for left_token, right_token in zip(left_tokens, right_tokens):
+        if left_token == right_token:
+            continue
+        if left_token[:1] != right_token[:1]:
+            return False
+        if abs(len(left_token) - len(right_token)) > 1:
+            return False
+        if difflib.SequenceMatcher(None, left_token, right_token).ratio() < 0.7:
+            return False
+    return True
+
+
+def _suspect_identity(mapping):
+    """Normalised identity values from a form or a customer row, for matching."""
+    custom_fields = _mapping_custom_fields(mapping)
+    id_number = _mapping_value(mapping, CUSTOMER_ID_NUMBER_KEY, None)
+    if id_number in (None, ""):
+        id_number = custom_fields.get(CUSTOMER_ID_NUMBER_KEY)
+    return {
+        "name": str(_mapping_value(mapping, "name", "") or "").strip(),
+        "email": _normalised_email(_mapping_value(mapping, "email", "")),
+        "phone": _normalised_phone(_mapping_value(mapping, "phone", "")),
+        "id_number": _normalised_id_number(id_number),
+    }
+
+
+def _customer_identity_rows():
+    """Blocked Suspect/Fraud identities, cached for the life of one request.
+
+    ``customer_summary_for`` may classify several rows in one request (the
+    order-form customer picker summarises the whole book), so the scans must not
+    multiply. Writes clear the cache (``_clear_suspect_cache``).
+    """
+    if has_request_context():
+        cached = getattr(g, "_suspect_identity_rows", None)
+        if cached is not None:
+            return cached
+    rows = get_db().execute("SELECT id, name, email, phone, custom_fields_json FROM customers WHERE is_blocked = 1").fetchall()
+    result = [
+        {"id": row["id"], "name": row["name"] or "", "email": row["email"] or "", "phone": row["phone"] or "", "custom_fields_json": row["custom_fields_json"]}
+        for row in rows if customer_is_suspect(row)
+    ]
+    if has_request_context():
+        g._suspect_identity_rows = result
+    return result
+
+
+def _clear_suspect_cache():
+    if not has_request_context():
+        return
+    try:
+        delattr(g, "_suspect_identity_rows")
+    except AttributeError:
+        pass
+
+
+def _customers_with_id_number(wanted):
+    """{id: row} for customers whose hidden ID number exactly equals ``wanted``.
+
+    Only classified records are decoded and compared exactly; a number that
+    merely appears in another custom field never counts as an ID match.
+    """
+    if not wanted:
+        return {}
+    rows = _customer_identity_rows()
+    hits = {}
+    for row in rows:
+        try:
+            fields = json.loads(row["custom_fields_json"] or "{}")
+        except Exception:
+            continue
+        if not isinstance(fields, dict):
+            continue
+        if _normalised_id_number(fields.get(CUSTOMER_ID_NUMBER_KEY)) == wanted:
+            hits[row["id"]] = {"id": row["id"], "name": row["name"] or ""}
+    return hits
+
+
+def suspect_matches(form_or_customer, exclude_id=None):
+    """Other clients whose identity overlaps this one; never returns ID values.
+
+    Accepts a submitted form (name/email/phone/customer_id_number) or a customer
+    row/dict (its hidden custom fields are read for the ID number). Each entry is
+    ``{"id", "name", "reasons"}`` where ``reasons`` is a subset of
+    ``SUSPECT_MATCH_REASONS``: a case-insensitive email, an SA-normalised phone
+    (+27/0/0027 agree), an exact supplementary ID number, or a conservative full
+    name match (never a blank or a lone first name). ``exclude_id`` skips the
+    client being edited. Returns [] when there is nothing to compare.
+    """
+    identity = _suspect_identity(form_or_customer)
+    try:
+        excluded = int(exclude_id) if exclude_id not in (None, "") else None
+    except (TypeError, ValueError):
+        excluded = None
+    matches = {}
+    for row in _customer_identity_rows():
+        if excluded is not None and row["id"] == excluded:
+            continue
+        reasons = []
+        if identity["email"] and _normalised_email(row["email"]) == identity["email"]:
+            reasons.append("email")
+        if identity["phone"] and _normalised_phone(row["phone"]) == identity["phone"]:
+            reasons.append("phone")
+        if identity["name"] and _names_match(identity["name"], row["name"]):
+            reasons.append("name")
+        if reasons:
+            matches[row["id"]] = {"id": row["id"], "name": row["name"], "reasons": reasons}
+    if identity["id_number"]:
+        for customer_id, row in _customers_with_id_number(identity["id_number"]).items():
+            if excluded is not None and customer_id == excluded:
+                continue
+            entry = matches.setdefault(customer_id, {"id": customer_id, "name": row["name"], "reasons": []})
+            if "id_number" not in entry["reasons"]:
+                entry["reasons"].append("id_number")
+    for entry in matches.values():
+        entry["reasons"] = [reason for reason in SUSPECT_MATCH_REASONS if reason in entry["reasons"]]
+    return sorted(matches.values(), key=lambda entry: (entry["name"].lower(), entry["id"]))
 
 
 def _row_flag(customer, key):
@@ -537,6 +846,13 @@ def _clean(form, existing_custom_fields=None):
             custom_fields.pop(key, None)
     custom_fields.pop("vehicle_details", None)
     custom_fields.pop("alternative_contact", None)
+    # Ticket ABI-341953268: the suspect classification and its optional ID number
+    # are written only from the customer form's own panel (blocking-panel marker,
+    # ``save_suspect`` action, signed-in staff). Every other caller leaves both
+    # values exactly as stored — a public/inline post cannot forge or clear them.
+    suspect_flagged = False
+    if suspect_panel_present(form):
+        suspect_flagged = _clean_suspect(form, custom_fields)
     try:
         standard_discount_percent = max(0, min(100, float(form.get("standard_discount_percent") or 0)))
     except ValueError as exc:
@@ -565,6 +881,14 @@ def _clean(form, existing_custom_fields=None):
         # is_blocked alone.
         data["is_blocked"] = 1 if form.get("is_blocked") else 0
         data["blocked_reason"] = (form.get("blocked_reason") or "").strip()
+    if suspect_flagged:
+        # Ticket ABI-341953268: a suspect classification IS a block. Forcing the
+        # flag here (rather than relying on the checkbox) means the atomic create
+        # insert below writes is_blocked=1 in the same INSERT as the customer, so
+        # the record is never briefly orderable, and a later suspect-panel save
+        # can never leave a classified client unblocked by forgetting the tick.
+        data["is_blocked"] = 1
+        data["blocked_reason"] = data.get("blocked_reason") or SUSPECT_DEFAULT_BLOCK_REASON
     if credit_panel_present(form) and can_set_customer_credit():
         # Ticket ABI-341953129: the credit facility is set ONLY through the
         # customer form's own panel AND only by the main profile. Any other
@@ -630,6 +954,7 @@ def create_customer(form, branch_id=None, notify=True, defer_commit=False, pendi
             "created_at": now(),
         },
     )
+    _clear_suspect_cache()
     if not defer_commit:
         db.commit()
     customer_id = cur.lastrowid
@@ -667,6 +992,7 @@ def update_customer(customer_id, form):
         sets += ", credit_allowed=:credit_allowed, credit_limit=:credit_limit"
     get_db().execute(f"UPDATE customers SET {sets} WHERE id=:id", data)
     get_db().commit()
+    _clear_suspect_cache()
 
 
 
@@ -735,7 +1061,7 @@ def customer_summary_for(customer):
     # adds no query (the one-SQL-query customer picker stays intact).
     account_credit_used = round(max(float(account_debt or 0), 0), 2) if credit_allowed else 0.0
     available_account_credit = round(max(credit_limit - float(account_debt or 0), 0), 2) if credit_allowed else 0.0
-    return {
+    summary = {
         "credit_allowed": credit_allowed,
         "credit_limit": credit_limit if credit_allowed else 0.0,
         "available_account_credit": available_account_credit,
@@ -768,6 +1094,18 @@ def customer_summary_for(customer):
         "blocked_reason": blocked_reason_for(customer),
         "display": display,
     }
+    # Ticket ABI-341953268: suspected-fraud classification is staff-only. The flag
+    # and its possible duplicate matches ride on this summary (the same payload the
+    # order form and the customer picker already carry) so no second request is
+    # needed — but never for a public/background caller, and never with an ID
+    # number: ``suspect_matches`` entries carry id/name/reasons only.
+    if staff_request_active():
+        is_suspect = customer_is_suspect(customer)
+        summary["is_suspect"] = is_suspect
+        summary["suspect_matches"] = suspect_matches(
+            customer, exclude_id=_customer_row_value(customer, "id", None)
+        )
+    return summary
 
 
 # --- Customer statement (ticket ABI-341953085) -------------------------------

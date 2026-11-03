@@ -39,7 +39,7 @@ import unicodedata
 
 from app.db import get_db, now
 from app.services import consent
-from app.services.customers import create_customer, get_customer
+from app.services.customers import create_customer, get_customer, customer_is_suspect
 
 #: The ``customers.source_system`` value every portal submission carries.
 PORTAL_SOURCE_SYSTEM = "portal"
@@ -738,6 +738,15 @@ def create_or_link_customer(form, branch_id, decision, slug=None, portal_duplica
         # have committed between our request claim and our contact claim.
         matches = find_possible_matches(values["name"], values["phone"], values["email"])
         blocked = blocked_match(values["name"], values["phone"], values["email"])
+        # Suspect matches are accepted as a NEW pending submission for staff review.
+        # Never link publicly to (or modify) the classified customer itself.
+        suspect_ids = {match["customer_id"] for match in matches
+                       if customer_is_suspect(get_customer(match["customer_id"]))}
+        if suspect_ids:
+            matches = [match for match in matches if match["customer_id"] not in suspect_ids]
+            if blocked and blocked["customer_id"] in suspect_ids:
+                blocked = None
+            action, target_id = "create", None
         if portal_duplicate_refuse:
             # An exact phone or email match is the same person with near-certainty: refuse, and
             # never create or link, whatever ``decision`` was posted (a crafted ``create`` or

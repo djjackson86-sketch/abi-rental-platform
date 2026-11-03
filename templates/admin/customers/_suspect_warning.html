@@ -1,0 +1,34 @@
+<dialog id="suspect-warning" class="cash-variance-dialog" aria-labelledby="suspect-warning-title" style="max-width: min(560px, calc(100vw - 32px));overflow-wrap:anywhere">
+  <h2 id="suspect-warning-title">Suspect/Fraud</h2>
+  <p>These details match a customer marked Suspect/Fraud. Check the record before renting. Similarity alone does not block or classify this customer.</p>
+  <ul id="suspect-warning-list"></ul>
+  <form method="dialog"><button class="btn primary">Close</button></form>
+</dialog>
+<script>
+(function(){
+  const dialog=document.getElementById('suspect-warning'), list=document.getElementById('suspect-warning-list');
+  let last='', generation=0;
+  window.showSuspectWarnings=function(matches){
+    if(!matches || !matches.length) {last='';return;}
+    const key=JSON.stringify(matches); if(key===last) return; last=key;
+    list.replaceChildren();
+    matches.forEach(m=>{const li=document.createElement('li'), a=document.createElement('a');
+      a.href='/customers/'+Number(m.id);a.textContent=m.name+' (review record)'; a.target='_blank';a.rel='noopener';
+      li.append(a, document.createTextNode(' — '+m.reasons.join(', ').replace('id_number','ID number')));list.append(li);});
+    if(!dialog.open) dialog.showModal();
+  };
+  const initial={{ suspect_warnings|default([])|tojson }};
+  window.showSuspectWarnings(initial);
+  async function check(form){
+    const seq=++generation, data=new FormData();
+    ['name','email','phone','customer_id_number'].forEach(k=>{const el=form.querySelector('[name="'+k+'"]:not(:disabled)');if(el)data.set(k,el.value);});
+    data.set('exclude_id', {{ (customer.id if customer else '')|default('')|tojson }});
+    try {const r=await fetch({{ url_for('customers.suspect_check')|tojson }},{method:'POST',body:data,headers:{'Accept':'application/json'}});
+      if(r.ok && seq===generation){window.showSuspectWarnings((await r.json()).matches);}}
+    catch(e){/* Saving still performs the server-side review check. */}
+  }
+  document.addEventListener('change',e=>{if(e.target.form && ['name','email','phone','customer_id_number'].includes(e.target.name))check(e.target.form);});
+  const initialForm=document.querySelector('form.customer-form') || document.querySelector('input[data-customer-field="name"]')?.form;
+  if(initialForm) check(initialForm);
+})();
+</script>

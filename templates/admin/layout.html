@@ -74,6 +74,7 @@
     })();
     </script>{% endif %}{% endif %}{% endwith %}
     {% block admin_body %}{% endblock %}
+    {% if user_can("customers") or user_can("orders") %}{% include "admin/customers/_suspect_warning.html" %}{% endif %}
   </main>
 </div>
 <script src="{{ url_for('static', filename='js/push.js') }}" defer></script>
