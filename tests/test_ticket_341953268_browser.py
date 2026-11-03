@@ -70,6 +70,14 @@ def test_desktop_mobile_suspect_workflow(app, client):
             page.locator('#save-suspect').click()
             page.wait_for_timeout(500)
             assert defaults==['8001015000081'],defaults
+            # An entry with no id_number key at all (the order form's "this client is a
+            # suspect" row) prints no ID text, while a matched client with nothing
+            # captured says so - never a blank ' · ID '.
+            page.evaluate("window.showSuspectWarnings([{id:1,name:'No Key Client',reasons:['name']}])")
+            assert page.locator('#suspect-warning-list').inner_text()=='No Key Client (review record) — name'
+            page.evaluate("window.showSuspectWarnings([{id:1,name:'No Id Client',id_number:'',reasons:['phone']}])")
+            assert 'No Id Client (review record) · no ID captured — phone' in page.locator('#suspect-warning-list').inner_text()
+            page.locator('#suspect-warning button').click()
             page.goto(base+'/customers?blocked=1')
             expect(page.locator('.customers-table')).to_contain_text('Synthetic Suspect')
             expect(page.locator('.customers-table')).not_to_contain_text('Synthetic Suspekt')
