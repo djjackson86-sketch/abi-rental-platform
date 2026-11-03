@@ -14,8 +14,8 @@
     list.replaceChildren();
     matches.forEach(m=>{const li=document.createElement('li'), a=document.createElement('a');
       a.href='/customers/'+Number(m.id);a.textContent=m.name+' (review record)'; a.target='_blank';a.rel='noopener';
-      // Ticket ABI-341953269: show the ID captured when that client was flagged so
-      // staff can compare it with the number being entered. textContent — never HTML.
+      // Show the ID captured when that client was flagged so staff can compare it
+      // with the number being entered (ticket 341953269). textContent — never HTML.
       // An entry with no id_number key at all (the order form's "this client is a
       // suspect" row) prints no ID text; a matched client with nothing captured says so.
       const id=m.id_number==null ? '' : (m.id_number ? ' · ID '+m.id_number : ' · no ID captured');

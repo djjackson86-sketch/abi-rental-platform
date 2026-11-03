@@ -145,8 +145,8 @@
 document.getElementById('save-suspect').addEventListener('click', function(){
   const form = this.form;
   if(!form.reportValidity()) return;
-  // Ticket ABI-341953269: prefill with the ID already captured for this client so a
-  // re-save shows (and never silently blanks) it; an empty prompt still stores nothing.
+  // Prefill with the ID already captured for this client so a re-save shows it and
+  // never silently blanks it (ticket 341953269); an empty prompt still stores nothing.
   const storedSuspectId = {{ (customer_id_number_for(customer) if customer else '')|tojson }};
   const id = window.prompt('Suspect/Fraud: save and block rentals. Enter the customer ID number for future checks (optional), or leave blank if unavailable. Cancel to go back.', storedSuspectId);
   if(id === null) return;
