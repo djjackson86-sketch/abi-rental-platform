@@ -182,17 +182,22 @@ def test_staff_suspect_create_is_blocked_in_the_same_insert_and_id_is_hidden(cli
     assert customer_id_number_for(row) == ID_NUMBER
     assert raw_fields(app, customer_id)[SUSPECT_FLAG_KEY] == 1
 
-    # Hidden metadata never enters the custom-field card, the editable form values,
-    # the detail/edit HTML or the main-profile CSV export.
+    # Hidden metadata never enters the custom-field card or the editable form values.
     assert SUSPECT_FLAG_KEY not in custom_fields_for(row)
     assert CUSTOMER_ID_NUMBER_KEY not in custom_fields_for(row)
     form_values = customer_form_values_for(row)
     assert SUSPECT_FLAG_KEY not in form_values
     assert CUSTOMER_ID_NUMBER_KEY not in form_values
-    for path in (f"/customers/{customer_id}", f"/customers/{customer_id}/edit", "/customers/export.csv"):
-        page = client.get(path).get_data(as_text=True)
-        assert ID_NUMBER not in page, path
-        # Input names may be rendered, but never the stored ID value.
+    # Ticket ABI-341953269: the flagged record page and the edit-page prompt now DO show
+    # the captured ID (staff comparison), but the CSV export and the custom-field cards
+    # still must not carry it.
+    assert f"Captured ID number" in client.get(f"/customers/{customer_id}").get_data(as_text=True)
+    edit_page = client.get(f"/customers/{customer_id}/edit").get_data(as_text=True)
+    assert f'"{ID_NUMBER}"' in edit_page
+    export = client.get("/customers/export.csv")
+    assert export.status_code == 200
+    assert ID_NUMBER not in export.get_data(as_text=True)
+    assert CUSTOMER_ID_NUMBER_KEY not in export.get_data(as_text=True)
 
 
 def test_the_supplementary_id_number_is_optional(client, app):
@@ -394,7 +399,14 @@ def test_matching_uses_normalised_email_phone_and_the_exact_id(app):
     })
     assert [entry["id"] for entry in found] == [customer_id]
     assert found[0]["reasons"] == ["email", "phone", "id_number", "name"]
-    assert set(found[0]) == {"id", "name", "reasons"}
+    assert set(found[0]) == {"id", "name", "id_number", "reasons"}
+    # Ticket ABI-341953269: the popup shows the number captured on the flagged record.
+    assert found[0]["id_number"] == ID_NUMBER
+
+    # A flagged client with no number recorded reports an empty string, never None.
+    bare_id = make_customer(app, "Bare Match", email="bare@example.test", suspect=True)
+    bare = [entry for entry in matches(app, {"email": "bare@example.test"}) if entry["id"] == bare_id]
+    assert bare and bare[0]["id_number"] == ""
 
     # Each signal matches on its own, and the alternate SA prefixes agree too.
     assert matches(app, {"email": "THABO@example.TEST"})[0]["reasons"] == ["email"]
@@ -447,8 +459,8 @@ def test_matches_exclude_the_client_being_edited_and_never_leak_an_id(app):
     assert matches(app, row, exclude_id=customer_id) == []
     found = matches(app, {"email": "self@example.test"})
     assert found[0]["id"] == customer_id
-    assert ID_NUMBER not in json.dumps(found)
-    assert all(set(entry) == {"id", "name", "reasons"} for entry in found)
+    assert found[0]["id_number"] == ID_NUMBER
+    assert all(set(entry) == {"id", "name", "id_number", "reasons"} for entry in found)
 
 
 # ------------------------------------------------------- summary surface
@@ -467,8 +479,9 @@ def test_staff_summary_carries_the_flag_and_matches_without_ids(client, app):
     assert summary["is_suspect"] is False
     assert [entry["id"] for entry in summary["suspect_matches"]] == [suspect_id]
     assert summary["suspect_matches"][0]["reasons"] == ["email", "phone", "name"]
-    assert set(summary["suspect_matches"][0]) == {"id", "name", "reasons"}
-    assert ID_NUMBER not in json.dumps(summary)
+    assert set(summary["suspect_matches"][0]) == {"id", "name", "id_number", "reasons"}
+    # Staff summary carries the flagged number for comparison (ticket ABI-341953269).
+    assert summary["suspect_matches"][0]["id_number"] == ID_NUMBER
 
 
 def test_staff_summary_of_an_ordinary_client_has_no_matches(client, app):

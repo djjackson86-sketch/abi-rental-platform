@@ -685,7 +685,17 @@ def _customer_identity_rows():
             return cached
     rows = get_db().execute("SELECT id, name, email, phone, custom_fields_json FROM customers WHERE is_blocked = 1").fetchall()
     result = [
-        {"id": row["id"], "name": row["name"] or "", "email": row["email"] or "", "phone": row["phone"] or "", "custom_fields_json": row["custom_fields_json"]}
+        {
+            "id": row["id"],
+            "name": row["name"] or "",
+            "email": row["email"] or "",
+            "phone": row["phone"] or "",
+            "custom_fields_json": row["custom_fields_json"],
+            # Ticket ABI-341953269: the ID number staff captured when this client was
+            # flagged, carried on the cached row so the similarity popup can show it
+            # beside the candidate's number for comparison (no second query).
+            "id_number": str(_mapping_custom_fields(row).get(CUSTOMER_ID_NUMBER_KEY) or "").strip(),
+        }
         for row in rows if customer_is_suspect(row)
     ]
     if has_request_context():
@@ -720,20 +730,28 @@ def _customers_with_id_number(wanted):
         if not isinstance(fields, dict):
             continue
         if _normalised_id_number(fields.get(CUSTOMER_ID_NUMBER_KEY)) == wanted:
-            hits[row["id"]] = {"id": row["id"], "name": row["name"] or ""}
+            hits[row["id"]] = {"id": row["id"], "name": row["name"] or "", "id_number": row["id_number"]}
     return hits
 
 
 def suspect_matches(form_or_customer, exclude_id=None):
-    """Other clients whose identity overlaps this one; never returns ID values.
+    """Other clients whose identity overlaps this one, with the ID they were flagged on.
 
     Accepts a submitted form (name/email/phone/customer_id_number) or a customer
     row/dict (its hidden custom fields are read for the ID number). Each entry is
-    ``{"id", "name", "reasons"}`` where ``reasons`` is a subset of
+    ``{"id", "name", "id_number", "reasons"}`` where ``reasons`` is a subset of
     ``SUSPECT_MATCH_REASONS``: a case-insensitive email, an SA-normalised phone
     (+27/0/0027 agree), an exact supplementary ID number, or a conservative full
     name match (never a blank or a lone first name). ``exclude_id`` skips the
     client being edited. Returns [] when there is nothing to compare.
+
+    Ticket ABI-341953269: ``id_number`` is the number staff captured when *that*
+    matched client was flagged (``""`` when none was recorded) so the staff
+    similarity popup can put it beside the number being entered for comparison.
+    Only the hidden ``customer_id_number`` value is read — never any other custom
+    field — and it never leaves a staff surface: the summary that carries these
+    matches is served to staff requests only, and the key stays hidden from
+    custom-field cards, CSV exports and public pages (``HIDDEN_CUSTOM_FIELD_KEYS``).
     """
     identity = _suspect_identity(form_or_customer)
     try:
@@ -752,12 +770,20 @@ def suspect_matches(form_or_customer, exclude_id=None):
         if identity["name"] and _names_match(identity["name"], row["name"]):
             reasons.append("name")
         if reasons:
-            matches[row["id"]] = {"id": row["id"], "name": row["name"], "reasons": reasons}
+            matches[row["id"]] = {
+                "id": row["id"],
+                "name": row["name"],
+                "id_number": row["id_number"],
+                "reasons": reasons,
+            }
     if identity["id_number"]:
         for customer_id, row in _customers_with_id_number(identity["id_number"]).items():
             if excluded is not None and customer_id == excluded:
                 continue
-            entry = matches.setdefault(customer_id, {"id": customer_id, "name": row["name"], "reasons": []})
+            entry = matches.setdefault(
+                customer_id,
+                {"id": customer_id, "name": row["name"], "id_number": row["id_number"], "reasons": []},
+            )
             if "id_number" not in entry["reasons"]:
                 entry["reasons"].append("id_number")
     for entry in matches.values():
@@ -1099,6 +1125,9 @@ def customer_summary_for(customer):
     # order form and the customer picker already carry) so no second request is
     # needed — but never for a public/background caller, and never with an ID
     # number: ``suspect_matches`` entries carry id/name/reasons only.
+    # Ticket ABI-341953269: they now also carry the *matched* client's captured ID
+    # number (``id_number``) so staff can compare it; the staff-only gate above is
+    # what keeps it off public/background payloads.
     if staff_request_active():
         is_suspect = customer_is_suspect(customer)
         summary["is_suspect"] = is_suspect

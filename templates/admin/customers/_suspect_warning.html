@@ -1,6 +1,6 @@
 <dialog id="suspect-warning" class="cash-variance-dialog" aria-labelledby="suspect-warning-title" style="max-width: min(560px, calc(100vw - 32px));overflow-wrap:anywhere">
   <h2 id="suspect-warning-title">Suspect/Fraud</h2>
-  <p>These details match a customer marked Suspect/Fraud. Check the record before renting. Similarity alone does not block or classify this customer.</p>
+  <p>These details match a customer marked Suspect/Fraud. Check the record before renting. The ID shown is the number captured when that customer was flagged — compare it with the number you are entering. Similarity alone does not block or classify this customer.</p>
   <ul id="suspect-warning-list"></ul>
   <form method="dialog"><button class="btn primary">Close</button></form>
 </dialog>
@@ -14,7 +14,11 @@
     list.replaceChildren();
     matches.forEach(m=>{const li=document.createElement('li'), a=document.createElement('a');
       a.href='/customers/'+Number(m.id);a.textContent=m.name+' (review record)'; a.target='_blank';a.rel='noopener';
-      li.append(a, document.createTextNode(' — '+m.reasons.join(', ').replace('id_number','ID number')));list.append(li);});
+      // Ticket ABI-341953269: show the ID captured when that client was flagged so
+      // staff can compare it with the number being entered. textContent — never HTML.
+      const id=m.id_number ? ' · ID '+m.id_number : ' · no ID captured';
+      const reasons=m.reasons.join(', ').replace('id_number','ID number');
+      li.append(a, document.createTextNode(id+' — '+reasons));list.append(li);});
     if(!dialog.open) dialog.showModal();
   };
   const initial={{ suspect_warnings|default([])|tojson }};

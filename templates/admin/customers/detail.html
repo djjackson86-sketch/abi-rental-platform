@@ -69,6 +69,12 @@
       <div class="detail-row"><span>POPIA consent</span>{% if consent_summary %}<b class="consent-recorded">{{ consent_summary }}</b>{% else %}<b class="muted">No POPIA consent recorded</b>{% endif %}</div>
       <div class="detail-row"><span>Client Verified</span><b>{{ client_verified_label(customer.client_verified) }}</b></div>
       <div class="detail-row"><span>{{ 'Suspect/Fraud' if customer_is_suspect(customer) else 'Blocked' }}</span><b>{% if customer.is_blocked %}<span class="badge blocked">{{ 'Suspect/Fraud' if customer_is_suspect(customer) else 'Blocked' }}</span>{% else %}No{% endif %}</b></div>
+      {# Ticket ABI-341953269: the ID number captured when the client was flagged, so staff
+         who follow a similarity popup to this record can compare it. Suspect/Fraud only. #}
+      {% if customer.is_blocked and customer_is_suspect(customer) %}
+        {% set captured_id = customer_id_number_for(customer) %}
+        <div class="detail-row"><span>Captured ID number</span><b>{% if captured_id %}{{ captured_id }}{% else %}<span class="muted">No ID number captured</span>{% endif %}</b></div>
+      {% endif %}
       {% if customer.is_blocked %}<div class="detail-row"><span>Blocked reason</span><b>{{ customer.blocked_reason or 'No reason recorded' }}</b></div>{% endif %}
       {# Ticket ABI-341953129: the owner-only credit facility, shown read-only to everyone. #}
       <div class="detail-row"><span>Credit allowed</span><b>{% if customer.credit_allowed %}Yes{% else %}No{% endif %}</b></div>

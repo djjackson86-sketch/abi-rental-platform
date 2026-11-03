@@ -21,7 +21,9 @@ def test_staff_check_and_grouping(client, app):
     r=client.post('/customers/suspect-check',data={'email':'SUSPECT@example.test'})
     assert r.status_code == 200
     assert r.json['matches'][0]['id']==flagged
-    assert ID_NUMBER not in r.get_data(as_text=True)
+    # Ticket ABI-341953269: the staff check carries the number captured on the flagged
+    # record so the popup can show it beside the number being entered.
+    assert r.json['matches'][0]['id_number']==ID_NUMBER
     with app.app_context():
         assert customer_filtered_total(blocked='1') == 1
         assert [c['id'] for c in list_customers(blocked='1')] == [flagged]
@@ -51,8 +53,12 @@ def test_portal_accepts_suspect_match_privately_for_staff_review(client, app, mo
     for path in (f'/customers/{new["id"]}',f'/customers/{new["id"]}/edit'):
         page=client.get(path)
         assert page.status_code==200
-        assert '"email", "phone", "name"' in page.get_data(as_text=True)
-        assert ID_NUMBER not in page.get_data(as_text=True)
+        body=page.get_data(as_text=True)
+        assert '"email", "phone", "name"' in body
+        # Ticket ABI-341953269: the number now shows, but ONLY inside the staff
+        # similarity popup's match entries - never as a plain page value.
+        assert body.count(ID_NUMBER)==body.count('"id_number": "%s"'%ID_NUMBER)
+        assert body.count(ID_NUMBER)>=1
 
 
 @pytest.mark.parametrize('blocked', [False, True])

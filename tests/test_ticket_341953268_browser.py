@@ -41,7 +41,11 @@ def test_desktop_mobile_suspect_workflow(app, client):
             page.locator('[name=phone]').dispatch_event('change')
             expect(page.locator('#suspect-warning')).to_be_visible()
             expect(page.locator('#suspect-warning-list')).to_contain_text('Synthetic Suspect')
-            assert '8001015000081' not in page.locator('#suspect-warning').inner_text()
+            # Ticket ABI-341953269: the popup row shows the ID captured on the flagged
+            # record so staff can compare it with the number they are entering.
+            warning_text=page.locator('#suspect-warning').inner_text()
+            assert '8001015000081' in warning_text, warning_text
+            assert 'Synthetic Suspect (review record) · ID 8001015000081' in warning_text, warning_text
             page.screenshot(path=str(output/'desktop.png'),full_page=False)
             page.set_viewport_size({'width':390,'height':844})
             page.screenshot(path=str(output/'mobile.png'),full_page=False)
@@ -54,6 +58,18 @@ def test_desktop_mobile_suspect_workflow(app, client):
             duplicate=int(page.url.rsplit('/',1)[1])
             assert customer_row(app,duplicate)['is_blocked']==0
             expect(page.locator('#suspect-warning')).to_be_visible()
+            # Following the popup link to the flagged record shows the captured number.
+            page.goto(base+'/customers/'+str(flagged))
+            expect(page.locator('.customer-info-card')).to_contain_text('Captured ID number')
+            expect(page.locator('.customer-info-card')).to_contain_text('8001015000081')
+            page.screenshot(path=str(output/'flagged-record.png'),full_page=False)
+            # Re-opening the capture prompt on that record prefills the stored number.
+            page.goto(base+'/customers/'+str(flagged)+'/edit')
+            defaults=[]
+            page.once('dialog',lambda d:(defaults.append(d.default_value),d.dismiss()))
+            page.locator('#save-suspect').click()
+            page.wait_for_timeout(500)
+            assert defaults==['8001015000081'],defaults
             page.goto(base+'/customers?blocked=1')
             expect(page.locator('.customers-table')).to_contain_text('Synthetic Suspect')
             expect(page.locator('.customers-table')).not_to_contain_text('Synthetic Suspekt')
