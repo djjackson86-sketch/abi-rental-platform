@@ -14,8 +14,9 @@
   /* An ordinary entry point to the account's own notification settings, in the main
      column so a phone (where the sidebar links are hidden) can reach it. No pill,
      no live status, no permission prompt: it is just a link to the page. */
-  .notify-entry{display:flex;justify-content:flex-end;margin:0 0 14px}
+  .notify-entry{display:none;justify-content:flex-end;margin:0 0 14px}
   .notify-entry .btn{width:auto}
+  @media(max-width:860px){.notify-entry{display:flex}}
 </style>
   <aside class="sidebar">
     <a class="logo" href="{{ url_for('admin.dashboard') }}"><img src="{{ url_for('static', filename='img/sano-trailers-logo-trimmed.png') }}" alt="SANO Trailers"></a>
@@ -25,6 +26,7 @@
     {% if user_can('orders') %}<a href="{{ url_for('orders.index') }}"><span>□</span><span>Orders</span></a>{% endif %}
     {% if user_can('customers') %}<a href="{{ url_for('customers.index') }}"><span>♙</span><span>Customers</span></a>{% endif %}
     {% if user_can('inventory') %}<a href="{{ url_for('inventory.index') }}"><span>▱</span><span>Inventory</span></a>{% endif %}
+    <a href="{{ url_for('settings.notifications') }}"><span aria-hidden="true">&#128276;</span><span>Notifications</span></a>
     {% if user_can('branches') %}<a href="{{ url_for('branches.index') }}"><span>⌘</span><span>Branches</span></a>{% endif %}
     {% if user_can('documents') %}<a href="{{ url_for('documents.index') }}"><span>◴</span><span>Documents</span></a>{% endif %}
     {% if user_can('payments') %}<a href="{{ url_for('payments.index') }}"><span>▤</span><span>Payments</span></a>{% endif %}

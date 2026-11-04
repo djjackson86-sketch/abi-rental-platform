@@ -14,7 +14,7 @@ imported rows, which is why a single receipt can settle several old orders.
 
 from app.db import get_db, now
 
-from app.services.access import session_branch_scope_ids, session_primary_branch_id
+from app.services.access import customer_branch_clause, session_branch_scope_ids, session_primary_branch_id
 
 
 def legacy_payment_totals(day, branch_id=None):
@@ -65,6 +65,28 @@ def legacy_balance_entries(customer_id):
         WHERE customer_id = ?
         ORDER BY COALESCE(NULLIF(source_started_at, ''), source_created_at) ASC, id ASC""",
         (customer_id,),
+    ).fetchall()
+    return [_decorate(row) for row in rows]
+
+
+def outstanding_legacy_balances(branch_id=None):
+    """Read-only dashboard rows, scoped by the owning customer's depot.
+
+    Imported balances have no platform order/collection branch. Unassigned
+    customers appear only in the unrestricted company-wide view, matching the
+    shared customer scope rather than guessing an order's depot.
+    """
+    clause, params = customer_branch_clause("c", branch_id=branch_id)
+    rows = get_db().execute(
+        f"""SELECT l.*, c.name AS customer_name, b.name AS branch_name
+        FROM legacy_customer_balances l
+        JOIN customers c ON c.id = l.customer_id
+        LEFT JOIN branches b ON b.id = c.branch_id
+        WHERE l.status = ? AND ROUND(l.amount_due - COALESCE(l.settled_amount, 0), 2) > 0
+        {clause}
+        ORDER BY (l.amount_due - COALESCE(l.settled_amount, 0)) DESC,
+                 COALESCE(NULLIF(l.source_started_at, ''), l.source_created_at), l.id""",
+        [ACTIVE_STATUS, *params],
     ).fetchall()
     return [_decorate(row) for row in rows]
 

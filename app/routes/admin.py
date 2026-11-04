@@ -5,6 +5,7 @@ from io import StringIO
 from app.routes.auth import login_required
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services import group_images
+from app.services.legacy_balances import outstanding_legacy_balances
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, list_orders, scheduled_events, status_label
 from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
@@ -115,6 +116,7 @@ def dashboard():
         # Loaded by the partial once the page is up; do not query it here.
         owing_orders = []
         owing_total = 0.0
+        owing_legacy_balances = []
     else:
         metrics = dashboard_period_metrics(
             start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
@@ -145,6 +147,7 @@ def dashboard():
         schedule = dashboard_schedule(branch_id=branch_id)
         owing_orders = _dashboard_owing_orders(branch_id)
         owing_total = _dashboard_owing_total(owing_orders)
+        owing_legacy_balances = outstanding_legacy_balances(branch_id)
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
@@ -153,6 +156,7 @@ def dashboard():
         day_metrics=day_metrics,
         owing_orders=owing_orders,
         owing_total=owing_total,
+        owing_legacy_balances=owing_legacy_balances,
         status_label=status_label,
         cash_panel=cash_panel,
         cash_day=cash_day,
@@ -230,6 +234,7 @@ def dashboard_owing_partial():
         "admin/_dashboard_owing.html",
         owing_orders=owing_orders,
         owing_total=_dashboard_owing_total(owing_orders),
+        owing_legacy_balances=outstanding_legacy_balances(branch_id),
         status_label=status_label,
     )
 
