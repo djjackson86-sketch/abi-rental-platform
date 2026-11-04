@@ -20,9 +20,9 @@
         <tr>
           <th>Customer</th>
           <th>Order</th>
-          <th>Status</th>
-          <th>Raised</th>
-          <th>Due</th>
+          <th class="owing-amount">Balance due</th>
+          <th class="owing-status">Status</th>
+          <th class="owing-raised">Raised</th>
         </tr>
       </thead>
       <tbody>
@@ -37,9 +37,9 @@
             {% if order.collect_branch_name %}<small>{{ order.collect_branch_name }}</small>{% endif %}
           </td>
           <td><a href="{{ url_for('orders.detail', order_id=order.id) }}">{{ order.order_number }}</a></td>
-          <td><span class="badge status-{{ order.status }}">{{ status_label(order.status) }}</span></td>
-          <td>{{ order.created_at[:10] if order.created_at else '—' }}</td>
-          <td><strong class="balance-owing">R{{ '%.2f'|format(order.due_total) }}</strong></td>
+          <td class="owing-amount"><strong class="balance-owing">R{{ '%.2f'|format(order.due_total) }}</strong></td>
+          <td class="owing-status"><span class="badge status-{{ order.status }}">{{ status_label(order.status) }}</span></td>
+          <td class="owing-raised">{{ order.created_at[:10] if order.created_at else '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>

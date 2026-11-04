@@ -81,10 +81,17 @@ def test_desktop_mobile_browser(app, client):
                 page.wait_for_load_state('networkidle')
                 assert 'dir=desc' in page.url
                 page.screenshot(path=str(output / f'customers-{width}.png'), full_page=True)
+                if width < 860:
+                    page.locator('td.legacy-balance-cell').scroll_into_view_if_needed()
+                    page.locator('.customers-table-wrap').screenshot(path=str(output / 'legacy-mobile.png'))
                 page.goto(base + '/dashboard', wait_until='networkidle')
                 panel=page.locator('#owing-customers')
                 assert 'OWE-OLD' in panel.inner_text()
                 assert panel.locator('.balance-owing').first.evaluate('(e)=>getComputedStyle(e).color') == 'rgb(180, 35, 24)'
+                if width < 860:
+                    for amount in panel.locator('td.owing-amount').all():
+                        box=amount.bounding_box()
+                        assert box['x'] >= 0 and box['x'] + box['width'] <= width
                 panel.screenshot(path=str(output / f'owing-{width}.png'))
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not errors, errors

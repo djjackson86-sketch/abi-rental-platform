@@ -478,6 +478,8 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .legacy-balance-row{grid-template-columns:minmax(190px,1.1fr) minmax(220px,1fr) auto}
 .legacy-balance-money small{color:var(--muted);font-weight:700}
 .balance-owing{color:#b42318}
+.owing-customers-table .owing-amount{text-align:right;white-space:nowrap}
+@media(max-width:620px){.owing-customers-table{min-width:0;width:100%;table-layout:fixed}.owing-customers-table .owing-status,.owing-customers-table .owing-raised{display:none}.owing-customers-table th,.owing-customers-table td{padding:10px 6px;overflow-wrap:anywhere}.owing-customers-table th:first-child{width:43%}.owing-customers-table th:nth-child(2){width:29%}.owing-customers-table .owing-amount{width:28%;white-space:normal}.owing-customers-panel .panel-title{flex-wrap:wrap;gap:8px}}
 @media(max-width:720px){.legacy-balance-summary{display:grid}.legacy-balance-row{grid-template-columns:1fr}.legacy-balance-row>b{justify-self:start}}
 
 /* Legacy balance stat card on the order form, plus the settlement panel on the
