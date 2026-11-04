@@ -113,22 +113,105 @@ def _directory_visibility_clause(folder="active"):
     )
 
 
-def list_customers(query="", customer_type="", marketing="", limit=None, offset=0, blocked="", folder="active"):
-    # Ticket ABI-341953196: ``order_count`` is a grouped LEFT JOIN, not a
-    # correlated subquery per returned row. The Customers list is paged, but the
-    # CSV export reads the whole book, where the per-row count billed one orders
-    # scan per client on the remote libSQL database.
-    sql = """SELECT c.*, CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL
-            THEN 'Public' ELSE u.name END AS created_by_name, u.email AS created_by_email,
-        COALESCE(oc.order_count, 0) AS order_count
-        FROM customers c
-        LEFT JOIN users u ON u.id = c.created_by_user_id
-        LEFT JOIN (SELECT customer_id, COUNT(*) AS order_count FROM orders GROUP BY customer_id) oc
-            ON oc.customer_id = c.id
-        WHERE 1=1""" + _directory_visibility_clause(folder)
+def _legacy_outstanding_sql(alias="c"):
+    """Outstanding on a client's *still-open* imported balances, not the original import.
+
+    Ticket ABI-341953282: the directory's Legacy balance column and its sort/filter
+    must agree with ``legacy_balances.legacy_balance_summary`` — only ``status =
+    'active'`` rows count, each row contributes ``amount_due - settled_amount`` clamped
+    at zero, so a row settled to nothing (or closed by hand / waived) contributes
+    nothing. The imported ``amount_due`` is never summed on its own.
+    """
+    return f"""COALESCE((SELECT ROUND(SUM(MAX(ROUND(COALESCE(lb.amount_due, 0) - COALESCE(lb.settled_amount, 0), 2), 0)), 2)
+            FROM legacy_customer_balances lb
+            WHERE lb.customer_id = {alias}.id AND lb.status = 'active'), 0)"""
+
+
+def _outstanding_balance_sql(alias="c"):
+    """Live order debt for one customer, clamped per order — the list's Balance due.
+
+    Same collectible-order rules as ``customer_outstanding_balances`` (rental stages
+    and accepted quotes count, finalised invoices count even on draft/archived orders,
+    cancelled orders never do, overpayments cannot hide another order's debt), phrased
+    as one correlated expression so the displayed figure and the sort key are the same
+    value instead of two definitions that can drift apart.
+    """
+    return f"""COALESCE((SELECT ROUND(SUM(MAX(ROUND(COALESCE(o.total, 0) - COALESCE(p.paid, 0), 2), 0)), 2)
+            FROM orders o
+            LEFT JOIN (
+                SELECT p.order_id, SUM(p.amount) AS paid FROM payments p
+                WHERE {_active_payment_clause('p')} AND LOWER(COALESCE(p.method, '')) <> 'account' GROUP BY p.order_id
+            ) p ON p.order_id = o.id
+            WHERE o.customer_id = {alias}.id
+              AND COALESCE(o.status, '') NOT IN ('canceled', 'cancelled')
+              AND (
+                  EXISTS (SELECT 1 FROM documents d WHERE d.order_id = o.id
+                          AND d.document_type = 'invoice' AND d.status = 'finalized')
+                  OR (COALESCE(o.status, '') NOT IN ('draft', 'archived') AND (
+                      o.status IN ('reserved', 'started', 'returned')
+                      OR EXISTS (SELECT 1 FROM documents d WHERE d.order_id = o.id
+                                 AND d.document_type = 'quote' AND d.status IN ('accepted', 'finalized'))
+                  ))
+              )), 0)"""
+
+
+#: The columns the Customers directory may be sorted by, keyed by the ``?sort=``
+#: value. The request value only *selects* one of these fixed expressions; it is
+#: never interpolated into SQL, so a crafted ``sort``/``dir`` cannot reach the
+#: query. The chosen column is every table header the page offers.
+CUSTOMER_SORTS = {
+    "id": "c.id",
+    "name": "LOWER(COALESCE(c.name, ''))",
+    "email": "LOWER(COALESCE(c.email, ''))",
+    "client_verified": "COALESCE(c.client_verified, 0)",
+    "created_at": "COALESCE(c.created_at, '')",
+    "created_by": "LOWER(COALESCE(CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL"
+                  " THEN 'Public' ELSE u.name END, ''))",
+    "orders": "COALESCE(oc.order_count, 0)",
+    "balance_due": _outstanding_balance_sql("c"),
+    "legacy_balance": _legacy_outstanding_sql("c"),
+}
+
+
+def normalise_customer_sort(sort, direction):
+    """Only an allowlisted column and direction ever reach the ORDER BY clause."""
+    sort = str(sort or "").strip().lower()
+    sort = sort if sort in CUSTOMER_SORTS else "created_at"
+    direction = "asc" if str(direction or "").strip().lower() == "asc" else "desc"
+    return sort, direction
+
+
+def _customer_order_clause(sort="created_at", direction="desc"):
+    """The directory's whole-result order: chosen column, then a stable tie-break.
+
+    The tie-break (name, then id) keeps page boundaries deterministic when the
+    chosen column holds equal values — without it a LIMIT/OFFSET page could repeat
+    or skip rows.
+    """
+    sort = sort if sort in CUSTOMER_SORTS else "created_at"
+    direction = "asc" if direction == "asc" else "desc"
+    clauses = [f"{CUSTOMER_SORTS[sort]} {direction.upper()}"]
+    if sort != "created_at":
+        clauses.append("COALESCE(c.created_at, '') DESC")
+    clauses.extend(["LOWER(COALESCE(c.name, '')) ASC", "c.id ASC"])
+    return ", ".join(clauses)
+
+
+def _customer_filter_where(query="", customer_type="", marketing="", blocked="", legacy="", folder="active"):
+    """One filter definition shared by the rows and the count, so they cannot disagree.
+
+    ``legacy`` is the "with a legacy balance" filter: ``'1'`` keeps only clients whose
+    still-open imported balances total more than zero, ``'without'`` keeps the rest.
+    """
+    sql = " WHERE 1=1" + _directory_visibility_clause(folder)
     params = []
+    legacy = str(legacy or "").strip().lower()
     if blocked == "1":
         sql += " AND c.is_blocked = 1"
+    if legacy in ("1", "with"):
+        sql += f" AND {_legacy_outstanding_sql('c')} > 0"
+    elif legacy in ("without", "none"):
+        sql += f" AND {_legacy_outstanding_sql('c')} <= 0"
     if query:
         sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
         needle = f"%{query.lower()}%"
@@ -140,14 +223,49 @@ def list_customers(query="", customer_type="", marketing="", limit=None, offset=
         sql += " AND c.marketing_opt_in = 1"
     elif marketing == "not_subscribed":
         sql += " AND c.marketing_opt_in = 0"
-    sql += " ORDER BY c.created_at DESC, c.name"
+    return sql, params
+
+
+def list_customers(query="", customer_type="", marketing="", limit=None, offset=0, blocked="", folder="active",
+                   legacy="", sort="created_at", direction="desc"):
+    # Ticket ABI-341953196: ``order_count`` is a grouped LEFT JOIN, not a
+    # correlated subquery per returned row. The Customers list is paged, but the
+    # CSV export reads the whole book, where the per-row count billed one orders
+    # scan per client on the remote libSQL database.
+    #
+    # Ticket ABI-341953282: the ORDER BY is part of this query (before LIMIT/OFFSET),
+    # so a column header orders the *whole* filtered directory rather than the page
+    # already loaded. Outstanding and legacy balances are selected here for the same
+    # reason: the rendered figure is the value the sort compared.
+    sort, direction = normalise_customer_sort(sort, direction)
+    where, params = _customer_filter_where(
+        query=query, customer_type=customer_type, marketing=marketing,
+        blocked=blocked, legacy=legacy, folder=folder,
+    )
+    sql = f"""SELECT c.*, CASE WHEN c.source_system = 'portal' AND c.created_by_user_id IS NULL
+            THEN 'Public' ELSE u.name END AS created_by_name, u.email AS created_by_email,
+        COALESCE(oc.order_count, 0) AS order_count,
+        {_outstanding_balance_sql('c')} AS outstanding_balance,
+        {_legacy_outstanding_sql('c')} AS legacy_balance
+        FROM customers c
+        LEFT JOIN users u ON u.id = c.created_by_user_id
+        LEFT JOIN (SELECT customer_id, COUNT(*) AS order_count FROM orders GROUP BY customer_id) oc
+            ON oc.customer_id = c.id
+        {where}
+        ORDER BY {_customer_order_clause(sort, direction)}"""
     if limit is not None:
         sql += " LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset or 0)])
     rows = get_db().execute(sql, params).fetchall()
-    balances = customer_outstanding_balances([row["id"] for row in rows])
     from app.services.reports import row_dict
-    return [dict(row_dict(row), outstanding_balance=balances[row["id"]]) for row in rows]
+    return [
+        dict(
+            row_dict(row),
+            outstanding_balance=round(float(row["outstanding_balance"] or 0), 2),
+            legacy_balance=round(float(row["legacy_balance"] or 0), 2),
+        )
+        for row in rows
+    ]
 
 
 def customer_outstanding_balances(customer_ids):
@@ -159,55 +277,31 @@ def customer_outstanding_balances(customer_ids):
     Refunds, applied deposits and allocated credit are payments counted once.
     Clamp per order so overpayments cannot hide another order's debt. Aggregate
     lists in batches rather than making a remote request for every customer.
+    The expression is shared with the directory's Balance due column and sort.
     """
     ids = list(dict.fromkeys(customer_ids))
     balances = {customer_id: 0.0 for customer_id in ids}
+    if not ids:
+        return balances
+    expr = _outstanding_balance_sql("c")
     for start in range(0, len(ids), 400):
         batch = ids[start:start + 400]
         marks = ",".join("?" for _ in batch)
-        rows = get_db().execute(f"""
-            SELECT o.customer_id,
-                   SUM(MAX(ROUND(COALESCE(o.total, 0) - COALESCE(p.paid, 0), 2), 0)) AS balance
-            FROM orders o
-            LEFT JOIN (
-                SELECT p.order_id, SUM(p.amount) AS paid FROM payments p
-                WHERE {_active_payment_clause('p')} AND LOWER(COALESCE(p.method, '')) <> 'account' GROUP BY p.order_id
-            ) p ON p.order_id = o.id
-            WHERE o.customer_id IN ({marks})
-              AND COALESCE(o.status, '') NOT IN ('canceled', 'cancelled')
-              AND (
-                  EXISTS (SELECT 1 FROM documents d WHERE d.order_id = o.id
-                          AND d.document_type = 'invoice' AND d.status = 'finalized')
-                  OR (COALESCE(o.status, '') NOT IN ('draft', 'archived') AND (
-                      o.status IN ('reserved', 'started', 'returned')
-                      OR EXISTS (SELECT 1 FROM documents d WHERE d.order_id = o.id
-                                 AND d.document_type = 'quote' AND d.status IN ('accepted', 'finalized'))
-                  ))
-              )
-            GROUP BY o.customer_id
-        """, batch).fetchall()
+        rows = get_db().execute(
+            f"SELECT c.id, {expr} AS balance FROM customers c WHERE c.id IN ({marks})",
+            batch,
+        ).fetchall()
         for row in rows:
-            balances[row["customer_id"]] = round(float(row["balance"] or 0), 2)
+            balances[row["id"]] = round(float(row["balance"] or 0), 2)
     return balances
 
 
-def customer_filtered_total(query="", customer_type="", marketing="", blocked="", folder="active"):
-    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1" + _directory_visibility_clause(folder)
-    params = []
-    if blocked == "1":
-        sql += " AND c.is_blocked = 1"
-    if query:
-        sql += " AND (LOWER(c.name) LIKE ? OR LOWER(c.email) LIKE ? OR LOWER(c.phone) LIKE ?)"
-        needle = f"%{query.lower()}%"
-        params.extend([needle, needle, needle])
-    if customer_type in VALID_TYPES:
-        sql += " AND c.customer_type = ?"
-        params.append(customer_type)
-    if marketing == "subscribed":
-        sql += " AND c.marketing_opt_in = 1"
-    elif marketing == "not_subscribed":
-        sql += " AND c.marketing_opt_in = 0"
-    row = get_db().execute(sql, params).fetchone()
+def customer_filtered_total(query="", customer_type="", marketing="", blocked="", folder="active", legacy=""):
+    where, params = _customer_filter_where(
+        query=query, customer_type=customer_type, marketing=marketing,
+        blocked=blocked, legacy=legacy, folder=folder,
+    )
+    row = get_db().execute("SELECT COUNT(*) AS total FROM customers c" + where, params).fetchone()
     return int(row["total"] if row else 0)
 
 

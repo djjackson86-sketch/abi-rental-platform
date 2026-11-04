@@ -1,0 +1,51 @@
+{# Owing Customers — every live order still carrying a positive balance, at ANY
+   date (ticket ABI-341953282). Rendered by the full dashboard and by
+   /dashboard/partials/owing, so both paths use this one panel.
+
+   The empty state deliberately reuses the dashboard's shared `.empty-results`
+   block (the same one the Movement and Cash up cards use): it is the centred
+   block for a card with no rows, so an empty Owing panel lines up with its
+   neighbours instead of falling back to a bare left-aligned paragraph. #}
+<div class="panel owing-customers-panel">
+  <div class="panel-title">
+    <h2>Outstanding orders</h2>
+    {% if owing_orders %}
+    <span class="pill">{{ owing_orders|length }} order{% if owing_orders|length != 1 %}s{% endif %} · <strong class="balance-owing">R{{ '%.2f'|format(owing_total) }}</strong></span>
+    {% endif %}
+  </div>
+  {% if owing_orders %}
+  <div class="table-wrap" style="margin-top:0">
+    <table class="data-table owing-customers-table">
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Order</th>
+          <th>Status</th>
+          <th>Raised</th>
+          <th>Due</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for order in owing_orders %}
+        <tr>
+          <td>
+            {% if order.customer_id %}
+            <a class="table-primary-text" href="{{ url_for('customers.detail', customer_id=order.customer_id) }}">{{ order.customer_name or 'Unnamed customer' }}</a>
+            {% else %}
+            <strong class="table-primary-text">No customer</strong>
+            {% endif %}
+            {% if order.collect_branch_name %}<small>{{ order.collect_branch_name }}</small>{% endif %}
+          </td>
+          <td><a href="{{ url_for('orders.detail', order_id=order.id) }}">{{ order.order_number }}</a></td>
+          <td><span class="badge status-{{ order.status }}">{{ status_label(order.status) }}</span></td>
+          <td>{{ order.created_at[:10] if order.created_at else '—' }}</td>
+          <td><strong class="balance-owing">R{{ '%.2f'|format(order.due_total) }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-results"><strong>No results</strong><span>No customers owe money right now.</span></div>
+  {% endif %}
+</div>

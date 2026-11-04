@@ -1,5 +1,17 @@
 {% extends "admin/layout.html" %}
 {% set title='Customers' %}
+{# Ticket ABI-341953282: server-side column sorting. The request values only ever
+   select an allowlisted column in the service; every link carries the active
+   filters so a sort never drops them, and the total shown stays the filtered
+   count because the count and the rows share one filter definition. #}
+{% macro sort_link(key, label) -%}
+  {%- set active = filters.sort == key -%}
+  {%- set next_dir = 'desc' if active and filters.dir == 'asc' else 'asc' -%}
+  <a class="table-sort{% if active %} active{% endif %}" href="{{ url_for('customers.index', folder=filters.folder, query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, blocked=filters.blocked or None, legacy=filters.legacy or None, sort=key, dir=next_dir) }}">{{ label }}{% if active %} {{ '↑' if filters.dir == 'asc' else '↓' }}{% endif %}</a>
+{%- endmacro %}
+{% macro sort_th(key, label) -%}
+  <th{% if filters.sort == key %} aria-sort="{{ 'ascending' if filters.dir == 'asc' else 'descending' }}"{% endif %}>{{ sort_link(key, label) }}</th>
+{%- endmacro %}
 {% block admin_body %}
 <header class="page-header customers-header">
   <div class="module-title">
@@ -12,10 +24,13 @@
   <form class="orders-search customers-search" method="get">
     <span>⌕</span>
     <input type="hidden" name="folder" value="{{ filters.folder }}">
+    <input type="hidden" name="sort" value="{{ filters.sort }}">
+    <input type="hidden" name="dir" value="{{ filters.dir }}">
     <input type="search" name="query" placeholder="Search..." value="{{ filters.query }}" aria-label="Search customers">
     {% if filters.customer_type %}<input type="hidden" name="customer_type" value="{{ filters.customer_type }}">{% endif %}
     {% if filters.blocked %}<input type="hidden" name="blocked" value="1">{% endif %}
     {% if filters.marketing %}<input type="hidden" name="marketing" value="{{ filters.marketing }}">{% endif %}
+    {% if filters.legacy %}<input type="hidden" name="legacy" value="{{ filters.legacy }}">{% endif %}
   </form>
   <a class="btn primary" href="{{ url_for('customers.new') }}">Add customer</a>
 </header>
@@ -28,8 +43,13 @@
     </nav>
     <form method="get" class="customers-filter-form">
       <input type="hidden" name="folder" value="{{ filters.folder }}">
+      <input type="hidden" name="sort" value="{{ filters.sort }}">
+      <input type="hidden" name="dir" value="{{ filters.dir }}">
       {% if filters.query %}<input type="hidden" name="query" value="{{ filters.query }}">{% endif %}
       <div class="filter-group"><label><input type="checkbox" name="blocked" value="1" {% if filters.blocked %}checked{% endif %} onchange="this.form.submit()"> Blocked / Suspect &amp; Fraud</label></div>
+      {# Ticket ABI-341953282: only clients whose still-open imported balances total
+         more than zero. The count beside the total stays the filtered count. #}
+      <div class="filter-group"><label><input type="checkbox" name="legacy" value="1" {% if filters.legacy %}checked{% endif %} onchange="this.form.submit()"> With legacy balance</label></div>
       <div class="filter-group">
         <div class="filter-group-head"><strong>Customer type</strong><span>⌃</span></div>
         {% for type_value,label in [('individual','Individual'),('company','Company')] %}
@@ -39,7 +59,7 @@
             <em>({{ filter_counts.customer_type.get(type_value, 0) }})</em>
           </label>
         {% endfor %}
-        {% if filters.customer_type %}<a class="filter-clear" href="{{ url_for('customers.index', folder=filters.folder, query=filters.query, marketing=filters.marketing, blocked=filters.blocked) }}">Clear type</a>{% endif %}
+        {% if filters.customer_type %}<a class="filter-clear" href="{{ url_for('customers.index', folder=filters.folder, query=filters.query, marketing=filters.marketing, blocked=filters.blocked, legacy=filters.legacy, sort=filters.sort, dir=filters.dir) }}">Clear type</a>{% endif %}
       </div>
 
       <div class="filter-group">
@@ -51,7 +71,7 @@
             <em>({{ filter_counts.marketing.get(value, 0) }})</em>
           </label>
         {% endfor %}
-        {% if filters.marketing %}<a class="filter-clear" href="{{ url_for('customers.index', folder=filters.folder, query=filters.query, customer_type=filters.customer_type, blocked=filters.blocked) }}">Clear marketing</a>{% endif %}
+        {% if filters.marketing %}<a class="filter-clear" href="{{ url_for('customers.index', folder=filters.folder, query=filters.query, customer_type=filters.customer_type, blocked=filters.blocked, legacy=filters.legacy, sort=filters.sort, dir=filters.dir) }}">Clear marketing</a>{% endif %}
       </div>
 
       <div class="filter-group compact">
@@ -110,7 +130,7 @@
         </div>
       </div>
 
-      {% if filters.query or filters.customer_type or filters.marketing %}
+      {% if filters.query or filters.customer_type or filters.marketing or filters.blocked or filters.legacy %}
         <div class="active-filter-line">
           <span>Showing filtered customers</span>
           <a href="{{ url_for('customers.index', folder=filters.folder) }}">Clear all filters</a>
@@ -123,14 +143,15 @@
             <thead>
               <tr>
                 <th><input type="checkbox" disabled aria-label="Select all customers"></th>
-                <th>#</th>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Client Verified</th>
-                <th>Created at</th>
-                <th>Created by</th>
-                <th>Orders</th>
-                <th>Balance due</th>
+                {{ sort_th('id', '#') }}
+                {{ sort_th('name', 'Name') }}
+                {{ sort_th('email', 'Email') }}
+                {{ sort_th('client_verified', 'Client Verified') }}
+                {{ sort_th('created_at', 'Created at') }}
+                {{ sort_th('created_by', 'Created by') }}
+                {{ sort_th('orders', 'Orders') }}
+                {{ sort_th('balance_due', 'Balance due') }}
+                {{ sort_th('legacy_balance', 'Legacy balance') }}
                 <th></th>
               </tr>
             </thead>
@@ -152,6 +173,7 @@
                   <td>{{ c.created_by_name or '—' }}</td>
                   <td>{{ c.order_count }}</td>
                   <td>R{{ '%.2f'|format(c.outstanding_balance) }}</td>
+                  <td class="legacy-balance-cell">R{{ '%.2f'|format(c.legacy_balance) }}</td>
                   <td><a class="btn ghost" href="{{ url_for('customers.detail', customer_id=c.id) }}">Open</a></td>
                 </tr>
               {% endfor %}
@@ -160,7 +182,7 @@
         </div>
         <div class="table-footer-count">Showing 1 - {{ customers|length }} of {{ total_customers }}</div>
         {% if customers|length < total_customers %}
-        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('customers.index', folder=filters.folder, query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, blocked=filters.blocked or None, limit=next_limit) }}#new-items">Load more customers (next 25)</a></div>
+        <div class="load-more-row"><a class="btn ghost" href="{{ url_for('customers.index', folder=filters.folder, query=filters.query or None, customer_type=filters.customer_type or None, marketing=filters.marketing or None, blocked=filters.blocked or None, legacy=filters.legacy or None, sort=filters.sort, dir=filters.dir, limit=next_limit) }}#new-items">Load more customers (next 25)</a></div>
         {% endif %}
       {% elif filters.folder == 'retained' %}
         <p>No deleted or archived customers match these filters.</p>

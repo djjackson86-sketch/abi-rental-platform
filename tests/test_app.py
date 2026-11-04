@@ -6563,7 +6563,7 @@ def test_client_verified_shows_on_customer_list_and_detail(client, app):
     assert '<span>Client Verified</span><b>—</b>' in unset_page
 
     # The list column follows the same rule.
-    assert '<th>Client Verified</th>' in listing_body
+    assert 'sort=client_verified' in listing_body
     unset_listing = client.get('/customers?query=Unset Client').data.decode()
     assert 'Unset Client' in unset_listing
     assert '<td>—</td>' in unset_listing

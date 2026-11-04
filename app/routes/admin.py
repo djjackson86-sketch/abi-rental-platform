@@ -6,7 +6,7 @@ from app.routes.auth import login_required
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services import group_images
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
-from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, scheduled_events
+from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, list_orders, scheduled_events, status_label
 from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
@@ -57,6 +57,30 @@ def health():
 def index():
     return redirect(url_for("admin.dashboard"))
 
+def _dashboard_owing_orders(branch_id=None):
+    """Every live order that still carries a positive collectable balance.
+
+    Deliberately NOT windowed by the dashboard's business day or quick range:
+    a balance raised three months ago is still owed today, so "Owing Customers"
+    lists all of them. ``payment_status="payment_due"`` is the shared
+    Orders-page definition (``orders._truly_due_condition``): positive
+    collectable due, drafts/cancelled/archived excluded, and Sales/Repairs only
+    once a quote has been accepted. Branch scoping is the shared orders clause,
+    so a depot's sign-in can only ever see its own depots and ``?branch=`` can
+    only narrow that view (ticket ABI-341953282).
+    """
+    rows = list_orders(payment_status="payment_due", branch_id=branch_id)
+    # Biggest debt first, then oldest, so the section opens on what matters.
+    return sorted(
+        rows,
+        key=lambda row: (-float(row["due_total"] or 0), row["created_at"] or "", row["id"]),
+    )
+
+
+def _dashboard_owing_total(orders):
+    return sum(float(order["due_total"] or 0) for order in orders)
+
+
 @bp.route("/dashboard")
 @login_required
 def dashboard():
@@ -88,6 +112,9 @@ def dashboard():
         spare_wheel_branch_id = branch_id
         spare_wheel_editable = False
         schedule = {"going_out": [], "coming_back": []}
+        # Loaded by the partial once the page is up; do not query it here.
+        owing_orders = []
+        owing_total = 0.0
     else:
         metrics = dashboard_period_metrics(
             start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
@@ -116,12 +143,17 @@ def dashboard():
         )
         day_metrics = dashboard_day_metrics(day=selected_day, branch_id=branch_id)
         schedule = dashboard_schedule(branch_id=branch_id)
+        owing_orders = _dashboard_owing_orders(branch_id)
+        owing_total = _dashboard_owing_total(owing_orders)
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
         dashboard_lazy=dashboard_lazy,
         metrics=metrics,
         day_metrics=day_metrics,
+        owing_orders=owing_orders,
+        owing_total=owing_total,
+        status_label=status_label,
         cash_panel=cash_panel,
         cash_day=cash_day,
         previous_day_notes=previous_day,
@@ -180,6 +212,25 @@ def dashboard_day_partial():
     return render_template(
         "admin/_dashboard_day_metrics.html",
         day_metrics=dashboard_day_metrics(day=selected_day, branch_id=branch_id),
+    )
+
+
+@bp.get("/dashboard/partials/owing")
+@login_required
+def dashboard_owing_partial():
+    """The Owing Customers panel, loaded on its own after the dashboard shell.
+
+    The branch filter is resolved exactly as the full dashboard does, and the
+    order query is the shared all-dates, positive-outstanding basis, so the
+    lazy and normal renders can never disagree (ticket ABI-341953282).
+    """
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    owing_orders = _dashboard_owing_orders(branch_id)
+    return render_template(
+        "admin/_dashboard_owing.html",
+        owing_orders=owing_orders,
+        owing_total=_dashboard_owing_total(owing_orders),
+        status_label=status_label,
     )
 
 

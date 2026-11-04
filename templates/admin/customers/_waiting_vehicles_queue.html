@@ -38,7 +38,7 @@
         {% endfor %}
       </div>
       {% endfor %}
-    {% else %}<p>No vehicles awaiting allocation.</p>{% endif %}
+    {% else %}<p class="pending-queue-empty">No vehicles awaiting allocation.</p>{% endif %}
   </div>
   <div class="movement-foot"><span>Maximum 3 vehicles per branch; head-office scans are shared across all branches{% if single and single.branch_name %} · Branch: {{ single.branch_name }}{% endif %}. Use “Allocate from list” on a customer's Main client vehicle to assign one — keep the main vehicle or replace it.</span></div>
 </article>

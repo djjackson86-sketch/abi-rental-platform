@@ -7,7 +7,7 @@ from flask import Blueprint, Response, abort, flash, jsonify, redirect, render_t
 from app.routes.auth import login_required
 from app.services import csrf, portal_registrations
 from app.services.access import main_required, user_can_module
-from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
+from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, normalise_customer_sort, update_customer
 from app.services.customers import customer_id_number_for, customer_is_suspect, customer_suspect_reason_for, suspect_matches
 from app.services.customers import retain_customer, customer_is_deleted, restore_customer, permanently_delete_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
@@ -162,10 +162,16 @@ def index():
     customer_type = request.args.get("customer_type", "")
     marketing = request.args.get("marketing", "")
     blocked = request.args.get("blocked", "")
+    # Ticket ABI-341953282: "with a legacy balance" only. The sort/dir pair is
+    # allowlisted in the service, so a crafted query string cannot reach the SQL.
+    legacy = request.args.get("legacy", "")
+    sort, direction = normalise_customer_sort(request.args.get("sort", "created_at"), request.args.get("dir", "desc"))
     folder = "retained" if request.args.get("folder") == "retained" else "active"
     display_limit = _display_limit()
-    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked, limit=display_limit, folder=folder)
-    total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked, folder=folder)
+    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked,
+                               legacy=legacy, sort=sort, direction=direction, limit=display_limit, folder=folder)
+    total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked,
+                                    legacy=legacy, folder=folder)
     # Vehicles awaiting allocation, branch-scoped: a depot-limited account sees only its own
     # queue; an all-branch account sees every depot's, grouped and labelled. Each branch has its
     # own 3-vehicle counter (ticket ABI-341953235).
@@ -181,7 +187,7 @@ def index():
         counts=customer_counts(folder),
         folder_counts={"active": customer_filtered_total(), "retained": customer_filtered_total(folder="retained")},
         filter_counts=customer_filter_counts(folder),
-        filters={"query": query, "customer_type": customer_type, "marketing": marketing, "blocked": blocked, "folder": folder},
+        filters={"query": query, "customer_type": customer_type, "marketing": marketing, "blocked": blocked, "folder": folder, "legacy": legacy, "sort": sort, "dir": direction},
         client_verified_label=client_verified_label,
         # Self-registered customers awaiting verification, branch-scoped, at the top of the
         # list (client instruction). Each row: id / reference / customer_id / name / email /

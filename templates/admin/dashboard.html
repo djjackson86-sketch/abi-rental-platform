@@ -99,6 +99,20 @@
   </div>
 </section>
 
+{# Ticket ABI-341953282: every order still owing money, at any date, on the
+   dashboard. The heading sits outside the lazy target (like Cash up), so both
+   renders show the section title immediately and only the rows arrive later. #}
+<section class="dashboard-card-section" id="owing-customers">
+  <div class="section-head"><h2 class="section-heading">Owing Customers</h2></div>
+  <div {% if dashboard_lazy %}data-dashboard-section="owing" data-src="{{ url_for('admin.dashboard_owing_partial', branch=filters.branch or None) }}"{% endif %}>
+    {% if dashboard_lazy %}
+    {# Same centred .empty-results block the loaded panel uses when it has no
+       rows, so the loading and empty states sit on the same line. #}
+    <div class="panel"><div class="empty-results"><strong>Loading…</strong><span>Fetching outstanding orders…</span></div></div>
+    {% else %}{% include "admin/_dashboard_owing.html" %}{% endif %}
+  </div>
+</section>
+
 {% if current_user_is_main %}
 <section class="dashboard-card-section">
   <div class="section-head"><h2 class="section-heading">Movement</h2></div>
