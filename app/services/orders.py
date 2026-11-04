@@ -784,6 +784,49 @@ def _pending_customer_allowance(value):
     return _blocked_customer_allowance(value)
 
 
+# Ticket ABI-341953272: a client record may be retired — ``customers.lifecycle_status``
+# is 'archived' (withdrawn) or 'deleted' (removed sign-up) — without losing anything.
+# The row, its documents and every order it already has stay exactly where they are;
+# it only stops being a candidate for NEW business: never offered in a new-booking
+# picker, never accepted by the server-side order validation, and never matched by a
+# public submission (which then creates a fresh client instead of reviving this one).
+LIFECYCLE_ACTIVE = "active"
+
+
+def active_customer_clause(alias="customers"):
+    """SQL fragment keeping only clients that may take a new booking.
+
+    Appended to new-booking pickers and public match queries, in the same style as
+    ``portal_registrations.pending_exclusion_clause``. A row with no
+    ``lifecycle_status`` (or the value 'active') is kept, so the rule is additive:
+    every existing client stays bookable until their record is actually retired.
+    """
+    return f" AND COALESCE({alias}.lifecycle_status, '{LIFECYCLE_ACTIVE}') = '{LIFECYCLE_ACTIVE}'"
+
+
+def customer_lifecycle_status(customer):
+    """The customer row's ``lifecycle_status``, defaulting to active (libSQL-safe)."""
+    try:
+        status = str(customer["lifecycle_status"] or "").strip().lower()
+    except (KeyError, IndexError, TypeError):
+        return LIFECYCLE_ACTIVE
+    return status or LIFECYCLE_ACTIVE
+
+
+def inactive_customer_error(status):
+    """The staff-facing refusal when a retired client is attached to a new booking."""
+    label = "archived" if status == "archived" else "deleted"
+    return (
+        f"This client is {label} and cannot take a new booking. "
+        "Existing orders are unaffected."
+    )
+
+
+def _lifecycle_customer_allowance(value):
+    """Normalise that same "this order already had the client" allowance for the lifecycle rule."""
+    return _blocked_customer_allowance(value)
+
+
 MAINTENANCE_MESSAGE = "Trailer under maintenance"
 
 
@@ -812,11 +855,19 @@ def under_maintenance_error(product):
     return f"{MAINTENANCE_MESSAGE}{detail}"
 
 
-def _build_order_payload(form, allow_blocked_customer_id=None, allow_pending_customer_id=None):
+def _build_order_payload(
+    form,
+    allow_blocked_customer_id=None,
+    allow_pending_customer_id=None,
+    allow_lifecycle_customer_id=None,
+):
     db = get_db()
     customer_id = int(form.get("customer_id") or 0) or None
     if customer_id:
-        customer = db.execute("SELECT id, is_blocked, blocked_reason FROM customers WHERE id = ?", (customer_id,)).fetchone()
+        customer = db.execute(
+            "SELECT id, is_blocked, blocked_reason, lifecycle_status FROM customers WHERE id = ?",
+            (customer_id,),
+        ).fetchone()
         if not customer:
             raise ValueError("Selected customer was not found")
         # Ticket ABI-341953028: the server-side gate for the whole feature. A
@@ -843,6 +894,13 @@ def _build_order_payload(form, allow_blocked_customer_id=None, allow_pending_cus
             ).fetchone()
             if deleted:
                 raise ValueError(portal_registrations.PENDING_BLOCKED_MESSAGE)
+        # Ticket ABI-341953272: an archived / deleted client keeps its record and its
+        # order history, but can never be attached to a NEW booking. The allowance is
+        # the same one the blocked and pending rules use: an order that already had
+        # this client attached (saved before the record was retired) stays editable.
+        lifecycle = customer_lifecycle_status(customer)
+        if lifecycle != LIFECYCLE_ACTIVE and customer_id != _lifecycle_customer_allowance(allow_lifecycle_customer_id):
+            raise ValueError(inactive_customer_error(lifecycle))
     booking_type = form.get("booking_type") if form.get("booking_type") in {"return", "oneway"} else "return"
     collect_branch_id = int(form.get("collect_branch_id") or 0) or None
     return_branch_id = int(form.get("return_branch_id") or 0) or collect_branch_id
@@ -1042,6 +1100,8 @@ def _notify_new_order(order_id):
 
 
 def create_order(form, notify=True):
+    # No customer allowance here on purpose: a NEW order may only be raised for a
+    # client that is active, unblocked and not a removed sign-up (ABI-341953272).
     payload = _build_order_payload(form)
     from app.services.credit_limits import ensure_credit_capacity
     ensure_credit_capacity(payload["customer_id"], payload["total"])
@@ -1174,7 +1234,12 @@ def update_draft_order(order_id, form):
     # Ticket ABI-341953028: a customer blocked AFTER this order was created can
     # still be kept on the order it is already attached to — only pointing the
     # order at a different blocked customer is refused.
-    payload = _build_order_payload(form, allow_blocked_customer_id=order["customer_id"], allow_pending_customer_id=order["customer_id"])
+    payload = _build_order_payload(
+        form,
+        allow_blocked_customer_id=order["customer_id"],
+        allow_pending_customer_id=order["customer_id"],
+        allow_lifecycle_customer_id=order["customer_id"],
+    )
     db = get_db()
     # Data-safety net (update path only): the order form no longer exposes an
     # editable "Damage waiver amount" box, so a re-save of an existing

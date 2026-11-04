@@ -988,6 +988,10 @@ def resolve_customer(enquiry):
     **exactly one** stored client matches by email (preferred), or by
     digit-normalised phone. Two candidates means ``ambiguous`` — staff choose,
     the app never guesses which person to attach.
+
+    Ticket ABI-341953272: a retired client (``customers.lifecycle_status``
+    'archived' or 'deleted') is never matched. The enquiry then converts against a
+    fresh client record; the retired one keeps its order history untouched.
     """
     if not enquiry:
         return {"customer_id": None, "ambiguous": False}
@@ -996,7 +1000,9 @@ def resolve_customer(enquiry):
     phone = _digits(enquiry.get("phone"))
     if email:
         rows = db.execute(
-            "SELECT id FROM customers WHERE LOWER(email) = ? ORDER BY id LIMIT 5", (email,)
+            "SELECT id FROM customers WHERE LOWER(email) = ? "
+            "AND COALESCE(lifecycle_status, 'active') = 'active' ORDER BY id LIMIT 5",
+            (email,),
         ).fetchall()
         if len(rows) == 1:
             return {"customer_id": int(row_dict(rows[0])["id"]), "ambiguous": False}
@@ -1005,7 +1011,8 @@ def resolve_customer(enquiry):
     if phone and len(phone) >= 8:
         rows = db.execute(
             """SELECT id, phone FROM customers
-            WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
+            WHERE COALESCE(lifecycle_status, 'active') = 'active'
+            AND REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?
             ORDER BY id LIMIT 5""",
             (f"%{phone[-9:]}",),
         ).fetchall()

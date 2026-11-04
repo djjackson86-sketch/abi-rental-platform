@@ -9,6 +9,7 @@ from app.services import csrf, portal_registrations
 from app.services.access import main_required, user_can_module
 from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.customers import customer_id_number_for, customer_is_suspect, customer_suspect_reason_for, suspect_matches
+from app.services.customers import retain_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
@@ -138,6 +139,7 @@ def _pending_registration_context(customer_id, customer=None):
         "approved_registration": portal_registrations.approved_registration_for_customer(customer_id),
         "archived_registration": portal_registrations.archived_registration_for_customer(customer_id),
         "portal_archive_csrf_token": csrf.issue_token("portal_archive"),
+        "customer_archive_csrf_token": csrf.issue_token("customer_archive"),
         "portal_approval_csrf_token": csrf.issue_token("portal_approval"),
         # Retain the existing scoped token for old open pages; a reason is now mandatory.
         "portal_pending_delete_csrf_token": csrf.issue_token("portal_pending_delete"),
@@ -157,9 +159,10 @@ def index():
     customer_type = request.args.get("customer_type", "")
     marketing = request.args.get("marketing", "")
     blocked = request.args.get("blocked", "")
+    folder = "retained" if request.args.get("folder") == "retained" else "active"
     display_limit = _display_limit()
-    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked, limit=display_limit)
-    total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked)
+    customers = list_customers(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked, limit=display_limit, folder=folder)
+    total = customer_filtered_total(query=query, customer_type=customer_type, marketing=marketing, blocked=blocked, folder=folder)
     # Vehicles awaiting allocation, branch-scoped: a depot-limited account sees only its own
     # queue; an all-branch account sees every depot's, grouped and labelled. Each branch has its
     # own 3-vehicle counter (ticket ABI-341953235).
@@ -172,9 +175,10 @@ def index():
         display_limit=display_limit,
         previous_limit=max(display_limit - PAGE_SIZE, 0),
         next_limit=display_limit + PAGE_SIZE,
-        counts=customer_counts(),
-        filter_counts=customer_filter_counts(),
-        filters={"query": query, "customer_type": customer_type, "marketing": marketing, "blocked": blocked},
+        counts=customer_counts(folder),
+        folder_counts={"active": customer_filtered_total(), "retained": customer_filtered_total(folder="retained")},
+        filter_counts=customer_filter_counts(folder),
+        filters={"query": query, "customer_type": customer_type, "marketing": marketing, "blocked": blocked, "folder": folder},
         client_verified_label=client_verified_label,
         # Self-registered customers awaiting verification, branch-scoped, at the top of the
         # list (client instruction). Each row: id / reference / customer_id / name / email /
@@ -418,6 +422,17 @@ def statement(customer_id):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+
+@bp.post("/<int:customer_id>/archive")
+@login_required
+def archive(customer_id):
+    csrf.validate("customer_archive")
+    if not get_customer(customer_id):
+        abort(404)
+    retain_customer(customer_id, "archived", request.form.get("reason", ""))
+    flash("Customer archived; record and history retained", "success")
+    return redirect(url_for("customers.detail", customer_id=customer_id))
 
 
 @bp.route("/<int:customer_id>/delete", methods=["POST"])

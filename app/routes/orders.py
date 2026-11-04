@@ -6,7 +6,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import ReservationConfirmationRequired, SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import ReservationConfirmationRequired, SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, active_customer_clause, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund, refundable_amount
 from app.services.customer_credits import customer_credit_balance
@@ -134,7 +134,15 @@ def _customer_picker_sql(where_sql="", tail=""):
 
 def _customers():
     rows = get_db().execute(
-        _customer_picker_sql(pending_exclusion_clause("customers", allow_pending=True), " ORDER BY customers.name")
+        # Ticket ABI-341953272: a retired (archived / deleted) client is never offered
+        # as a candidate for a NEW booking. The record and its order history stay fully
+        # reachable from the customer module and from the orders already raised for it;
+        # only this picker (and the server-side validation) excludes them.
+        _customer_picker_sql(
+            pending_exclusion_clause("customers", allow_pending=True)
+            + active_customer_clause("customers"),
+            " ORDER BY customers.name",
+        )
     ).fetchall()
     return [customer_summary_for(row) for row in rows]
 
@@ -149,7 +157,7 @@ def _selected_customer_summary(customers, selected_customer_id):
     return next((customer for customer in customers if customer["id"] == wanted), None)
 
 
-def _customer_summary_by_id(customer_id):
+def _customer_summary_by_id(customer_id, *, allow_retained=False):
     # A single selected client is looked up by primary key, so the per-parent
     # correlated projection is the cheap form here: every child fetch is an index
     # probe (idx_orders_customer / idx_payments_order). The batched grouped joins
@@ -167,7 +175,7 @@ def _customer_summary_by_id(customer_id):
                (SELECT COALESCE(SUM(l.amount_due - l.settled_amount), 0) FROM legacy_customer_balances l WHERE l.customer_id = customers.id AND l.status = 'active' AND l.amount_due > l.settled_amount) AS legacy_balance,
                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
-        WHERE id = ?{pending_exclusion_clause("customers", allow_pending=True)}
+        WHERE id = ?{'' if allow_retained else pending_exclusion_clause("customers", allow_pending=True)}
     """, (customer_id,)).fetchone()
     return customer_summary_for(row) if row else None
 
@@ -522,7 +530,15 @@ def edit(order_id):
                 # order's OWN customer may be blocked (a block applied after the
                 # order was raised) — only re-pointing it at a blocked customer is
                 # refused.
-                _build_order_payload(form, allow_blocked_customer_id=_order_customer_id(form_data), allow_pending_customer_id=_order_customer_id(form_data))
+                # Ticket ABI-341953272: the order's OWN client may also be retired
+                # (archived / deleted after the order was raised) — only pointing the
+                # order at a different retired client is refused.
+                _build_order_payload(
+                    form,
+                    allow_blocked_customer_id=_order_customer_id(form_data),
+                    allow_pending_customer_id=_order_customer_id(form_data),
+                    allow_lifecycle_customer_id=_order_customer_id(form_data),
+                )
                 form = _form_with_inline_customer(form)
                 update_draft_order(order_id, form)
                 if _wants_sales_repairs(form, order_id):
@@ -547,10 +563,16 @@ def edit(order_id):
         form_order_status = form_order["status"] if form_order is not None else ""
     except (KeyError, IndexError, TypeError):
         form_order_status = ""
+    customers = _customers()
+    attached_id = _order_customer_id(form_data)
+    if attached_id and not any(c["id"] == int(attached_id) for c in customers):
+        attached = _customer_summary_by_id(attached_id, allow_retained=True)
+        if attached:
+            customers.append(attached)
     return render_template(
         "admin/orders/form.html",
         settings=get_company_settings(),
-        customers=_customers(),
+        customers=customers,
         products=_products(),
         selected_customer_id=form_data.get("selected_customer_id", ""),
         default_start_date=form_data.get("start_date", ""),

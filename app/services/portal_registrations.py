@@ -141,7 +141,7 @@ def pending_exclusion_clause(alias="c", *, allow_pending=False):
     hidden = ", ".join(f"'{status}'" for status in statuses)
     source_clause = "" if allow_pending else f" AND COALESCE({alias}.source_system, '') <> 'portal_pending'"
     return (
-        source_clause +
+        f" AND {alias}.lifecycle_status = 'active'" + source_clause +
         f" AND NOT EXISTS (SELECT 1 FROM portal_registrations pr "
         f"WHERE pr.customer_id = {alias}.id AND pr.status IN ({hidden}))"
     )
@@ -203,7 +203,7 @@ def list_pending_registrations():
         "FROM portal_registrations r "
         "LEFT JOIN branches b ON b.id = r.branch_id "
         "WHERE r.status = ? AND NOT EXISTS (SELECT 1 FROM customers c "
-        "WHERE c.id = r.customer_id AND c.is_blocked = 1)" + clause +
+        "WHERE c.id = r.customer_id AND (c.is_blocked = 1 OR c.lifecycle_status <> 'active'))" + clause +
         " ORDER BY r.created_at DESC, r.id DESC"
     )
     rows = get_db().execute(sql, [STATUS_PENDING, *params]).fetchall()

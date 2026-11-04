@@ -251,13 +251,19 @@ def _candidate_rows():
     A client whose sign-up was **removed** (``portal_registrations.status = 'deleted'``) is
     excluded: removing a rejected sign-up is exactly what lets that person register again, so a
     tombstoned record must never keep matching them as an existing client (client portal changes).
+
+    Ticket ABI-341953272: a **retired** client record (``customers.lifecycle_status``
+    'archived' or 'deleted') is excluded too. A public submission must never link to, or
+    be turned away as a duplicate of, a record the business has retired — it creates a
+    fresh client instead, while the retired row and its order history stay untouched.
     """
     from app.services import portal_registrations
 
     deleted = getattr(portal_registrations, "STATUS_DELETED", "deleted")
     return get_db().execute(
         "SELECT id, name, phone, email, is_blocked FROM customers AS c "
-        "WHERE NOT EXISTS (SELECT 1 FROM portal_registrations pr "
+        "WHERE COALESCE(c.lifecycle_status, 'active') = 'active' "
+        "AND NOT EXISTS (SELECT 1 FROM portal_registrations pr "
         "WHERE pr.customer_id = c.id AND pr.status = ?)",
         (deleted,),
     ).fetchall()

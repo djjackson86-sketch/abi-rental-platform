@@ -24,17 +24,29 @@
 
 {# Client portal changes: the self-registration verification panel, shown at the top of the client's
    page for a self-registered client who is still awaiting approval (hidden for everyone else). #}
-{% include "admin/customers/_pending_registration_panel.html" %}
+{% if customer.lifecycle_status == 'active' %}{% include "admin/customers/_pending_registration_panel.html" %}{% endif %}
 
 <section class="panel">
   <div class="panel-title"><h2>Customer actions</h2></div>
-  {% if customer_has_history %}
+  {% if customer.lifecycle_status != 'active' %}
+    <p><strong>{{ customer.lifecycle_status|title }}</strong> — {{ customer.lifecycle_changed_at or 'Date not recorded' }}</p>
+    <p>{{ customer.lifecycle_reason or 'No reason recorded' }}</p>
+    <a href="{{ url_for('customers.index', folder='retained') }}">Deleted &amp; Archived</a>
+  {% elif customer_has_history %}
     <p class="form-help">This customer has existing orders/history, so deletion is blocked.</p>
   {% else %}
-    <form method="post" action="{{ url_for('customers.delete', customer_id=customer.id) }}" onsubmit="return confirm('Delete this customer? This cannot be undone.');">
+    <form method="post" action="{{ url_for('customers.delete', customer_id=customer.id) }}" onsubmit="return confirm('Move this customer to Deleted & Archived? Their record will be retained.');">
       <button class="btn danger" type="submit">Delete customer</button>
     </form>
-    <p class="form-help">Only customers with no orders/history can be deleted.</p>
+    <p class="form-help">Only customers with no orders/history can be deleted. Their records are retained.</p>
+  {% endif %}
+  {% if customer.lifecycle_status == 'active' and not archived_registration %}
+    <form method="post" action="{{ url_for('customers.archive', customer_id=customer.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ customer_archive_csrf_token }}">
+      <label>Archive reason <input name="reason" maxlength="2000"></label>
+      <button class="btn ghost" type="submit">Archive customer</button>
+    </form>
+    <p class="form-help">Archiving retains all history and excludes this customer from new bookings.</p>
   {% endif %}
 </section>
 
@@ -181,7 +193,7 @@
   {% endif %}
 
   <article class="panel customer-orders-card">
-    <div class="panel-title"><h2>Order history</h2><a href="{{ url_for('orders.new', customer_id=customer.id) }}">New order</a></div>
+    <div class="panel-title"><h2>Order history</h2>{% if customer.lifecycle_status == 'active' and not archived_registration %}<a href="{{ url_for('orders.new', customer_id=customer.id) }}">New order</a>{% endif %}</div>
     {% if orders %}
       <div class="customer-order-list">
         {% for order in orders %}
@@ -195,8 +207,10 @@
     {% else %}
       <div class="soft-empty">
         <h3>No orders yet</h3>
-        <p>This customer is ready to use on a draft order.</p>
-        <a class="btn primary" href="{{ url_for('orders.new', customer_id=customer.id) }}">Create order</a>
+        {% if customer.lifecycle_status == 'active' and not archived_registration %}
+          <p>This customer is ready to use on a draft order.</p>
+          <a class="btn primary" href="{{ url_for('orders.new', customer_id=customer.id) }}">Create order</a>
+        {% else %}<p>This retained customer is unavailable for new bookings.</p>{% endif %}
       </div>
     {% endif %}
   </article>

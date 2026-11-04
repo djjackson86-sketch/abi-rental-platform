@@ -966,6 +966,11 @@ def run_migrations(db):
     # Purely additive with defaults, so every existing customer stays unblocked.
     ensure_column(db, "customers", "is_blocked", "INTEGER NOT NULL DEFAULT 0")
     ensure_column(db, "customers", "blocked_reason", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "lifecycle_status", "TEXT NOT NULL DEFAULT 'active'")
+    ensure_column(db, "customers", "lifecycle_changed_at", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "lifecycle_reason", "TEXT NOT NULL DEFAULT ''")
+    ensure_column(db, "customers", "lifecycle_changed_by_user_id", "INTEGER")
+    ensure_column(db, "customers", "lifecycle_source", "TEXT NOT NULL DEFAULT ''")
     # Ticket ABI-341953129: an owner-only credit facility on the customer. Purely
     # additive with defaults, so every existing customer stays on cash terms and
     # no order/document figure is touched by these columns.

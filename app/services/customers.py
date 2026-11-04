@@ -97,20 +97,23 @@ CREDIT_FIELDS = ("credit_allowed", "credit_limit")
 CREDIT_LIMIT_ERROR = "Credit limit must be a positive amount"
 
 
-def _directory_visibility_clause():
+def _directory_visibility_clause(folder="active"):
     """Include disapproved portal clients in the directory, never in booking pickers.
 
     Disapproval sets is_blocked but leaves the registration pending. Deleted
     registrations remain hidden, even if their retained customer row is blocked.
     """
-    return (
+    retained = "(c.lifecycle_status IN ('deleted','archived') OR EXISTS (SELECT 1 FROM portal_registrations pr WHERE pr.customer_id=c.id AND pr.status='deleted'))"
+    if folder == "retained":
+        return " AND " + retained
+    return " AND NOT " + retained + (
         " AND ((1=1" + pending_exclusion_clause("c") + ") OR (c.is_blocked = 1"
         " AND NOT EXISTS (SELECT 1 FROM portal_registrations pr"
         " WHERE pr.customer_id = c.id AND pr.status = 'deleted')))"
     )
 
 
-def list_customers(query="", customer_type="", marketing="", limit=None, offset=0, blocked=""):
+def list_customers(query="", customer_type="", marketing="", limit=None, offset=0, blocked="", folder="active"):
     # Ticket ABI-341953196: ``order_count`` is a grouped LEFT JOIN, not a
     # correlated subquery per returned row. The Customers list is paged, but the
     # CSV export reads the whole book, where the per-row count billed one orders
@@ -122,7 +125,7 @@ def list_customers(query="", customer_type="", marketing="", limit=None, offset=
         LEFT JOIN users u ON u.id = c.created_by_user_id
         LEFT JOIN (SELECT customer_id, COUNT(*) AS order_count FROM orders GROUP BY customer_id) oc
             ON oc.customer_id = c.id
-        WHERE 1=1""" + _directory_visibility_clause()
+        WHERE 1=1""" + _directory_visibility_clause(folder)
     params = []
     if blocked == "1":
         sql += " AND c.is_blocked = 1"
@@ -188,8 +191,8 @@ def customer_outstanding_balances(customer_ids):
     return balances
 
 
-def customer_filtered_total(query="", customer_type="", marketing="", blocked=""):
-    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1" + _directory_visibility_clause()
+def customer_filtered_total(query="", customer_type="", marketing="", blocked="", folder="active"):
+    sql = "SELECT COUNT(*) AS total FROM customers c WHERE 1=1" + _directory_visibility_clause(folder)
     params = []
     if blocked == "1":
         sql += " AND c.is_blocked = 1"
@@ -304,10 +307,10 @@ def find_customer_id_by_text(text, *, allow_pending=False):
     return None
 
 
-def customer_counts():
+def customer_counts(folder="active"):
     row = get_db().execute(
         "SELECT COUNT(*) total, SUM(customer_type='individual') individuals, SUM(customer_type='company') companies, SUM(marketing_opt_in) subscribed FROM customers c WHERE 1=1"
-        + _directory_visibility_clause()
+        + _directory_visibility_clause(folder)
     ).fetchone()
     return {
         "total": row["total"] or 0,
@@ -318,8 +321,8 @@ def customer_counts():
     }
 
 
-def customer_filter_counts():
-    counts = customer_counts()
+def customer_filter_counts(folder="active"):
+    counts = customer_counts(folder)
     return {
         "customer_type": {"individual": counts["individuals"], "company": counts["companies"]},
         "marketing": {"subscribed": counts["subscribed"], "not_subscribed": counts["not_subscribed"]},
@@ -350,40 +353,23 @@ def customer_has_history(customer_id):
     return bool(row and row["count"])
 
 
-#: Every table that references ``customers(id)`` and must be cleared when a client is
-#: removed. ``orders`` is deliberately absent: it is the one child that blocks deletion
-#: (the history guard below rejects a client with any), so it is never silently touched.
-#: libSQL / Turso does not guarantee the declared ``ON DELETE CASCADE`` (and a Turso
-#: write is autocommit, so a half-applied transaction cannot be relied on to roll back),
-#: so each child row is removed explicitly rather than trusting the FK cascade — that is
-#: what keeps the delete from ever leaving an orphan (a pending queue entry, a vehicle,
-#: a POPIA consent event, a credit or a legacy balance behind).
-_CUSTOMER_CHILD_TABLES = (
-    "portal_registrations",
-    "vehicles",
-    "consent_records",
-    "customer_credits",
-    "legacy_customer_balances",
-    "legacy_balance_payments",
-)
-
-
 def delete_customer(customer_id):
-    """Delete a client with **no** order/invoice history, leaving zero orphan rows.
-
-    Refuses outright when the client has any order history, so an existing client's
-    ledger is never removed and no refund/notification is ever triggered by a delete.
-    When it does proceed it clears every child row explicitly (see
-    ``_CUSTOMER_CHILD_TABLES``) before the customer, because libSQL does not honour the
-    declared FK cascade — a left-behind pending registration would otherwise show an
-    orphan entry in the verification queue.
-    """
+    """Retain a deleted client and all children; existing order history still blocks deletion."""
     if customer_has_history(customer_id):
         raise ValueError("Customer has existing orders/history and cannot be deleted")
+    return retain_customer(customer_id, "deleted")
+
+
+def retain_customer(customer_id, status="archived", reason=""):
+    """Retain identity and every financial/vehicle link; never overwrite prior audit."""
+    if status not in ("archived", "deleted"):
+        raise ValueError("Invalid customer lifecycle status")
     db = get_db()
-    for table in _CUSTOMER_CHILD_TABLES:
-        db.execute(f"DELETE FROM {table} WHERE customer_id = ?", (customer_id,))
-    cur = db.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+    cur = db.execute(
+        "UPDATE customers SET lifecycle_status=?, lifecycle_changed_at=?, lifecycle_reason=?, "
+        "lifecycle_changed_by_user_id=?, lifecycle_source='staff' WHERE id=? AND lifecycle_status='active'",
+        (status, now(), str(reason or "").strip()[:2000], current_session_user_id(), customer_id),
+    )
     db.commit()
     _clear_suspect_cache()
     return cur.rowcount > 0

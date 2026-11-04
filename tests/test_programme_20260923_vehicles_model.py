@@ -228,7 +228,8 @@ def test_deleting_a_customer_leaves_zero_orphan_vehicle_rows(app, customer_id, o
         ).fetchone()["c"]
         left = get_db().execute("SELECT id FROM vehicles").fetchall()
     assert orphans == 0
-    assert [row["id"] for row in left] == [survivors]
+    assert len(left) == 3
+    assert survivors in [row["id"] for row in left]
 
 
 # ── one owner per registration ──────────────────────────────────────────────

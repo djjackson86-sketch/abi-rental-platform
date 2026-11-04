@@ -443,13 +443,13 @@ def test_consent_records_stores_no_ip_address_and_no_user_agent(app):
         assert banned not in columns
 
 
-def test_deleting_the_customer_removes_the_consent_rows(app):
+def test_deleting_the_customer_retains_the_consent_rows(app):
     customer_id = make_customer(app)
     with app.app_context():
         consent.record_consent(customer_id, "Midrand portal", True)
         assert delete_customer(customer_id) is True
         db = get_db()
-        assert db.execute("SELECT COUNT(*) AS c FROM consent_records").fetchone()["c"] == 0
+        assert db.execute("SELECT COUNT(*) AS c FROM consent_records").fetchone()["c"] == 1
         orphans = db.execute(
             "SELECT COUNT(*) AS c FROM consent_records c LEFT JOIN customers cu ON cu.id = c.customer_id "
             "WHERE cu.id IS NULL"

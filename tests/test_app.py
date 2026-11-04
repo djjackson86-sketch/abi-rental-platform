@@ -1407,7 +1407,8 @@ def test_customer_without_orders_can_be_deleted(client, app):
     assert b'Delete Me Customer' not in deleted.data
     with app.app_context():
         remaining = get_db().execute("SELECT COUNT(*) AS count FROM customers WHERE id = ?", (customer_id,)).fetchone()['count']
-        assert remaining == 0
+        assert remaining == 1
+        assert get_db().execute("SELECT lifecycle_status FROM customers WHERE id = ?", (customer_id,)).fetchone()['lifecycle_status'] == 'deleted'
 
 
 def test_customer_with_orders_cannot_be_deleted(client, app):
