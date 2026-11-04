@@ -121,6 +121,19 @@ def test_legacy_empty_state_and_authentication(client):
         assert 'No outstanding legacy balances.' in block
 
 
+def test_legacy_only_customer_does_not_claim_nobody_owes_money(app, client):
+    with app.app_context():
+        db = get_db()
+        cid = add_customer(db, 'Legacy Only')
+        upsert_legacy_balance(cid, 'legacy-only', 'LEG-ONLY', 125)
+        db.commit()
+    login(client)
+    page = client.get('/dashboard/partials/owing').get_data(as_text=True)
+    assert 'No outstanding orders right now.' in page
+    assert 'No customers owe money' not in page
+    assert 'LEG-ONLY' in page and 'R125.00' in page
+
+
 def test_dashboard_module_gate_still_applies(app, client):
     seed_legacy(app)
     add_depot_user(app, 'No Dashboard', 1)

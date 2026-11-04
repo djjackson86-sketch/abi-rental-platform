@@ -166,7 +166,7 @@ def test_every_positive_outstanding_order_is_listed_whatever_its_date(client, ap
     assert f'href="/customers/{ids["bob"]}"' in block
     # The running total is red too, and counts every owing order.
     assert '4 orders · <strong class="balance-owing">R945.50</strong>' in block
-    assert 'No customers owe money right now.' not in block
+    assert 'No outstanding orders right now.' not in block
 
 
 def test_owing_list_ignores_the_dashboard_quick_range(client, app):
@@ -224,7 +224,7 @@ def test_empty_owing_section_uses_the_centred_dashboard_empty_block(client, app)
     block = owing_block(page)
 
     assert ('<div class="empty-results"><strong>No results</strong>'
-            '<span>No customers owe money right now.</span></div>') in block
+            '<span>No outstanding orders right now.</span></div>') in block
 
 
 def _lazy_owing_src(page):
@@ -263,4 +263,4 @@ def test_lazy_partial_empty_state_matches_the_normal_empty_state(client, app):
     shell = client.get('/dashboard').get_data(as_text=True)
     partial = client.get(_lazy_owing_src(shell)).get_data(as_text=True)
     assert ('<div class="empty-results"><strong>No results</strong>'
-            '<span>No customers owe money right now.</span></div>') in partial
+            '<span>No outstanding orders right now.</span></div>') in partial
