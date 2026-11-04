@@ -9,7 +9,7 @@ from app.services import csrf, portal_registrations
 from app.services.access import main_required, user_can_module
 from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, update_customer
 from app.services.customers import customer_id_number_for, customer_is_suspect, customer_suspect_reason_for, suspect_matches
-from app.services.customers import retain_customer
+from app.services.customers import retain_customer, customer_is_deleted, restore_customer, permanently_delete_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
 from app.services.settings import get_company_settings
@@ -140,6 +140,9 @@ def _pending_registration_context(customer_id, customer=None):
         "archived_registration": portal_registrations.archived_registration_for_customer(customer_id),
         "portal_archive_csrf_token": csrf.issue_token("portal_archive"),
         "customer_archive_csrf_token": csrf.issue_token("customer_archive"),
+        "customer_is_deleted": customer_is_deleted(customer),
+        "customer_restore_csrf_token": csrf.issue_token("customer_restore"),
+        "customer_permanent_delete_csrf_token": csrf.issue_token("customer_permanent_delete"),
         "portal_approval_csrf_token": csrf.issue_token("portal_approval"),
         # Retain the existing scoped token for old open pages; a reason is now mandatory.
         "portal_pending_delete_csrf_token": csrf.issue_token("portal_pending_delete"),
@@ -433,6 +436,34 @@ def archive(customer_id):
     retain_customer(customer_id, "archived", request.form.get("reason", ""))
     flash("Customer archived; record and history retained", "success")
     return redirect(url_for("customers.detail", customer_id=customer_id))
+
+
+@bp.post("/<int:customer_id>/restore")
+@login_required
+def restore(customer_id):
+    csrf.validate("customer_restore")
+    try:
+        destination = restore_customer(customer_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+    else:
+        flash(f"Customer restored to {destination}. Existing rental blocks remain in effect.", "success")
+    return redirect(url_for("customers.detail", customer_id=customer_id))
+
+
+@bp.post("/<int:customer_id>/permanently-delete")
+@login_required
+def permanently_delete(customer_id):
+    csrf.validate("customer_permanent_delete")
+    if request.form.get("confirmation") != f"DELETE {customer_id}":
+        abort(400, description="Type the exact deletion confirmation shown on the customer record.")
+    try:
+        permanently_delete_customer(customer_id)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("customers.detail", customer_id=customer_id))
+    flash("Customer permanently deleted. This cannot be undone.", "success")
+    return redirect(url_for("customers.index", folder="retained"))
 
 
 @bp.route("/<int:customer_id>/delete", methods=["POST"])

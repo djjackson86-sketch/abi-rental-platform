@@ -27,7 +27,7 @@ HIDDEN_CUSTOM_FIELD_KEYS = {
     # staff capture with it. Both live in custom_fields_json precisely so they stay hidden from
     # the custom-field cards, form summaries and public/CSV exports; the service reads them via
     # raw_custom_fields_for / customer_is_suspect only.
-    "suspect_fraud", "customer_id_number", "suspect_reason",
+    "suspect_fraud", "customer_id_number", "suspect_reason", "lifecycle_history",
 }
 #: The custom-field keys the client's main vehicle is shown under. Deliberately the eight fields
 #: staff capture on the scan screen — number plate, disc licence number, NaTIS registration number,
@@ -373,6 +373,92 @@ def retain_customer(customer_id, status="archived", reason=""):
     db.commit()
     _clear_suspect_cache()
     return cur.rowcount > 0
+
+
+def customer_is_deleted(customer):
+    """Include legacy portal tombstones, but never archived customers."""
+    if customer is None or customer['lifecycle_status'] == 'archived':
+        return False
+    return customer['lifecycle_status'] == 'deleted' or bool(get_db().execute(
+        "SELECT 1 FROM portal_registrations WHERE customer_id=? AND status='deleted' "
+        "AND NOT EXISTS (SELECT 1 FROM portal_registrations WHERE customer_id=? AND status IN ('pending','approved'))",
+        (customer['id'], customer['id']),
+    ).fetchone())
+
+
+def _lock_deleted_customer(customer_id):
+    # Acquire the write lock before reading eligibility, on SQLite and Turso alike.
+    db = get_db()
+    db.execute("UPDATE customers SET lifecycle_status=lifecycle_status WHERE id=?", (customer_id,))
+    customer = get_customer(customer_id)
+    if customer is None or not customer_is_deleted(customer):
+        raise ValueError("Only a deleted customer can use this action.")
+    from app.services.portal_registrations import branch_in_session_scope
+    if not branch_in_session_scope(customer):
+        raise ValueError("This customer is outside the branches you can access.")
+    return customer
+
+
+def restore_customer(customer_id):
+    """Restore identity in place; never grant verification or remove rental blocks."""
+    from app.db import write_transaction
+    from app.services import portal_registrations as registrations
+    with write_transaction():
+        customer = _lock_deleted_customer(customer_id)
+        db = get_db()
+        rows = db.execute("SELECT * FROM portal_registrations WHERE customer_id=? ORDER BY id", (customer_id,)).fetchall()
+        # A portal sign-up needs saved approval evidence, not merely an ID tick.
+        was_approved = any(r['status'] == 'approved' or r['approved_at'] for r in rows)
+        active = registrations.id_verified(customer) and (
+            was_approved or (not rows and customer['source_system'] != 'portal_pending')
+        )
+        status = 'approved' if active else 'pending'
+        if rows:
+            # Collapse legacy multiple pending/tombstone states without losing evidence.
+            db.execute("UPDATE portal_registrations SET status='superseded' WHERE customer_id=?", (customer_id,))
+            chosen = next((r for r in rows if r['status'] == 'approved' or r['approved_at']), rows[-1]) if active else rows[-1]
+            db.execute("UPDATE portal_registrations SET status=? WHERE id=?", (status, chosen['id']))
+
+        elif not active:
+            registrations.record_pending_registration(customer_id, customer['branch_id'],
+                f'RESTORED-{customer_id}', customer['name'], customer['email'], customer['phone'], commit=False)
+        fields = raw_custom_fields_for(customer)
+        history = fields.get('lifecycle_history')
+        if not isinstance(history, list):
+            history = []
+        restored_at = now()
+        restored_by = current_session_user_id()
+        history.append({key: customer[key] for key in (
+            'lifecycle_status', 'lifecycle_changed_at', 'lifecycle_changed_by_user_id',
+            'lifecycle_reason', 'lifecycle_source')})
+        history.append({'action': 'restore', 'at': restored_at, 'by_user_id': restored_by, 'destination': status})
+        fields['lifecycle_history'] = history
+        db.execute("UPDATE customers SET lifecycle_status='active', lifecycle_changed_at=?, "
+                   "lifecycle_changed_by_user_id=?, lifecycle_reason='Restored from deleted', lifecycle_source='staff', "
+                   "custom_fields_json=?, source_system=CASE WHEN ? AND source_system='portal_pending' THEN 'portal' ELSE source_system END WHERE id=?",
+                   (restored_at, restored_by, json.dumps(fields), int(active), customer_id))
+    _clear_suspect_cache()
+    return 'Active' if active else 'Awaiting Verification'
+
+
+def permanently_delete_customer(customer_id):
+    """Erase only an eligible deleted identity, never cascade business/audit history."""
+    from app.db import write_transaction
+    with write_transaction():
+        _lock_deleted_customer(customer_id)
+        db = get_db()
+        for table in ('orders', 'customer_credits', 'legacy_customer_balances',
+                      'legacy_balance_payments', 'prepaid_fundings', 'consent_records'):
+            if db.execute(f'SELECT 1 FROM {table} WHERE customer_id=? LIMIT 1', (customer_id,)).fetchone():
+                raise ValueError("Permanent deletion blocked: customer has business or protected audit history. Restore or retain the record instead.")
+        # Explicit children also work when a remote connection has FK enforcement disabled.
+        db.execute("DELETE FROM portal_submission_claims WHERE customer_id=? OR registration_id IN "
+                   "(SELECT id FROM portal_registrations WHERE customer_id=?)", (customer_id, customer_id))
+        for table in ('portal_registrations', 'vehicles'):
+            db.execute(f'DELETE FROM {table} WHERE customer_id=?', (customer_id,))
+        db.execute("DELETE FROM customers WHERE id=?", (customer_id,))
+    _clear_suspect_cache()
+    return True
 
 
 def _client_verified_value(form):

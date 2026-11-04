@@ -88,7 +88,7 @@
       {% include "admin/customers/_pending_registrations_queue.html" %}
     {% else %}
       <h2>Deleted &amp; Archived</h2>
-      <p>Retained customer records and history. Permanently deleted past records without recoverable details cannot be shown.</p>
+      <p>Open a deleted customer to Restore or Permanently delete. Business and protected audit history cannot be permanently deleted. Permanently deleted past records without recoverable details cannot be shown.</p>
     {% endif %}
     <section class="metrics customers-metrics">
       <div class="metric-card"><small>Total customers</small><b>{{ counts.total }}</b></div>
