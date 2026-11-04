@@ -78,7 +78,8 @@ def _submitted_customer_values(form):
 #   * orders_to_date            = COUNT of those orders whose payment_status is
 #                                 paid/overpaid
 #   * customer_credit_balance   = grouped active customer_credits
-#   * legacy_balance            = grouped active legacy_customer_balances
+#   * legacy_balance            = grouped active legacy_customer_balances, net of
+#                                 any noncash write-off (ABI-341953292)
 # ``customers`` is kept as the table name (not an alias) so the shared
 # ``pending_exclusion_clause`` keeps deleted self-registrations hidden.
 _CUSTOMER_PICKER_COLUMNS = """
@@ -116,10 +117,16 @@ _CUSTOMER_PICKER_JOINS = """
             FROM customer_credits WHERE status = 'active' GROUP BY customer_id
         ) credit_totals ON credit_totals.customer_id = customers.id
         LEFT JOIN (
-            SELECT customer_id, SUM(amount_due - settled_amount) AS legacy_balance
-            FROM legacy_customer_balances
-            WHERE status = 'active' AND amount_due > settled_amount
-            GROUP BY customer_id
+            SELECT l.customer_id, SUM(l.amount_due - COALESCE(l.settled_amount, 0)
+                                       - COALESCE(w.writeoff_amount, 0)) AS legacy_balance
+            FROM legacy_customer_balances l
+            LEFT JOIN (
+                SELECT legacy_balance_id, SUM(amount) AS writeoff_amount
+                FROM legacy_balance_writeoffs GROUP BY legacy_balance_id
+            ) w ON w.legacy_balance_id = l.id
+            WHERE l.status = 'active'
+              AND l.amount_due - COALESCE(l.settled_amount, 0) - COALESCE(w.writeoff_amount, 0) > 0
+            GROUP BY l.customer_id
         ) legacy_totals ON legacy_totals.customer_id = customers.id
 """
 
@@ -172,7 +179,14 @@ def _customer_summary_by_id(customer_id, *, allow_retained=False):
                (SELECT COALESCE(SUM(o.total - COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id AND p.status='paid' AND COALESCE(p.deleted_at,'')='' AND LOWER(COALESCE(p.method,'')) <> 'account'), 0)), 0)
                 FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived')) AS previous_orders_balance,
                (SELECT COALESCE(SUM(cc.amount), 0) FROM customer_credits cc WHERE cc.customer_id = customers.id AND cc.status = 'active') AS customer_credit_balance,
-               (SELECT COALESCE(SUM(l.amount_due - l.settled_amount), 0) FROM legacy_customer_balances l WHERE l.customer_id = customers.id AND l.status = 'active' AND l.amount_due > l.settled_amount) AS legacy_balance,
+               (SELECT COALESCE(SUM(l.amount_due - COALESCE(l.settled_amount, 0)
+                        - COALESCE((SELECT SUM(wo.amount) FROM legacy_balance_writeoffs wo
+                                    WHERE wo.legacy_balance_id = l.id), 0)), 0)
+                FROM legacy_customer_balances l
+                WHERE l.customer_id = customers.id AND l.status = 'active'
+                  AND l.amount_due - COALESCE(l.settled_amount, 0)
+                      - COALESCE((SELECT SUM(wo.amount) FROM legacy_balance_writeoffs wo
+                                  WHERE wo.legacy_balance_id = l.id), 0) > 0) AS legacy_balance,
                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = customers.id AND o.status NOT IN ('canceled','cancelled','archived') AND o.payment_status IN ('paid','overpaid')) AS orders_to_date
         FROM customers
         WHERE id = ?{'' if allow_retained else pending_exclusion_clause("customers", allow_pending=True)}

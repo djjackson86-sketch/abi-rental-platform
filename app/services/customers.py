@@ -8,6 +8,7 @@ from flask import g, has_request_context, session
 
 from app.db import get_db, now
 from app.services.access import current_session_user_id, is_main_session, session_active_branch_id, session_primary_branch_id
+from app.services.legacy_balances import legacy_balance_writeoffs
 from app.services.payments import _active_payment_clause, normalise_payment_date_filter
 from app.services.portal_registrations import pending_exclusion_clause
 from app.services.settings import get_company_settings
@@ -1442,10 +1443,13 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
     activity = []
     opening_invoiced = 0.0
     opening_paid = 0.0
+    opening_writeoff = 0.0
     invoiced_total = 0.0
     paid_total = 0.0
+    writeoff_total = 0.0
     lifetime_invoiced = 0.0
     lifetime_paid = 0.0
+    lifetime_writeoff = 0.0
 
     for row in invoice_rows:
         amount = _statement_money(row["total"])
@@ -1529,7 +1533,17 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
           AND COALESCE(status, 'active') = 'active'
           AND COALESCE(deleted_at, '') = ''
     """, (customer_id,)).fetchall()
+    # Ticket ABI-341953292: an approved noncash write-off of imported debt is its
+    # own audit record, not a receipt. The statement keeps the imported debt whole
+    # and prints the write-off as a separate credit, so a reader can see what was
+    # owed and that the business chose not to collect it. Grouped per imported row
+    # because that row's own date decides whether the debt is in range or opening.
+    writeoffs_by_balance = {}
+    for row in legacy_balance_writeoffs(customer_id):
+        writeoffs_by_balance.setdefault(row['legacy_balance_id'], []).append(row)
+
     legacy_balances = []
+    legacy_writeoffs = []
     legacy_total = 0.0
     for row in legacy_rows:
         # Use the source order date, then source creation date. Undated imports
@@ -1541,25 +1555,37 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         # already-settled portion so existing receipts still offset it exactly;
         # collected rows continue to carry the full imported debt as before.
         waived = row['status'] == 'waived'
-        amount = _statement_money(row['settled_amount'] if waived else row['amount_due'])
+        balance_writeoffs = writeoffs_by_balance.get(row['id']) or []
+        if balance_writeoffs:
+            # ABI-341953292: when the waiver came from an approved noncash
+            # write-off, keep the WHOLE imported debt on the statement and let
+            # the write-off credit below clear it. This is the audit trail the
+            # older bare-waiver shortcut never had.
+            amount = _statement_money(row['amount_due'])
+        else:
+            amount = _statement_money(row['settled_amount'] if waived else row['amount_due'])
         lifetime_invoiced += amount
         if date_from and day < date_from:
             opening_invoiced += amount
-            continue
-        if date_to and day > date_to:
-            continue
-        legacy_total += amount
-        entry = {
-            'date': day, 'type': 'Legacy balance',
-            'detail': str(row['source_order_number'] or 'Unnumbered')
-                      + (' (import date)' if not source_day else '')
-                      + (' (unpaid remainder waived)' if waived else ''),
-            'amount': amount, 'amount_display': _statement_money_display(amount),
-            'type_rank': STATEMENT_ACTIVITY_INVOICE_RANK,
-            'source_kind': 'legacy_balance', 'source_id': row['id'],
-        }
-        legacy_balances.append(entry)
-        activity.append(entry)
+        elif not (date_to and day > date_to):
+            legacy_total += amount
+            detail = str(row['source_order_number'] or 'Unnumbered')
+            if not source_day:
+                detail += ' (import date)'
+            if waived and not balance_writeoffs:
+                detail += ' (unpaid remainder waived)'
+            entry = {
+                'date': day, 'type': 'Legacy balance',
+                'detail': detail,
+                'amount': amount, 'amount_display': _statement_money_display(amount),
+                'type_rank': STATEMENT_ACTIVITY_INVOICE_RANK,
+                'source_kind': 'legacy_balance', 'source_id': row['id'],
+            }
+            legacy_balances.append(entry)
+            activity.append(entry)
+        # A write-off is dated by its own approval date, not the debt's date, so
+        # it is collected here and filtered against the range further down.
+        legacy_writeoffs.extend((row, writeoff) for writeoff in balance_writeoffs)
 
     for row in legacy_receipts:
         day = _statement_day(row['paid_at'])
@@ -1590,6 +1616,39 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
             'is_credit': True,
             'type_rank': STATEMENT_ACTIVITY_PAYMENT_RANK, 'source_id': row['id'],
         })
+
+    # Ticket ABI-341953292: the noncash write-off rows. They read as credits in
+    # the activity table but are NOT payments: ``payments``/``paid_total`` stay
+    # money actually collected, and the write-off is subtracted on its own line
+    # of the balance arithmetic (opening, period and lifetime).
+    for row, writeoff in legacy_writeoffs:
+        amount = _statement_money(writeoff['amount'])
+        lifetime_writeoff += amount
+        day = (_statement_day(writeoff['writeoff_date'])
+               or _statement_day(writeoff['created_at']))
+        if date_from and day < date_from:
+            opening_writeoff += amount
+            continue
+        if date_to and day > date_to:
+            continue
+        writeoff_total += amount
+        reason = str(writeoff['reason'] or '').strip()
+        ticket = str(writeoff['ticket_id'] or '').strip()
+        detail_parts = [str(row['source_order_number'] or 'Unnumbered')]
+        if ticket:
+            detail_parts.append(f'Ticket {ticket}')
+        if reason:
+            detail_parts.append(reason)
+        activity.append({
+            'date': day, 'type': 'Legacy write-off',
+            'detail': ' · '.join(detail_parts),
+            'amount': amount,
+            'amount_display': _statement_signed_money_display(-amount),
+            # A write-off takes the debt off the balance without cash moving.
+            'is_credit': True,
+            'type_rank': STATEMENT_ACTIVITY_PAYMENT_RANK,
+            'source_kind': 'legacy_writeoff', 'source_id': writeoff['id'],
+        })
     payments.sort(key=lambda item: (item['date'], item.get('source_kind', 'current')))
 
     # Ticket ABI-341953086: the statement prints ONE chronological activity table
@@ -1601,11 +1660,16 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
     activity.sort(key=lambda item: (item["date"], item["type_rank"],
                                     item.get("source_kind", "current"), item["source_id"]))
 
-    opening_balance = round(opening_invoiced - opening_paid, 2)
+    opening_balance = round(opening_invoiced - opening_paid - opening_writeoff, 2)
     invoiced_total = round(invoiced_total, 2)
     paid_total = round(paid_total, 2)
     legacy_total = round(legacy_total, 2)
-    closing_balance = round(opening_balance + invoiced_total + legacy_total - paid_total, 2)
+    writeoff_total = round(writeoff_total, 2)
+    # Ticket ABI-341953292: a noncash write-off closes debt without money being
+    # received, so it is subtracted here — and never inside ``paid_total``.
+    closing_balance = round(opening_balance + invoiced_total + legacy_total
+                            - paid_total - writeoff_total, 2)
+    outstanding_balance = round(lifetime_invoiced - lifetime_paid - lifetime_writeoff, 2)
 
     # Ticket ABI-341953265: every activity row carries the balance it leaves
     # behind (the running total from the statement's opening balance). Invoices
@@ -1702,13 +1766,15 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         "opening_balance": opening_balance,
         "invoiced_total": invoiced_total,
         "paid_total": paid_total,
+        "writeoff_total": writeoff_total,
         "closing_balance": closing_balance,
-        "outstanding_balance": round(lifetime_invoiced - lifetime_paid, 2),
+        "outstanding_balance": outstanding_balance,
         "opening_balance_display": _statement_money_display(opening_balance),
         "invoiced_total_display": _statement_money_display(invoiced_total),
         "paid_total_display": _statement_money_display(paid_total),
+        "writeoff_total_display": _statement_money_display(writeoff_total),
         "closing_balance_display": _statement_money_display(closing_balance),
-        "outstanding_balance_display": _statement_money_display(lifetime_invoiced - lifetime_paid),
+        "outstanding_balance_display": _statement_money_display(outstanding_balance),
         "facility": facility,
         "facility_enabled": facility["enabled"],
         "facility_limit_display": _statement_money_display(facility["limit"]),

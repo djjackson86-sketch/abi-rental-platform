@@ -157,22 +157,24 @@
   {% if legacy_balance.imported_total > 0 %}
   <article class="panel customer-orders-card legacy-balance-card" id="legacy-balance">
     <div class="panel-title"><h2>Legacy balance from old system</h2>
-      {% if legacy_balance.active_count %}<span class="badge status-payment_due">{{ legacy_balance.active_count }} unpaid old order{{ '' if legacy_balance.active_count == 1 else 's' }}</span>{% else %}<span class="badge status-paid">Settled</span>{% endif %}
+      {% if legacy_balance.active_count %}<span class="badge status-payment_due">{{ legacy_balance.active_count }} unpaid old order{{ '' if legacy_balance.active_count == 1 else 's' }}</span>{% elif legacy_balance.writeoff_total > 0 %}<span class="badge status-paid">Written off (noncash)</span>{% else %}<span class="badge status-paid">Settled</span>{% endif %}
     </div>
     <div class="legacy-balance-summary">
       <div class="legacy-balance-total">
         <small>Still outstanding</small>
         <strong class="{{ 'balance-owing' if legacy_balance.total > 0 else 'balance-credit' }}">R{{ '%.2f'|format(legacy_balance.total) }}</strong>
         {% if legacy_balance.settled_total > 0 %}<span class="legacy-balance-settled">R{{ '%.2f'|format(legacy_balance.settled_total) }} of R{{ '%.2f'|format(legacy_balance.imported_total) }} settled</span>{% endif %}
+        {% if legacy_balance.writeoff_total > 0 %}<span class="legacy-balance-settled legacy-writeoff-total">R{{ '%.2f'|format(legacy_balance.writeoff_total) }} written off — noncash, no money received</span>{% endif %}
       </div>
       <p>Balance-only import from the previous Sano system. Old order numbers are the source reference and the imported amount is never edited.</p>
     </div>
     <div class="customer-order-list legacy-balance-list">
       {% for entry in legacy_balance.entries %}
         <div class="customer-order-row legacy-balance-row">
-          <span><strong>Old order #{{ entry.source_order_number }}</strong><small>{% if entry.source_started_at %}{{ entry.source_started_at[:10] }} · {% endif %}{{ entry.source_payment_status|replace('_', ' ')|title }} · {{ entry.source_order_status }}</small></span>
+          <span><strong>Old order #{{ entry.source_order_number }}</strong><small>{% if entry.source_started_at %}{{ entry.source_started_at[:10] }} · {% endif %}{{ entry.source_payment_status|replace('_', ' ')|title }} · {{ entry.source_order_status }}</small>
+            {% if entry.writeoff_amount > 0 %}<small class="legacy-writeoff-note">Noncash writeoff{% if entry.writeoff_date %} {{ entry.writeoff_date }}{% endif %}{% if entry.writeoff_ticket_id %} · {{ entry.writeoff_ticket_id }}{% endif %}{% if entry.writeoff_reason %} · {{ entry.writeoff_reason }}{% endif %}</small>{% endif %}</span>
           <span class="legacy-balance-money"><small>Total R{{ '%.2f'|format(entry.source_total) }} · Paid then R{{ '%.2f'|format(entry.source_paid) }}{% if entry.invoice_count %} · {{ entry.invoice_count }} invoice{{ '' if entry.invoice_count == 1 else 's' }}{% endif %}</small></span>
-          <b class="{{ 'balance-owing' if entry.outstanding > 0 else 'balance-credit' }}">{% if entry.status == 'waived' %}Waived{% elif entry.outstanding > 0 %}R{{ '%.2f'|format(entry.outstanding) }}{% else %}Settled{% endif %}</b>
+          <b class="{{ 'balance-owing' if entry.outstanding > 0 else 'balance-credit' }}">{% if entry.status == 'waived' %}{% if entry.writeoff_amount > 0 %}Waived — noncash writeoff{% else %}Waived{% endif %}{% elif entry.outstanding > 0 %}R{{ '%.2f'|format(entry.outstanding) }}{% else %}Settled{% endif %}</b>
         </div>
       {% endfor %}
     </div>

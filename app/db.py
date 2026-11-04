@@ -676,6 +676,28 @@ CREATE TABLE IF NOT EXISTS portal_submission_claims (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_submission_claims_key
     ON portal_submission_claims(scope, request_key);
 
+-- Ticket ABI-341953292: noncash write-off of imported legacy debt. A write-off
+-- is not a receipt: it never creates a payment or cash row. The original import
+-- (amount_due) and any money already collected (settled_amount) stay untouched;
+-- each write-off is its own audited row, unique per (ticket, imported row) so a
+-- replayed approval cannot double-write.
+CREATE TABLE IF NOT EXISTS legacy_balance_writeoffs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    legacy_balance_id INTEGER NOT NULL REFERENCES legacy_customer_balances(id) ON DELETE CASCADE,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    amount REAL NOT NULL CHECK (amount > 0),
+    writeoff_date TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    ticket_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(ticket_id, legacy_balance_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_legacy_balance_writeoffs_balance
+    ON legacy_balance_writeoffs(legacy_balance_id);
+CREATE INDEX IF NOT EXISTS idx_legacy_balance_writeoffs_customer
+    ON legacy_balance_writeoffs(customer_id);
+
 -- Hot-path indexes (ABI-341953196). The order/payment/document screens join
 -- children back to their parent on every list and picker render. Without these
 -- the remote libSQL database bills a full child scan per parent: the new-order
@@ -1238,6 +1260,23 @@ def run_migrations(db):
     # infer their collecting branch from later orders or today's operator.
     ensure_column(db, "legacy_balance_payments", "branch_id", "INTEGER REFERENCES branches(id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_balance_payments_customer ON legacy_balance_payments(customer_id)")
+    # Noncash write-off of imported legacy debt (ticket ABI-341953292). Additive:
+    # a new, empty table on an existing database, so no client's balance changes
+    # until a write-off is explicitly recorded. The unique key makes an approval
+    # replay idempotent, and the CHECK keeps every write-off positive.
+    db.execute("""CREATE TABLE IF NOT EXISTS legacy_balance_writeoffs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        legacy_balance_id INTEGER NOT NULL REFERENCES legacy_customer_balances(id) ON DELETE CASCADE,
+        customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+        amount REAL NOT NULL CHECK (amount > 0),
+        writeoff_date TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        ticket_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(ticket_id, legacy_balance_id)
+    )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_balance_writeoffs_balance ON legacy_balance_writeoffs(legacy_balance_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_legacy_balance_writeoffs_customer ON legacy_balance_writeoffs(customer_id)")
 
     # --- POPIA consent records (additive) ------------------------------------
     # A new, empty table on an existing database: every client simply has no consent
