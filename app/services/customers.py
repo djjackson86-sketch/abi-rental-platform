@@ -1383,14 +1383,26 @@ def _statement_setting(settings, key, default=""):
 
 
 def _statement_branch(customer):
-    """The customer's own branch row, when the record claims one."""
-    try:
-        branch_id = customer["branch_id"]
-    except (KeyError, IndexError, TypeError):
-        return None
+    """Prefer the customer branch; otherwise use an unambiguous invoice issuer.
+
+    Imported customers may have no branch even though their invoices do. Never
+    substitute the signed-in user's branch or pick one of several issuers.
+    """
+    branch_id = _statement_setting(customer, "branch_id", "")
+    db = get_db()
     if not branch_id:
-        return None
-    return get_db().execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
+        issuers = db.execute(
+            """SELECT DISTINCT o.collect_branch_id AS branch_id
+               FROM documents d JOIN orders o ON o.id = d.order_id
+               WHERE o.customer_id = ? AND d.document_type = 'invoice'
+                 AND d.status = 'finalized'
+                 AND LOWER(COALESCE(o.status, '')) NOT IN (?, ?)""",
+            (customer["id"], *STATEMENT_EXCLUDED_ORDER_STATUSES),
+        ).fetchall()
+        if len(issuers) != 1 or not issuers[0]["branch_id"]:
+            return None
+        branch_id = issuers[0]["branch_id"]
+    return db.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
 
 
 def customer_statement(customer_id, date_from="", date_to="", generated_at=None):
