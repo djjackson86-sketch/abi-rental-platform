@@ -1585,6 +1585,39 @@ def customer_statement_pdf_bytes(view):
         page['text'].append(_pdf_right_text(STATEMENT_SUMMARY_RIGHT, line_y, amount, size=8.8, font='F2' if bold else 'F1'))
     page['y'] = summary_y - summary_height
 
+    banking = view.get('banking_details') or {}
+    bank_lines = []
+    for label, key in (
+        ('Bank', 'bank_name'), ('Account holder', 'bank_account_name'),
+        ('Account number', 'bank_account_number'), ('Branch code', 'bank_branch_code'),
+        ('Account type', 'bank_account_type'), ('Reference', 'bank_reference_note'),
+    ):
+        value = str(banking.get(key) or '').strip()
+        if value:
+            bank_lines.extend(_pdf_wrap_hard(
+                f'{label}: {value}', 8.5, STATEMENT_RIGHT - STATEMENT_LEFT))
+    if bank_lines:
+        # Keep ordinary banking blocks whole; exceptionally long saved notes
+        # continue on numbered pages rather than truncating payment instructions.
+        leading = 13
+        bank_y = page['y'] - STATEMENT_SECTION_GAP
+        block_height = len(bank_lines) * leading
+        if bank_y - block_height < STATEMENT_BOTTOM:
+            page = _statement_new_page(pages, logo_command)
+            bank_y = page['y'] - STATEMENT_SECTION_GAP
+        page['text'].append(_pdf_text_command(
+            STATEMENT_LEFT, bank_y, 'Banking details', size=8.5, font='F2'))
+        for line in bank_lines:
+            bank_y -= leading
+            if bank_y < STATEMENT_BOTTOM:
+                page = _statement_new_page(pages, logo_command)
+                bank_y = page['y'] - STATEMENT_SECTION_GAP
+                page['text'].append(_pdf_text_command(
+                    STATEMENT_LEFT, bank_y, 'Banking details (continued)', size=8.5, font='F2'))
+                bank_y -= leading
+            page['text'].append(_pdf_text_command(STATEMENT_LEFT, bank_y, line, size=8.5))
+        page['y'] = bank_y - leading
+
     total_pages = len(pages)
     streams = []
     for page_index, statement_page in enumerate(pages, start=1):

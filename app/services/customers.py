@@ -1749,6 +1749,12 @@ def customer_statement(customer_id, date_from="", date_to="", generated_at=None)
         "issuer_vat_number": issuer_vat_number,
         "issuer_company_reg_no": issuer_company_reg_no,
         "issuer_address": issuer_address,
+        # Payment instructions belong only to this customer's statement branch.
+        "banking_details": {
+            key: _statement_setting(branch, key, "")
+            for key in ("bank_name", "bank_account_name", "bank_account_number",
+                        "bank_branch_code", "bank_account_type", "bank_reference_note")
+        },
         "date_from": date_from,
         "date_to": date_to,
         "period_label": period_label,
