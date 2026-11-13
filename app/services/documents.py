@@ -12,7 +12,7 @@ from app.services.payments import payment_total, payment_total_sql
 DOCUMENT_TYPES = {
     "quote": {"label": "Quote", "prefix": "QUO"},
     "contract": {"label": "Contract", "prefix": "CON"},
-    "invoice": {"label": "Invoice", "prefix": "INV"},
+    "invoice": {"label": "Tax Invoice", "prefix": "INV"},
     "packing_slip": {"label": "Packing slip", "prefix": "PCK"},
 }
 

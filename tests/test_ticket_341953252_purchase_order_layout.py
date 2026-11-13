@@ -23,7 +23,7 @@ def test_inline_reference_layout_and_persistence(client, app, status, value):
         return
     assert b'<p class="invoice-purchase-order">Purchase Order: ' + value.encode() + b'</p>' in page
     label = next(r for r in runs if r['text'].startswith('Purchase Order:'))
-    heading = next(r for r in runs if r['text'] in ['Invoice', 'Proforma Invoice'])
+    heading = next(r for r in runs if r['text'] in ['Tax Invoice', 'Proforma Invoice'])
     order = next(r for r in runs if r['text'] == 'Order')
     assert label['x'] == heading['x'] == order['x'] == 455
     assert label['size'] == heading['size']

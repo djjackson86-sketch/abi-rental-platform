@@ -3530,7 +3530,7 @@ def test_invoice_finalize_assigns_number_once(client, app):
     assert finalized.status_code == 200
     assert b'Invoice finalized and numbered' in finalized.data
     assert b'Finalize invoice' not in finalized.data
-    assert b'Invoice' in finalized.data
+    assert b'Tax Invoice' in finalized.data
     assert b'INV-10145' in finalized.data
 
     again = client.post('/documents/1/finalize', follow_redirects=True)
@@ -3727,7 +3727,7 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
         b'INV-10145',
         b'Invoice date:',
         invoice_date.encode(),
-        b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj',
+        b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Tax Invoice) Tj',
         b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj',
         # left column aligns with the logo ARTWORK (x=26.69), not the padded image box
         b'/F2 8.5 Tf 1 0 0 1 26.69 625.00 Tm (Bill To:) Tj',
@@ -3800,10 +3800,10 @@ def test_invoice_uses_collection_branch_issuer_and_bank_details(client, app):
     assert TOTAL_INCL_COLUMN_X == 470
     assert b'(R400.00) Tj' in pdf and b'(Total with VAT) Tj' in pdf
     assert pdf.index(b'Order: ORD-10145') < pdf.index(b'Pickup: 2026-07-01') < pdf.index(b'Return: 2026-07-02') < pdf.index(b'Rental days 2')
-    assert pdf.index(b'Invoice') < pdf.index(b'INV-10145') < pdf.index(b'Invoice date:') < pdf.index(invoice_date.encode()) < pdf.index(b'Order: ORD-10145') < pdf.index(b'Bill To:')
+    assert pdf.index(b'Tax Invoice') < pdf.index(b'INV-10145') < pdf.index(b'Tax Invoice date:') < pdf.index(invoice_date.encode()) < pdf.index(b'Order: ORD-10145') < pdf.index(b'Bill To:')
     assert pdf.index(b'Wonderboom') < pdf.index(b'+27 12 999 0000') < pdf.index(b'wonderboom@example.test') < pdf.index(b'22 Wonderboom Avenue')
     assert pdf.index(b'Bill To:') < pdf.index(b'Order Customer')
-    assert pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Invoice) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj')
+    assert pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 760.00 Tm (Tax Invoice) Tj') < pdf.index(b'/F2 8.5 Tf 1 0 0 1 455.00 625.00 Tm (Order) Tj')
     assert pdf.index(b'(Total without VAT) Tj') < pdf.index(b'(VAT) Tj') < pdf.index(b'(Total with VAT) Tj') < pdf.index(b'(Banking details) Tj')
     assert pdf.index(b'Thank you for your business.') < pdf.index(b'Banking details')
     assert b'0.08 0.39 1 rg' not in pdf

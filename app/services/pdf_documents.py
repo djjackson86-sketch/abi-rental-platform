@@ -1747,7 +1747,8 @@ def document_pdf_bytes(document_id):
 
 
 def document_pdf_filename(document):
-    prefix = label_for(document['document_type']).upper().replace(' ', '-')
+    # Keep existing download names stable when the display label changes.
+    prefix = 'INVOICE' if document['document_type'] == 'invoice' else label_for(document['document_type']).upper().replace(' ', '-')
     number = (document['number'] or '').strip() or 'PROFORMA'
     return f'{prefix}-{number}.pdf'
 
