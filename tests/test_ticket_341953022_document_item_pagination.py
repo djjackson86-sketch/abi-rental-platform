@@ -475,8 +475,8 @@ def test_invoice_with_vehicle_details_and_eight_items_prints_cleanly(client, app
     pages = pdf_pages(download_pdf(client, documents['invoice']))
     drawn_text = [run['text'] for page in pages for run in page['runs']]
     assert 'Vehicle Make: Toyota Quantum' in drawn_text
-    assert 'Vehicle Color: White' in drawn_text
-    assert 'Veh Reg No: LKL 455 NW' in drawn_text
+    assert 'Vehicle Colour: White' in drawn_text
+    assert 'Vehicle Reg No: LKL 455 NW' in drawn_text
     assert 'Alternative Contact Name: Sbu' in drawn_text
     assert [row['name'] for row in all_rows(pages)] == [item_name(index) for index in range(1, 9)]
     assert summary_amount(pages, 'Amount due') is not None

@@ -918,21 +918,12 @@ def _pdf_objects(stream, image_object=None):
     return bytes(out)
 
 
-# Labels match the customer form's wording where the field already existed (make / color / reg);
-# the rest follow the vehicle form's own field names.
+# Customer documents deliberately show only these vehicle fields (ABI-341953296).
+# Keep the stored/entry fields unchanged; this is a presentation-only whitelist.
 MAIN_VEHICLE_FIELDS = (
     ('vehicle_make', 'Vehicle Make'),
-    ('vehicle_model', 'Vehicle Model'),
-    ('vehicle_color', 'Vehicle Color'),
-    ('vehicle_type', 'Vehicle Type'),
-    ('vehicle_reg_no', 'Veh Reg No'),
-    ('vehicle_registration_number', 'NaTIS registration number'),
-    ('vehicle_vin', 'VIN'),
-    ('vehicle_engine_number', 'Engine number'),
-    ('vehicle_licence_number', 'Disk licence number'),
-    ('vehicle_licence_disk_expiry', 'Licence disk expiry'),
-    ('vehicle_registering_authority', 'Registering authority'),
-    ('vehicle_control_number', 'Control number'),
+    ('vehicle_color', 'Vehicle Colour'),
+    ('vehicle_reg_no', 'Vehicle Reg No'),
 )
 
 

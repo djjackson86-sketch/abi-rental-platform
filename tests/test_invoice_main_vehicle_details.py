@@ -1,9 +1,9 @@
 """Invoice PDF main-vehicle display (customer custom fields, not extra vehicles).
 
 Confirms the invoice/quote PDF prints the MAIN vehicle held on the customer
-record (``custom_fields_json`` keys ``vehicle_*``) as a labelled block, expanding
-the old three-line legacy block (Vehicle Make / Vehicle Color / Veh Reg No) to
-every non-blank captured field, and that the block never leaks a row from the
+record (``custom_fields_json`` keys ``vehicle_*``) as a three-field whitelist
+(Vehicle Make / Vehicle Colour / Vehicle Reg No), and that the block never leaks
+other stored vehicle fields or a row from the
 per-client ``vehicles`` table (which is where ADDITIONAL vehicles live).
 
 Layout invariants are checked on the drawn PDF content streams, page by page - a
@@ -44,17 +44,8 @@ ALL_MAIN_VEHICLE_FIELDS = {
 
 EXPECTED_LINES = [
     'Vehicle Make: Toyota Hilux',
-    'Vehicle Model: Hilux 2.4GD-6',
-    'Vehicle Color: Arctic White',
-    'Vehicle Type: LDV',
-    'Veh Reg No: CA 123-456',
-    'NaTIS registration number: BB33CD',
-    'VIN: AHTBB3CD500123456',
-    'Engine number: 2GD9174456',
-    'Disk licence number: 5120367QP4HD',
-    'Licence disk expiry: 2027-03-31',
-    'Registering authority: City of Tshwane',
-    'Control number: CN-778899',
+    'Vehicle Colour: Arctic White',
+    'Vehicle Reg No: CA 123-456',
 ]
 
 
@@ -158,7 +149,7 @@ def _render(document, items):
 def test_helper_reads_only_decoded_custom_fields_and_skips_blanks():
     lines = _main_vehicle_lines({'vehicle_make': 'Toyota Hilux', 'vehicle_model': '',
                                  'vehicle_reg_no': 'CA 123-456', 'vehicle_vin': '   '})
-    assert lines == ['Vehicle Make: Toyota Hilux', 'Veh Reg No: CA 123-456']
+    assert lines == ['Vehicle Make: Toyota Hilux', 'Vehicle Reg No: CA 123-456']
     # An unrelated key that happens to sit in the same blob is never printed here.
     assert _main_vehicle_lines({'vat_number': '4990123456'}) == []
     assert _main_vehicle_lines({}) == []
@@ -172,11 +163,11 @@ def test_legacy_three_vehicle_lines_keep_their_labels(app):
     with app.app_context():
         texts = _drawn_texts(_render(_document_with_fields(fields), _items(2)))
     assert 'Vehicle Make: Toyota Quantum' in texts
-    assert 'Vehicle Color: White' in texts
-    assert 'Veh Reg No: LKL 455 NW' in texts
+    assert 'Vehicle Colour: White' in texts
+    assert 'Vehicle Reg No: LKL 455 NW' in texts
 
 
-def test_every_nonblank_main_vehicle_field_is_printed(app):
+def test_only_whitelisted_main_vehicle_fields_are_printed(app):
     with app.app_context():
         texts = _drawn_texts(_render(_document_with_fields(dict(ALL_MAIN_VEHICLE_FIELDS)), _items(2)))
     for expected in EXPECTED_LINES:
@@ -188,24 +179,27 @@ def test_the_main_vehicle_block_prints_on_invoices_and_quotes(app, document_type
     with app.app_context():
         texts = _drawn_texts(_render(_document_with_fields(dict(ALL_MAIN_VEHICLE_FIELDS), document_type), _items(1)))
     assert 'Vehicle Make: Toyota Hilux' in texts
-    assert 'Control number: CN-778899' in texts
+    assert [text for text in texts if text.startswith('Vehicle ')] == EXPECTED_LINES
+    for key, value in ALL_MAIN_VEHICLE_FIELDS.items():
+        if key not in {'vehicle_make', 'vehicle_color', 'vehicle_reg_no'}:
+            assert value not in '\n'.join(texts)
 
 
 def test_blank_main_vehicle_fields_are_omitted_and_nothing_is_fabricated(app):
     fields = {'vehicle_make': 'Toyota Hilux', 'vehicle_reg_no': 'CA 123-456'}
     with app.app_context():
         texts = _drawn_texts(_render(_document_with_fields(fields), _items(1)))
-    for label in ('Vehicle Model', 'Vehicle Color', 'Vehicle Type', 'VIN', 'Engine number',
+    for label in ('Vehicle Model', 'Vehicle Colour', 'Vehicle Type', 'VIN', 'Engine number',
                   'NaTIS registration number', 'Disk licence number', 'Licence disk expiry',
                   'Registering authority', 'Control number'):
         assert not any(text.startswith(f'{label}:') for text in texts), f'{label} printed despite being blank'
     # the two that ARE set still print, and no vehicle line is blank-valued
     assert 'Vehicle Make: Toyota Hilux' in texts
-    assert 'Veh Reg No: CA 123-456' in texts
+    assert 'Vehicle Reg No: CA 123-456' in texts
 
 
 def test_rich_vehicle_block_does_not_cut_customer_info_or_line_items(app):
-    """12 vehicle fields + 3 alt contacts + 8 items: nothing is dropped or overlapped."""
+    """Extra stored vehicle fields cannot crowd out contacts or eight item rows."""
     fields = dict(ALL_MAIN_VEHICLE_FIELDS)
     fields.update({
         'alternative_contact_name': 'Sbu Mahlangu',
@@ -331,8 +325,8 @@ def test_invoice_shows_the_customer_main_vehicle_not_the_vehicles_table(client, 
 
     # the main vehicle from the customer's own fields is printed
     assert 'Vehicle Make: Toyota Hilux' in texts
-    assert 'Vehicle Model: Hilux 2.4GD-6' in texts
-    assert 'Veh Reg No: MAIN-123' in texts
+    assert 'Vehicle Model: Hilux 2.4GD-6' not in texts
+    assert 'Vehicle Reg No: MAIN-123' in texts
 
     # nothing from the extra `vehicles` table row appears anywhere
     joined = '\n'.join(texts)
