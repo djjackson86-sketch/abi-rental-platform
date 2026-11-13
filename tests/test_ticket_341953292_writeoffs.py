@@ -10,7 +10,7 @@ import pytest
 from test_legacy_customer_balances import app, client, login, seed_customer
 
 from app.db import get_db
-from app.routes.orders import _customer_summary_by_id, _customers
+from app.routes.orders import _customer_summary_by_id, _order_customer_summary
 from app.services.legacy_balances import (
     legacy_balance_summary,
     record_legacy_payment,
@@ -118,7 +118,7 @@ def test_writeoff_after_partial_payment_forgives_debt_without_a_receipt(app, cli
 
         # Both order-form balance paths stop counting the written-off debt.
         assert _customer_summary_by_id(ids["customer_id"])["legacy_balance"] == 0.0
-        picked = next(row for row in _customers() if row["id"] == ids["customer_id"])
+        picked = _order_customer_summary(ids["customer_id"])
         assert picked["legacy_balance"] == 0.0
 
         # Another customer's debt is completely untouched.

@@ -2,7 +2,7 @@ import pytest
 from app import create_app
 from app.db import get_db
 from app.services import customers, portal_registrations, portal_intake
-from app.routes.orders import _customers
+from app.routes.orders import search_order_customers
 
 @pytest.fixture
 def app(tmp_path):
@@ -16,7 +16,7 @@ def test_initial_portal_insert_is_hidden_even_without_queue_row(app):
         assert portal_registrations.is_pending(cid)
         assert not customers.list_customers()
         assert not customers.search_customers('Initial')
-        assert not _customers()
+        assert not search_order_customers('Initial')
         assert get_db().execute('SELECT COUNT(*) FROM portal_registrations').fetchone()[0]==0
 
 

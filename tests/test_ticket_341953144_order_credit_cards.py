@@ -7,7 +7,7 @@ import time
 import pytest
 
 from app.db import get_db
-from app.routes.orders import _customers, _customer_summary_by_id
+from app.routes.orders import _order_customer_summary, _customer_summary_by_id
 from app.services.credit_limits import outstanding_debt, ensure_credit_capacity
 
 spec = importlib.util.spec_from_file_location('card_helpers', Path(__file__).with_name('test_ticket_341953074_customer_credit_card.py'))
@@ -84,11 +84,11 @@ def test_payment_rules_retained_credit_and_single_query(app, client):
         queries = []
         db.set_trace_callback(queries.append)
         started = time.perf_counter()
-        summaries = _customers()
+        summary = _order_customer_summary(cid)
         elapsed = time.perf_counter() - started
         db.set_trace_callback(None)
         assert len(queries) == 1
-        summary = next(s for s in summaries if s['id'] == cid)
+
         assert summary['available_account_credit'] == 180
         assert outstanding_debt(cid) == 820
         assert summary['customer_credit_balance'] == 200
@@ -131,10 +131,10 @@ def test_real_browser_switch_clear_and_unmatched(app, client, viewport):
             page.goto(f'http://127.0.0.1:{server.server_port}/orders/new')
             assert page.locator('#account-credit-status').inner_text() == '—'
             assert page.locator('#customer-credit-value').inner_text() == '—'
-            options = page.locator('#customer-options option').evaluate_all('(els)=>els.map(e=>({id:e.dataset.id,value:e.value}))')
             for cid in [active, inactive, active]:
-                value = next(o['value'] for o in options if o['id'] == str(cid))
-                page.locator('#customer-search').fill(value)
+                page.locator('#customer-search').fill('Activated' if cid == active else 'Inactive')
+                page.locator(f'.customer-picker-option[data-customer-id="{cid}"]').click()
+                page.wait_for_function("document.querySelector('#customer-options option[data-summary]') !== null && document.getElementById('account-credit-status').textContent !== '—'")
                 assert page.locator('#customer-id').input_value() == str(cid)
                 if cid == active:
                     assert page.locator('#account-credit-amounts').is_visible()
@@ -155,8 +155,11 @@ def test_real_browser_switch_clear_and_unmatched(app, client, viewport):
             page.wait_for_function("document.getElementById('customer-id').value !== ''")
             inline_id = page.locator('#customer-id').input_value()
             assert page.locator('#account-credit-status').inner_text() == 'Not activated'
-            page.locator('#customer-search').fill(next(o['value'] for o in options if o['id'] == str(active)))
+            page.locator('#customer-search').fill('Activated')
+            page.locator(f'.customer-picker-option[data-customer-id="{active}"]').click()
             page.locator('#customer-search').fill('Browser Inline Customer')
+            page.locator(f'.customer-picker-option[data-customer-id="{inline_id}"]').click()
+            page.wait_for_function("document.getElementById('account-credit-status').textContent === 'Not activated'")
             assert page.locator('#customer-id').input_value() == inline_id
             assert page.locator('#account-credit-status').inner_text() == 'Not activated'
             assert page.locator('#customer-credit-card').count() == 1
