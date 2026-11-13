@@ -16,7 +16,7 @@ from app.services.customers import create_customer, customer_fields_changed, cus
 from app.services.portal_registrations import pending_exclusion_clause
 from app.services.branches import adjusted_pickup_time_for_branch, branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
-from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order
+from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id, user_can_access_order, user_can_module
 from app.services.pdf_documents import grouped_simple_lines_pdf_bytes
 from app.services.reports import started_orders_report_pdf_blocks
 
@@ -139,29 +139,112 @@ def _customer_picker_sql(where_sql="", tail=""):
     )
 
 
-def _customers():
+ORDER_CUSTOMER_SEARCH_MIN_CHARS = 2
+ORDER_CUSTOMER_SEARCH_MAX_CHARS = 80
+ORDER_CUSTOMER_SEARCH_LIMIT = 20
+
+
+def _order_customer_query(raw):
+    """The bounded search term for the order form's client picker.
+
+    Blank, one-character and over-long terms are refused/trimmed: a search is
+    never allowed to become a scan of the whole client book, and ``LIKE`` never
+    receives an unbounded pattern.
+    """
+    query = (raw or "").strip()[:ORDER_CUSTOMER_SEARCH_MAX_CHARS]
+    return query if len(query) >= ORDER_CUSTOMER_SEARCH_MIN_CHARS else ""
+
+
+def _like_escape(value):
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _order_customer_display(name, email):
+    display = name or ""
+    if email:
+        display += f" — {email}"
+    return display
+
+
+def search_order_customers(raw_query):
+    """Server-side, case-insensitive client search bounded to 20 rows.
+
+    The order form used to embed every client (5 034 on the live book) with its
+    full summary in one page — a 9.3 MB HTML document that OOM-killed the worker.
+    The picker now asks the server: this query selects identity columns only,
+    applies the *same* picker guards the whole-book query used (retired clients
+    are never candidates; deleted self-registrations stay hidden; pending
+    self-registrations may still be reserved for, exactly as before), and stops
+    at ``LIMIT 20``. No balances, order history or custom fields are read here —
+    those come from ``_customer_summary_by_id`` only after an explicit pick.
+    """
+    query = _order_customer_query(raw_query)
+    if not query:
+        return []
+    needle = _like_escape(query.lower())
+    contains = f"%{needle}%"
+    prefix = f"{needle}%"
     rows = get_db().execute(
-        # Ticket ABI-341953272: a retired (archived / deleted) client is never offered
-        # as a candidate for a NEW booking. The record and its order history stay fully
-        # reachable from the customer module and from the orders already raised for it;
-        # only this picker (and the server-side validation) excludes them.
-        _customer_picker_sql(
-            pending_exclusion_clause("customers", allow_pending=True)
-            + active_customer_clause("customers"),
-            " ORDER BY customers.name",
-        )
+        "SELECT customers.id, customers.name, customers.email, customers.phone"
+        " FROM customers WHERE 1=1"
+        + pending_exclusion_clause("customers", allow_pending=True)
+        + active_customer_clause("customers")
+        + " AND (LOWER(COALESCE(customers.name, '')) LIKE ? ESCAPE '\\'"
+        " OR LOWER(COALESCE(customers.email, '')) LIKE ? ESCAPE '\\'"
+        " OR LOWER(COALESCE(customers.phone, '')) LIKE ? ESCAPE '\\')"
+        " ORDER BY CASE WHEN LOWER(COALESCE(customers.name, '')) LIKE ? ESCAPE '\\'"
+        " THEN 0 ELSE 1 END, LOWER(COALESCE(customers.name, '')), customers.id"
+        " LIMIT ?",
+        (contains, contains, contains, prefix, ORDER_CUSTOMER_SEARCH_LIMIT),
     ).fetchall()
-    return [customer_summary_for(row) for row in rows]
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"] or "",
+            "email": row["email"] or "",
+            "display": _order_customer_display(row["name"], row["email"]),
+        }
+        for row in rows
+    ]
 
 
-def _selected_customer_summary(customers, selected_customer_id):
-    if not selected_customer_id:
-        return None
+def _order_customer_summary(customer_id, *, allow_retained=False):
+    """One client's summary by primary key — never the whole book."""
     try:
-        wanted = int(selected_customer_id)
+        wanted = int(customer_id)
     except (TypeError, ValueError):
         return None
-    return next((customer for customer in customers if customer["id"] == wanted), None)
+    if wanted <= 0:
+        return None
+    return _customer_summary_by_id(wanted, allow_retained=allow_retained)
+
+
+def _retained_customer_allowed(customer_id, order_id):
+    """True only when this exact client is already stored on that order.
+
+    The order form may keep showing a client who has since been archived or
+    deleted — but only for the order that already has them. A flag or id in the
+    query string is never taken at its word.
+    """
+    try:
+        wanted_order = int(order_id)
+    except (TypeError, ValueError):
+        return False
+    order = get_order(wanted_order)
+    if not order or not user_can_access_order(order):
+        return False
+    try:
+        stored = order["customer_id"]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return stored is not None and int(stored) == int(customer_id)
+
+
+def _require_order_customer_picker():
+    """Both order-form modules reach the picker; anything else is refused."""
+    if not (user_can_module(session, "orders") or user_can_module(session, "new_order")):
+        abort(403)
+
 
 
 def _customer_summary_by_id(customer_id, *, allow_retained=False):
@@ -379,6 +462,32 @@ def index():
     )
 
 
+@bp.get("/customer-search")
+@login_required
+def customer_search():
+    """Bounded client typeahead for the order form (identity columns only)."""
+    _require_order_customer_picker()
+    return jsonify({"ok": True, "customers": search_order_customers(request.args.get("q", ""))})
+
+
+@bp.get("/customer-summary/<int:customer_id>")
+@login_required
+def customer_summary(customer_id):
+    """One client's full summary after an explicit pick.
+
+    A retired (archived/deleted) client is returned only when the caller also
+    names the order that already stores them (``?order_id=``) — and that order is
+    fetched and access-checked server-side, so a crafted query string cannot
+    borrow the historical-retention allowance.
+    """
+    _require_order_customer_picker()
+    allow_retained = _retained_customer_allowed(customer_id, request.args.get("order_id"))
+    summary = _order_customer_summary(customer_id, allow_retained=allow_retained)
+    if not summary:
+        abort(404)
+    return jsonify({"ok": True, "customer": summary})
+
+
 @bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new():
@@ -473,8 +582,16 @@ def new():
     slot = next_time_slot(increment_minutes=15)
     default_branch = _scoped_default_branch_id()
     default_start_time = adjusted_pickup_time_for_branch(default_branch, slot)
-    customers = _customers()
-    selected_customer_summary = _selected_customer_summary(customers, selected_customer_id)
+    # The picker no longer embeds the client book: only the explicitly chosen
+    # client (query id / POST id / shop enquiry) is fetched, and a search term
+    # returns at most 20 identity rows for the no-JS result list.
+    selected_customer_summary = _order_customer_summary(selected_customer_id)
+    if selected_customer_summary is None:
+        selected_customer_id = ""
+    else:
+        selected_customer_id = str(selected_customer_summary["id"])
+    customer_search_query = _order_customer_query(request.args.get("q", "")) if request.method == "GET" else ""
+    customer_search_results = search_order_customers(customer_search_query) if customer_search_query else []
     if shop_prefill and selected_customer_summary:
         # Exact option label keeps the browser picker from clearing its selected ID.
         shop_prefill['customer_display'] = selected_customer_summary['display']
@@ -485,10 +602,14 @@ def new():
     return render_template(
         "admin/orders/form.html",
         settings=settings,
-        customers=customers,
+        customers=[],
         products=_products(),
         selected_customer_id=selected_customer_id,
         selected_customer_summary=selected_customer_summary,
+        customer_search_query=customer_search_query,
+        customer_search_results=customer_search_results,
+        customer_search_action=url_for("orders.new", enquiry_id=shop_enquiry_id) if shop_enquiry_id else url_for("orders.new"),
+        picker_order_id="",
         customer_values=submitted_customer_values if selected_customer_summary else {},
         default_start_date=slot.date().isoformat(),
         default_return_date=(slot + timedelta(days=1)).date().isoformat(),
@@ -577,18 +698,50 @@ def edit(order_id):
         form_order_status = form_order["status"] if form_order is not None else ""
     except (KeyError, IndexError, TypeError):
         form_order_status = ""
-    customers = _customers()
     attached_id = _order_customer_id(form_data)
-    if attached_id and not any(c["id"] == int(attached_id) for c in customers):
-        attached = _customer_summary_by_id(attached_id, allow_retained=True)
-        if attached:
-            customers.append(attached)
+    if request.method == "POST":
+        requested_customer_id = form_data.get("selected_customer_id", "")
+    else:
+        # A no-JS pick is a GET to this same edit page with ?customer_id=; it only
+        # PRELOADS the card — nothing is saved until the form is submitted.
+        requested_customer_id = request.args.get("customer_id") or form_data.get("selected_customer_id", "")
+    selected_customer_summary = None
+    try:
+        requested_int = int(requested_customer_id)
+    except (TypeError, ValueError):
+        requested_int = None
+    if requested_int:
+        # The historical-retention allowance is derived from the order actually
+        # loaded above, never from the query string.
+        selected_customer_summary = _order_customer_summary(
+            requested_int,
+            allow_retained=attached_id is not None and requested_int == int(attached_id),
+        )
+    if selected_customer_summary is None and attached_id is not None:
+        # Fall back to the order's own client (retained included) so an invalid
+        # query id can never blank out an attached customer.
+        requested_int = int(attached_id)
+        selected_customer_summary = _order_customer_summary(requested_int, allow_retained=True)
+    if selected_customer_summary is None:
+        requested_int = None
+    selected_customer_id = str(requested_int) if requested_int else ""
+    if isinstance(form_data, dict):
+        form_data["selected_customer_id"] = selected_customer_id
+        if selected_customer_summary:
+            form_data["customer_summary"] = selected_customer_summary
+    customer_search_query = _order_customer_query(request.args.get("q", "")) if request.method == "GET" else ""
+    customer_search_results = search_order_customers(customer_search_query) if customer_search_query else []
     return render_template(
         "admin/orders/form.html",
         settings=get_company_settings(),
-        customers=customers,
+        customers=[],
         products=_products(),
-        selected_customer_id=form_data.get("selected_customer_id", ""),
+        selected_customer_id=selected_customer_id,
+        selected_customer_summary=selected_customer_summary,
+        customer_search_query=customer_search_query,
+        customer_search_results=customer_search_results,
+        customer_search_action=url_for("orders.edit", order_id=order_id),
+        picker_order_id=order_id,
         default_start_date=form_data.get("start_date", ""),
         default_return_date=form_data.get("end_date", ""),
         default_start_time=form_data.get("start_time", ""),

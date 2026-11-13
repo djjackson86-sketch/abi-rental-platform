@@ -98,7 +98,10 @@ def test_the_order_picker_allows_a_pending_client_without_approving(client, app)
     pending_id = create_customer(client, 'Pending Portal Client', 'pending.portal@example.test', '0825550101')
     make_pending(app, pending_id, 'PRT-AAA111', name='Pending Portal Client')
 
-    page = client.get('/orders/new').get_data(as_text=True)
+    # The order form's picker still offers the pending client (reservation is
+    # allowed before approval) — via the bounded server-side search, since the
+    # page no longer embeds the whole client book.
+    page = client.get('/orders/new', query_string={'q': 'Pending Portal'}).get_data(as_text=True)
     assert 'Pending Portal Client' in page
 
     # The picker's own data sources agree: pending is hidden everywhere it lists clients.
@@ -184,7 +187,8 @@ def test_a_failed_pending_insert_leaves_no_ordinary_customer(app, monkeypatch):
     monkeypatch.setattr(portal_registrations, 'record_pending_registration', boom)
 
     form = {
-        'name': 'Atomic Leak Client', 'email': 'atomic.leak@example.test', 'phone': '0825550177',
+        'name': 'Atomic Leak Client', 'first_names': 'Atomic Leak', 'surname': 'Client',
+        'email': 'atomic.leak@example.test', 'phone': '0825550177',
         'address_line1': '1 Atomic Road', 'suburb': 'Atomicville', 'city': 'Atomicburg',
         'province': 'Gauteng', 'postal_code': '2004',
         'alternative_contact_name': 'Atomic Contact', 'alternative_contact_number': '0825550176',

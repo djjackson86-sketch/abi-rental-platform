@@ -25,9 +25,10 @@ import pytest
 
 from app import create_app
 from app.db import get_db, run_migrations
-from app.routes.orders import _customer_picker_sql, _customer_summary_by_id, _customers
+from app.routes.orders import _customer_picker_sql, _customer_summary_by_id
 from app.services.credit_limits import debt_sql
-from app.services.customers import list_customers
+from app.services.customers import customer_summary_for, list_customers
+from app.services.orders import active_customer_clause
 from app.services.portal_registrations import pending_exclusion_clause
 
 TS = "2026-01-01T00:00:00"
@@ -230,9 +231,18 @@ def test_picker_values_match_correlated_oracle(app):
 def test_picker_and_selected_summary_agree(app):
     ids = seed(app)
     with app.app_context():
+        # The page-level whole-book helper is gone (the order form now searches);
+        # the batched projection it used is still pinned here for parity.
+        picker_rows = get_db().execute(
+            _customer_picker_sql(
+                pending_exclusion_clause("customers", allow_pending=True)
+                + active_customer_clause("customers"),
+                " ORDER BY customers.name",
+            )
+        ).fetchall()
         listed = {c["id"]: (c["account_credit_used"], c["previous_orders_balance"],
                             c["customer_credit_balance"], c["legacy_balance"], c["orders_to_date"])
-                  for c in _customers() if c}
+                  for c in (customer_summary_for(row) for row in picker_rows) if c}
         for label, cid in ids.items():
             if label == "DeletedSignUp":
                 assert _customer_summary_by_id(cid) is None, label

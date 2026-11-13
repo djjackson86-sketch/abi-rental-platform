@@ -123,6 +123,13 @@ _ENDPOINT_MODULE_RULES = [
 _ALWAYS_ALLOWED_ENDPOINTS = frozenset(
     {
         "settings.notifications",
+        # The order form's bounded client picker is reachable from BOTH order-form
+        # modules (new_order for a new order, orders for editing one), so a single
+        # module rule would lock one of them out. The endpoints enforce that OR
+        # themselves (routes/orders.py::_require_order_customer_picker) and every
+        # read stays behind login_required.
+        "orders.customer_search",
+        "orders.customer_summary",
     }
 )
 
