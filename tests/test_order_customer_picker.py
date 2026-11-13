@@ -359,3 +359,19 @@ def test_inline_create_and_continue_still_answers_json(client, book):
     assert payload["customer"]["name"] == "Inline Picker Client"
     found = client.get("/orders/customer-search", query_string={"q": "Inline Picker"}).get_json()["customers"]
     assert [row["id"] for row in found] == [payload["customer"]["id"]]
+
+
+def test_nojs_search_and_pick_keep_shop_enquiry_context(client, app, book):
+    from test_shop_enquiries import add_branch, add_product, publish_notice, post_enquiry, rental_form
+    branch = add_branch(app, "Picker Enquiry")
+    product = add_product(app, "Picker Enquiry Trailer", branch_id=branch)
+    publish_notice(app)
+    response = post_enquiry(client, rental_form(branch, product, request_key="picker-enquiry"))
+    with app.app_context():
+        enquiry_id = get_db().execute("SELECT id FROM shop_enquiries ORDER BY id DESC LIMIT 1").fetchone()["id"]
+    login(client)
+    response = client.get("/orders/new", query_string={"enquiry_id": enquiry_id, "q": "Zulu"})
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert f'name="enquiry_id" value="{enquiry_id}"' in body
+    assert f'enquiry_id={enquiry_id}&amp;customer_id={book["zulu"]}' in body

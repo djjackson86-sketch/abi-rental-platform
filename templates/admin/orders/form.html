@@ -14,6 +14,7 @@
 <form method="get" action="{{ customer_search_action or url_for('orders.new') }}" class="customer-search-fallback no-js-picker" role="search">
   <label>Find customer<input type="search" name="q" value="{{ customer_search_query or '' }}" placeholder="Type at least 2 characters" autocomplete="off"></label>
   {% if selected_customer_id %}<input type="hidden" name="customer_id" value="{{ selected_customer_id }}">{% endif %}
+  {% if shop_enquiry_id %}<input type="hidden" name="enquiry_id" value="{{ shop_enquiry_id }}">{% endif %}
   <button class="btn ghost" type="submit">Search clients</button>
 </form>
 {% if customer_search_query %}
@@ -22,7 +23,7 @@
   {% if customer_search_results %}
   <ul class="customer-search-result-list">
     {% for c in customer_search_results %}
-    <li><a class="btn ghost" href="{{ customer_search_action }}?customer_id={{ c.id }}"{% if editing %} rel="nofollow"{% endif %}>{{ c.display }}</a></li>
+    <li><a class="btn ghost" href="{{ customer_search_action }}{{ '&' if '?' in customer_search_action else '?' }}customer_id={{ c.id }}"{% if editing %} rel="nofollow"{% endif %}>{{ c.display }}</a></li>
     {% endfor %}
   </ul>
   {% else %}<p class="form-help">No client matches that search.</p>{% endif %}
