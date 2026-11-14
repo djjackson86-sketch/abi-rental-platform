@@ -29,6 +29,9 @@
    on a mapping resolves to a dict method in Jinja rather than to the field. #}
 {% block body %}
 <style>
+.portal-panel .portal-requirements,.portal-panel .portal-requirements h2,.portal-panel .portal-requirements a{color:#702080}
+.portal-panel .portal-requirements{overflow-wrap:anywhere}
+.portal-panel .portal-requirements [hidden]{display:none}
 @media(max-width:360px){
   .portal-panel .customer-form{min-width:0;overflow-wrap:anywhere}
   .portal-panel .customer-form .form-grid,.portal-panel .customer-form .option-grid{grid-template-columns:minmax(0,1fr)}
@@ -107,6 +110,34 @@
         </div>
       </section>
 
+      <section class="form-section portal-requirements" aria-labelledby="portal-requirements-heading">
+        <h2 id="portal-requirements-heading">REQUIREMENTS</h2>
+        <div data-business-requirements {% if not is_company %}hidden{% endif %}>
+          <p>Company Registration Certificate</p>
+          <p>Copy of Directors ID (s)</p>
+          <p>Letter of Authority (Signed by Director) for the person who will sign the contracts</p>
+          {# Use the public portal identity, never the staff session branch. Production's
+             Roodepoort slug is historically spelled "rooderport"; keep existing links valid.
+             Universal/unknown portals list labelled contacts rather than guess a branch. #}
+          {% set requirement_emails = {'midrand': 'mid@sanotrailers.co.za', 'roodepoort': 'cle@sanotrailers.co.za', 'rooderport': 'cle@sanotrailers.co.za', 'pretoria': 'pta@sanotrailers.co.za'} %}
+          {% set requirement_email = requirement_emails.get(branch.public_slug) if not universal else none %}
+          {% if requirement_email %}
+          <p>To be email at <a href="mailto:{{ requirement_email }}">{{ requirement_email }}</a></p>
+          {% else %}
+          <p>To be email at the relevant branch:</p>
+          <ul>
+            <li>Midrand: <a href="mailto:mid@sanotrailers.co.za">mid@sanotrailers.co.za</a></li>
+            <li>Roodepoort: <a href="mailto:cle@sanotrailers.co.za">cle@sanotrailers.co.za</a></li>
+            <li>Pretoria: <a href="mailto:pta@sanotrailers.co.za">pta@sanotrailers.co.za</a></li>
+          </ul>
+          {% endif %}
+          <p>The driver must bring the following:</p>
+        </div>
+        <p>RSA Citizen: original ID and licence</p>
+        <p>Foreign Nationals: original passport, work permit, drivers licence and traffic register</p>
+        <p><strong>NB: All first time clients to pay with cards or EFT</strong></p>
+      </section>
+
       {# The honeypot: off-screen (the .honeypot rule in app.css), out of the tab order and not
          announced, so a person never fills it in and a form-filling bot always does. The visible
          "Website" field above is the genuine, company-only one. #}
@@ -157,6 +188,8 @@
     each(inputs, function(input){ if(input.checked){ selected = input; } });
     var company = !!selected && selected.value === 'company';
     section.hidden = !company;
+    var businessRequirements = document.querySelector('[data-business-requirements]');
+    if(businessRequirements){ businessRequirements.hidden = !company; }
     document.querySelector('[data-other-emails]').hidden = !company;
     toggleName(companyName, company);
     each(individualNames, function(label){ toggleName(label, !company); });
