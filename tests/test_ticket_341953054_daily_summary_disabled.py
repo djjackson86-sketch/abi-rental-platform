@@ -206,6 +206,7 @@ def test_the_manual_day_report_pdf_still_goes_out(client, app, monkeypatch, sent
     monkeypatch.setattr(cash_routes, '_send_document', fake_document)
     day = today_iso()
     login(client)
+    sent.clear()  # ABI-341953300: sign-in alerts are separate from report delivery.
     client.post('/cash-up/interactions', data={
         'day': day, 'branch': '1',
         'interaction_calls': '0', 'interaction_whatsapp': '0',

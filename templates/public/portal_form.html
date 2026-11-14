@@ -30,7 +30,13 @@
 {% block body %}
 <style>
 .portal-panel .portal-requirements,.portal-panel .portal-requirements h2,.portal-panel .portal-requirements a{color:#702080}
-.portal-panel .portal-requirements{overflow-wrap:anywhere}
+.portal-panel .portal-requirements{overflow-wrap:anywhere;gap:5px;line-height:1.4}
+.portal-panel .portal-requirements h2{margin:0 0 2px}
+.portal-panel .portal-requirements [data-business-requirements]{display:grid;gap:5px}
+.portal-panel .portal-requirements p{margin:0}
+.portal-panel .portal-requirements ol,.portal-panel .portal-requirements ul{margin:0;padding-left:1.4em}
+.portal-panel .portal-requirements li{margin:0}
+.portal-panel .portal-requirements li::marker{font-weight:750}
 .portal-panel .portal-requirements [hidden]{display:none}
 @media(max-width:360px){
   .portal-panel .customer-form{min-width:0;overflow-wrap:anywhere}
@@ -134,10 +140,20 @@
 
       <section class="form-section portal-requirements" aria-labelledby="portal-requirements-heading">
         <h2 id="portal-requirements-heading">REQUIREMENTS</h2>
+        {# Numbered, and spaced tight (ABI-341953300). The requirements are an ordered list so the
+           owner's numbering is real markup — a screen reader says "list, 3 items" and reads each
+           number — rather than a "1." typed into the sentence, which would change the copy. The
+           company's documents are items 1-3; the driver's two documents continue the same sequence
+           (start=4 for a company, start=1 for an individual, kept in step by the type switch below),
+           so no customer ever sees two number 1s or a gap where the hidden company list would be.
+           The email line and "The driver must bring the following:" stay prose: they are instructions,
+           not documents to hand in, so they carry no number. Word-for-word copy is unchanged. #}
         <div data-business-requirements {% if not is_company %}hidden{% endif %}>
-          <p>Company Registration Certificate</p>
-          <p>Copy of Directors ID (s)</p>
-          <p>Letter of Authority (Signed by Director) for the person who will sign the contracts</p>
+          <ol class="requirement-list">
+            <li>Company Registration Certificate</li>
+            <li>Copy of Directors ID (s)</li>
+            <li>Letter of Authority (Signed by Director) for the person who will sign the contracts</li>
+          </ol>
           {# Use the public portal identity, never the staff session branch. Production's
              Roodepoort slug is historically spelled "rooderport"; keep existing links valid.
              Universal/unknown portals list labelled contacts rather than guess a branch. #}
@@ -155,8 +171,10 @@
           {% endif %}
           <p>The driver must bring the following:</p>
         </div>
-        <p>RSA Citizen: original ID and licence</p>
-        <p>Foreign Nationals: original passport, work permit, drivers licence and traffic register</p>
+        <ol class="requirement-list" data-driver-requirements start="{{ 4 if is_company else 1 }}">
+          <li>RSA Citizen: original ID and licence</li>
+          <li>Foreign Nationals: original passport, work permit, drivers licence and traffic register</li>
+        </ol>
         <p><strong>NB: All first time clients to pay with cards or EFT</strong></p>
       </section>
 
@@ -205,6 +223,7 @@
   var alternativeGroup = document.querySelector('[data-individual-alternative]');
   var directorGroup = document.querySelector('[data-company-director]');
   var directorBox = document.querySelector('[name="contact_person_is_director"]');
+  var driverRequirements = document.querySelector('[data-driver-requirements]');
   if(!section){ return; }
   function each(list, fn){ Array.prototype.forEach.call(list, fn); }
   function toggleName(label, active){
@@ -234,6 +253,9 @@
     section.hidden = !company;
     var businessRequirements = document.querySelector('[data-business-requirements]');
     if(businessRequirements){ businessRequirements.hidden = !company; }
+    // The driver's documents come after the company's three, so their numbering continues rather
+    // than restarting: a company reads 1-5, an individual 1-2 (ABI-341953300).
+    if(driverRequirements){ driverRequirements.start = company ? 4 : 1; }
     document.querySelector('[data-other-emails]').hidden = !company;
     toggleName(companyName, company);
     each(individualNames, function(label){ toggleName(label, !company); });

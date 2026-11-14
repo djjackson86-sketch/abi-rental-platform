@@ -187,4 +187,9 @@
 }());
 </script>
 {% endif %}
+{# Ticket ABI-341953300: a confirmed day-report send asks, once, whether to log out.
+   The flag is popped here as the dashboard renders, so a refresh cannot ask again,
+   and nothing is rendered at all when no send was confirmed. #}
+{% set day_report_logout_prompt = session.pop('day_report_logout_prompt', None) %}
+{% if day_report_logout_prompt %}{% include "admin/_day_report_logout_prompt.html" %}{% endif %}
 {% endblock %}

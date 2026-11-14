@@ -60,6 +60,19 @@ def _dashboard_url(branch_id=None):
     return url_for("admin.dashboard")
 
 
+# Ticket ABI-341953300: a *confirmed* day-report send leaves this one-time flag in
+# the session. The dashboard template renders the "You have submitted your day
+# report, LOGOUT?" modal from it and pops it while rendering, so a refresh, a back
+# button or a second tab can never ask again - and a failed or disabled send never
+# sets it in the first place.
+DAY_REPORT_LOGOUT_PROMPT_KEY = "day_report_logout_prompt"
+
+
+def _mark_day_report_logout_prompt(day):
+    """Remember, once, that this session may be asked whether to log out."""
+    session[DAY_REPORT_LOGOUT_PROMPT_KEY] = str(day or "")
+
+
 def _done(message, branch_id=None):
     flash(message, "success")
     return redirect(_dashboard_url(branch_id))
@@ -409,6 +422,10 @@ def submit_report_telegram():
     if result.get("ok"):
         _note_submission_and_maybe_send_all_branches(day, cash_summary.get("branch_id") or branch_id)
     if result.get("sent"):
+        # Ticket ABI-341953300: only a send Telegram actually confirmed (2xx) asks
+        # the staff member whether to log out. A disabled, unconfigured or failed
+        # send falls through to its own flash and never prompts.
+        _mark_day_report_logout_prompt(day)
         flash(f"Day report sent on Telegram for {branch_name} ({day})", "success")
     elif result.get("skipped") == "disabled":
         flash("Telegram notifications are disabled; day report was not sent", "error")

@@ -1,7 +1,7 @@
 from functools import wraps
 from urllib.parse import urlsplit
 
-from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from app.db import get_db
 from app.services.access import (
@@ -23,6 +23,43 @@ from app.services.recovery import (
 from app.services.settings import get_company_settings
 
 bp = Blueprint("auth", __name__)
+
+
+def _notify_sign_in():
+    """One best-effort alert, after the effective branch for this login is known."""
+    if not session.pop("login_notification_pending", False):
+        return
+    try:
+        from app.services.access import session_branch_scope_ids
+        from app.services.telegram import send_login_notification
+        scope = session_branch_scope_ids()
+        if scope is None:
+            branch = "All branches"
+        elif not scope:
+            branch = "No authorised branches"
+        else:
+            placeholders = ",".join("?" for _ in scope)
+            rows = get_db().execute(
+                f"SELECT name FROM branches WHERE id IN ({placeholders}) ORDER BY name",
+                tuple(scope),
+            ).fetchall()
+            names = ", ".join(row["name"] for row in rows)
+            branch = names if len(scope) == 1 else f"All authorised branches: {names}"
+        send_login_notification(session.get("user_name", ""), branch)
+    except Exception:
+        # Do not log provider exception text: URLs may contain bot credentials.
+        current_app.logger.warning("Sign-in Telegram notification unavailable")
+
+
+@bp.before_app_request
+def _notify_skipped_branch_choice():
+    # A bookmarked page may bypass the chooser. Describe the actual authorised
+    # scope in that case rather than incorrectly naming the primary depot.
+    from app.services.access import module_for_endpoint
+    if (session.get("user_id") and session.get("login_notification_pending")
+            and (module_for_endpoint(request.endpoint) is not None
+                 or request.endpoint in {"admin.index", "settings.notifications"})):
+        _notify_sign_in()
 
 
 def _safe_next(value):
@@ -147,12 +184,14 @@ def login():
                 # The extra depots this account may see (empty = the historic
                 # single branch, or every branch when they are unrestricted).
                 session["branch_ids"] = user_branch_ids(user["id"])
+            session["login_notification_pending"] = True
             if session_branch_choice_options():
                 # An account that manages several depots says which one it is
                 # managing for this sign-in before it lands on a screen. The
                 # choice can only narrow what it may already reach, and skipping
                 # it simply leaves the account with all of its own depots.
                 return redirect(url_for("auth.select_branch", next=next_target))
+            _notify_sign_in()
             if next_target:
                 return redirect(next_target)
             return redirect(url_for("admin.dashboard"))
@@ -191,6 +230,7 @@ def select_branch():
             flash("Choose one of the branches you manage", "error")
         else:
             session["active_branch_id"] = branch_id
+            _notify_sign_in()
             if next_target:
                 return redirect(next_target)
             return redirect(url_for("admin.dashboard"))

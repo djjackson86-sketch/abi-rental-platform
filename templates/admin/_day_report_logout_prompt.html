@@ -1,0 +1,53 @@
+{# Ticket ABI-341953300 — one-time "log out?" prompt after a confirmed day report.
+
+   Rendered by admin/dashboard.html only when the session still carries the flag a
+   *successfully sent* /cash-up/report/telegram leaves behind, and the flag is
+   popped as the dashboard renders, so a refresh cannot ask twice.
+
+   YES posts the dashboard's existing /logout form - the same endpoint, the same
+   hidden push_endpoint field push.js fills in, so this browser's notifications
+   are still stopped on the way out. NO closes the dialog (form method="dialog")
+   and leaves the session untouched. #}
+<dialog class="day-report-logout-dialog" id="day-report-logout-dialog"
+        aria-labelledby="day-report-logout-title" aria-describedby="day-report-logout-copy">
+  <h2 id="day-report-logout-title">You have submitted your day report, LOGOUT?</h2>
+  <p id="day-report-logout-copy">Your day report was sent on Telegram. Log out now, or stay signed in and keep working.</p>
+  <div class="day-report-logout-actions">
+    <form method="post" action="{{ url_for('auth.logout') }}" class="day-report-logout-yes">
+      <input type="hidden" name="push_endpoint" value="">
+      <button class="btn primary" type="submit">YES</button>
+    </form>
+    <form method="dialog" class="day-report-logout-no">
+      <button class="btn ghost" type="submit" autofocus>NO</button>
+    </form>
+  </div>
+</dialog>
+<style>
+  /* Scoped to this dialog: the same shape as the cash-variance pop-up. */
+  .day-report-logout-dialog{width:min(30rem,calc(100% - 2rem));max-width:calc(100% - 2rem);max-height:90dvh;overflow-y:auto;box-sizing:border-box;border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:24px;background:var(--surface,#fff);color:var(--text,#111)}
+  .day-report-logout-dialog::backdrop{background:rgba(15,23,42,.45)}
+  .day-report-logout-dialog h2{margin:0 0 10px;font-size:20px;font-weight:760}
+  .day-report-logout-dialog p{margin:0 0 16px;color:var(--muted,#5b6472);font-size:15px}
+  .day-report-logout-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
+  .day-report-logout-actions form{margin:0}
+  .day-report-logout-actions .btn{min-width:6rem}
+</style>
+<script>
+(function () {
+  var dialog = document.getElementById('day-report-logout-dialog');
+  if (!dialog) { return; }
+  function open() {
+    if (typeof dialog.showModal === 'function') {
+      if (!dialog.open) { dialog.showModal(); }
+    } else {
+      /* No <dialog> support: show the same prompt inline rather than not at all. */
+      dialog.setAttribute('open', '');
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', open);
+  } else {
+    open();
+  }
+})();
+</script>

@@ -156,6 +156,13 @@ def _escape(value):
     return html.escape(str(value if value is not None else ""), quote=False)
 
 
+def send_login_notification(name, branch):
+    """Use the existing bot, destination, escaping and global notification switch."""
+    return _send_message(
+        f"<b>User logged in</b>\nName: {_escape(name)}\nBranch: {_escape(branch)}"
+    )
+
+
 def _money(value):
     symbol = current_app.config.get("CURRENCY_SYMBOL", "R")
     try:
