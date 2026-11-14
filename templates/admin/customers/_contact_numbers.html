@@ -1,0 +1,14 @@
+{% set company = posted.get('customer_type', customer.customer_type if customer else 'individual') == 'company' %}
+{% set director = posted.get('contact_person_is_director', '0') == '1' if request.method == 'POST' else custom_fields.get('contact_person_is_director') == '1' %}
+<div>
+  <input type="hidden" name="contact_details_panel" value="1">
+  <div data-business-contact {% if not company %}hidden{% endif %}>
+    <label>Telephone No.<input name="telephone_number" type="tel" value="{{ posted.get('telephone_number', custom_fields.get('telephone_number','')) }}"></label>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px">
+      <label>Contact Person Name &amp; Surname<input name="contact_person_name" value="{{ posted.get('contact_person_name', custom_fields.get('contact_person_name','')) }}"></label>
+      <label class="switch"><input type="checkbox" name="contact_person_is_director" value="1" {% if director %}checked{% endif %}> Director</label>
+    </div>
+  </div>
+  <label><span data-cellphone-label>{{ 'Contact Person Cellphone No.*' if company else 'Cellphone No.' }}</span><input name="phone" type="tel" {% if company %}required{% endif %} value="{{ posted.get('phone', customer.phone if customer else '') }}" placeholder="+27..."></label>
+  <label>WhatsApp No. (if different from the above)<input name="whatsapp_number" type="tel" value="{{ posted.get('whatsapp_number', custom_fields.get('whatsapp_number','')) }}" placeholder="+27..."></label>
+</div>

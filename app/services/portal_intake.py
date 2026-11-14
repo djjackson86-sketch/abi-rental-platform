@@ -128,6 +128,33 @@ PORTAL_CUSTOM_FIELD_KEYS = (
     "company_reg_no",
 )
 
+#: The contact-details panel's own keys (ABI-341953299). They are written to the customer's
+#: custom details by the shared customers service, gated on ``CONTACT_DETAILS_PANEL_FIELD``:
+#: the panel carries the optional WhatsApp number, a company's switchboard and contact person,
+#: the "contact person is a director" flag (stored as the string ``'1'``/``'0'``) and the
+#: directors block that replaces the individual's alternative contact for a company. The
+#: marker is set by :func:`submission_values` on every public submission, so the panel's values
+#: travel with the same payload the rest of the form is validated and re-parsed from.
+CONTACT_DETAILS_PANEL_FIELD = "contact_details_panel"
+CONTACT_DETAIL_KEYS = (
+    "whatsapp_number",
+    "telephone_number",
+    "contact_person_name",
+    "contact_person_is_director",
+    "director_name",
+    "director_contact",
+)
+
+#: Company-only keys. An individual has no company contact panel and no directors block, so a
+#: crafted post cannot put them on a person (the same rule as ``website``).
+COMPANY_CONTACT_KEYS = (
+    "telephone_number",
+    "contact_person_name",
+    "contact_person_is_director",
+    "director_name",
+    "director_contact",
+)
+
 #: Every field the public form must carry a value for, with the sentence shown when it is
 #: blank. The owner asked for these to be mandatory (the red asterisk on the form) and the
 #: server enforces the same set, so a crafted POST that omits one is refused exactly like a
@@ -141,9 +168,21 @@ PORTAL_REQUIRED_FIELDS = (
     ("city", "Please enter your city."),
     ("province", "Please enter your province."),
     # Postal code is optional on the customer portal (ABI-341953255).
+)
+
+#: An **individual** keeps the alternative contact, required exactly as before. A company
+#: replaces it with the directors block below (ABI-341953299).
+PORTAL_INDIVIDUAL_REQUIRED_FIELDS = (
     ("alternative_contact_name", "Please enter the alternative contact's name."),
     ("alternative_contact_number", "Please enter the alternative contact's number."),
     ("alternative_contact_relationship", "Please enter the alternative contact's relationship."),
+)
+
+#: A company's directors block, required unless the contact person was ticked as a director —
+#: then the same person is already the named director and the block is hidden/disabled.
+PORTAL_COMPANY_DIRECTOR_FIELDS = (
+    ("director_name", "Please enter the director's name and surname."),
+    ("director_contact", "Please enter the director's contact number."),
 )
 
 #: The two customer types the staff form offers; anything else falls back to individual.
@@ -396,24 +435,46 @@ def parse_decision(value):
     raise ValueError("Please choose one of the options we showed you.")
 
 
+def _truthy(value):
+    """``1``/``'1'``/``'true'``/``'on'``/``'yes'`` are true; anything else (including None) false.
+
+    The same vocabulary the rest of the app uses for checkbox posts, so a browser, a fixture and
+    a hand-written POST all mean the same thing by "ticked".
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "on", "yes"}
+
+
 def submission_values(form):
     """The public form's values, cleaned and validated — the shape the intake service writes.
 
     The customer's own capture: the customer type, the contact block, the (required) SA
-    address block and the alternative-contact block. Two staff-only things are gone by
-    design — **country** (a South African depot's clients are South African, so the record
-    defaults to SA internally and a posted country is ignored) and the **vehicle** fields
-    (make/colour/reg), which staff capture and scan, never the customer. ``website`` is a
-    company-only detail: it is accepted for a company and dropped for an individual, so a
-    crafted post cannot put one on a person.
+    address block and either the alternative-contact block (individual) or the directors block
+    (company, ABI-341953299). Two staff-only things are gone by design — **country** (a South
+    African depot's clients are South African, so the record defaults to SA internally and a
+    posted country is ignored) and the **vehicle** fields (make/colour/reg), which staff capture
+    and scan, never the customer. ``website`` is a company-only detail: it is accepted for a
+    company and dropped for an individual, so a crafted post cannot put one on a person.
 
-    Every field the owner marked mandatory is required here too (``PORTAL_REQUIRED_FIELDS``),
-    with a real email/phone shape check on top. The rule is server-side on purpose: the red
-    asterisk and the browser's ``required`` are a courtesy, this is the boundary.
+    The contact-details panel is always marked (``contact_details_panel='1'``) and its keys —
+    WhatsApp number, company switchboard, contact person, the director flag (``'1'``/``'0'``)
+    and the directors block — are carried in the returned values, so a re-parse or a validation
+    failure re-render keeps every one of them. A company replaces the alternative contact with
+    the directors block; an old alternative contact is **never** copied into director fields.
+
+    Every field the owner marked mandatory is required here too. For an individual that is the
+    original alternative-contact set; for a company it is the directors block, unless the contact
+    person was ticked as a director (the block is then hidden/disabled client-side and not
+    required here). The rule is server-side on purpose: the red asterisk and the browser's
+    ``required`` are a courtesy, this is the boundary.
     """
     customer_type = str(form.get("customer_type") or "individual").strip().lower()
     if customer_type not in PORTAL_CUSTOMER_TYPES:
         customer_type = "individual"
+    is_company = customer_type == "company"
     # Individuals must supply both parts explicitly: never guess a surname from a
     # combined name (including a crafted/old POST). Storage still uses the full name.
     name = str(form.get("name") or "").strip()
@@ -443,25 +504,49 @@ def submission_values(form):
         values.update(first_names=first_names, surname=surname)
     for key in PORTAL_CUSTOM_FIELD_KEYS:
         values[key] = str(form.get(key) or "").strip()
-    if customer_type == "company":
+    # Contact details panel (ABI-341953299): always marked, so the shared customers service
+    # persists the keys on every portal submission. The flag is normalised to the string
+    # '1'/'0' the service stores; a company's own fields are dropped for an individual.
+    for key in CONTACT_DETAIL_KEYS:
+        values[key] = str(form.get(key) or "").strip()
+    values[CONTACT_DETAILS_PANEL_FIELD] = "1"
+    director_is_contact_person = _truthy(form.get("contact_person_is_director"))
+    values["contact_person_is_director"] = "1" if director_is_contact_person else "0"
+    if not is_company:
+        for key in COMPANY_CONTACT_KEYS:
+            values[key] = "0" if key == "contact_person_is_director" else ""
+    if is_company:
         from app.services.customer_emails import additional_emails
         values["other_email_addresses"] = "; ".join(additional_emails(form.get("other_email_addresses"), values["email"], max_addresses=3))
     # Company-only: website. A crafted ``website`` on an individual is dropped here rather
     # than stored, so the field really is "visible only for Company" server-side too.
     values["website"] = (
-        str(form.get("website") or "").strip() if customer_type == "company" else ""
+        str(form.get("website") or "").strip() if is_company else ""
     )
     for key, message in PORTAL_REQUIRED_FIELDS:
         if not str(values.get(key) or "").strip():
             raise ValueError(message)
+    if customer_type == "individual":
+        for key, message in PORTAL_INDIVIDUAL_REQUIRED_FIELDS:
+            if not str(values.get(key) or "").strip():
+                raise ValueError(message)
+    elif not director_is_contact_person:
+        # Ticking "Director" beside the contact person means the same person IS the director:
+        # the directors block is hidden and disabled in the browser, so it is not required here.
+        for key, message in PORTAL_COMPANY_DIRECTOR_FIELDS:
+            if not str(values.get(key) or "").strip():
+                raise ValueError(message)
     if not _EMAIL_RE.match(values["email"]):
         raise ValueError("Please enter a valid email address.")
     digits = normalise_phone(values["phone"])
     if not (_PHONE_DIGITS_MIN <= len(digits) <= _PHONE_DIGITS_MAX):
         raise ValueError("Please enter a valid phone number, e.g. 082 123 4567.")
     alt_digits = normalise_phone(values["alternative_contact_number"])
-    if not (_PHONE_DIGITS_MIN <= len(alt_digits) <= _PHONE_DIGITS_MAX):
+    if not is_company and values["alternative_contact_number"] and not (_PHONE_DIGITS_MIN <= len(alt_digits) <= _PHONE_DIGITS_MAX):
         raise ValueError("Please enter a valid alternative contact number, e.g. 082 123 4567.")
+    director_digits = normalise_phone(values["director_contact"])
+    if is_company and not director_is_contact_person and values["director_contact"] and not (_PHONE_DIGITS_MIN <= len(director_digits) <= _PHONE_DIGITS_MAX):
+        raise ValueError("Please enter a valid director's contact number, e.g. 082 123 4567.")
     return values
 
 

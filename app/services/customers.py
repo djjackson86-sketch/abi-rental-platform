@@ -48,6 +48,12 @@ VEHICLE_CUSTOM_FIELD_KEYS = (
     "vehicle_color",
 )
 VISIBLE_CUSTOM_FIELD_LABELS = {
+    "whatsapp_number": "WhatsApp No. (if different from the above)",
+    "telephone_number": "Telephone No.",
+    "contact_person_name": "Contact Person Name & Surname",
+    "contact_person_is_director": "Contact Person is Director",
+    "director_name": "Directors Name & Surname",
+    "director_contact": "Directors Contact",
     "other_email_addresses": "Other email addresses",
     "vehicle_make": "Vehicle Make",
     "vehicle_reg_no": "Veh Reg No",
@@ -1012,6 +1018,24 @@ def _clean(form, existing_custom_fields=None):
     if customer_type not in VALID_TYPES:
         customer_type = "individual"
     custom_fields = dict(existing_custom_fields or {})
+    # ABI-341953299: additive contacts belong to the full panel, not inline saves.
+    if str(form.get("contact_details_panel") or "") == "1":
+        if customer_type == "company":
+            if not str(form.get("phone") or "").strip():
+                raise ValueError("Contact Person Cellphone No. is required")
+            is_director = str(form.get("contact_person_is_director") or "0") == "1"
+            if not is_director:
+                for key, label in (("director_name", "Directors Name & Surname"), ("director_contact", "Directors Contact")):
+                    if not str(form.get(key) or "").strip():
+                        raise ValueError(f"{label} is required")
+            custom_fields["contact_person_is_director"] = "1" if is_director else "0"
+        for key in ("whatsapp_number", "telephone_number", "contact_person_name", "director_name", "director_contact"):
+            if key in form:
+                value = str(form.get(key) or "").strip()
+                if value:
+                    custom_fields[key] = value
+                else:
+                    custom_fields.pop(key, None)
     if customer_type != "company":
         custom_fields.pop("other_email_addresses", None)
     elif "other_email_addresses" in form:
@@ -1041,6 +1065,9 @@ def _clean(form, existing_custom_fields=None):
         "company_reg_no": form.get("company_reg_no", "").strip(),
     }
     for key, value in submitted_custom_fields.items():
+        if key.startswith("alternative_contact") and customer_type == "company" and str(form.get("contact_details_panel") or "") == "1":
+            # Keep historic alternative contacts; they are not verified directors.
+            continue
         if key.startswith("vehicle_") and not _form_has(form, key):
             # A partial post (the public portal, or the order card's cached snapshot) omits the
             # main-vehicle fields it does not show. Leaving the stored value alone keeps a later
@@ -1053,7 +1080,8 @@ def _clean(form, existing_custom_fields=None):
         else:
             custom_fields.pop(key, None)
     custom_fields.pop("vehicle_details", None)
-    custom_fields.pop("alternative_contact", None)
+    if not (customer_type == "company" and str(form.get("contact_details_panel") or "") == "1"):
+        custom_fields.pop("alternative_contact", None)
     # Ticket ABI-341953268: the suspect classification and its optional ID number
     # are written only from the customer form's own panel (blocking-panel marker,
     # ``save_suspect`` action, signed-in staff). Every other caller leaves both

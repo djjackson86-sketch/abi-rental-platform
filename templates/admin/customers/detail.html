@@ -91,7 +91,7 @@
     <div class="detail-list">
       <div class="detail-row"><span>Type</span><b>{{ customer.customer_type|title }}</b></div>
       <div class="detail-row"><span>Email</span><b>{{ customer.email or '—' }}</b></div>
-      <div class="detail-row"><span>Phone</span><b>{{ customer.phone or '—' }}</b></div>
+      <div class="detail-row"><span>{{ "Contact Person Cellphone No." if customer.customer_type == "company" else "Cellphone No." }}</span><b>{{ customer.phone or '—' }}</b></div>
       <div class="detail-row"><span>Marketing emails</span><b>{{ 'Subscribed' if customer.marketing_opt_in else 'Not subscribed' }}</b></div>
       <div class="detail-row"><span>POPIA consent</span>{% if consent_summary %}<b class="consent-recorded">{{ consent_summary }}</b>{% else %}<b class="muted">No POPIA consent recorded</b>{% endif %}</div>
       <div class="detail-row"><span>Client Verified</span><b>{{ client_verified_label(customer.client_verified) }}</b></div>
@@ -121,7 +121,7 @@
         <div class="detail-row"><span>Company Reg No</span><b>{{ custom_fields.get('company_reg_no') or '—' }}</b></div>
       {% endif %}
       {% if custom_fields %}
-        {% for key, value in custom_fields.items() %}{% if key not in ['vat_number', 'company_reg_no'] %}<div class="detail-row"><span>{{ custom_field_label(key) }}</span><b>{{ value }}</b></div>{% endif %}{% endfor %}
+        {% for key, value in custom_fields.items() %}{% if key not in ['vat_number', 'company_reg_no'] %}<div class="detail-row"><span>{{ custom_field_label(key) }}</span><b>{{ ("Yes" if value == "1" else "No") if key == "contact_person_is_director" else value }}</b></div>{% endif %}{% endfor %}
       {% endif %}
     </div>
   </article>

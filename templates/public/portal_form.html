@@ -70,12 +70,27 @@
         <h2>Contact details</h2>
         <div class="form-grid">
           {% set is_company = form_values.get('customer_type', 'individual') == 'company' %}
+          {% set contact_is_director = form_values.get('contact_person_is_director') in ('1', 'true', 'on', 'yes', 'True') %}
           <label class="span-2 portal-company-name" data-company-name {% if not is_company %}hidden{% endif %}><span class="field-label">Company Name <span class="req-star" aria-hidden="true">*</span></span><input name="name" {% if is_company %}required{% else %}disabled{% endif %} autocomplete="organization" value="{{ form_values.get('name', '') }}" placeholder="e.g. ABC Trading (Pty) Ltd."></label>
           {% for field, label, autocomplete, message in [('first_names', 'Name(s)', 'given-name', 'Please enter your name(s).'), ('surname', 'Surname', 'family-name', 'Please enter your surname.')] %}
           <label class="portal-individual-name" data-individual-name {% if is_company %}hidden{% endif %}><span class="field-label">{{ label }} <span class="req-star" aria-hidden="true">*</span></span><input name="{{ field }}" {% if is_company %}disabled{% else %}required{% endif %} pattern=".*\S.*" title="{{ message }}" autocomplete="{{ autocomplete }}" value="{{ form_values.get(field, '') }}" {% if error == message %}aria-invalid="true" aria-describedby="portal-{{ field }}-error"{% endif %}>{% if error == message %}<span id="portal-{{ field }}-error" role="alert">{{ message }}</span>{% endif %}</label>
           {% endfor %}
           <div><label><span class="field-label">Email <span class="req-star" aria-hidden="true">*</span></span><input name="email" type="email" required autocomplete="email" value="{{ form_values.get('email', '') }}" placeholder="e.g. customer@example.com"></label><label data-other-emails {% if not is_company %}hidden{% endif %}>Other email addresses<textarea name="other_email_addresses" placeholder="e.g. accounts@abc.com; cindy@abc.com" rows="3">{{ form_values.get('other_email_addresses', '') }}</textarea></label></div>
-          <label><span class="field-label">Phone <span class="req-star" aria-hidden="true">*</span></span><input name="phone" type="tel" required inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
+          {# Company contact panel (ABI-341953299): the company's switchboard number and the person the
+             counter will speak to sit ABOVE the cellphone, because the cellphone belongs to that
+             person for a company. Both are optional; "Director" marks the contact person as a
+             director, and ticking it hides the separate directors block in the Alternative contact
+             section below (a director is their own contact — asking twice wastes the customer's
+             time). #}
+          <label class="portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><span class="field-label">Telephone No</span><input name="telephone_number" type="tel" inputmode="tel" autocomplete="tel-national" {% if not is_company %}disabled{% endif %} value="{{ form_values.get('telephone_number', '') }}" placeholder="e.g. 011 123 4567"></label>
+          <div class="span-2" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px">
+          <label class="portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><span class="field-label">Contact Person Name &amp; Surname</span><input name="contact_person_name" autocomplete="name" {% if not is_company %}disabled{% endif %} value="{{ form_values.get('contact_person_name', '') }}" placeholder="e.g. Jane Smith"></label>
+          <label class="switch portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><input type="checkbox" name="contact_person_is_director" value="1" {% if contact_is_director %}checked{% endif %} {% if not is_company %}disabled{% endif %}> Director</label>
+          </div>
+          <div class="span-2">
+          <label><span class="field-label"><span data-phone-label>{{ 'Contact Person Cellphone No.' if is_company else 'Cellphone No.' }}</span> <span class="req-star" aria-hidden="true">*</span></span><input name="phone" type="tel" required inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
+          <label><span class="field-label">WhatsApp No. (if different from the above)</span><input name="whatsapp_number" type="tel" inputmode="tel" value="{{ form_values.get('whatsapp_number', '') }}" placeholder="e.g. 082 123 4567"></label>
+          </div>
           <label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" {% if form_values.get('marketing_opt_in') %}checked{% endif %}> Subscribed to marketing emails</label>
         </div>
       </section>
@@ -102,11 +117,18 @@
       </section>
 
       <section class="form-section">
-        <h2>Alternative contact</h2>
-        <div class="form-grid">
-          <label><span class="field-label">Alternative Contact Name <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_name" required value="{{ form_values.get('alternative_contact_name', '') }}" placeholder="e.g. Jane Smith"></label>
-          <label><span class="field-label">Alternative Contact Number <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_number" type="tel" inputmode="tel" required value="{{ form_values.get('alternative_contact_number', '') }}" placeholder="e.g. 082 123 4567"></label>
-          <label><span class="field-label">Alternative Contact Relationship <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_relationship" required value="{{ form_values.get('alternative_contact_relationship', '') }}" placeholder="e.g. Sister"></label>
+        <h2 data-alternative-heading>{{ "Directors contact details" if is_company else "Alternative contact" }}</h2>
+        {# An individual keeps the alternative contact exactly as before. A company replaces it with
+           the directors block (ABI-341953299): a business signs through a director, so the counter
+           needs that person's name and number, not a friend or relative. #}
+        <div class="form-grid" data-individual-alternative {% if is_company %}hidden{% endif %}>
+          <label><span class="field-label">Alternative Contact Name <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_name" {% if is_company %}disabled{% else %}required{% endif %} value="{{ form_values.get('alternative_contact_name', '') }}" placeholder="e.g. Jane Smith"></label>
+          <label><span class="field-label">Alternative Contact Number <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_number" type="tel" inputmode="tel" {% if is_company %}disabled{% else %}required{% endif %} value="{{ form_values.get('alternative_contact_number', '') }}" placeholder="e.g. 082 123 4567"></label>
+          <label><span class="field-label">Alternative Contact Relationship <span class="req-star" aria-hidden="true">*</span></span><input name="alternative_contact_relationship" {% if is_company %}disabled{% else %}required{% endif %} value="{{ form_values.get('alternative_contact_relationship', '') }}" placeholder="e.g. Sister"></label>
+        </div>
+        <div class="form-grid" data-company-director {% if not is_company or contact_is_director %}hidden{% endif %}>
+          <label><span class="field-label">Directors Name &amp; Surname <span class="req-star" aria-hidden="true">*</span></span><input name="director_name" {% if is_company and not contact_is_director %}required{% else %}disabled{% endif %} value="{{ form_values.get('director_name', '') }}" placeholder="e.g. Jane Smith"></label>
+          <label><span class="field-label">Directors Contact <span class="req-star" aria-hidden="true">*</span></span><input name="director_contact" type="tel" inputmode="tel" {% if is_company and not contact_is_director %}required{% else %}disabled{% endif %} value="{{ form_values.get('director_contact', '') }}" placeholder="e.g. 082 123 4567"></label>
         </div>
       </section>
 
@@ -168,13 +190,21 @@
   </article>
 </main>
 <script>
-/* The Company details section follows the Customer type choice, exactly as it does on the staff
-   Edit customer page — a customer switching to Company sees the same two fields staff do. */
+/* The Contact details and Alternative contact sections follow the Customer type choice, exactly as
+   they do on the staff Edit customer page — a customer switching to Company sees the company's
+   contact fields and the directors block; an individual keeps the alternative contact. Ticking
+   "Director" hides the separate directors block (a director is their own contact) and drops its
+   required flags; nothing typed is ever cleared by a switch. */
 (function(){
   var section = document.querySelector('.company-details-section');
   var inputs = document.getElementsByName('customer_type');
   var companyName = document.querySelector('.portal-company-name');
   var individualNames = document.querySelectorAll('.portal-individual-name');
+  var companyContacts = document.querySelectorAll('[data-company-contact]');
+  var phoneLabel = document.querySelector('[data-phone-label]');
+  var alternativeGroup = document.querySelector('[data-individual-alternative]');
+  var directorGroup = document.querySelector('[data-company-director]');
+  var directorBox = document.querySelector('[name="contact_person_is_director"]');
   if(!section){ return; }
   function each(list, fn){ Array.prototype.forEach.call(list, fn); }
   function toggleName(label, active){
@@ -182,6 +212,20 @@
     var input = label.querySelector('input');
     input.disabled = !active;
     input.required = active;
+  }
+  function toggleGroup(group, active){
+    if(!group){ return; }
+    group.hidden = !active;
+    each(group.querySelectorAll('input'), function(input){
+      input.disabled = !active;
+      input.required = active;
+    });
+  }
+  function toggleOptional(label, active){
+    label.hidden = !active;
+    var input = label.querySelector('input');
+    input.disabled = !active;
+    input.required = false;
   }
   function sync(){
     var selected = null;
@@ -193,6 +237,15 @@
     document.querySelector('[data-other-emails]').hidden = !company;
     toggleName(companyName, company);
     each(individualNames, function(label){ toggleName(label, !company); });
+    each(companyContacts, function(label){ toggleOptional(label, company); });
+    if(phoneLabel){
+      phoneLabel.textContent = company ? 'Contact Person Cellphone No.' : 'Cellphone No.';
+    }
+    var directorIsContact = !!(directorBox && directorBox.checked);
+    toggleGroup(alternativeGroup, !company);
+    toggleGroup(directorGroup, company && !directorIsContact);
+    alternativeGroup.closest('section').hidden = company && directorIsContact;
+    document.querySelector('[data-alternative-heading]').textContent = company ? 'Directors contact details' : 'Alternative contact';
     var declaration = document.querySelector('[data-own-use-declaration]');
     if(declaration){
       var wording = company
@@ -208,6 +261,7 @@
     }
   }
   each(inputs, function(input){ input.addEventListener('change', sync); });
+  if(directorBox){ directorBox.addEventListener('change', sync); }
   sync();
 })();
 </script>

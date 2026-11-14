@@ -30,10 +30,20 @@
       <label>{{ label }}<input type="{{ kind }}" name="{{ name }}" value="{{ custom_fields.get(name,'') }}" autocomplete="off"></label>
     {% endfor %}
   </div>
+  <div data-individual-contact>
   <h3>Alternative contact</h3>
   <div class="form-grid">
     <label>Alternative Contact Name<input name="alternative_contact_name" value="{{ custom_fields.get('alternative_contact_name','') }}" placeholder="Jane Smith"></label>
     <label>Alternative Contact Number<input name="alternative_contact_number" value="{{ custom_fields.get('alternative_contact_number','') }}" placeholder="+27..."></label>
     <label>Alternative Contact Relationship<input name="alternative_contact_relationship" value="{{ custom_fields.get('alternative_contact_relationship','') }}" placeholder="Sister"></label>
+  </div>
+  </div>
+  <div data-director-contact hidden>
+    <h3>Directors contact details</h3>
+    <div class="form-grid">
+      {% for key,label in [('director_name','Directors Name & Surname*'),('director_contact','Directors Contact*')] %}
+      <label>{{ label }}<input name="{{ key }}" value="{{ posted.get(key, custom_fields.get(key,'')) }}"></label>
+      {% endfor %}
+    </div>
   </div>
 </section>

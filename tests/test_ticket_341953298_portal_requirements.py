@@ -42,7 +42,7 @@ def test_branch_content_placement_and_postback(client, app, slug, email, company
     assert response.status_code == (400 if company else 200)
     soup = BeautifulSoup(response.data, "html.parser")
     block = soup.select_one(".portal-requirements")
-    assert block.find_previous_sibling("section").h2.text == "Alternative contact"
+    assert block.find_previous_sibling("section").h2.text == ("Directors contact details" if company else "Alternative contact")
     assert block.h2.text == "REQUIREMENTS"
     assert block.select_one("[data-business-requirements]").has_attr("hidden") != company
     assert [a.text for a in block.select("a")] == [email]
