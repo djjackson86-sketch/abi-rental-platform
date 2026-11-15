@@ -12,7 +12,7 @@ from app.services.payments import display_payment_date, label_for as payment_lab
 from app.services.customer_credits import customer_credit_balance
 from app.services.credit_limits import debt_sql, facility_summary
 from app.services.settings import get_company_settings
-from app.services.customers import create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
+from app.services.customers import suspect_matches, create_customer, customer_fields_changed, customer_summary_for, custom_field_label, custom_fields_for, get_customer, update_customer
 from app.services.portal_registrations import pending_exclusion_clause
 from app.services.branches import adjusted_pickup_time_for_branch, branch_hours_summaries, branch_options, default_branch_id
 from app.services.timezone import local_now_iso
@@ -787,6 +787,7 @@ def detail(order_id):
     finalized_invoice_exists = has_finalized_invoice(order_id)
     return render_template(
         "admin/orders/detail.html",
+        suspect_warnings=suspect_matches(get_customer(order["customer_id"]), exclude_id=order["customer_id"]),
         settings=get_company_settings(),
         order=order,
         items=items,

@@ -664,7 +664,39 @@ SUSPECT_REASON_MAX_LENGTH = 2000
 SUSPECT_FORM_ACTION = "save_suspect"
 SUSPECT_DEFAULT_BLOCK_REASON = "Suspected fraud"
 #: Stable match reasons returned by ``suspect_matches`` — never the matched value.
-SUSPECT_MATCH_REASONS = ("email", "phone", "id_number", "name")
+#: Ticket ABI-341953312 added the vehicle and address signals after the original
+#: four, so the existing email/phone/ID/name order (and every payload that already
+#: relied on it) is unchanged.
+SUSPECT_MATCH_REASONS = ("email", "phone", "id_number", "name", "vehicle_registration", "vin", "address")
+#: Stored custom-field keys that can carry an ID or passport number.
+#: ``customer_id_number`` is the canonical key this feature writes; the rest are
+#: read-only equivalents, so a number captured by an older or different form still
+#: counts as an exact ID match. Nothing here is ever written by the matcher.
+ID_NUMBER_CUSTOM_KEYS = (
+    "customer_id_number",
+    "id_number",
+    "identity_number",
+    "id_or_license",
+    "passport_number",
+    "passport_no",
+    "passport",
+)
+#: Keys a submission or a stored record can carry a number plate / VIN under. The
+#: main-vehicle mirror uses the canonical ``vehicle_*`` names (``vehicle_reg_no``,
+#: ``vehicle_vin``); the other names are tolerated so a direct caller is not
+#: silently unmatched. A vehicle row's own columns are read separately.
+REGISTRATION_KEYS = ("vehicle_reg_no", "vehicle_registration", "registration")
+VIN_KEYS = ("vehicle_vin", "vin")
+#: An identity shorter than this is never evidence on its own: junk in a legacy
+#: field must not turn two unrelated clients into a warning.
+MIN_REGISTRATION_LENGTH = 4
+MIN_VIN_LENGTH = 6
+MIN_ID_NUMBER_LENGTH = 5
+#: The customer columns that make up a complete address. ``address_line2`` is the
+#: unit/complex line the customer and portal forms both label as such, so it is
+#: part of the identity rather than skipped.
+ADDRESS_FIELDS = ("address_line1", "address_line2", "suburb", "city", "province", "postal_code", "country")
+ADDRESS_UNIT_KEYS = ("unit_number", "unit_no", "unit")
 #: The form action the suspect panel posts. The field is named ``action`` in the
 #: customer form; ``form_action`` is accepted too so a caller's template can use
 #: either name without silently losing the protection.
@@ -804,14 +836,150 @@ def _normalised_email(value):
 
 
 def _normalised_phone(value):
-    """The last nine digits of an SA number, so +27 82…, 082… and 0027 82… agree."""
-    digits = _phone_digits(value)
-    return digits[-9:] if len(digits) >= 9 else ""
+    """A complete phone identity — never a suffix comparison.
+
+    South African numbers collapse to one ten-digit national form whether they were
+    typed ``082 555 1234``, ``+27 82 555 1234``, ``27 (0)82 555 1234`` or
+    ``0027 82 555 1234``. Anything else keeps its country code and its full digit
+    run, so a foreign number can never collide with an SA number (or with another
+    country's) merely because the last nine digits happen to agree.
+    """
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("27") and not digits.startswith("0"):
+        rest = digits[2:]
+        if rest.startswith("0"):
+            rest = rest[1:]
+        if len(rest) == 9:
+            digits = "0" + rest
+    if len(digits) == 10 and digits.startswith("0"):
+        return digits
+    if 8 <= len(digits) <= 15:
+        return "+" + digits
+    return ""
 
 
 def _normalised_id_number(value):
-    """Whitespace-free ID number for exact comparison (never fuzzy-matched)."""
-    return re.sub(r"\s+", "", str(value or "")).strip().upper()
+    """Whitespace-free ID/passport number for exact comparison (never fuzzy-matched).
+
+    A leading label that older forms stored beside the number (``ID 8001…``,
+    ``Passport A123…``) is dropped so the number itself compares equal; the digit
+    body is otherwise used exactly as captured.
+    """
+    text = re.sub(r"\s+", "", str(value or "")).upper()
+    for label in ("IDENTITYNUMBER", "PASSPORTNUMBER", "PASSPORTNO", "IDNUMBER", "PASSPORT", "IDNO"):
+        if text.startswith(label):
+            text = text[len(label):]
+            break
+    if text.startswith("ID") and len(text) > 2:
+        text = text[2:]
+    return text
+
+
+def _normalised_registration(value):
+    """A number-plate comparison key: upper case, punctuation and spacing removed."""
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def _normalised_vin(value):
+    """A VIN comparison key: upper case, punctuation and spacing removed."""
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def _identity_value(mapping, custom_fields, keys):
+    """First non-blank value for ``keys`` — from the submission, else custom fields.
+
+    A submitted form (or a customer row) is read first, so a number typed into the
+    form being checked wins; the stored custom fields are the fallback for a row
+    whose record carries the value in its JSON blob.
+    """
+    for key in keys:
+        value = _mapping_value(mapping, key, None)
+        if value not in (None, ""):
+            return str(value).strip()
+        value = custom_fields.get(key)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def _normalised_address_part(value):
+    """Lower-case, accent-folded, punctuation-free text for an address component."""
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return " ".join(token for token in re.split(r"[^0-9a-z]+", text.lower()) if token)
+
+
+def _address_identity(mapping, custom_fields):
+    """The address components that must agree before two records are called the same.
+
+    ``address_line2`` is the unit/complex line on both the customer and portal
+    forms, so it is kept as the unit component (a separate ``unit*`` custom field,
+    where an older form kept it, is folded in). Nothing is invented: a blank part
+    stays blank.
+    """
+    def part(key):
+        return _normalised_address_part(_mapping_value(mapping, key, "") or "")
+
+    unit = part("address_line2")
+    extra_unit = ""
+    for key in ADDRESS_UNIT_KEYS:
+        extra_unit = _normalised_address_part(custom_fields.get(key) or "")
+        if extra_unit:
+            break
+    if extra_unit and extra_unit not in unit:
+        unit = f"{unit} {extra_unit}".strip()
+    return {
+        "line1": part("address_line1"),
+        "unit": unit,
+        "suburb": part("suburb"),
+        "city": part("city"),
+        "province": part("province"),
+        "postal_code": part("postal_code"),
+        "country": part("country"),
+    }
+
+
+def _addresses_match(left, right):
+    """True only for the same street AND at least one more shared address component.
+
+    The street line must be present and equal; unit, suburb, city and postal code
+    must agree wherever both sides carry them (so the same building with a
+    different unit is not the same address); province and country must never
+    conflict. At least one component besides the street must match, so a common
+    street name alone is not evidence.
+    """
+    if not left["line1"] or left["line1"] != right["line1"]:
+        return False
+    if left["unit"] != right["unit"]:
+        return False
+    shared = 0
+    for key in ("unit", "suburb", "city", "postal_code"):
+        if left[key] and right[key]:
+            if left[key] != right[key]:
+                return False
+            shared += 1
+    for key in ("province", "country"):
+        if left[key] and right[key] and left[key] != right[key]:
+            return False
+    return shared >= 1
+
+
+def _suspect_identity(mapping):
+    """Normalised identity values from a form or a customer row, for matching."""
+    custom_fields = _mapping_custom_fields(mapping)
+    return {
+        "name": str(_mapping_value(mapping, "name", "") or "").strip(),
+        "email": _normalised_email(_mapping_value(mapping, "email", "")),
+        "phone": _normalised_phone(_mapping_value(mapping, "phone", "")),
+        "id_number": _normalised_id_number(
+            _identity_value(mapping, custom_fields, (CUSTOMER_ID_NUMBER_KEY,) + ID_NUMBER_CUSTOM_KEYS)
+        ),
+        "registration": _normalised_registration(_identity_value(mapping, custom_fields, REGISTRATION_KEYS)),
+        "vin": _normalised_vin(_identity_value(mapping, custom_fields, VIN_KEYS)),
+        "address": _address_identity(mapping, custom_fields),
+    }
 
 
 def _name_tokens(value):
@@ -846,46 +1014,78 @@ def _names_match(left, right):
     return True
 
 
-def _suspect_identity(mapping):
-    """Normalised identity values from a form or a customer row, for matching."""
-    custom_fields = _mapping_custom_fields(mapping)
-    id_number = _mapping_value(mapping, CUSTOMER_ID_NUMBER_KEY, None)
-    if id_number in (None, ""):
-        id_number = custom_fields.get(CUSTOMER_ID_NUMBER_KEY)
-    return {
-        "name": str(_mapping_value(mapping, "name", "") or "").strip(),
-        "email": _normalised_email(_mapping_value(mapping, "email", "")),
-        "phone": _normalised_phone(_mapping_value(mapping, "phone", "")),
-        "id_number": _normalised_id_number(id_number),
-    }
-
-
 def _customer_identity_rows():
-    """Blocked Suspect/Fraud identities, cached for the life of one request.
+    """Blocked OR Suspect/Fraud clients as match sources, cached per request.
+
+    Ticket ABI-341953312: a record is a risk source when staff blocked it **or**
+    classified it as Suspect/Fraud. Before this, only records that were both were
+    scanned, so a flagged client whose block was later lifted — and any client
+    blocked for another reason — was invisible to the warning. Blocking alone
+    never turns the warning into an action: matches are advisory only.
 
     ``customer_summary_for`` may classify several rows in one request (the
     order-form customer picker summarises the whole book), so the scans must not
-    multiply. Writes clear the cache (``_clear_suspect_cache``).
+    multiply. Writes clear the cache (``_clear_suspect_cache``); each source's
+    vehicle rows are fetched in one extra query and attached to the same cached
+    entries, so per-vehicle identity costs no query per row.
+
+    The LIKE is only a cheap pre-filter for JSON rows that mention the flag at all;
+    ``customer_is_suspect`` decides, so a note that merely contains the word never
+    becomes a source. A blocked row is a source whether or not it was ever flagged.
     """
     if has_request_context():
         cached = getattr(g, "_suspect_identity_rows", None)
         if cached is not None:
             return cached
-    rows = get_db().execute("SELECT id, name, email, phone, custom_fields_json FROM customers WHERE is_blocked = 1").fetchall()
-    result = [
-        {
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, name, email, phone, address_line1, address_line2, suburb, city, province, "
+        "postal_code, country, is_blocked, custom_fields_json FROM customers "
+        "WHERE is_blocked = 1 OR custom_fields_json LIKE ?",
+        ("%suspect_fraud%",),
+    ).fetchall()
+    result = []
+    for row in rows:
+        if not (customer_is_blocked(row) or customer_is_suspect(row)):
+            continue
+        custom_fields = raw_custom_fields_for(row)
+        # Ticket ABI-341953269: the ID staff captured when this client was flagged,
+        # carried on the cached row so the similarity popup can show it beside the
+        # candidate's number (no second query). Only the canonical key is the shown
+        # value; the equivalents below are match-only evidence.
+        stored_id = str(custom_fields.get(CUSTOMER_ID_NUMBER_KEY) or "").strip()
+        id_numbers = {
+            _normalised_id_number(custom_fields.get(key))
+            for key in ID_NUMBER_CUSTOM_KEYS
+            if str(custom_fields.get(key) or "").strip()
+        }
+        result.append({
             "id": row["id"],
             "name": row["name"] or "",
             "email": row["email"] or "",
             "phone": row["phone"] or "",
             "custom_fields_json": row["custom_fields_json"],
-            # Ticket ABI-341953269: the ID number staff captured when this client was
-            # flagged, carried on the cached row so the similarity popup can show it
-            # beside the candidate's number for comparison (no second query).
-            "id_number": str(_mapping_custom_fields(row).get(CUSTOMER_ID_NUMBER_KEY) or "").strip(),
-        }
-        for row in rows if customer_is_suspect(row)
-    ]
+            "id_number": stored_id,
+            "id_numbers": id_numbers,
+            "registration": _normalised_registration(_identity_value(row, custom_fields, REGISTRATION_KEYS)),
+            "vin": _normalised_vin(_identity_value(row, custom_fields, VIN_KEYS)),
+            "address": _address_identity(row, custom_fields),
+            "vehicles": [],
+        })
+    if result:
+        placeholders = ",".join("?" for _ in result)
+        vehicles = db.execute(
+            f"SELECT customer_id, registration, vin FROM vehicles WHERE customer_id IN ({placeholders})",
+            [entry["id"] for entry in result],
+        ).fetchall()
+        by_customer = {}
+        for vehicle in vehicles:
+            by_customer.setdefault(vehicle["customer_id"], []).append({
+                "registration": _normalised_registration(vehicle["registration"]),
+                "vin": _normalised_vin(vehicle["vin"]),
+            })
+        for entry in result:
+            entry["vehicles"] = by_customer.get(entry["id"], [])
     if has_request_context():
         g._suspect_identity_rows = result
     return result
@@ -900,52 +1100,60 @@ def _clear_suspect_cache():
         pass
 
 
-def _customers_with_id_number(wanted):
-    """{id: row} for customers whose hidden ID number exactly equals ``wanted``.
-
-    Only classified records are decoded and compared exactly; a number that
-    merely appears in another custom field never counts as an ID match.
-    """
-    if not wanted:
-        return {}
-    rows = _customer_identity_rows()
-    hits = {}
-    for row in rows:
-        try:
-            fields = json.loads(row["custom_fields_json"] or "{}")
-        except Exception:
-            continue
-        if not isinstance(fields, dict):
-            continue
-        if _normalised_id_number(fields.get(CUSTOMER_ID_NUMBER_KEY)) == wanted:
-            hits[row["id"]] = {"id": row["id"], "name": row["name"] or "", "id_number": row["id_number"]}
-    return hits
+def _identity_matches_vehicle(identity, entry):
+    """True when a submitted plate or VIN matches the record or any of its vehicles."""
+    registration = identity["registration"]
+    if len(registration) >= MIN_REGISTRATION_LENGTH:
+        if entry["registration"] == registration:
+            return "vehicle_registration"
+        if any(vehicle["registration"] == registration for vehicle in entry["vehicles"]):
+            return "vehicle_registration"
+    vin = identity["vin"]
+    if len(vin) >= MIN_VIN_LENGTH:
+        if entry["vin"] == vin or any(vehicle["vin"] == vin for vehicle in entry["vehicles"]):
+            return "vin"
+    return ""
 
 
 def suspect_matches(form_or_customer, exclude_id=None):
-    """Other clients whose identity overlaps this one, with the ID they were flagged on.
+    """Other risk clients whose identity overlaps this one, with their captured ID.
 
-    Accepts a submitted form (name/email/phone/customer_id_number) or a customer
-    row/dict (its hidden custom fields are read for the ID number). Each entry is
+    Accepts a submitted form (name/email/phone/customer_id_number/vehicle_reg_no/
+    vehicle_vin/address fields) or a customer row/dict (its hidden custom fields
+    are read for the ID number and main-vehicle mirror). Each entry is
     ``{"id", "name", "id_number", "reasons"}`` where ``reasons`` is a subset of
-    ``SUSPECT_MATCH_REASONS``: a case-insensitive email, an SA-normalised phone
-    (+27/0/0027 agree), an exact supplementary ID number, or a conservative full
-    name match (never a blank or a lone first name). ``exclude_id`` skips the
-    client being edited. Returns [] when there is nothing to compare.
+    ``SUSPECT_MATCH_REASONS``: a case-insensitive email, a complete normalised
+    phone (+27/0/0027 agree, foreign numbers keep their country code), an exact
+    ID/passport number, a conservative full-name match (never a blank or a lone
+    first name), the exact number plate or VIN of the client or of any vehicle
+    recorded against them, or a complete address (street plus unit/suburb/city/
+    postal agreement). ``exclude_id`` skips the client being edited. Returns []
+    when there is nothing to compare.
+
+    Ticket ABI-341953312: sources are blocked OR Suspect/Fraud records (see
+    ``_customer_identity_rows``), and vehicle/address signals join the original
+    four. The match is a warning only — nothing here blocks, merges or edits a
+    client.
 
     Ticket ABI-341953269: ``id_number`` is the number staff captured when *that*
-    matched client was flagged (``""`` when none was recorded) so the staff
+    matched client was flagged (an empty string when none was recorded) so the staff
     similarity popup can put it beside the number being entered for comparison.
-    Only the hidden ``customer_id_number`` value is read — never any other custom
-    field — and it never leaves a staff surface: the summary that carries these
-    matches is served to staff requests only, and the key stays hidden from
-    custom-field cards, CSV exports and public pages (``HIDDEN_CUSTOM_FIELD_KEYS``).
+    Only the hidden ID keys are read — never any other custom field — and the
+    private Suspect/Fraud reason is never part of an entry. The summary that
+    carries these matches is served to staff requests only, and the keys stay
+    hidden from custom-field cards, CSV exports and public pages
+    (``HIDDEN_CUSTOM_FIELD_KEYS``).
     """
     identity = _suspect_identity(form_or_customer)
     try:
         excluded = int(exclude_id) if exclude_id not in (None, "") else None
     except (TypeError, ValueError):
         excluded = None
+    vehicle_identities = [identity]
+    candidate_id = _mapping_value(form_or_customer, "id", None)
+    if candidate_id:
+        for vehicle in get_db().execute("SELECT registration, vin FROM vehicles WHERE customer_id=?", (candidate_id,)).fetchall():
+            vehicle_identities.append({"registration": _normalised_registration(vehicle["registration"]), "vin": _normalised_vin(vehicle["vin"])})
     matches = {}
     for row in _customer_identity_rows():
         if excluded is not None and row["id"] == excluded:
@@ -957,6 +1165,14 @@ def suspect_matches(form_or_customer, exclude_id=None):
             reasons.append("phone")
         if identity["name"] and _names_match(identity["name"], row["name"]):
             reasons.append("name")
+        if len(identity["id_number"]) >= MIN_ID_NUMBER_LENGTH and identity["id_number"] in row["id_numbers"]:
+            reasons.append("id_number")
+        for vehicle_identity in vehicle_identities:
+            vehicle_reason = _identity_matches_vehicle(vehicle_identity, row)
+            if vehicle_reason and vehicle_reason not in reasons:
+                reasons.append(vehicle_reason)
+        if _addresses_match(identity["address"], row["address"]):
+            reasons.append("address")
         if reasons:
             matches[row["id"]] = {
                 "id": row["id"],
@@ -964,16 +1180,6 @@ def suspect_matches(form_or_customer, exclude_id=None):
                 "id_number": row["id_number"],
                 "reasons": reasons,
             }
-    if identity["id_number"]:
-        for customer_id, row in _customers_with_id_number(identity["id_number"]).items():
-            if excluded is not None and customer_id == excluded:
-                continue
-            entry = matches.setdefault(
-                customer_id,
-                {"id": customer_id, "name": row["name"], "id_number": row["id_number"], "reasons": []},
-            )
-            if "id_number" not in entry["reasons"]:
-                entry["reasons"].append("id_number")
     for entry in matches.values():
         entry["reasons"] = [reason for reason in SUSPECT_MATCH_REASONS if reason in entry["reasons"]]
     return sorted(matches.values(), key=lambda entry: (entry["name"].lower(), entry["id"]))
@@ -1018,6 +1224,12 @@ def _clean(form, existing_custom_fields=None):
     if customer_type not in VALID_TYPES:
         customer_type = "individual"
     custom_fields = dict(existing_custom_fields or {})
+    # ABI-341953312: optional staff identity capture never classifies or blocks.
+    if staff_request_active() and str(form.get("risk_identity_panel") or "") == "1" and CUSTOMER_ID_NUMBER_KEY in form:
+        identity_number = str(form.get(CUSTOMER_ID_NUMBER_KEY) or "").strip()
+        if len(identity_number) > 64 or any(ord(c) < 32 for c in identity_number):
+            raise ValueError("ID/passport must be at most 64 characters without control characters")
+        custom_fields[CUSTOMER_ID_NUMBER_KEY] = identity_number
     # ABI-341953299: additive contacts belong to the full panel, not inline saves.
     if str(form.get("contact_details_panel") or "") == "1":
         if customer_type == "company":
@@ -1341,6 +1553,7 @@ def customer_summary_for(customer):
     if staff_request_active():
         is_suspect = customer_is_suspect(customer)
         summary["is_suspect"] = is_suspect
+        summary["form"]["customer_id_number"] = customer_id_number_for(customer)
         summary["suspect_matches"] = suspect_matches(
             customer, exclude_id=_customer_row_value(customer, "id", None)
         )
