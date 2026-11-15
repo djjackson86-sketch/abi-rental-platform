@@ -124,7 +124,7 @@ def test_individual_phone_label_and_whatsapp_placement(client, app, branch):  # 
     whatsapp = soup.select_one('.customer-form [name="whatsapp_number"]')
     assert whatsapp is not None, "the optional WhatsApp number belongs on the form"
     assert not whatsapp.has_attr("required"), "WhatsApp is optional"
-    assert "WhatsApp No. (if different from the above)" in label_of(soup, "whatsapp_number")
+    assert label_of(soup, "whatsapp_number") == "WhatsApp No."
     body = str(soup.select_one(".customer-form"))
     assert body.index('name="phone"') < body.index('name="whatsapp_number"'), (
         "WhatsApp sits directly below the cellphone"

@@ -510,6 +510,10 @@ def submission_values(form):
     for key in CONTACT_DETAIL_KEYS:
         values[key] = str(form.get(key) or "").strip()
     values[CONTACT_DETAILS_PANEL_FIELD] = "1"
+    # Resolve from the current cellphone on every parse; never trust a stale hidden number.
+    values["whatsapp_same_as_phone"] = "1" if _truthy(form.get("whatsapp_same_as_phone")) else "0"
+    if values["whatsapp_same_as_phone"] == "1":
+        values["whatsapp_number"] = values["phone"]
     director_is_contact_person = _truthy(form.get("contact_person_is_director"))
     values["contact_person_is_director"] = "1" if director_is_contact_person else "0"
     if not is_company:

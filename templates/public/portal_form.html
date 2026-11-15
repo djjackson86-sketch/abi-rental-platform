@@ -39,6 +39,10 @@
 .portal-panel .portal-requirements li::marker{font-weight:750}
 .portal-panel .portal-requirements [hidden]{display:none}
 .portal-panel .portal-whatsapp{margin-top:16px}
+.portal-panel .portal-whatsapp[hidden]{display:none}
+.portal-panel .portal-phone-row{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.portal-panel .portal-phone-row>label:first-child{flex:1;min-width:180px}
+.portal-panel .portal-phone-row .switch{display:flex;align-items:center;gap:8px;margin:0 0 12px}
 .portal-panel .portal-requirements .portal-requirement-email{margin:12px 0}
 .portal-panel .portal-contact-person-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}
 .portal-panel .portal-contact-person-row>label:not(.switch):not([hidden]){display:contents}
@@ -106,8 +110,12 @@
           <label class="switch portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><input type="checkbox" name="contact_person_is_director" value="1" {% if contact_is_director %}checked{% endif %} {% if not is_company %}disabled{% endif %}> Director</label>
           </div>
           <div class="span-2">
+          {% set whatsapp_same = form_values.get('whatsapp_same_as_phone') in ('1', 'true', 'on', 'yes', 'True') %}
+          <div class="portal-phone-row">
           <label><span class="field-label"><span data-phone-label>{{ 'Contact Person Cellphone No.' if is_company else 'Cellphone No.' }}</span> <span class="req-star" aria-hidden="true">*</span></span><input name="phone" type="tel" required inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
-          <label class="portal-whatsapp"><span class="field-label">WhatsApp No. (if different from the above)</span><input name="whatsapp_number" type="tel" inputmode="tel" value="{{ form_values.get('whatsapp_number', '') }}" placeholder="e.g. 082 123 4567"></label>
+          <label class="switch"><input type="checkbox" name="whatsapp_same_as_phone" value="1" {% if whatsapp_same %}checked{% endif %} aria-controls="portal-whatsapp"> Same for WhatsApp</label>
+          </div>
+          <label class="portal-whatsapp" id="portal-whatsapp" {% if whatsapp_same %}hidden{% endif %}><span class="field-label">WhatsApp No.</span><input name="whatsapp_number" type="tel" inputmode="tel" {% if whatsapp_same %}disabled{% endif %} value="{{ form_values.get('whatsapp_number', '') }}" placeholder="e.g. 082 123 4567"></label>
           </div>
           <label class="switch span-2"><input type="checkbox" name="marketing_opt_in" value="1" {% if form_values.get('marketing_opt_in') %}checked{% endif %}> Subscribed to marketing emails</label>
         </div>
@@ -214,6 +222,17 @@
   </article>
 </main>
 <script>
+(function(){
+  var same = document.querySelector('[name="whatsapp_same_as_phone"]');
+  var field = document.getElementById('portal-whatsapp');
+  if(!same || !field){ return; }
+  function syncWhatsApp(){
+    field.hidden = same.checked;
+    field.querySelector('input').disabled = same.checked;
+  }
+  same.addEventListener('change', syncWhatsApp);
+  syncWhatsApp();
+})();
 /* The Contact details and Alternative contact sections follow the Customer type choice, exactly as
    they do on the staff Edit customer page — a customer switching to Company sees the company's
    contact fields and the directors block; an individual keeps the alternative contact. Ticking
