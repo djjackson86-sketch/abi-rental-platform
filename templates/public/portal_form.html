@@ -38,6 +38,7 @@
 .portal-panel .portal-requirements li{margin:0}
 .portal-panel .portal-requirements li::marker{font-weight:750}
 .portal-panel .portal-requirements [hidden]{display:none}
+.portal-panel .portal-lookup button[type="submit"]{margin-top:12px}
 .portal-panel .portal-whatsapp{margin-top:16px}
 .portal-panel .portal-whatsapp[hidden]{display:none}
 .portal-panel .portal-phone-row{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
@@ -107,7 +108,7 @@
           <label class="portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><span class="field-label">Telephone No</span><input name="telephone_number" type="tel" inputmode="tel" autocomplete="tel-national" {% if not is_company %}disabled{% endif %} value="{{ form_values.get('telephone_number', '') }}" placeholder="e.g. 011 123 4567"></label>
           <div class="span-2 portal-contact-person-row">
           <label class="portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><span class="field-label">Contact Person Name &amp; Surname</span><input name="contact_person_name" autocomplete="name" {% if not is_company %}disabled{% endif %} value="{{ form_values.get('contact_person_name', '') }}" placeholder="e.g. Jane Smith"></label>
-          <label class="switch portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><input type="checkbox" name="contact_person_is_director" value="1" {% if contact_is_director %}checked{% endif %} {% if not is_company %}disabled{% endif %}> Director</label>
+          <label class="switch portal-company-contact" data-company-contact {% if not is_company %}hidden{% endif %}><input type="checkbox" name="contact_person_is_director" value="1" {% if contact_is_director %}checked{% endif %} {% if not is_company %}disabled{% endif %}> Tick if Director</label>
           </div>
           <div class="span-2">
           {% set whatsapp_same = form_values.get('whatsapp_same_as_phone') in ('1', 'true', 'on', 'yes', 'True') %}

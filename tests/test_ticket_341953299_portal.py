@@ -149,7 +149,7 @@ def test_company_contact_fields_are_above_the_cellphone_and_optional(client, app
     director_tick = soup.select_one('[name="contact_person_is_director"]')
     assert director_tick is not None and director_tick.get("type") == "checkbox"
     assert director_tick.get("value") == "1"
-    assert label_of(soup, "contact_person_is_director") == "Director"
+    assert label_of(soup, "contact_person_is_director") == "Tick if Director"
     body = str(soup.select_one(".customer-form"))
     assert body.index('name="telephone_number"') < body.index('name="contact_person_name"')
     assert body.index('name="contact_person_name"') < body.index('name="phone"'), (
