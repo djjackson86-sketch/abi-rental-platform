@@ -6,15 +6,14 @@ only for a company.
 
 What this file pins:
 
-* the requirements are a real ``<ol>`` — the company's three documents are items 1-3, the driver's
-  two continue the sequence at 4 for a company and start at 1 for an individual, so a customer
-  never sees two number 1s or a gap left by the hidden company list;
+* the requirements are real ``<ol>`` lists; company and driver documents each start at 1
+  (the driver restart was requested in ABI-341953302);
 * the copy is word-for-word what it was: no "1." typed into a sentence, the email line and "The
   driver must bring the following:" stay prose, and the NB note stays a bold note;
 * the conditional lists survive: the company block (with its documents and its branch email) is
   hidden for an individual, and the universal portal still lists the three labelled branch
   addresses;
-* the spacing is tight — 5px between blocks, no paragraph or list margins, and list items that sit
+* the spacing is tight — 5px between blocks, no list margins (the email has breathing room), and list items that sit
   on consecutive lines — at desktop and phone widths.
 
 Fixtures are synthetic, notifications are off, and nothing is sent anywhere.
@@ -98,7 +97,7 @@ def business_list(block):
 # ---------------------------------------------------------------- the markup, as served
 
 
-def test_company_renders_the_documents_as_one_continuous_numbered_list(client, app):
+def test_company_renders_independent_numbered_document_lists(client, app):
     add_branch(app, "midrand")
     # A validation re-render is where the server draws the company labels and lists.
     response = client.post("/portal/midrand/register", data={"customer_type": "company", "email": "kept@example.com"})
@@ -114,7 +113,7 @@ def test_company_renders_the_documents_as_one_continuous_numbered_list(client, a
     driver = driver_list(block)
     assert driver.name == "ol"
     assert li_texts(driver) == DRIVER_DOCUMENTS
-    assert driver["start"] == "4", "a company's driver documents continue after its three documents"
+    assert driver["start"] == "1", "driver documents restart independently of company documents"
 
     # The email line and the "must bring" line stay prose, in order, inside the conditional block.
     business_panel = business_block(block)
@@ -214,7 +213,7 @@ def test_real_browser_numbering_toggle_and_tight_spacing(app, client, branch, wi
             # The spacing is tight: 5px between blocks, nothing added by paragraph or list margins,
             # and list items on consecutive lines.
             assert block.evaluate("el => getComputedStyle(el).rowGap") == "5px"
-            for selector in (".portal-requirements p", ".portal-requirements li"):
+            for selector in (".portal-requirements p:not(.portal-requirement-email)", ".portal-requirements li"):
                 margins = page.eval_on_selector_all(
                     selector, "els => els.map(el => [getComputedStyle(el).marginTop, getComputedStyle(el).marginBottom])"
                 )
@@ -226,10 +225,10 @@ def test_real_browser_numbering_toggle_and_tight_spacing(app, client, branch, wi
             assert driver.bounding_box()["y"] - (heading["y"] + heading["height"]) <= 8
             block.screenshot(path=str(shots / f"individual-{width}.png"))
 
-            # Switching to company adds the three documents and renumbers the driver's list to 4-5.
+            # Switching to company adds the three documents and keeps the driver's list at 1-2.
             page.locator('[name="customer_type"][value="company"]').check()
             assert business.is_visible()
-            numbers_are(driver, 4)
+            numbers_are(driver, 1)
             assert business_items.count() == 3
             assert [business_items.nth(i).inner_text() for i in range(3)] == COMPANY_DOCUMENTS
             assert [driver.locator("li").nth(i).inner_text() for i in range(2)] == DRIVER_DOCUMENTS
