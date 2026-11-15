@@ -74,10 +74,7 @@
   <div class="metric-card"><small>Customer base</small><b>Loading…</b><span>{{ range_label }}</span></div>
   <div class="metric-card"><small>Gross revenue</small><b>Loading…</b><span>{{ range_label }}</span></div>
   {% else %}
-  <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Created · {{ range_label }}</span></div>
-  <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Added · {{ range_label }}</span></div>
-  <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Added · {{ range_label }}</span></div>
-  <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Received · {{ range_label }}</span></div>
+  {% include "admin/_dashboard_period_metrics.html" %}
   {% endif %}
 </section>
 {% endif %}

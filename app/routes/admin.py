@@ -82,6 +82,18 @@ def _dashboard_owing_total(orders):
     return sum(float(order["due_total"] or 0) for order in orders)
 
 
+def _dashboard_last_month_metrics(branch_id):
+    """Previous complete calendar month, independent of dashboard date filters."""
+    if not is_main_session(session):
+        return None
+    month_end = date.fromisoformat(cash_today_iso()).replace(day=1) - timedelta(days=1)
+    return dashboard_period_metrics(
+        start_date=month_end.replace(day=1).isoformat(),
+        end_date=month_end.isoformat(),
+        branch_id=branch_id,
+    )
+
+
 @bp.route("/dashboard")
 @login_required
 def dashboard():
@@ -153,6 +165,7 @@ def dashboard():
         settings=get_company_settings(),
         dashboard_lazy=dashboard_lazy,
         metrics=metrics,
+        last_month_metrics=None if dashboard_lazy else _dashboard_last_month_metrics(branch_id),
         day_metrics=day_metrics,
         owing_orders=owing_orders,
         owing_total=owing_total,
@@ -196,14 +209,10 @@ def dashboard_period_partial():
     metrics = dashboard_period_metrics(
         start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
     )
-    return render_template_string(
-        """
-        <div class="metric-card"><small>Total orders</small><b>{{ metrics.orders }}</b><span>Created · {{ range_label }}</span></div>
-        <div class="metric-card"><small>Catalog size</small><b>{{ metrics.products }}</b><span>Added · {{ range_label }}</span></div>
-        <div class="metric-card"><small>Customer base</small><b>{{ metrics.customers }}</b><span>Added · {{ range_label }}</span></div>
-        <div class="metric-card"><small>Gross revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><span>Received · {{ range_label }}</span></div>
-        """,
+    return render_template(
+        "admin/_dashboard_period_metrics.html",
         metrics=metrics,
+        last_month_metrics=_dashboard_last_month_metrics(branch_id),
         range_label=range_label,
     )
 
