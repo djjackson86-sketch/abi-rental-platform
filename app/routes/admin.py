@@ -83,13 +83,15 @@ def _dashboard_owing_total(orders):
 
 
 def _dashboard_last_month_metrics(branch_id):
-    """Previous complete calendar month, independent of dashboard date filters."""
+    """Previous month through the matching business day, independent of filters."""
     if not is_main_session(session):
         return None
-    month_end = date.fromisoformat(cash_today_iso()).replace(day=1) - timedelta(days=1)
+    today = date.fromisoformat(cash_today_iso())
+    month_end = today.replace(day=1) - timedelta(days=1)
+    comparison_end = month_end.replace(day=min(today.day, month_end.day))
     return dashboard_period_metrics(
         start_date=month_end.replace(day=1).isoformat(),
-        end_date=month_end.isoformat(),
+        end_date=comparison_end.isoformat(),
         branch_id=branch_id,
     )
 

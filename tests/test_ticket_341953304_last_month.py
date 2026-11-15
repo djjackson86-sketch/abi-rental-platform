@@ -10,14 +10,17 @@ from test_ticket_341953282_dashboard import add_depot_user
 
 
 def comparisons(body):
-    return re.findall(r'class="dashboard-last-month">Last month <strong>(.*?)</strong>', body)
+    return re.findall(r'class="dashboard-last-month">This time last month <strong>(.*?)</strong>', body)
 
 
 @pytest.mark.parametrize('today,start,end', [
-    ('2026-01-01', '2025-12-01', '2025-12-31'),
-    ('2024-03-01', '2024-02-01', '2024-02-29'),
+    ('2026-01-01', '2025-12-01', '2025-12-01'),
+    ('2024-03-01', '2024-02-01', '2024-02-01'),
+    ('2024-03-31', '2024-02-01', '2024-02-29'),
+    ('2026-01-15', '2025-12-01', '2025-12-15'),
+    ('2026-05-31', '2026-04-01', '2026-04-30'),
     ('2025-03-31', '2025-02-01', '2025-02-28'),
-    ('2026-11-15', '2026-10-01', '2026-10-31'),
+    ('2026-11-15', '2026-10-01', '2026-10-15'),
 ])
 def test_month_boundaries(app, monkeypatch, today, start, end):
     monkeypatch.setattr(admin, 'cash_today_iso', lambda: today)
@@ -34,11 +37,13 @@ def seed(app):
     with app.app_context():
         db = get_db()
         db.execute('DELETE FROM customers')
-        for day in ('2026-09-30', '2026-10-01', '2026-10-31', '2026-11-01'):
+        for day in ('2026-09-30', '2026-10-01', '2026-10-15T23:59:59', '2026-10-16', '2026-10-31', '2026-11-01'):
             db.execute('INSERT INTO customers (name, created_at) VALUES (?, ?)', ('Client '+day, day))
         for number, day, branch, amount in [
             ('MONTH-1', '2026-10-01', 1, 125),
-            ('MONTH-2', '2026-10-31', 2, 200),
+            ('MONTH-2', '2026-10-15T23:59:59', 2, 200),
+            ('LATER-1', '2026-10-16', 1, 500),
+            ('LATER-2', '2026-10-31', 2, 600),
             ('BEFORE', '2026-09-30', 1, 900),
             ('CURRENT', '2026-11-01', 1, 700),
         ]:
@@ -57,7 +62,7 @@ def test_full_and_partial_share_comparisons(app, client, monkeypatch, query):
     assert comparisons(body) == comparisons(partial) == ['2', '2', 'R325.00']
     assert card_values(body) == card_values(partial)
     catalog = re.search(r'<div class="metric-card">\s*<small>Catalog size.*?</div>', partial, re.S).group()
-    assert 'Last month' not in catalog
+    assert 'This time last month' not in catalog
 
 
 def test_branch_and_accounting_rules(app, client, monkeypatch):
@@ -66,7 +71,7 @@ def test_branch_and_accounting_rules(app, client, monkeypatch):
     with app.app_context():
         db = get_db()
         oid = db.execute("SELECT id FROM orders WHERE order_number='MONTH-1'").fetchone()['id']
-        db.execute("UPDATE orders SET deposit_refund_amount=25, deposit_processed_at='2026-10-31' WHERE id=?", (oid,))
+        db.execute("UPDATE orders SET deposit_refund_amount=25, deposit_processed_at='2026-10-15' WHERE id=?", (oid,))
         db.execute("INSERT INTO payments (order_id, amount, method, status, payment_date, created_at, deleted_at) VALUES (?, 999, 'cash', 'paid', '2026-10-10', '2026-10-10', '2026-10-11')", (oid,))
         customer_id = db.execute('SELECT id FROM customers ORDER BY id LIMIT 1').fetchone()['id']
         db.execute("INSERT INTO legacy_balance_payments (customer_id, amount, method, status, payment_date, created_at, branch_id) VALUES (?, 40, 'cash', 'active', '2026-10-15', '2026-10-15', 1)", (customer_id,))
