@@ -26,18 +26,22 @@ def messages(monkeypatch):
     return sent
 
 
-def test_owner_once_per_signin(client, messages):
+def test_head_office_admin_signin_is_silent(client, messages):
+    """Ticket ABI-341953309: the head-office admin's own sign-in is not announced.
+
+    The account is still recognised by the existing main-profile classification
+    (role 'owner'), so a refresh, a skipped branch screen and a fresh sign-in all
+    stay silent, while the staff alerts below are untouched.
+    """
     assert sign_in(client, follow=False).status_code == 302
-    assert len(messages) == 1
-    assert 'Name: Head office admin' in messages[0]
-    assert 'Branch: All branches' in messages[0]
+    assert messages == []
     client.get('/dashboard')
     client.get('/dashboard')
     client.get('/select-branch')
-    assert len(messages) == 1
+    assert messages == []
     client.post('/logout')
     sign_in(client, follow=False)
-    assert len(messages) == 2
+    assert messages == []
 
 
 def test_failed_login_silent(client, messages):

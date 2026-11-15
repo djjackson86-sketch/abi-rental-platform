@@ -1,3 +1,4 @@
+import calendar
 from datetime import datetime, time
 
 from app.db import get_db
@@ -303,6 +304,53 @@ _NOT_NEW_ORDER_STATUSES = ("draft", "reserved", "canceled", "cancelled", "archiv
 _PICKED_UP_STATUSES = ("started", "returned")
 
 
+def received_revenue_by_day(start_date, end_date, branch_id=None):
+    """Dashboard receipt-date rules, grouped in three bounded queries.
+
+    Negative paid payments and separate deposit payouts reduce revenue; account
+    transfers, pending and archived payments are not receipts. Legacy receipts
+    use the ledger's existing eligibility and recorded-depot scope.
+    """
+    from app.services.payments import _legacy_payment_where
+    db = get_db()
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    payment_day = "substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10)"
+    rows = db.execute(f"""SELECT {payment_day} AS day, SUM(pay.amount) AS total
+        FROM payments pay JOIN orders o ON o.id = pay.order_id
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+          AND LOWER(COALESCE(pay.method, '')) <> 'account'
+          AND {payment_day} >= ? AND {payment_day} <= ?{scope_sql}
+        GROUP BY {payment_day}""", [start_date, end_date, *scope_params]).fetchall()
+    totals = {row["day"]: money(row["total"]) for row in rows}
+    where, params = _legacy_payment_where(False, branch_id, start_date, end_date)
+    rows = db.execute(f"""SELECT date(COALESCE(NULLIF(lp.payment_date, ''), lp.created_at)) AS day,
+        LOWER(COALESCE(lp.method, '')) AS method, SUM(lp.amount) AS total
+        FROM legacy_balance_payments lp JOIN customers c ON c.id = lp.customer_id
+        WHERE {' AND '.join(where)} GROUP BY day, LOWER(COALESCE(lp.method, ''))""", params).fetchall()
+    for row in rows:
+        totals[row["day"]] = totals.get(row["day"], 0) + money(row["total"])
+    rows = db.execute(f"""SELECT substr(o.deposit_processed_at, 1, 10) AS day,
+        LOWER(o.deposit_process_method) AS method, SUM(o.deposit_refund_amount) AS total
+        FROM orders o WHERE COALESCE(o.deposit_refund_amount, 0) > 0
+          AND LOWER(COALESCE(o.deposit_process_method, '')) IN
+              ('cash', 'card', 'eft', 'customer_credit', 'other', 'manual')
+          AND substr(o.deposit_processed_at, 1, 10) >= ?
+          AND substr(o.deposit_processed_at, 1, 10) <= ?{scope_sql}
+        GROUP BY day, LOWER(o.deposit_process_method)""", [start_date, end_date, *scope_params]).fetchall()
+    for row in rows:
+        totals[row["day"]] = totals.get(row["day"], 0) - money(row["total"])
+    return {day: money(value) for day, value in totals.items()}
+
+
+def monthly_received_revenue(year, branch_id=None):
+    """Twelve 31-day series; nonexistent calendar dates are gaps, not zeroes."""
+    totals = received_revenue_by_day(f"{year:04d}-01-01", f"{year:04d}-12-31", branch_id)
+    return [{"month": month, "label": calendar.month_name[month], "values": [
+        totals.get(f"{year:04d}-{month:02d}-{day:02d}", 0)
+        if day <= calendar.monthrange(year, month)[1] else None
+        for day in range(1, 32)]} for month in range(1, 13)]
+
+
 def dashboard_day_metrics(day=None, branch_id=None):
     """Every "for the day" figure the dashboard shows, as finished scalars.
 
@@ -415,7 +463,7 @@ def dashboard_day_metrics(day=None, branch_id=None):
     held_prepaid = receipt_totals('prepaid_fundings',branch_id,day,day)
     # Revenue for the day = money actually received today (paid payments, by
     # payment date), not the value of the orders raised today.
-    revenue = money(payment_total() - sum(deposit_refunds(day, branch_id, method) for method in ("cash", "card", "eft", "customer_credit", "other", "manual")))
+    revenue = received_revenue_by_day(day, day, branch_id).get(day, 0.0)
     reservations = count(
         f"""SELECT COUNT(*) c FROM orders o
         WHERE substr(o.created_at, 1, 10) = ? AND o.status = 'reserved'{scope_sql}""",

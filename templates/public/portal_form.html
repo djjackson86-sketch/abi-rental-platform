@@ -114,7 +114,7 @@
           {% set whatsapp_same = form_values.get('whatsapp_same_as_phone') in ('1', 'true', 'on', 'yes', 'True') %}
           <div class="portal-phone-row">
           <label><span class="field-label"><span data-phone-label>{{ 'Contact Person Cellphone No.' if is_company else 'Cellphone No.' }}</span> <span class="req-star" aria-hidden="true">*</span></span><input name="phone" type="tel" required inputmode="tel" autocomplete="tel" value="{{ form_values.get('phone', '') }}" placeholder="e.g. 082 123 4567"></label>
-          <label class="switch"><input type="checkbox" name="whatsapp_same_as_phone" value="1" {% if whatsapp_same %}checked{% endif %} aria-controls="portal-whatsapp"> Same for WhatsApp</label>
+          <label class="switch"><input type="checkbox" name="whatsapp_same_as_phone" value="1" {% if whatsapp_same %}checked{% endif %} aria-controls="portal-whatsapp"> This is the same number for WhatsApp</label>
           </div>
           <label class="portal-whatsapp" id="portal-whatsapp" {% if whatsapp_same %}hidden{% endif %}><span class="field-label">WhatsApp No.</span><input name="whatsapp_number" type="tel" inputmode="tel" {% if whatsapp_same %}disabled{% endif %} value="{{ form_values.get('whatsapp_number', '') }}" placeholder="e.g. 082 123 4567"></label>
           </div>

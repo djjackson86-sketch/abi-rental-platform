@@ -1,5 +1,6 @@
 from flask import Blueprint, current_app, render_template, render_template_string, redirect, request, url_for, Response, flash, abort, session
 import csv
+from app.services.timezone import local_now
 from datetime import date, timedelta
 from io import StringIO
 from app.routes.auth import login_required
@@ -8,7 +9,7 @@ from app.services import group_images
 from app.services.legacy_balances import outstanding_legacy_balances
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, list_orders, scheduled_events, status_label
-from app.services.reports import customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
+from app.services.reports import monthly_received_revenue, customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
 from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids
 from app.services.branches import branch_options
 from app.services import spare_wheels
@@ -112,7 +113,7 @@ def dashboard():
     if is_main_session(session) and request.args.get("day"):
         selected_day = cash_parse_business_day(request.args.get("day"))
     day_is_today = selected_day == cash_today_iso()
-    # Quick ranges for the four headline cards, defaulting to This month.
+    # Quick ranges for the three headline cards, defaulting to This month.
     range_presets, range_key, range_start, range_end, range_label = _dashboard_range()
     dashboard_lazy = not current_app.config.get("TESTING")
     if dashboard_lazy:
@@ -525,7 +526,7 @@ def _report_presets(today=None):
     ]
 
 
-#: The dashboard's four headline cards open on the client's requested default.
+#: The dashboard's three headline cards open on the client's requested default.
 DASHBOARD_RANGE_DEFAULT = "this_month"
 
 
@@ -543,7 +544,7 @@ def _range_presets():
 
 
 def _dashboard_range():
-    """Resolve the quick range that windows the four headline dashboard cards.
+    """Resolve the quick range that windows the three headline dashboard cards.
 
     ``?range=`` is matched against the reports presets (``this_month``,
     ``all_time``, ...). Absent *or* unrecognised falls back to the default —
@@ -568,11 +569,21 @@ def _dashboard_range():
 @bp.route("/reports")
 @login_required
 def reports():
+    today = local_now().date()
+    try:
+        chart_year = int(request.args.get('chart_year', today.year))
+        if not 1900 <= chart_year <= 9999:
+            raise ValueError
+    except (TypeError, ValueError):
+        chart_year = today.year
     start_date = request.args.get('start_date', '').strip()
     end_date = request.args.get('end_date', '').strip()
     selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
     return render_template(
         "admin/reports.html",
+        chart_year=chart_year,
+        chart_month=today.month,
+        revenue_months=monthly_received_revenue(chart_year, branch_id),
         settings=get_company_settings(),
         branches=branches,
         branch_scope=branch_scope,

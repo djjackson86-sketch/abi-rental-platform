@@ -5,8 +5,22 @@ from unittest.mock import Mock
 import pytest
 from app.routes import admin
 from app.db import get_db
-from test_dashboard_day_metrics import app, client, login, _order, card_values
+from test_dashboard_day_metrics import app, client, login, _order
 from test_ticket_341953282_dashboard import add_depot_user
+
+# Ticket ABI-341953309 retired the Catalog size card, so this test reads the
+# three remaining headline cards (kept local rather than depending on the
+# day-metrics suite's helper, which is owned by the parallel dashboard change).
+HEADLINE_LABELS = ('Total orders', 'Customer base', 'Gross revenue')
+
+
+def card_values(page):
+    values = {}
+    for label in HEADLINE_LABELS:
+        match = re.search(re.escape(label) + r'</small><b>(.*?)</b>', page)
+        assert match, f'the {label} card is missing'
+        values[label] = match.group(1)
+    return values
 
 
 def comparisons(body):
@@ -61,8 +75,8 @@ def test_full_and_partial_share_comparisons(app, client, monkeypatch, query):
     partial = client.get('/dashboard/partials/period'+query).get_data(as_text=True)
     assert comparisons(body) == comparisons(partial) == ['2', '2', 'R325.00']
     assert card_values(body) == card_values(partial)
-    catalog = re.search(r'<div class="metric-card">\s*<small>Catalog size.*?</div>', partial, re.S).group()
-    assert 'This time last month' not in catalog
+    # Ticket ABI-341953309: Catalog size was removed from the dashboard.
+    assert 'Catalog size' not in body and 'Catalog size' not in partial
 
 
 def test_branch_and_accounting_rules(app, client, monkeypatch):

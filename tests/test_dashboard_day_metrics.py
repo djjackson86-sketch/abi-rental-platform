@@ -766,7 +766,7 @@ def _window_counts(app, start, end, branch_id=None):
     return counts
 
 
-CARD_LABELS = ('Total orders', 'Catalog size', 'Customer base', 'Gross revenue')
+CARD_LABELS = ('Total orders', 'Customer base', 'Gross revenue')
 
 
 def card_values(page):
@@ -782,7 +782,7 @@ def card_values(page):
 def expected_cards(counts):
     return {
         'Total orders': str(counts['orders']),
-        'Catalog size': str(counts['products']),
+
         'Customer base': str(counts['customers']),
         'Gross revenue': 'R%.2f' % counts['revenue'],
     }

@@ -51,7 +51,7 @@
 
 {% if current_user_is_main %}
 <div class="dashboard-ranges">
-  <div class="filter-group-head"><strong>Quick ranges</strong><span class="dashboard-ranges-note">applies to the four cards below</span></div>
+  <div class="filter-group-head"><strong>Quick ranges</strong><span class="dashboard-ranges-note">applies to the three cards below</span></div>
   <div class="report-presets">
     {% for preset in range_presets %}<a class="report-preset{{ ' is-active' if filters.range == preset.key }}" href="{{ url_for('admin.dashboard', branch=filters.branch or None, range=preset.key, day=filters.day) }}">{{ preset.label }}</a>{% endfor %}
   </div>
@@ -67,10 +67,11 @@
     </div>
   </form>
 </div>
-<section class="metrics dashboard-metrics" {% if dashboard_lazy %}data-dashboard-section="period" data-src="{{ url_for('admin.dashboard_period_partial', branch=filters.branch or None, range=filters.range, start_date=filters.start_date or None, end_date=filters.end_date or None, day=filters.day) }}"{% endif %}>
+<section class="metrics dashboard-metrics dashboard-period-metrics" {% if dashboard_lazy %}data-dashboard-section="period" data-src="{{ url_for('admin.dashboard_period_partial', branch=filters.branch or None, range=filters.range, start_date=filters.start_date or None, end_date=filters.end_date or None, day=filters.day) }}"{% endif %}>
   {% if dashboard_lazy %}
+  {# Catalog size was retired from the dashboard (ticket ABI-341953309), so the
+     loading shell mirrors the three cards the partial now renders. #}
   <div class="metric-card"><small>Total orders</small><b>Loading…</b><span>{{ range_label }}</span></div>
-  <div class="metric-card"><small>Catalog size</small><b>Loading…</b><span>{{ range_label }}</span></div>
   <div class="metric-card"><small>Customer base</small><b>Loading…</b><span>{{ range_label }}</span></div>
   <div class="metric-card"><small>Gross revenue</small><b>Loading…</b><span>{{ range_label }}</span></div>
   {% else %}

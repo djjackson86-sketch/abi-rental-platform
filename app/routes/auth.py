@@ -29,6 +29,14 @@ def _notify_sign_in():
     """One best-effort alert, after the effective branch for this login is known."""
     if not session.pop("login_notification_pending", False):
         return
+    # Ticket ABI-341953309: the head-office admin's own successful sign-in is no
+    # longer announced. "Head-office admin" is decided by the existing main-profile
+    # classification (role 'owner' — see access.is_main_session / recovery.main_profile),
+    # never by a name or email, so a renamed account is still recognised and any
+    # additional account still gets its alert.
+    from app.services.access import is_main_session
+    if is_main_session(session):
+        return
     try:
         from app.services.access import session_branch_scope_ids
         from app.services.telegram import send_login_notification
