@@ -242,7 +242,7 @@ def test_opening_cash_is_the_previous_days_closing_cash(client, app):
     # The card itself follows the previous closing.
     body = client.get('/dashboard?branch=1').get_data(as_text=True)
     assert 'Prev. closing 2026-09-12' in body
-    assert 'R1000.00' in body
+    assert 'R1 000.00' in body
 
 
 def test_expected_cash_and_variance_arithmetic(client, app):
@@ -1190,7 +1190,7 @@ def test_all_branch_dashboard_cash_totals_are_aggregated_and_read_only(client, a
     # ABI-341953048) - no write or submit action appears on this view.
     assert 'Download day report (PDF)' in body
     assert '<form' not in body[body.index('Day report actions'):body.index('Movement')]
-    assert re.search(r'Cash received</small>\s*<b>R1200\.00</b>', body), 'all branch cash is summed'
+    assert re.search(r'Cash received</small>\s*<b>R1 200\.00</b>', body), 'all branch cash is summed'
     assert re.search(r'Cash used</small>\s*<b>R75\.00</b>', body), 'all branch cash-used lines are summed'
     assert 'Branch 1: Depot one fuel' in body
     assert 'Branch 2: Depot two toll' in body

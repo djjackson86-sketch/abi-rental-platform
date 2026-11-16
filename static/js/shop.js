@@ -1,5 +1,7 @@
 (() => {
   'use strict';
+  const symbol = document.currentScript?.dataset.currencySymbol || 'R';
+  const money = value => (Number(value) < 0 ? '-' : '') + symbol + Math.abs(Number(value || 0)).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}).replace(/,/g, ' ');
   const nav = document.querySelector('.nav-toggle');
   if (nav) nav.addEventListener('click', () => {
     const open = nav.getAttribute('aria-expanded') !== 'true';
@@ -29,9 +31,9 @@
       summary.append(note);
     } else {
       const rate = document.createElement('p');
-      rate.textContent = 'Inventory rate: R' + Number(option.dataset.rate || 0).toFixed(2);
+      rate.textContent = 'Inventory rate: ' + money(option.dataset.rate);
       const deposit = document.createElement('p');
-      deposit.textContent = 'Refundable deposit: R' + Number(option.dataset.deposit || 0).toFixed(2);
+      deposit.textContent = 'Refundable deposit: ' + money(option.dataset.deposit);
       summary.append(rate, deposit);
     }
     if (option.dataset.description) {

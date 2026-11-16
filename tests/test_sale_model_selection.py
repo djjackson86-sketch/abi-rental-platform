@@ -22,6 +22,8 @@ The contract pinned here:
   variant products (nothing deleted or merged).
 """
 
+from app.services.currency import format_currency
+
 import json
 import sys
 from pathlib import Path
@@ -315,7 +317,7 @@ def test_detail_selector_lists_each_sibling_code_size_and_saved_price(app):
     body = page.get_data(as_text=True)
     for item in group:
         assert item["code"] in body, "every sibling code is offered"
-    assert f"R{float(cheapest['price']):,.2f}" in body
+    assert format_currency(float(cheapest['price'])) in body
     for sibling in group:
         if sibling is cheapest:
             continue  # the current size is rendered as the selected option
@@ -328,7 +330,7 @@ def test_detail_selector_lists_each_sibling_code_size_and_saved_price(app):
     other_body = other_page.get_data(as_text=True)
     assert other_page.status_code == 200
     assert other["code"] in other_body
-    assert f"R{float(other['price']):,.2f}" in other_body
+    assert format_currency(float(other['price'])) in other_body
     assert other["name"] in other_body
 
 
@@ -384,7 +386,7 @@ def test_cart_stores_the_actual_size_product(app):
     cart = client.get("/store/cart").get_data(as_text=True)
     assert chosen["name"] in cart
     assert cheapest["name"] not in cart
-    assert f"R{float(chosen['price']):,.2f}" in cart
+    assert format_currency(float(chosen['price'])) in cart
 
     # A second size is a second cart line, because it is a different product.
     client.post(f"/store/cart/add/{cheapest_id}", data={"quantity": "2", "csrf_token": token})

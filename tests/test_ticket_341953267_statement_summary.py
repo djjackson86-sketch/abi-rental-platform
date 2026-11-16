@@ -70,7 +70,7 @@ def test_full_history_summary_rows_are_the_balance_line_only(client, app):
     assert _statement_summary_rows(view) == [('Balance outstanding', 'R275.00', True)]
     # The component figures are untouched on the view (only their box rows went).
     assert (view['invoiced_total'], view['paid_total']) == (1725.0, 1450.0)
-    assert (view['invoiced_total_display'], view['paid_total_display']) == ('R1725.00', 'R1450.00')
+    assert (view['invoiced_total_display'], view['paid_total_display']) == ('R1 725.00', 'R1 450.00')
 
 
 def test_ranged_summary_rows_keep_the_opening_and_closing_balance(client, app):
@@ -81,7 +81,7 @@ def test_ranged_summary_rows_keep_the_opening_and_closing_balance(client, app):
         view = customer_statement(customer_id, date_from='2026-08-12', date_to='')
 
     assert _statement_summary_rows(view) == [
-        ('Opening balance', 'R1150.00', False),
+        ('Opening balance', 'R1 150.00', False),
         ('Closing balance', 'R275.00', True),
     ]
 
@@ -127,7 +127,7 @@ def test_full_history_pdf_box_prints_only_the_balance(client, app):
     # The activity table still carries the components as rows, with their money.
     for token in ('INV-90001', 'INV-90002', 'EFT ref 88', 'OLD-267'):
         assert token in source
-    assert '(R1150.00)' in source and '(-R300.00)' in source
+    assert '(R1 150.00)' in source and '(-R300.00)' in source
 
 
 def test_ranged_pdf_box_prints_opening_and_closing_only(client, app):
@@ -142,7 +142,7 @@ def test_ranged_pdf_box_prints_opening_and_closing_only(client, app):
         assert label not in source
     assert '(Opening balance)' in source and '(Closing balance)' in source
     assert '(Balance outstanding)' not in source
-    assert '(R1150.00)' in source and '(R275.00)' in source
+    assert '(R1 150.00)' in source and '(R275.00)' in source
 
 
 def test_shorter_box_still_clears_the_page_footer(client, app):

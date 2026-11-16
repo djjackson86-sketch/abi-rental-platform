@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 import calendar
 from datetime import datetime, time
 
@@ -716,8 +717,8 @@ def signed_money(value):
     """'R20.00' for money due, '-R20.00' for a credit to the customer."""
     amount = round(float(value or 0), 2)
     if amount < 0:
-        return f"-R{abs(amount):.2f}"
-    return f"R{amount:.2f}"
+        return f'-{format_currency(abs(amount))}'
+    return format_currency(amount)
 
 
 def _started_order_tax_mode():
@@ -1065,7 +1066,7 @@ def started_orders_report_pdf_blocks(branch_label=None, branch_id=None):
         return blocks
     for index, row in enumerate(rows, start=1):
         deposit = row.get('available_deposit')
-        deposit_text = 'N/A' if deposit is None else f"R{float(deposit or 0):.2f}"
+        deposit_text = 'N/A' if deposit is None else format_currency(float(deposit or 0))
         block = [
             f"{index}. Customer Name: {row.get('customer_name') or 'No customer'}",
             f"   Order No: {row.get('order_number') or ''}",

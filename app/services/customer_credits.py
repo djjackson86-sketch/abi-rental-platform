@@ -6,6 +6,8 @@ Credits are additive ledger entries:
 Only rows with ``status='active'`` count toward the customer's available balance.
 """
 
+from app.services.currency import format_currency
+
 from app.db import get_db, now
 
 CREDIT_STATUS_ACTIVE = "active"
@@ -65,7 +67,7 @@ def apply_customer_credit(customer_id, amount, applied_order_id, applied_payment
         raise ValueError("Customer credit amount must be greater than zero")
     available = customer_credit_balance(customer_id)
     if amount > available:
-        raise ValueError(f"Customer credit cannot exceed the available R{available:.2f}")
+        raise ValueError(f'Customer credit cannot exceed the available {format_currency(available)}')
     cur = get_db().execute(
         """INSERT INTO customer_credits
         (customer_id, source_order_id, amount, source_type, note, status, applied_order_id, applied_payment_id, created_at)

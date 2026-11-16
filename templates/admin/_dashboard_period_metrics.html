@@ -1,9 +1,9 @@
 {% for key, label, basis in [('orders', 'Total orders', 'Created'), ('customers', 'Customer base', 'Added'), ('revenue', 'Gross revenue', 'Received')] %}
 <div class="metric-card">
-  <small>{{ label }}</small><b>{% if key == 'revenue' %}R{{ '%.2f'|format(metrics[key]) }}{% else %}{{ metrics[key] }}{% endif %}</b>
+  <small>{{ label }}</small><b>{% if key == 'revenue' %}{{ (metrics[key])|currency }}{% else %}{{ metrics[key] }}{% endif %}</b>
   <span>{{ basis }} · {{ range_label }}</span>
   {% if last_month_metrics is not none %}
-  <span class="dashboard-last-month">This time last month <strong>{% if key == 'revenue' %}R{{ '%.2f'|format(last_month_metrics[key]) }}{% else %}{{ last_month_metrics[key] }}{% endif %}</strong></span>
+  <span class="dashboard-last-month">This time last month <strong>{% if key == 'revenue' %}{{ (last_month_metrics[key])|currency }}{% else %}{{ last_month_metrics[key] }}{% endif %}</strong></span>
   {% endif %}
 </div>
 {% endfor %}

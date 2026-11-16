@@ -45,9 +45,9 @@
         <tr>
           <td>{{ item.product_name or 'Product removed from inventory' }}</td>
           <td>{{ item.sku or '—' }}</td>
-          <td>R{{ '%.2f'|format(item.unit_price or 0) }}</td>
+          <td>{{ (item.unit_price or 0)|currency }}</td>
           <td>{{ item.quantity }}</td>
-          <td>R{{ '%.2f'|format(item.line_total or 0) }}</td>
+          <td>{{ (item.line_total or 0)|currency }}</td>
         </tr>
         {% else %}
         <tr><td colspan="5" class="muted">No lines were captured.</td></tr>

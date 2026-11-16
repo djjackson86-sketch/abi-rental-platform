@@ -120,7 +120,7 @@ def test_statement_lists_finalised_invoices_and_live_payments_and_reconciles(cli
     assert [row["number"] for row in view["invoices"]] == ["INV-90001", "INV-90002"]
     assert [row["order_number"] for row in view["invoices"]] == ["ORD-ST-1", "ORD-ST-2"]
     assert [row["date"] for row in view["invoices"]] == ["2026-08-10", "2026-09-05"]
-    assert view["invoices"][0]["amount_display"] == "R1150.00"
+    assert view["invoices"][0]["amount_display"] == "R1 150.00"
     # Payments carry their own reference and payment date.
     assert [row["date"] for row in view["payments"]] == ["2026-08-12", "2026-09-06"]
     assert view["payments"][0]["reference"] == "EFT ref 88"
@@ -367,8 +367,8 @@ def test_activity_merges_invoices_and_payments_in_date_order(client, app):
     ]
     # Ticket ABI-341953265: a payment now prints as a credit (-R…) and every row
     # carries the balance it leaves behind.
-    assert [row["amount_display"] for row in activity] == ["R1150.00", "-R1150.00", "R575.00", "-R300.00"]
-    assert [row["balance_display"] for row in activity] == ["R1150.00", "R0.00", "R575.00", "R275.00"]
+    assert [row["amount_display"] for row in activity] == ["R1 150.00", "-R1 150.00", "R575.00", "-R300.00"]
+    assert [row["balance_display"] for row in activity] == ["R1 150.00", "R0.00", "R575.00", "R275.00"]
     # The merge never changes the money: the activity rows are the same amounts the
     # summary block reconciles (invoiced 1725.00, paid 1450.00, closing 275.00).
     assert round(sum(row["amount"] for row in activity if row["type"] == "Invoice"), 2) == view["invoiced_total"] == 1725.0
@@ -424,7 +424,7 @@ def test_statement_pdf_prints_one_activity_table_in_date_order(client, app):
     # parentheses of the invoice detail are escaped in the PDF text command.
     assert "(Cash · EFT ref 88)" in source
     assert "(INV-90001 \\(ORD-ST-1\\))" in source
-    assert "(R1150.00)" in source and "(-R300.00)" in source
+    assert "(R1 150.00)" in source and "(-R300.00)" in source
     # ...and the running balance closes the statement on its closing figure.
     assert "(R275.00)" in source
 

@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 from app.db import get_db, now
 
 VALID_DISCOUNT_TYPES = {"percent", "fixed"}
@@ -28,7 +29,7 @@ def get_coupon_by_code(code):
 def format_discount(coupon):
     if coupon["discount_type"] == "percent":
         return f"{float(coupon['value']):.1f}%"
-    return f"R{float(coupon['value']):.2f}"
+    return format_currency(float(coupon['value']))
 
 
 def calculate_discount(coupon, subtotal):

@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 from flask import Blueprint, current_app, render_template, render_template_string, redirect, request, url_for, Response, flash, abort, session
 import csv
 from app.services.timezone import local_now
@@ -606,25 +607,25 @@ def _reports_pdf_lines(start_date, end_date, branch_id, branch_label):
         _period_label(start_date, end_date, branch_label),
         "",
         f"Orders: {metrics['orders']}",
-        f"Recognised revenue: R{float(metrics['revenue'] or 0):.2f}",
-        f"Paid: R{float(metrics['paid'] or 0):.2f}",
-        f"Due: R{float(metrics['due'] or 0):.2f}",
+        f"Recognised revenue: {format_currency(float(metrics['revenue'] or 0))}",
+        f"Paid: {format_currency(float(metrics['paid'] or 0))}",
+        f"Due: {format_currency(float(metrics['due'] or 0))}",
         f"Customers: {metrics['customers']}",
         f"Products: {metrics['products']}",
         "",
         "Orders by status",
     ]
     for row in orders_by_status(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id):
-        lines.append(f"- {row['status']}: {row['count']} / R{float(row['total'] or 0):.2f}")
+        lines.append(f"- {row['status']}: {row['count']} / {format_currency(float(row['total'] or 0))}")
     lines.extend(["", "Payments by method"])
     for row in payments_by_method(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id):
-        lines.append(f"- {row['method']}: {row['count']} / R{float(row['total'] or 0):.2f}")
+        lines.append(f"- {row['method']}: {row['count']} / {format_currency(float(row['total'] or 0))}")
     lines.extend(["", "Top products"])
     for row in product_performance(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id)[:10]:
-        lines.append(f"- {row['product_name']}: {row['quantity']} / R{float(row['total'] or 0):.2f}")
+        lines.append(f"- {row['product_name']}: {row['quantity']} / {format_currency(float(row['total'] or 0))}")
     lines.extend(["", "Top customers"])
     for row in customer_summary(start_date=start_date or None, end_date=end_date or None, branch_id=branch_id)[:10]:
-        lines.append(f"- {row['customer_name']}: {row['orders']} / R{float(row['total'] or 0):.2f}")
+        lines.append(f"- {row['customer_name']}: {row['orders']} / {format_currency(float(row['total'] or 0))}")
     return lines
 
 

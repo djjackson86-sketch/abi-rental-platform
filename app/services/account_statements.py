@@ -1,4 +1,6 @@
 """Explicit facility activity using the existing customer-statement layout."""
+
+from app.services.currency import format_currency
 from app.db import get_db
 from app.services.customers import (
     _statement_money_display,
@@ -58,8 +60,8 @@ def account_statement(customer_id, date_from='', date_to=''):
     facility = facility_summary(customer_id)
     view.update(title='ACCOUNT STATEMENT', statement_number=f'ACCOUNT-STATEMENT-{customer_id}', activity=activity,
         activity_count=len(activity), facility=facility,
-        summary_rows=[('Opening balance',f'R{opening:.2f}',False),('Account charges',f'R{charges:.2f}',False),
-            ('Repayments',f'R{repayments:.2f}',False),('Closing balance',f'R{closing:.2f}',True),
-            ('Configured credit limit',f"R{facility['limit']:.2f}",False),
-            ('Available credit (current)',f"R{facility['available']:.2f}",True)])
+        summary_rows=[('Opening balance',format_currency(opening),False),('Account charges',format_currency(charges),False),
+            ('Repayments',format_currency(repayments),False),('Closing balance',format_currency(closing),True),
+            ('Configured credit limit',format_currency(facility['limit']),False),
+            ('Available credit (current)',format_currency(facility['available']),True)])
     return view

@@ -316,7 +316,7 @@ def test_document_table_visual_ticket_changes_are_pinned(app):
     assert '0.860 0.940 1' not in decoded
     assert '0.070 0.540 0.300 rg' in decoded
     line_total = next(entry for entry in positions if entry['text'] == 'R690.00' and entry['y'] > 300)
-    bottom_total = next(entry for entry in positions if entry['text'] == 'R5520.00' and entry['font'] == 'F2')
+    bottom_total = next(entry for entry in positions if entry['text'] == 'R5 520.00' and entry['font'] == 'F2')
     assert round(line_total['x'] + _pdf_exact_text_width(line_total['text'], line_total['size']), 1) == round(INVOICE_TABLE_RIGHT_EDGE - 7, 1)
     # Ticket ABI-341953072(3): the bold "Total with VAT" amount ends on the same
     # edge as the plain rows above it, measured with the real glyph widths.

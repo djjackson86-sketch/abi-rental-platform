@@ -89,14 +89,14 @@
     <div class="list-row"><span>Created by</span><b>{{ order.created_by_name or '—' }}</b></div>
     <div class="list-row"><span>Created</span><b>{{ display_local_datetime(order.created_at) }}</b></div>
     <div class="list-row"><span>Payment</span><b>{{ payment_label_for(payment_summary.payment_status) }}</b></div>
-    <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
-    <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
+    <div class="list-row"><span>Paid</span><b data-total-field="paid_total">{{ (payment_summary.paid_total)|currency }}</b></div>
+    <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-{{ (0 - payment_summary.due_total)|currency }}{% else %}{{ (payment_summary.due_total)|currency }}{% endif %}</b></div>
     {# Ticket ABI-341953166: used/available credit facility, beside the prepaid Customer Credit that stays on the payment method below. #}
-    {% if facility.enabled %}<div class="list-row"><span>Credit facility</span><b>R{{ '%.2f'|format(facility.used) }} used · R{{ '%.2f'|format(facility.available) }} available</b></div>{% endif %}
+    {% if facility.enabled %}<div class="list-row"><span>Credit facility</span><b>{{ (facility.used)|currency }} used · {{ (facility.available)|currency }} available</b></div>{% endif %}
     {% if refundable_amount > 0 %}
     <form method="post" action="{{ url_for('orders.refund_order', order_id=order.id) }}" class="payment-form refund-form">
       <h3>{{ 'Refund cancelled draft payment' if order.status_before_cancel == 'draft' and order.status in ['canceled', 'cancelled'] else 'Refund credit' }}</h3>
-      <p class="form-help">Optional: record a full or partial refund of the available R{{ '%.2f'|format(refundable_amount) }}. This records the refund only; it does not send money to the customer.</p>
+      <p class="form-help">Optional: record a full or partial refund of the available {{ (refundable_amount)|currency }}. This records the refund only; it does not send money to the customer.</p>
       <input type="hidden" name="refund_request_id" value="{{ refund_request_id }}">
       <div class="form-grid compact"><label>Refund amount<input type="number" step="0.01" min="0.01" max="{{ '%.2f'|format(refundable_amount) }}" name="refund_amount" value="{{ '%.2f'|format(refundable_amount) }}" required></label><label>Refund method<select name="refund_method" required><option value="">Choose method</option><option value="eft">EFT</option><option value="card">Card</option><option value="cash">Cash</option><option value="customer_credit">Credit to Customer</option></select></label><label>Refund date<input type="datetime-local" name="refund_date" value="{{ default_payment_date }}" required></label></div>
       <label>Reference<input name="reference" value="Customer credit refund"></label>
@@ -105,18 +105,18 @@
     {% endif %}
     <form method="post" action="{{ url_for('orders.record_order_payment', order_id=order.id) }}" class="payment-form">
       <h3>Record payment</h3>
-      {% if facility.enabled %}<p class="form-help">Unpaid orders reserve the credit facility, separate from prepaid Customer Credit. Available credit: R{{ '%.2f'|format(facility.available) }}. Repayments restore available credit.</p>{% endif %}
-      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method" required><option value="">Choose method</option><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option>{% if customer_credit_balance > 0 %}<option value="customer_credit">Use Customer Credit (R{{ '%.2f'|format(customer_credit_balance) }})</option>{% endif %}</select></label><label>Payment date<input type="datetime-local" name="payment_date" value="{{ default_payment_date }}" required></label></div>
+      {% if facility.enabled %}<p class="form-help">Unpaid orders reserve the credit facility, separate from prepaid Customer Credit. Available credit: {{ (facility.available)|currency }}. Repayments restore available credit.</p>{% endif %}
+      <div class="form-grid compact"><label>Amount<input type="number" step="0.01" min="0.01" name="amount" required></label><label>Method<select name="method" required><option value="">Choose method</option><option value="cash">Cash</option><option value="eft">EFT</option><option value="card">Card</option>{% if customer_credit_balance > 0 %}<option value="customer_credit">Use Customer Credit ({{ (customer_credit_balance)|currency }})</option>{% endif %}</select></label><label>Payment date<input type="datetime-local" name="payment_date" value="{{ default_payment_date }}" required></label></div>
       <label>Reference<input name="reference" placeholder="Payment reference or note"></label>
       <button class="btn primary" type="submit">Record payment</button>
     </form>
     {% if payments or (order.deposit_refund_amount and (order.deposit_process_method or order.deposit_processed_at)) %}
       <div class="schedule-list payment-list">
       {% for payment in payments %}
-        <div class="schedule-row"><span><b>R{{ '%.2f'|format(payment.amount) }}</b><small>{{ (payment.method or '')|replace('_', ' ')|title }}</small></span><span><small>Payment date</small><b>{{ display_payment_date(payment) }}</b></span><span><small>Reference</small><b>{{ payment.reference or '—' }}</b></span><span class="payment-actions"><a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a><form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form></span></div>
+        <div class="schedule-row"><span><b class="money-amount">{{ (payment.amount)|currency }}</b><small>{{ (payment.method or '')|replace('_', ' ')|title }}</small></span><span><small>Payment date</small><b>{{ display_payment_date(payment) }}</b></span><span><small>Reference</small><b>{{ payment.reference or '—' }}</b></span><span class="payment-actions"><a class="btn ghost" href="{{ url_for('payments.edit', payment_id=payment.id) }}">Edit</a><form method="post" action="{{ url_for('payments.delete', payment_id=payment.id) }}" class="inline-form"><button class="btn danger" type="submit">Delete</button></form></span></div>
       {% endfor %}
       {% if order.deposit_refund_amount and (order.deposit_process_method or order.deposit_processed_at) %}
-        <div class="schedule-row money-payout"><span><b>-R{{ '%.2f'|format(order.deposit_refund_amount) }}</b><small>{{ 'Customer credit' if order.deposit_process_method == 'customer_credit' else 'Money payout' }}</small></span><span><small>Payout date</small><b>{{ order.deposit_processed_at[:10] if order.deposit_processed_at else '—' }}</b></span><span><small>Reference</small><b>Refunded deposit{% if order.deposit_process_method %} · {{ (order.deposit_process_method or '')|replace('_', ' ')|title }}{% endif %}</b></span><span class="payment-actions">{% if can_process_return_deposit %}<a class="btn ghost" href="{{ url_for('orders.deposit_refund_edit', order_id=order.id) }}">Edit</a><form method="post" action="{{ url_for('orders.deposit_refund_delete', order_id=order.id) }}" class="inline-form" onsubmit="return confirm('Delete this deposit refund of R{{ '%.2f'|format(order.deposit_refund_amount) }}? The payout is reversed and the order returns to Process deposit.');"><button class="btn danger" type="submit">Delete</button></form>{% endif %}</span></div>
+        <div class="schedule-row money-payout"><span><b>-{{ (order.deposit_refund_amount)|currency }}</b><small>{{ 'Customer credit' if order.deposit_process_method == 'customer_credit' else 'Money payout' }}</small></span><span><small>Payout date</small><b>{{ order.deposit_processed_at[:10] if order.deposit_processed_at else '—' }}</b></span><span><small>Reference</small><b>Refunded deposit{% if order.deposit_process_method %} · {{ (order.deposit_process_method or '')|replace('_', ' ')|title }}{% endif %}</b></span><span class="payment-actions">{% if can_process_return_deposit %}<a class="btn ghost" href="{{ url_for('orders.deposit_refund_edit', order_id=order.id) }}">Edit</a><form method="post" action="{{ url_for('orders.deposit_refund_delete', order_id=order.id) }}" class="inline-form" onsubmit="return confirm('Delete this deposit refund of {{ (order.deposit_refund_amount)|currency }}? The payout is reversed and the order returns to Process deposit.');"><button class="btn danger" type="submit">Delete</button></form>{% endif %}</span></div>
       {% endif %}
       </div>
     {% endif %}
@@ -148,11 +148,11 @@
 <section class="panel settings-form">
   <h2>Items</h2>
   <div class="table-wrap">
-    <table class="data-table">
+    <table class="data-table order-money-lines">
       <thead><tr><th>Product</th><th>Days</th><th>Qty</th><th>Unit</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr></thead>
       <tbody>
       {% for item in items %}
-        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small>{% if item.description %}<span class="line-description">{{ item.description }}</span>{% endif %}</td><td>{% if item.billing_mode == 'rental_day' or (item.billing_mode == 'catalog' and item.product_type in ['rental', 'service'] and item.price_unit in ['day', 'week', 'month', 'hour']) %}{{ order_rental_days }}{% else %}—{% endif %}</td><td>{{ item.quantity }}</td><td>R{{ '%.2f'|format(item.unit_price) }}</td><td>R{{ '%.2f'|format(item.line_subtotal) }}</td><td>R{{ '%.2f'|format(item.line_tax) }}</td><td>R{{ '%.2f'|format(item.line_total) }}</td></tr>
+        <tr><td><strong>{{ item.product_name or item.custom_name }}</strong><small>{{ item.product_sku or '' }}</small>{% if item.description %}<span class="line-description">{{ item.description }}</span>{% endif %}</td><td>{% if item.billing_mode == 'rental_day' or (item.billing_mode == 'catalog' and item.product_type in ['rental', 'service'] and item.price_unit in ['day', 'week', 'month', 'hour']) %}{{ order_rental_days }}{% else %}—{% endif %}</td><td>{{ item.quantity }}</td><td>{{ (item.unit_price)|currency }}</td><td>{{ (item.line_subtotal)|currency }}</td><td>{{ (item.line_tax)|currency }}</td><td>{{ (item.line_total)|currency }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -176,7 +176,7 @@
       .btn[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none}
       @media(max-width:520px){.totals .discount-form input{width:72px}.totals .discount-row>b{min-width:0}}
     </style>
-    <div class="list-row"><span>Subtotal</span><b>R{{ '%.2f'|format(order.subtotal) }}</b></div>
+    <div class="list-row"><span>Subtotal</span><b>{{ (order.subtotal)|currency }}</b></div>
     {% if order.coupon_code %}<div class="list-row"><span>Coupon</span><b>{{ order.coupon_code }}</b></div>{% endif %}
     <div class="list-row discount-row"><span>Discount</span>
       {% if order.status not in ['canceled', 'cancelled', 'archived'] %}
@@ -189,19 +189,19 @@
         <button class="btn discount-apply" type="submit">Apply</button>
       </form>
       {% endif %}
-      <b data-total-field="discount_total">R{{ '%.2f'|format(order.discount_total) }}</b>
+      <b data-total-field="discount_total">{{ (order.discount_total)|currency }}</b>
     </div>
-    <div class="list-row"><span>Tax</span><b data-total-field="tax_total">R{{ '%.2f'|format(order.tax_total) }}</b></div>
-    {% if (order.deposit_option or 'security_deposit') == 'security_deposit' %}<div class="list-row"><span>Security deposit</span><b>R{{ '%.2f'|format(order.deposit_total) }}</b></div>{% endif %}
+    <div class="list-row"><span>Tax</span><b data-total-field="tax_total">{{ (order.tax_total)|currency }}</b></div>
+    {% if (order.deposit_option or 'security_deposit') == 'security_deposit' %}<div class="list-row"><span>Security deposit</span><b>{{ (order.deposit_total)|currency }}</b></div>{% endif %}
     <div class="list-row"><span>Deposit choice</span><b>{{ (order.deposit_option or 'security_deposit').replace('_', ' ')|title }}</b></div>
-    {% if order.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>R{{ '%.2f'|format(order.damage_waiver_amount) }}</b></div>{% endif %}
+    {% if order.damage_waiver_amount %}<div class="list-row"><span>Damage waiver</span><b>{{ (order.damage_waiver_amount)|currency }}</b></div>{% endif %}
     {% if order.extra_hours %}<div class="list-row"><span>Extra hours</span><b>{{ order.extra_hours }} hrs</b></div>{% endif %}
-    {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used R{{ '%.2f'|format(order.deposit_applied_amount) }} · Refund R{{ '%.2f'|format(order.deposit_refund_amount) }}</b></div>{% endif %}
+    {% if order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit used/refund</span><b>Used {{ (order.deposit_applied_amount)|currency }} · Refund {{ (order.deposit_refund_amount)|currency }}</b></div>{% endif %}
     {% if order.deposit_process_method %}<div class="list-row"><span>Deposit processed by</span><b>{{ order.deposit_process_method|upper }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit processed by</span><b>Not processed</b></div>{% endif %}
     {% if order.deposit_processed_at and (order.deposit_refund_amount or order.deposit_process_method) %}<div class="list-row"><span>Deposit refund date</span><b>{{ display_local_datetime(order.deposit_processed_at) }}</b></div>{% elif order.deposit_applied_amount or order.deposit_refund_amount %}<div class="list-row"><span>Deposit refund date</span><b>Not recorded — processed before date tracking</b></div>{% endif %}
-    <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b data-total-field="total">R{{ '%.2f'|format(order.total) }}</b></div>
-    <div class="list-row"><span>Paid</span><b data-total-field="paid_total">R{{ '%.2f'|format(payment_summary.paid_total) }}</b></div>
-    <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-R{{ '%.2f'|format(0 - payment_summary.due_total) }}{% else %}R{{ '%.2f'|format(payment_summary.due_total) }}{% endif %}</b></div>
+    <div class="list-row"><span>Total incl. taxes{% if (order.deposit_option or 'security_deposit') == 'security_deposit' and order.deposit_total %} and refundable deposit{% endif %}</span><b data-total-field="total">{{ (order.total)|currency }}</b></div>
+    <div class="list-row"><span>Paid</span><b data-total-field="paid_total">{{ (payment_summary.paid_total)|currency }}</b></div>
+    <div class="list-row"><span>Due</span><b data-total-field="due_total">{% if payment_summary.due_total < 0 %}-{{ (0 - payment_summary.due_total)|currency }}{% else %}{{ (payment_summary.due_total)|currency }}{% endif %}</b></div>
   </div>
 </section>
 <section class="panel settings-form">
@@ -232,7 +232,7 @@
   </form>
   <form method="post" action="{{ url_for('orders.settle_return', order_id=order.id) }}" class="payment-form">
     <div class="form-grid compact">
-      <label>Remaining deposit<input type="text" readonly value="R{{ '%.2f'|format(0 if (order.deposit_process_method or order.deposit_processed_at) else ((order.deposit_refund_amount if (order.deposit_applied_amount or order.deposit_refund_amount) else order.deposit_total) or 0)) }}"></label>
+      <label>Remaining deposit<input type="text" readonly value="{{ (0 if (order.deposit_process_method or order.deposit_processed_at) else ((order.deposit_refund_amount if (order.deposit_applied_amount or order.deposit_refund_amount) else order.deposit_total) or 0))|currency }}"></label>
       {% if order.status in ['canceled', 'cancelled'] %}<label>Refund amount<input type="number" step="0.01" min="0.01" max="{{ '%.2f'|format(order.deposit_total or 0) }}" name="deposit_refund_amount" value="{{ '%.2f'|format((order.deposit_refund_amount if (order.deposit_applied_amount or order.deposit_refund_amount) else order.deposit_total) or 0) }}"></label>{% endif %}
       <label>Deposit method<select name="deposit_process_method" required><option value="">Choose method</option>{% for value,label in [('eft','EFT'),('card','Card'),('cash','Cash'),('customer_credit','Credit to Customer')] %}<option value="{{ value }}" {% if order.deposit_process_method==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label>Deposit date<input type="datetime-local" name="deposit_processed_at" value="{{ default_deposit_processed_at }}"></label>
@@ -265,8 +265,7 @@ function confirmCriticalPickup(form){
 (function(){
   const form=document.querySelector('[data-ajax-discount]');
   if(!form || !window.fetch) return;
-  const money=new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR'});
-  function fmt(value){ const n=Number(value||0); const abs=money.format(Math.abs(n)); return n < 0 ? '-' + abs : abs; }
+{% include 'admin/orders/_currency.js' %}
   function setField(name,value){ document.querySelectorAll('[data-total-field="'+name+'"]').forEach(el=>{ el.textContent=fmt(value); }); }
   form.addEventListener('submit', async function(ev){
     ev.preventDefault();

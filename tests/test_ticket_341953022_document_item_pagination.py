@@ -261,7 +261,7 @@ def all_rows(pages):
 
 
 def money(value):
-    return f'R{value:.2f}'
+    return 'R' + format(value, ',.2f').replace(',', ' ')
 
 
 def summary_amount(pages, label):

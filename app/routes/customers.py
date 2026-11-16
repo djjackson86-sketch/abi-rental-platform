@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 import csv
 import uuid
 from io import StringIO
@@ -410,7 +411,7 @@ def record_legacy_balance_payment(customer_id):
         return redirect(url_for("customers.index"))
     try:
         result = record_legacy_payment(customer_id, request.form)
-        flash(f"R{result['amount']:.2f} recorded against previous orders. R{result['remaining']:.2f} still outstanding.", "success")
+        flash(f"{format_currency(result['amount'])} recorded against previous orders. {format_currency(result['remaining'])} still outstanding.", "success")
     except ValueError as exc:
         flash(str(exc), "error")
     return redirect(url_for("customers.detail", customer_id=customer_id) + "#legacy-balance")

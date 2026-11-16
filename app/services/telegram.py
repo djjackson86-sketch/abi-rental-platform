@@ -166,7 +166,8 @@ def send_login_notification(name, branch):
 def _money(value):
     symbol = current_app.config.get("CURRENCY_SYMBOL", "R")
     try:
-        return f"{symbol}{float(value or 0):,.2f}"
+        from app.services.currency import format_currency
+        return format_currency(value, symbol=symbol)
     except Exception:
         return f"{symbol}0.00"
 

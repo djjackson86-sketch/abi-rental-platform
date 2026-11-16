@@ -85,8 +85,8 @@
         </td>
         <td class="shop-muted-cell">{{ product.name }}</td>
         <td><span class="shop-type">{{ product.product_type|capitalize }}</span></td>
-        <td>R{{ '%.2f'|format(product.price_amount or 0) }}<span class="shop-unit"> / {{ product.price_unit }}</span></td>
-        <td>R{{ '%.2f'|format(product.security_deposit or 0) }}</td>
+        <td>{{ (product.price_amount or 0)|currency }}<span class="shop-unit"> / {{ product.price_unit }}</span></td>
+        <td>{{ (product.security_deposit or 0)|currency }}</td>
         <td>{{ product.category_name or '—' }}</td>
         <td>
           {% if product.store_public %}

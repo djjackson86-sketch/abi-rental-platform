@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 from datetime import datetime, date, time, timedelta
 from math import ceil
 import calendar as _month_calendar
@@ -1347,7 +1348,8 @@ def apply_order_discount(order_id, mode, value):
     recalculate_order_payment(order_id)
     unit = "%" if mode == "percent" else "R"
     if discount_total:
-        return f"Discount applied: {unit}{value:g} = R{discount_total:.2f}"
+        display_value = f'{unit}{value:g}' if mode == 'percent' else format_currency(value)
+        return f'Discount applied: {display_value} = {format_currency(discount_total)}'
     return "Discount cleared"
 
 
@@ -2135,7 +2137,7 @@ def settle_return_deposit(order_id, form):
     if refund_override:
         refund_amount = _parse_deposit_refund_amount(refund_override)
         if refund_amount > deposit_available:
-            raise ValueError(f"Deposit refund cannot be more than the R{deposit_available:.2f} deposit")
+            raise ValueError(f'Deposit refund cannot be more than the {format_currency(deposit_available)} deposit')
         # Canceled bookings may need a discretionary partial or full payout. The
         # office-entered refund is authoritative here; the remainder is kept as
         # deposit applied/forfeited so accounting still satisfies
@@ -2167,10 +2169,10 @@ def settle_return_deposit(order_id, form):
     from app.services.payments import recalculate_order_payment
     recalculate_order_payment(order_id)
     if applied_amount > 0 and refund_amount > 0:
-        return f"Deposit settled: R{applied_amount:.2f} used; R{refund_amount:.2f} refunded"
+        return f'Deposit settled: {format_currency(applied_amount)} used; {format_currency(refund_amount)} refunded'
     if applied_amount > 0:
-        return f"Deposit settled: R{applied_amount:.2f} used; no refund remaining"
-    return f"Deposit refund processed: R{refund_amount:.2f}"
+        return f'Deposit settled: {format_currency(applied_amount)} used; no refund remaining'
+    return f'Deposit refund processed: {format_currency(refund_amount)}'
 
 def use_return_deposit(order_id, form):
     order = get_order(order_id)
@@ -2193,7 +2195,7 @@ def use_return_deposit(order_id, form):
     db.commit()
     from app.services.payments import recalculate_order_payment
     recalculate_order_payment(order_id)
-    return f"Security deposit used: R{deposit_applied:.2f}; refund R{deposit_refund:.2f}"
+    return f'Security deposit used: {format_currency(deposit_applied)}; refund {format_currency(deposit_refund)}'
 
 
 def _parse_deposit_refund_amount(value):
@@ -2264,14 +2266,14 @@ def update_deposit_refund(order_id, form):
         raise ValueError("A customer is required before credit can be stored")
     deposit_available = round(float(order["deposit_total"] or 0), 2)
     if refund_amount > deposit_available:
-        raise ValueError(f"Deposit refund cannot be more than the R{deposit_available:.2f} deposit")
+        raise ValueError(f'Deposit refund cannot be more than the {format_currency(deposit_available)} deposit')
     deposit_processed_at = _parse_deposit_processed_at(form.get("deposit_processed_at"))
     note = form.get("deposit_note", "").strip()
     applied_amount = round(max(deposit_available - refund_amount, 0), 2)
     _write_deposit_split(
         order_id, applied_amount, refund_amount, deposit_process_method, deposit_processed_at, note
     )
-    return f"Deposit refund updated: R{refund_amount:.2f} paid out; R{applied_amount:.2f} used"
+    return f'Deposit refund updated: {format_currency(refund_amount)} paid out; {format_currency(applied_amount)} used'
 
 
 def reverse_deposit_settlement(order_id, payment_id=None, *, repair_archived=False):
@@ -2299,8 +2301,8 @@ def reverse_deposit_settlement(order_id, payment_id=None, *, repair_archived=Fal
         payment = _deposit_applied_payment(order_id)
         payment_id = payment["id"] if payment else None
     stamp = local_now().isoformat(timespec="microseconds")
-    audit = (f"Deposit refund of R{refund:.2f} deleted {stamp}; used R{applied:.2f} reversed"
-             if refund > 0 else f"Deposit settlement deleted {stamp}: used R{applied:.2f} reversed")
+    audit = (f'Deposit refund of {format_currency(refund)} deleted {stamp}; used {format_currency(applied)} reversed'
+             if refund > 0 else f'Deposit settlement deleted {stamp}: used {format_currency(applied)} reversed')
     if payment_id is not None:
         audit += f" (payment {payment_id})"
     previous_note = (order["deposit_note"] or "").strip()
@@ -2385,7 +2387,7 @@ def delete_deposit_refund(order_id):
     if refund_amount <= 0:
         raise ValueError("There is no deposit refund recorded on this order to delete")
     reverse_deposit_settlement(order_id)
-    return f"Deposit refund of R{refund_amount:.2f} deleted — the order is back in Process deposit"
+    return f'Deposit refund of {format_currency(refund_amount)} deleted — the order is back in Process deposit'
 
 
 def _calendar_range(start_date=None, end_date=None):

@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 import math
 import textwrap
 import unicodedata
@@ -490,7 +491,7 @@ def _pdf_exact_text_width(text, size: int | float, bold=False):
     return adobe * float(size) / 1000.0
 
 
-def _pdf_right_text(x_right, y, text, size: int | float = 9, font='F1'):
+def _pdf_right_text(x_right, y, text, size: int | float = 9, font='F1', max_width=None):
     """A run whose RIGHT edge lands exactly on ``x_right``.
 
     Ticket ABI-341953072(3): this used the flat ``_pdf_text_width`` factors, which
@@ -500,6 +501,10 @@ def _pdf_right_text(x_right, y, text, size: int | float = 9, font='F1'):
     ones the viewer uses) puts every right-aligned run on the same edge, bold or
     not, which also fixes the summary's bold rows and the report rows.
     """
+    width = _pdf_exact_text_width(text, size, bold=font == 'F2')
+    if max_width and width > max_width:
+        # Grouped amounts must stay whole inside their column, never truncate.
+        size = size * max_width / width
     return _pdf_text_command(x_right - _pdf_exact_text_width(text, size, bold=font == 'F2'), y, text, size=size, font=font)
 
 
@@ -1114,32 +1119,32 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
     # Built before the table is drawn because how many summary rows there are
     # sets the floor the last item row of every page has to clear - that floor
     # is what tells the pagination how many rows genuinely fit on a page.
-    totals = [('Total without VAT', f"R{tax_view['net']:.2f}")]
+    totals = [('Total without VAT', format_currency(tax_view['net']))]
     if tax_view['discount']:
         discount_label = 'Discount'
         if _doc_value(document, 'discount_mode', '') == 'percent' and float(_doc_value(document, 'discount_value') or 0):
             discount_label = f'Discount ({float(_doc_value(document, "discount_value") or 0):g}%)'
         elif _doc_value(document, 'discount_mode', '') == 'amount' and float(_doc_value(document, 'discount_value') or 0):
-            discount_label = f'Discount (R{float(_doc_value(document, "discount_value") or 0):.2f})'
-        totals.append((discount_label, f"-R{tax_view['discount']:.2f}"))
-    totals.append((f"VAT ({tax_view['rate']:g}%)" if tax_view['rate'] else 'VAT', f"R{tax_view['vat']:.2f}"))
-    totals.append(('Total with VAT', f"R{tax_view['gross']:.2f}"))
+            discount_label = f"Discount ({format_currency(float(_doc_value(document, 'discount_value') or 0))})"
+        totals.append((discount_label, f"-{format_currency(tax_view['discount'])}"))
+    totals.append((f"VAT ({tax_view['rate']:g}%)" if tax_view['rate'] else 'VAT', format_currency(tax_view['vat'])))
+    totals.append(('Total with VAT', format_currency(tax_view['gross'])))
     if (_doc_value(document, 'deposit_option', 'security_deposit') or 'security_deposit') == 'security_deposit':
         deposit_total = float(document["deposit_total"] or 0)
         if deposit_total:
-            totals.append(('Security deposit', f'R{deposit_total:.2f}'))
+            totals.append(('Security deposit', format_currency(deposit_total)))
     elif float(_doc_value(document, 'damage_waiver_amount') or 0):
-        totals.append(('Damage waiver', f'R{float(_doc_value(document, "damage_waiver_amount") or 0):.2f}'))
+        totals.append(('Damage waiver', format_currency(float(_doc_value(document, 'damage_waiver_amount') or 0))))
     # Security deposit consumed by the return settlement (extra time, damages or
     # outstanding balance). It is already inside Paid as a deposit_applied
     # payment; this is the visible deduction the client asked for. Invoices only:
     # a quote never has a settled deposit.
     deposit_used = float(_doc_value(document, 'deposit_applied_amount') or 0)
     if _doc_value(document, 'document_type', '') == 'invoice' and deposit_used:
-        totals.append(('Less: deposit used', f'-R{deposit_used:.2f}'))
+        totals.append(('Less: deposit used', f'-{format_currency(deposit_used)}'))
     totals.extend([
-        ('Paid', f'R{float(document["paid_total"] or 0):.2f}'),
-        ('Amount due', f'R{float(document["due_total"] or 0):.2f}'),
+        ('Paid', format_currency(float(document['paid_total'] or 0))),
+        ('Amount due', format_currency(float(document['due_total'] or 0))),
     ])
 
     # Bill To block, aligned under the logo/brand on the left. It must never run
@@ -1194,10 +1199,10 @@ def _invoice_template_pdf(document, items, settings, logo_bytes=None):
                 continue
             _add_pdf_lines(text, QTY_COLUMN_X, y_pos, [str(item['quantity'])], size=8)
             _add_pdf_lines(text, DAYS_COLUMN_X, y_pos, [days_text], size=8)
-            text.append(_pdf_right_text(RATE_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['unit_excl']:.2f}", size=8))
-            text.append(_pdf_right_text(SUBTOTAL_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['subtotal_excl']:.2f}", size=8))
-            text.append(_pdf_right_text(TAX_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['tax']:.2f}", size=8))
-            text.append(_pdf_right_text(TOTAL_INCL_VALUE_RIGHT_EDGE, y_pos, f"R{line_view['total_incl']:.2f}", size=8))
+            text.append(_pdf_right_text(RATE_VALUE_RIGHT_EDGE, y_pos, format_currency(line_view['unit_excl']), size=8, max_width=RATE_VALUE_RIGHT_EDGE - RATE_COLUMN_X))
+            text.append(_pdf_right_text(SUBTOTAL_VALUE_RIGHT_EDGE, y_pos, format_currency(line_view['subtotal_excl']), size=8, max_width=SUBTOTAL_VALUE_RIGHT_EDGE - SUBTOTAL_COLUMN_X))
+            text.append(_pdf_right_text(TAX_VALUE_RIGHT_EDGE, y_pos, format_currency(line_view['tax']), size=8, max_width=TAX_VALUE_RIGHT_EDGE - TAX_COLUMN_X))
+            text.append(_pdf_right_text(TOTAL_INCL_VALUE_RIGHT_EDGE, y_pos, format_currency(line_view['total_incl']), size=8, max_width=TOTAL_INCL_VALUE_RIGHT_EDGE - TOTAL_INCL_COLUMN_X))
             y_pos -= entry['height']
         return y_pos
 
@@ -1510,21 +1515,21 @@ def _statement_summary_rows(view):
     rows = []
     ranged = bool(view.get('date_from') or view.get('date_to'))
     if ranged:
-        rows.append(('Opening balance', view.get('opening_balance_display') or 'R0.00', False))
+        rows.append(('Opening balance', view.get('opening_balance_display') or format_currency(0), False))
     # Ticket ABI-341953267: the customer statement's totals box is a balance box
     # only. The Invoices / Legacy balances / Payments component rows were removed
     # at the client's request; the figures themselves stay on the view dict.
     rows.append(('Closing balance' if ranged else 'Balance outstanding',
-                 (view.get('closing_balance_display') if ranged else view.get('outstanding_balance_display')) or 'R0.00',
+                 (view.get('closing_balance_display') if ranged else view.get('outstanding_balance_display')) or format_currency(0),
                  True))
     # Ticket ABI-341953166: the customer statement reports the shared credit
     # facility summary (used / available) so a customer-facing statement carries
     # the same facility figures as the customer page and the order screens.
     facility = view.get('facility') or {}
     if facility.get('enabled'):
-        rows.append(('Credit limit', view.get('facility_limit_display') or 'R0.00', False))
-        rows.append(('Credit used', view.get('facility_used_display') or 'R0.00', False))
-        rows.append(('Credit available', view.get('facility_available_display') or 'R0.00', True))
+        rows.append(('Credit limit', view.get('facility_limit_display') or format_currency(0), False))
+        rows.append(('Credit used', view.get('facility_used_display') or format_currency(0), False))
+        rows.append(('Credit available', view.get('facility_available_display') or format_currency(0), True))
     return rows
 
 
@@ -1715,22 +1720,22 @@ def document_pdf_bytes(document_id):
             lines.append(f'Alternative Contact Relationship: {custom_fields["alternative_contact_relationship"]}')
     lines.append('')
     for item in items:
-        lines.append(f'{item["product_name"] or item["custom_name"]} x {item["quantity"]} @ R{float(item["unit_price"] or 0):.2f} = R{float(item["line_total"] or 0):.2f}')
+        lines.append(f"{item['product_name'] or item['custom_name']} x {item['quantity']} @ {format_currency(float(item['unit_price'] or 0))} = {format_currency(float(item['line_total'] or 0))}")
         description = (_doc_value(item, 'description', '') or '').strip()
         if description:
             lines.append(f'   {description}')
-    lines.extend(['', f'Subtotal: R{float(document["subtotal"] or 0):.2f}'])
+    lines.extend(['', f"Subtotal: {format_currency(float(document['subtotal'] or 0))}"])
     if float(_doc_value(document, 'discount_total') or 0):
-        lines.append(f'Discount: -R{float(_doc_value(document, "discount_total") or 0):.2f}')
-    lines.append(f'Tax: R{float(document["tax_total"] or 0):.2f}')
+        lines.append(f"Discount: -{format_currency(float(_doc_value(document, 'discount_total') or 0))}")
+    lines.append(f"Tax: {format_currency(float(document['tax_total'] or 0))}")
     if (_doc_value(document, 'deposit_option', 'security_deposit') or 'security_deposit') == 'security_deposit':
-        lines.append(f'Security deposit: R{float(document["deposit_total"] or 0):.2f}')
-    lines.append(f'Total: R{float(document["total"] or 0):.2f}')
+        lines.append(f"Security deposit: {format_currency(float(document['deposit_total'] or 0))}")
+    lines.append(f"Total: {format_currency(float(document['total'] or 0))}")
     if document['document_type'] == 'invoice':
         deposit_used = float(_doc_value(document, 'deposit_applied_amount') or 0)
         if deposit_used:
-            lines.append(f'Less: deposit used: -R{deposit_used:.2f}')
-        lines.extend([f'Paid: R{float(document["paid_total"] or 0):.2f}', f'Amount due: R{float(document["due_total"] or 0):.2f}'])
+            lines.append(f'Less: deposit used: -{format_currency(deposit_used)}')
+        lines.extend([f"Paid: {format_currency(float(document['paid_total'] or 0))}", f"Amount due: {format_currency(float(document['due_total'] or 0))}"])
     logo_bytes = _document_logo_bytes()
     if document['document_type'] in {'invoice', 'quote'}:
         return _invoice_template_pdf(document, items, settings, logo_bytes=logo_bytes)

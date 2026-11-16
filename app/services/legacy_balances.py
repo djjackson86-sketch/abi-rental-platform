@@ -19,6 +19,8 @@ One customer payment is allocated oldest-first across that customer's still-open
 imported rows, which is why a single receipt can settle several old orders.
 """
 
+from app.services.currency import format_currency
+
 from app.db import get_db, now
 
 from app.services.access import customer_branch_clause, session_branch_scope_ids, session_primary_branch_id
@@ -272,7 +274,7 @@ def record_legacy_payment(customer_id, form):
         raise ValueError("This customer has no outstanding legacy balance to settle")
     amount = _parse_amount(form)
     if amount > outstanding:
-        raise ValueError(f"Payment cannot be more than the outstanding legacy balance R{outstanding:.2f}")
+        raise ValueError(f'Payment cannot be more than the outstanding legacy balance {format_currency(outstanding)}')
     method = normalise_payment_method(form.get("method"), fallback="cash")
     if method == "customer_credit":
         raise ValueError("Customer credit cannot be used on an imported legacy balance")
@@ -379,8 +381,7 @@ def record_legacy_writeoff(customer_id, expected_rows, ticket_id, reason="", wri
             raise ValueError(f"Old order {balance_id} is not open ({entry['status']}); no writeoff is needed")
         if abs(entry["outstanding"] - expected) > 0.005:
             raise ValueError(
-                f"Old order {balance_id} changed: expected R{expected:.2f} outstanding, "
-                f"now R{entry['outstanding']:.2f}. Refresh and try again."
+                f"Old order {balance_id} changed: expected {format_currency(expected)} outstanding, now {format_currency(entry['outstanding'])}. Refresh and try again."
             )
         planned.append((balance_id, expected))
 

@@ -7,7 +7,8 @@
   const checks = [...root.querySelectorAll('.monthly-revenue-months input')];
   const colors = ['#2563eb','#b45309','#15803d','#b91c1c','#7e22ce','#0e7490','#be185d','#4d7c0f','#4338ca','#a16207','#0f766e','#9f1239'];
   const dashes = ['', '8 4', '3 4', '12 4 3 4'];
-  const rand = value => 'R' + value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const symbol = document.currentScript?.dataset.currencySymbol || 'R';
+  const rand = value => (value < 0 ? '-' : '') + symbol + Math.abs(value).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}).replace(/,/g, ' ');
   function element(tag, attrs, text) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
     Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
@@ -44,7 +45,7 @@
       element('text', {x:x(day), y:338, 'text-anchor':'middle', fill:'#475569', 'font-size':12}, day);
     }
     element('text', {x:555, y:367, 'text-anchor':'middle', fill:'#334155', 'font-size':14}, 'Day of month');
-    element('text', {x:20, y:175, transform:'rotate(-90 20 175)', 'text-anchor':'middle', fill:'#334155', 'font-size':14}, 'Revenue (R)');
+    element('text', {x:20, y:175, transform:'rotate(-90 20 175)', 'text-anchor':'middle', fill:'#334155', 'font-size':14}, 'Revenue (' + symbol + ')' );
     selected.forEach(month => {
       const i = month.month - 1;
       const points = month.values.map((value, day) => value === null ? null : `${x(day+1)},${y(value)}`).filter(v => v !== null).join(' ');

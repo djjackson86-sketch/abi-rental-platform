@@ -114,10 +114,10 @@
     <section class="metrics orders-metrics" id="orders-metrics">
       <div class="metric-card"><small>Orders</small><b>{{ counts.total }}</b></div>
 
-      <div class="metric-card"><small>Revenue received</small><b>R{{ '%.2f'|format(counts.revenue) }}</b></div>
-      <div class="metric-card is-alert"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
+      <div class="metric-card"><small>Revenue received</small><b>{{ (counts.revenue)|currency }}</b></div>
+      <div class="metric-card is-alert"><small>Due</small><b>{{ (counts.due)|currency }}</b></div>
       <div class="metric-card"><small>Unprocessed deposits</small><b>{{ counts.deposits_unprocessed_total }}</b></div>
-      <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>R{{ '%.2f'|format(counts.deposits_unprocessed_amount) }}</b></div>
+      <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>{{ (counts.deposits_unprocessed_amount)|currency }}</b></div>
       {# Ticket ABI-341953072(1): finalized invoices whose email has not been
          prepared yet, shown in red like the "Unsent" badge on the order's own
          document list. Draft orders are excluded by the count itself. #}
@@ -141,9 +141,9 @@
        stay main-profile only. Counts come from the same order_counts() the main
        row uses and honour the page filters and the branch scope. #}
     <section class="metrics orders-metrics orders-metrics-staff" id="orders-staff-metrics">
-      <div class="metric-card is-alert"><small>Due</small><b>R{{ '%.2f'|format(counts.due) }}</b></div>
+      <div class="metric-card is-alert"><small>Due</small><b>{{ (counts.due)|currency }}</b></div>
       <div class="metric-card"><small>Unprocessed deposits</small><b>{{ counts.deposits_unprocessed_total }}</b></div>
-      <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>R{{ '%.2f'|format(counts.deposits_unprocessed_amount) }}</b></div>
+      <div class="metric-card is-alert"><small>Unprocessed deposit value</small><b>{{ (counts.deposits_unprocessed_amount)|currency }}</b></div>
       {# Ticket ABI-341953072(1): staff see the same red "Unsent Invoices" figure
          the main profile's row carries — it is counter work, not money. #}
       <div class="metric-card is-alert"><small>Unsent Invoices</small><b>{{ counts.unsent_invoices }}</b></div>
@@ -190,9 +190,9 @@
                   <td><span class="badge status-{{ o.status }}">{{ status_label(o.status) }}</span></td>
                   <td>{{ o.start_at[:10] if o.start_at else '—' }} → {{ o.end_at[:10] if o.end_at else '—' }}</td>
                   <td>{{ o.item_count }}</td>
-                  <td>R{{ '%.2f'|format(o.total) }}</td>
-                  <td>{% if o.due_total < 0 %}<strong class="balance-credit">-R{{ '%.2f'|format(0 - o.due_total) }}</strong>{% else %}R{{ '%.2f'|format(o.due_total) }}{% endif %}</td>
-                  {% set deposit_due = deposit_to_process_amount(o) %}<td>{% if deposit_due %}<strong>R{{ '%.2f'|format(deposit_due) }}</strong>{% elif o.deposit_total %}<small>Done</small>{% else %}<small>—</small>{% endif %}</td>
+                  <td>{{ (o.total)|currency }}</td>
+                  <td>{% if o.due_total < 0 %}<strong class="balance-credit">-{{ (0 - o.due_total)|currency }}</strong>{% else %}{{ (o.due_total)|currency }}{% endif %}</td>
+                  {% set deposit_due = deposit_to_process_amount(o) %}<td>{% if deposit_due %}<strong>{{ (deposit_due)|currency }}</strong>{% elif o.deposit_total %}<small>Done</small>{% else %}<small>—</small>{% endif %}</td>
                   <td><a class="btn ghost" href="{{ url_for('orders.detail', order_id=o.id) }}">Open</a></td>
                 </tr>
               {% endfor %}

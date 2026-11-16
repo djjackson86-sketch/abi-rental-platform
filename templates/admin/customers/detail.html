@@ -75,9 +75,9 @@
       </div>
     </div>
     <div class="profile-stat-row">
-      <div><small>Balance due</small><strong>R{{ '%.2f'|format(outstanding_balance) }}</strong></div>
-      <div><small>Legacy balance</small><strong class="balance-owing">R{{ '%.2f'|format(legacy_balance.total) }}</strong></div>
-      <div><small>Customer credit</small><strong class="balance-credit">R{{ '%.2f'|format(customer_credit_balance) }}</strong></div>
+      <div><small>Balance due</small><strong>{{ (outstanding_balance)|currency }}</strong></div>
+      <div><small>Legacy balance</small><strong class="balance-owing">{{ (legacy_balance.total)|currency }}</strong></div>
+      <div><small>Customer credit</small><strong class="balance-credit">{{ (customer_credit_balance)|currency }}</strong></div>
       <div><small>Orders</small><strong>{{ orders|length }}</strong></div>
     </div>
     <div class="contact-stack">
@@ -106,16 +106,16 @@
       {% if customer.is_blocked %}<div class="detail-row"><span>Blocked reason</span><b>{{ customer.blocked_reason or 'No reason recorded' }}</b></div>{% endif %}
       {# Ticket ABI-341953129: the owner-only credit facility, shown read-only to everyone. #}
       <div class="detail-row"><span>Credit allowed</span><b>{% if customer.credit_allowed %}Yes{% else %}No{% endif %}</b></div>
-      {% if customer.credit_allowed %}<div class="detail-row"><span>Credit limit</span><b>R{{ '%.2f'|format(customer.credit_limit or 0) }}</b></div>
+      {% if customer.credit_allowed %}<div class="detail-row"><span>Credit limit</span><b>{{ (customer.credit_limit or 0)|currency }}</b></div>
       {# Ticket ABI-341953166: the shared facility summary, read-only. Customer credit (prepaid) stays shown below and is a separate pot. #}
-      <div class="detail-row"><span>Credit used</span><b class="balance-owing">R{{ '%.2f'|format(facility.used if facility else 0) }}</b></div>
-      <div class="detail-row"><span>Credit available</span><b class="balance-credit">R{{ '%.2f'|format(facility.available if facility else 0) }}</b></div>{% endif %}
+      <div class="detail-row"><span>Credit used</span><b class="balance-owing">{{ (facility.used if facility else 0)|currency }}</b></div>
+      <div class="detail-row"><span>Credit available</span><b class="balance-credit">{{ (facility.available if facility else 0)|currency }}</b></div>{% endif %}
       <div class="detail-row"><span>Created</span><b>{{ customer.created_at[:10] }}</b></div>
       <div class="detail-row"><span>Created by</span><b>{{ customer.created_by_name or '—' }}</b></div>
       <div class="detail-row"><span>Branch</span><b>{{ customer.branch_name or 'No branch recorded' }}</b></div>
-      <div class="detail-row"><span>Balance due</span><b>R{{ '%.2f'|format(outstanding_balance) }}</b></div>
-      <div class="detail-row"><span>Legacy balance</span><b class="balance-owing">R{{ '%.2f'|format(legacy_balance.total) }}</b></div>
-      <div class="detail-row"><span>Customer credit</span><b class="balance-credit">R{{ '%.2f'|format(customer_credit_balance) }}</b></div>
+      <div class="detail-row"><span>Balance due</span><b>{{ (outstanding_balance)|currency }}</b></div>
+      <div class="detail-row"><span>Legacy balance</span><b class="balance-owing">{{ (legacy_balance.total)|currency }}</b></div>
+      <div class="detail-row"><span>Customer credit</span><b class="balance-credit">{{ (customer_credit_balance)|currency }}</b></div>
       {% if customer.customer_type == 'company' and (custom_fields.get('vat_number') or custom_fields.get('company_reg_no')) %}
         <div class="detail-row"><span>VAT No</span><b>{{ custom_fields.get('vat_number') or '—' }}</b></div>
         <div class="detail-row"><span>Company Reg No</span><b>{{ custom_fields.get('company_reg_no') or '—' }}</b></div>
@@ -134,7 +134,7 @@
           <div class="customer-order-row">
             <span><strong>{{ 'Credit' if credit.amount > 0 else 'Used credit' }}</strong><small>{{ credit.created_at[:10] }}{% if credit.source_order_number %} · {{ credit.source_order_number }}{% elif credit.applied_order_number %} · {{ credit.applied_order_number }}{% endif %}</small></span>
             <span class="badge status-{{ credit.status }}">{{ credit.source_type|replace('_', ' ')|title }}</span>
-            <b class="{{ 'balance-credit' if credit.amount > 0 else 'balance-owing' }}">{{ 'R' if credit.amount >= 0 else '-R' }}{{ '%.2f'|format(credit.amount|abs) }}</b>
+            <b class="{{ 'balance-credit' if credit.amount > 0 else 'balance-owing' }}">{{ credit.amount|currency }}</b>
           </div>
         {% endfor %}
       </div>
@@ -162,9 +162,9 @@
     <div class="legacy-balance-summary">
       <div class="legacy-balance-total">
         <small>Still outstanding</small>
-        <strong class="{{ 'balance-owing' if legacy_balance.total > 0 else 'balance-credit' }}">R{{ '%.2f'|format(legacy_balance.total) }}</strong>
-        {% if legacy_balance.settled_total > 0 %}<span class="legacy-balance-settled">R{{ '%.2f'|format(legacy_balance.settled_total) }} of R{{ '%.2f'|format(legacy_balance.imported_total) }} settled</span>{% endif %}
-        {% if legacy_balance.writeoff_total > 0 %}<span class="legacy-balance-settled legacy-writeoff-total">R{{ '%.2f'|format(legacy_balance.writeoff_total) }} written off — noncash, no money received</span>{% endif %}
+        <strong class="{{ 'balance-owing' if legacy_balance.total > 0 else 'balance-credit' }}">{{ (legacy_balance.total)|currency }}</strong>
+        {% if legacy_balance.settled_total > 0 %}<span class="legacy-balance-settled">{{ (legacy_balance.settled_total)|currency }} of {{ (legacy_balance.imported_total)|currency }} settled</span>{% endif %}
+        {% if legacy_balance.writeoff_total > 0 %}<span class="legacy-balance-settled legacy-writeoff-total">{{ (legacy_balance.writeoff_total)|currency }} written off — noncash, no money received</span>{% endif %}
       </div>
       <p>Balance-only import from the previous Sano system. Old order numbers are the source reference and the imported amount is never edited.</p>
     </div>
@@ -173,8 +173,8 @@
         <div class="customer-order-row legacy-balance-row">
           <span><strong>Old order #{{ entry.source_order_number }}</strong><small>{% if entry.source_started_at %}{{ entry.source_started_at[:10] }} · {% endif %}{{ entry.source_payment_status|replace('_', ' ')|title }} · {{ entry.source_order_status }}</small>
             {% if entry.writeoff_amount > 0 %}<small class="legacy-writeoff-note">Noncash writeoff{% if entry.writeoff_date %} {{ entry.writeoff_date }}{% endif %}{% if entry.writeoff_ticket_id %} · {{ entry.writeoff_ticket_id }}{% endif %}{% if entry.writeoff_reason %} · {{ entry.writeoff_reason }}{% endif %}</small>{% endif %}</span>
-          <span class="legacy-balance-money"><small>Total R{{ '%.2f'|format(entry.source_total) }} · Paid then R{{ '%.2f'|format(entry.source_paid) }}{% if entry.invoice_count %} · {{ entry.invoice_count }} invoice{{ '' if entry.invoice_count == 1 else 's' }}{% endif %}</small></span>
-          <b class="{{ 'balance-owing' if entry.outstanding > 0 else 'balance-credit' }}">{% if entry.status == 'waived' %}{% if entry.writeoff_amount > 0 %}Waived — noncash writeoff{% else %}Waived{% endif %}{% elif entry.outstanding > 0 %}R{{ '%.2f'|format(entry.outstanding) }}{% else %}Settled{% endif %}</b>
+          <span class="legacy-balance-money"><small>Total {{ (entry.source_total)|currency }} · Paid then {{ (entry.source_paid)|currency }}{% if entry.invoice_count %} · {{ entry.invoice_count }} invoice{{ '' if entry.invoice_count == 1 else 's' }}{% endif %}</small></span>
+          <b class="{{ 'balance-owing' if entry.outstanding > 0 else 'balance-credit' }}">{% if entry.status == 'waived' %}{% if entry.writeoff_amount > 0 %}Waived — noncash writeoff{% else %}Waived{% endif %}{% elif entry.outstanding > 0 %}{{ (entry.outstanding)|currency }}{% else %}Settled{% endif %}</b>
         </div>
       {% endfor %}
     </div>
@@ -199,7 +199,7 @@
       <div class="customer-order-list">
         {% for payment in legacy_balance.payments %}
         <div class="customer-order-row legacy-balance-row">
-          <span><strong>R{{ '%.2f'|format(payment.amount) }}</strong><small>{{ (payment.payment_date or payment.created_at)[:10] }} · {{ payment.method|title }}{% if payment.reference %} · {{ payment.reference }}{% endif %}</small></span>
+          <span><strong>{{ (payment.amount)|currency }}</strong><small>{{ (payment.payment_date or payment.created_at)[:10] }} · {{ payment.method|title }}{% if payment.reference %} · {{ payment.reference }}{% endif %}</small></span>
           <span class="badge status-paid">Received</span>
         </div>
         {% endfor %}
@@ -217,7 +217,7 @@
           <a class="customer-order-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
             <span><strong>{{ order.order_number }}</strong><small>{{ order.start_at[:10] if order.start_at else order.created_at[:10] }}</small></span>
             <span class="badge status-{{ order.status }}">{{ order.status }}</span>
-            <b>R{{ '%.2f'|format(order.due_total) }}</b>
+            <b>{{ (order.due_total)|currency }}</b>
           </a>
         {% endfor %}
       </div>

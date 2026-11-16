@@ -69,9 +69,9 @@
 
     <section class="metrics reports-metrics">
       <div class="metric-card"><small>Orders</small><b>{{ metrics.orders }}</b><em>in this period</em></div>
-      <div class="metric-card"><small>Revenue</small><b>R{{ '%.2f'|format(metrics.revenue) }}</b><em>recognised (booked)</em></div>
-      <div class="metric-card"><small>Payments received</small><b>R{{ '%.2f'|format(metrics.paid) }}</b><em>received</em></div>
-      <div class="metric-card"><small>Amount due</small><b>R{{ '%.2f'|format(metrics.due) }}</b><em>outstanding</em></div>
+      <div class="metric-card"><small>Revenue</small><b>{{ (metrics.revenue)|currency }}</b><em>recognised (booked)</em></div>
+      <div class="metric-card"><small>Payments received</small><b>{{ (metrics.paid)|currency }}</b><em>received</em></div>
+      <div class="metric-card"><small>Amount due</small><b>{{ (metrics.due)|currency }}</b><em>outstanding</em></div>
     </section>
 
     {% include 'admin/_monthly_revenue.html' %}
@@ -82,12 +82,12 @@
           <p>What the period is worth and what is still owed</p>
         </header>
         <div class="report-card-body">
-          <div class="metric-row"><span>Total revenue</span><b>R{{ '%.2f'|format(metrics.revenue) }}</b></div>
-          <div class="metric-row"><span>Total paid</span><b>R{{ '%.2f'|format(metrics.paid) }}</b></div>
-          <div class="metric-row"><span>Total due</span><b{{ ' class="is-due"'|safe if metrics.due }}>R{{ '%.2f'|format(metrics.due) }}</b></div>
+          <div class="metric-row"><span>Total revenue</span><b>{{ (metrics.revenue)|currency }}</b></div>
+          <div class="metric-row"><span>Total paid</span><b>{{ (metrics.paid)|currency }}</b></div>
+          <div class="metric-row"><span>Total due</span><b{{ ' class="is-due"'|safe if metrics.due }}>{{ (metrics.due)|currency }}</b></div>
           {% if metrics.payment_split %}
             <div class="report-split-wrap">
-              <div class="report-split" role="img" aria-label="{{ metrics.payment_split.paid_pct }}% of R{{ '%.2f'|format(metrics.revenue) }} received">
+              <div class="report-split" role="img" aria-label="{{ metrics.payment_split.paid_pct }}% of {{ (metrics.revenue)|currency }} received">
                 <span class="report-split-paid" style="width: {{ metrics.payment_split.paid_share }}%"></span>
                 <span class="report-split-due" style="width: {{ metrics.payment_split.due_share }}%"></span>
               </div>
@@ -105,7 +105,7 @@
         <div class="report-card-body">
           {% if status_rows %}
             {% for row in status_rows %}
-              <div class="metric-row has-bar"><i class="metric-bar" style="width: {{ row.bar }}%"></i><span>{{ row.status|replace('_', ' ')|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row has-bar"><i class="metric-bar" style="width: {{ row.bar }}%"></i><span>{{ row.status|replace('_', ' ')|title }}</span><b>{{ row.count }} · {{ (row.total)|currency }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No orders in this period.</p>
@@ -121,7 +121,7 @@
         <div class="report-card-body">
           {% if payment_rows %}
             {% for row in payment_rows %}
-              <div class="metric-row has-bar"><i class="metric-bar is-green" style="width: {{ row.bar }}%"></i><span>{{ row.method|replace('_', ' ')|title }}</span><b>{{ row.count }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row has-bar"><i class="metric-bar is-green" style="width: {{ row.bar }}%"></i><span>{{ row.method|replace('_', ' ')|title }}</span><b>{{ row.count }} · {{ (row.total)|currency }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No payments recorded in this period.</p>
@@ -137,7 +137,7 @@
         <div class="report-card-body">
           {% if product_rows %}
             {% for row in product_rows %}
-              <div class="metric-row"><span>{{ row.product_name }}</span><b>{{ row.quantity }} item{{ '' if row.quantity == 1 else 's' }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row"><span>{{ row.product_name }}</span><b>{{ row.quantity }} item{{ '' if row.quantity == 1 else 's' }} · {{ (row.total)|currency }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No order items in this period.</p>
@@ -153,7 +153,7 @@
         <div class="report-card-body">
           {% if customer_rows %}
             {% for row in customer_rows %}
-              <div class="metric-row"><span>{{ row.customer_name }}</span><b>{{ row.orders }} order{{ '' if row.orders == 1 else 's' }} · R{{ '%.2f'|format(row.total) }}</b></div>
+              <div class="metric-row"><span>{{ row.customer_name }}</span><b>{{ row.orders }} order{{ '' if row.orders == 1 else 's' }} · {{ (row.total)|currency }}</b></div>
             {% endfor %}
           {% else %}
             <p class="report-empty">No customers in this period.</p>

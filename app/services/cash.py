@@ -31,6 +31,8 @@ Every function returns **plain scalars and dicts**. Production rows are libsql
 tuples, so a raw row object must never leave this module (``row.count`` is the
 tuple method there, which is how /reports once 500'd in production only).
 """
+
+from app.services.currency import format_currency
 from contextlib import nullcontext
 from datetime import date
 
@@ -334,23 +336,23 @@ def _drop_lines(cash_up_id):
     return lines
 
 
-def _variance_text(variance, cashed_up):
+def _variance_text(variance, cashed_up, formatter=format_currency):
     if not cashed_up:
         return '—'
     if variance > 0.005:
-        return f'+R{abs(variance):.2f}'
+        return f'+{formatter(abs(variance))}'
     if variance < -0.005:
-        return f'-R{abs(variance):.2f}'
-    return 'R0.00'
+        return f'-{formatter(abs(variance))}'
+    return formatter(0)
 
 
-def _variance_label(variance, cashed_up):
+def _variance_label(variance, cashed_up, formatter=format_currency):
     if not cashed_up:
         return 'Cash up to see the difference'
     if variance > 0.005:
-        return f'Over by R{abs(variance):.2f}'
+        return f'Over by {formatter(abs(variance))}'
     if variance < -0.005:
-        return f'Short by R{abs(variance):.2f}'
+        return f'Short by {formatter(abs(variance))}'
     return 'Balanced'
 
 
@@ -405,7 +407,7 @@ def _variance_note_required(cashed_up, variance, notes):
     if str(notes or '').strip():
         return ''
     side = 'over' if amount > 0 else 'short'
-    return f'{side} by R{abs(amount):.2f}'
+    return f'{side} by {format_currency(abs(amount))}'
 
 
 def _variance_note_gaps(summary):
@@ -1168,41 +1170,41 @@ def record_day_report_send(day, chat_id=''):
     return True
 
 
-def day_report_rows(report):
+def day_report_rows(report, formatter=format_currency):
     """One source of truth for both the PDF and the CSV: (section, item, value)."""
     cash = report['cash']
     metrics = report['metrics']
     money_rows = [
         ('Dashboard', 'New orders for the day', str(metrics['orders'])),
         ('Dashboard', 'New customers for the day', str(metrics['customers'])),
-        ('Dashboard', 'Revenue for the day', f"R{metrics['revenue']:.2f}"),
-        ('Dashboard', 'Total card payments', f"R{metrics['card_payments']:.2f}"),
-        ('Dashboard', 'Total cash payments', f"R{metrics['cash_payments']:.2f}"),
-        ('Dashboard', 'Total EFT payments', f"R{metrics['eft_payments']:.2f}"),
+        ('Dashboard', 'Revenue for the day', formatter(metrics['revenue'])),
+        ('Dashboard', 'Total card payments', formatter(metrics['card_payments'])),
+        ('Dashboard', 'Total cash payments', formatter(metrics['cash_payments'])),
+        ('Dashboard', 'Total EFT payments', formatter(metrics['eft_payments'])),
         # Ticket ABI-341953066: "Other" money still has to appear in the day's
         # figures, or a payment recorded as Other would show in the revenue line
         # and in none of the method lines.
-        ('Dashboard', 'Total other payments', f"R{metrics.get('other_payments', 0):.2f}"),
+        ('Dashboard', 'Total other payments', formatter(metrics.get('other_payments', 0))),
         ('Dashboard', 'Reservations for the day', str(metrics['reservations'])),
         ('Dashboard', 'Reservation pick ups for the day', str(metrics['reservation_pickups'])),
         ('Dashboard', 'Total no. of trailers out', str(metrics['trailers_out'])),
         ('Dashboard', 'Total no. of trailers in', str(metrics['trailers_in'])),
     ]
     opening_item = 'Opening cash (previous day closing)'
-    opening_value = f"R{cash['opening']:.2f}"
+    opening_value = formatter(cash['opening'])
     if cash['opening_from']:
         opening_value += f" (closed {cash['opening_from']})"
     cash_rows = [
         ('Cash up', opening_item, opening_value),
-        ('Cash up', 'Cash received for the day', f"R{cash['cash_received']:.2f}"),
-        ('Cash up', 'Cash used for the day', f"R{cash['used_total']:.2f}"),
-        ('Cash up', 'Total dropped at the bank', f"R{cash['drop_total']:.2f}"),
-        ('Cash up', 'Cash deposit refunds paid out', f"R{cash.get('deposit_refund_total', 0):.2f}"),
-        ('Cash up', 'Expected cash in the drawer', f"R{cash['expected']:.2f}"),
+        ('Cash up', 'Cash received for the day', formatter(cash['cash_received'])),
+        ('Cash up', 'Cash used for the day', formatter(cash['used_total'])),
+        ('Cash up', 'Total dropped at the bank', formatter(cash['drop_total'])),
+        ('Cash up', 'Cash deposit refunds paid out', formatter(cash.get('deposit_refund_total', 0))),
+        ('Cash up', 'Expected cash in the drawer', formatter(cash['expected'])),
         (
             'Cash up',
             'Closing cash (counted)',
-            f"R{cash['counted']:.2f}" if cash['cashed_up'] else 'Not cashed up yet',
+            formatter(cash['counted']) if cash['cashed_up'] else 'Not cashed up yet',
         ),
         (
             'Cash up',
@@ -1211,11 +1213,11 @@ def day_report_rows(report):
         ),
     ]
     pos_rows = [
-        ('POS Cashup', 'Expected card total', f"R{cash.get('expected_card', 0):.2f}"),
+        ('POS Cashup', 'Expected card total', formatter(cash.get('expected_card', 0))),
         (
             'POS Cashup',
             'POS/card counted',
-            f"R{cash['counted_card']:.2f}" if cash.get('pos_cashed_up') else 'Not POS cashed up yet',
+            formatter(cash['counted_card']) if cash.get('pos_cashed_up') else 'Not POS cashed up yet',
         ),
         (
             'POS Cashup',
@@ -1245,9 +1247,9 @@ def day_report_rows(report):
             item = f"{item} · {entry['product_sku']}"
         rows.append(('Trailer service and maintenance', item, str(entry.get('label') or '')))
     for line in cash['used_lines']:
-        rows.append(('Cash used', line['description'] or 'No description', f"R{line['amount']:.2f}"))
+        rows.append(('Cash used', line['description'] or 'No description', formatter(line['amount'])))
     if not cash['used_lines']:
-        rows.append(('Cash used', 'No cash used recorded', 'R0.00'))
+        rows.append(('Cash used', 'No cash used recorded', formatter(0)))
     # Amount-only lines: the timestamp is the only thing that tells two drop offs
     # on the same day apart, and it is what the dashboard panel shows too. It is
     # printed as the app prints every other date+time (YYYY-MM-DD  HH:MM) — the
@@ -1256,9 +1258,9 @@ def day_report_rows(report):
     for line in cash['drop_lines']:
         stamped = display_local_datetime(line['created_at']) if line['created_at'] else ''
         item = f'Dropped at the bank {stamped}'.strip()
-        rows.append(('Cash drop off (to bank)', item, f"R{line['amount']:.2f}"))
+        rows.append(('Cash drop off (to bank)', item, formatter(line['amount'])))
     if not cash['drop_lines']:
-        rows.append(('Cash drop off (to bank)', 'No cash dropped at the bank', 'R0.00'))
+        rows.append(('Cash drop off (to bank)', 'No cash dropped at the bank', formatter(0)))
     for row in report.get('spare_wheels') or []:
         rows.append(('Spare wheel count', str(row.get('wheel_size') or ''), _spare_wheel_report_value(row)))
     notes = cash['notes'] or 'No end of day notes recorded'
@@ -1451,4 +1453,14 @@ def _variance_tone(cash):
 
 def day_report_csv_rows(report):
     """(section, item, value) rows for the CSV export, uncapped."""
-    return [list(row) for row in day_report_rows(report)]
+    # Keep the legacy CSV representation, not the human display grouping.
+    def legacy_money(value):
+        return f'R{float(value or 0):.2f}'
+
+    raw = dict(report, cash=dict(report['cash']))
+    for prefix, flag in (('', 'cashed_up'), ('pos_', 'pos_cashed_up')):
+        variance = raw['cash'].get(prefix + 'variance', 0)
+        counted = raw['cash'].get(flag, False)
+        raw['cash'][prefix + 'variance_display'] = _variance_text(variance, counted, formatter=legacy_money)
+        raw['cash'][prefix + 'variance_label'] = _variance_label(variance, counted, formatter=legacy_money)
+    return [list(row) for row in day_report_rows(raw, formatter=legacy_money)]

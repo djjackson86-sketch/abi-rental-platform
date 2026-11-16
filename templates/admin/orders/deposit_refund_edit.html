@@ -9,7 +9,7 @@
   <div>
     <p class="eyebrow">Order {{ order.order_number }}</p>
     <h1>Edit deposit refund</h1>
-    <p>{{ order.customer_name or 'No customer' }} · deposit R{{ '%.2f'|format(order.deposit_total) }} · refund/credit R{{ '%.2f'|format(order.deposit_refund_amount) }}</p>
+    <p>{{ order.customer_name or 'No customer' }} · deposit {{ (order.deposit_total)|currency }} · refund/credit {{ (order.deposit_refund_amount)|currency }}</p>
   </div>
   <div class="header-actions"><a class="btn ghost" href="{{ url_for('orders.detail', order_id=order.id) }}">Back to order</a></div>
 </header>
@@ -21,7 +21,7 @@
       <label>Deposit date<input type="datetime-local" name="deposit_processed_at" value="{{ posted_date }}"></label>
     </div>
     <label>Settlement note<input name="deposit_note" value="{{ posted_note }}" placeholder="Refund note"></label>
-    <p class="form-help">Saving restates the deposit split: the amount you enter is paid out or credited to the customer and the rest of the R{{ '%.2f'|format(order.deposit_total) }} deposit counts as used on the order. Paid, due, the Reports figures and the invoice &ldquo;Less: deposit used&rdquo; line all recalculate. To remove the payout completely, use Delete on the order.</p>
+    <p class="form-help">Saving restates the deposit split: the amount you enter is paid out or credited to the customer and the rest of the {{ (order.deposit_total)|currency }} deposit counts as used on the order. Paid, due, the Reports figures and the invoice &ldquo;Less: deposit used&rdquo; line all recalculate. To remove the payout completely, use Delete on the order.</p>
     <div class="form-actions"><button class="btn primary" type="submit">Save deposit refund</button></div>
   </form>
 </section>

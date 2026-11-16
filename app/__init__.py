@@ -121,6 +121,9 @@ def create_app(test_config=None):
     # Human-visible date-times always render through this helper so the ISO "T"
     # between the date and the time can never leak into a template (ticket
     # ABI-341952990). Stored values and datetime-local inputs stay raw.
+    from .services.currency import format_currency, format_amount
+    app.jinja_env.filters['currency'] = format_currency
+    app.jinja_env.filters['money_amount'] = format_amount
     app.jinja_env.globals.update(
         display_local_datetime=display_local_datetime,
         display_local_date=display_local_date,

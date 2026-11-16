@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 import difflib
 import json
 import math
@@ -1605,7 +1606,7 @@ def _statement_money(value):
 
 
 def _statement_money_display(value):
-    return f"R{_statement_money(value):.2f}"
+    return format_currency(_statement_money(value))
 
 
 def _statement_signed_money_display(value):
@@ -1615,7 +1616,7 @@ def _statement_signed_money_display(value):
     amount, and the South African convention puts the minus before the currency.
     """
     value = _statement_money(value)
-    return f"-R{abs(value):.2f}" if value < 0 else f"R{value:.2f}"
+    return f'-{format_currency(abs(value))}' if value < 0 else format_currency(value)
 
 
 def _statement_setting(settings, key, default=""):

@@ -42,10 +42,10 @@
     <noscript><button class="btn ghost" type="submit">Apply filters</button></noscript>
   </form>
   <div class="metrics payments-summary-cards">
-    <div class="metric-card"><small>Card Payments</small><b>R{{ '%.2f'|format(payment_totals.card) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
-    <div class="metric-card"><small>Cash Payments</small><b>R{{ '%.2f'|format(payment_totals.cash) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
-    <div class="metric-card"><small>EFT Payments</small><b>R{{ '%.2f'|format(payment_totals.eft) }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
-    <div class="metric-card"><small>OTHER PAYMENTS</small><b>R{{ '%.2f'|format(payment_totals.other) }}</b><span title="Excludes Account borrowing and unused prepaid funds">Deposits &amp; customer credit used</span></div>
+    <div class="metric-card"><small>Card Payments</small><b>{{ (payment_totals.card)|currency }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
+    <div class="metric-card"><small>Cash Payments</small><b>{{ (payment_totals.cash)|currency }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
+    <div class="metric-card"><small>EFT Payments</small><b>{{ (payment_totals.eft)|currency }}</b><span>Selected dates{% if branch_label %} · {{ branch_label }}{% endif %}</span></div>
+    <div class="metric-card"><small>OTHER PAYMENTS</small><b>{{ (payment_totals.other)|currency }}</b><span title="Excludes Account borrowing and unused prepaid funds">Deposits &amp; customer credit used</span></div>
   </div>
   {% if payments %}
   <div class="table-tools"><span>Showing 1 - {{ payments|length }} of {{ total_payments }}</span></div>
@@ -59,7 +59,7 @@
           <td>{{ payment.branch_label or '—' }}</td>
           <td>{{ payment.order_number or '—' }}</td>
           <td>{% if payment.synthetic_kind == 'legacy_receipt' %}<a href="{{ url_for('customers.detail', customer_id=payment.customer_id) }}">{{ payment.customer_name or '—' }}</a>{% else %}{{ payment.customer_name or '—' }}{% endif %}</td>
-          <td><strong{% if is_refund(payment) %} class="text-danger"{% endif %}>{% if is_refund(payment) %}-R{{ '%.2f'|format((payment.amount * -1)) }}{% else %}R{{ '%.2f'|format(payment.amount) }}{% endif %}</strong></td>
+          <td><strong{% if is_refund(payment) %} class="text-danger"{% endif %}>{% if is_refund(payment) %}-{{ ((payment.amount * -1))|currency }}{% else %}{{ (payment.amount)|currency }}{% endif %}</strong></td>
           <td>{{ payment.method|title }}</td>
           <td>{{ payment.reference or '—' }}</td>
           <td><span class="pill">{{ 'Refund' if is_refund(payment) else payment.status|title }}</span></td>

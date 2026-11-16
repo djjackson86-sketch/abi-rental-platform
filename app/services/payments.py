@@ -1,3 +1,4 @@
+from app.services.currency import format_currency
 from datetime import date, datetime
 import math
 
@@ -204,7 +205,7 @@ def _record_customer_credit_payment(order, amount, reference, payment_date):
     if due <= 0:
         raise ValueError("This order has no due amount to pay with customer credit")
     if amount > due:
-        raise ValueError(f"Customer credit payment cannot be more than the order due R{due:.2f}")
+        raise ValueError(f'Customer credit payment cannot be more than the order due {format_currency(due)}')
     from app.services.customer_credits import customer_credit_balance
     if amount > customer_credit_balance(customer_id):
         raise ValueError("Customer credit cannot exceed the available balance")

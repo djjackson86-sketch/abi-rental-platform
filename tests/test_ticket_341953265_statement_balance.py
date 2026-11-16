@@ -62,11 +62,11 @@ def test_invoice_payment_legacy_sequence_carries_the_running_balance(app):
     # 0 -> +1000 -> -300 -> +500 -> -200
     assert [row["balance"] for row in rows] == [1000.0, 700.0, 1200.0, 1000.0]
     assert [row["balance_display"] for row in rows] == [
-        "R1000.00", "R700.00", "R1200.00", "R1000.00",
+        "R1 000.00", "R700.00", "R1 200.00", "R1 000.00",
     ]
     # The ticket's example: payments (current and imported) print as a credit.
     assert [row["amount_display"] for row in rows] == [
-        "R1000.00", "-R300.00", "R500.00", "-R200.00",
+        "R1 000.00", "-R300.00", "R500.00", "-R200.00",
     ]
     # The running balance closes on the statement's own closing figure, and the
     # summary totals keep the money positive (only the row's sign is a credit).
@@ -110,7 +110,7 @@ def test_ranged_statement_starts_the_balance_at_the_opening_figure(app):
 
     assert view["opening_balance"] == 1000.0
     # Rows run from the opening balance, not from zero.
-    assert [row["balance_display"] for row in view["activity"]] == ["R1500.00", "R1300.00"]
+    assert [row["balance_display"] for row in view["activity"]] == ["R1 500.00", "R1 300.00"]
     assert view["activity"][-1]["balance"] == view["closing_balance"] == 1300.0
 
 

@@ -1,4 +1,4 @@
-{% macro money_card(label, amount) %}<div class="metric-card"><small>{{ label }}</small><b>R{{ '%.2f'|format(amount) }}</b><span>{{ day_metrics.day }}</span></div>{% endmacro %}
+{% macro money_card(label, amount) %}<div class="metric-card"><small>{{ label }}</small><b>{{ (amount)|currency }}</b><span>{{ day_metrics.day }}</span></div>{% endmacro %}
 <section class="metrics dashboard-metrics dashboard-day-metrics">
   <div class="metric-card"><small>New orders for the day</small><b>{{ day_metrics.orders }}</b><span>{{ day_metrics.day }}</span></div>
   <div class="metric-card"><small>New customers for the day</small><b>{{ day_metrics.customers }}</b><span>{{ day_metrics.day }}</span></div>

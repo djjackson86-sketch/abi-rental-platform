@@ -40,6 +40,7 @@ from flask import (
     url_for,
 )
 
+from app.services.currency import format_currency
 from app.db import get_db
 from app.services.access import session_branch_scope_ids, user_can_module
 from app.services.csrf import FORM_FIELD, issue_token, validate
@@ -306,7 +307,7 @@ def update_listing_price(product_id):
     except ValueError as exc:
         flash(str(exc), "error")
     else:
-        flash("Selling price updated to R%.2f." % price, "success")
+        flash("Selling price updated to %s." % format_currency(price), "success")
     return redirect(url_for("shop_admin.listing_detail", product_id=int(product_id)))
 
 

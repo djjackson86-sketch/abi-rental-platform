@@ -40,8 +40,8 @@
       <div><dt>Inventory name</dt><dd>{{ product.name }}</dd></div>
       <div><dt>SKU</dt><dd>{{ product.sku or '—' }}</dd></div>
       <div><dt>Type</dt><dd>{{ product.product_type|capitalize }}</dd></div>
-      <div><dt>Price</dt><dd>R{{ '%.2f'|format(product.price_amount or 0) }} / {{ product.price_unit }}</dd></div>
-      <div><dt>Security deposit</dt><dd>R{{ '%.2f'|format(product.security_deposit or 0) }}</dd></div>
+      <div><dt>Price</dt><dd>{{ (product.price_amount or 0)|currency }} / {{ product.price_unit }}</dd></div>
+      <div><dt>Security deposit</dt><dd>{{ (product.security_deposit or 0)|currency }}</dd></div>
       <div><dt>Stock</dt><dd>{{ product.quantity }}</dd></div>
       <div><dt>Category</dt><dd>{{ product.category_name or 'Ungrouped' }}{% if product.store_category_hidden %} <span class="badge shop-badge-hidden">Hidden category</span>{% endif %}</dd></div>
       <div><dt>Branch</dt><dd>{{ product.branch_name or 'Unassigned' }}</dd></div>

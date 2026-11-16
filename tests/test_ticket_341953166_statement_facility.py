@@ -12,6 +12,8 @@ beside the prepaid Customer Credit that is a separate pot.
 The tests read the facility figures back from the shared service rather than
 hard-coding them, so they stay valid as the parent retunes that definition.
 """
+
+from app.services.currency import format_currency
 import os
 import tempfile
 
@@ -148,8 +150,8 @@ def test_customer_statement_pdf_reports_the_facility_summary(client, app):
 
     assert "Credit used" in source
     assert "Credit available" in source
-    assert f"(R{facility['used']:.2f})" in source
-    assert f"(R{facility['available']:.2f})" in source
+    assert f"({format_currency(facility['used'])})" in source
+    assert f"({format_currency(facility['available'])})" in source
     # The receipt is printed; the historical Account draw is not.
     assert "CASH-OK" in source
     assert "FACILITY-DRAW-XYZ" not in source
@@ -199,8 +201,8 @@ def test_customer_detail_shows_facility_used_and_available(client, app):
     body = client.get(f"/customers/{customer_id}").data.decode()
     assert "Credit used" in body
     assert "Credit available" in body
-    assert f"R{facility['used']:.2f}" in body
-    assert f"R{facility['available']:.2f}" in body
+    assert f"{format_currency(facility['used'])}" in body
+    assert f"{format_currency(facility['available'])}" in body
     # The prepaid Customer Credit presentation is preserved.
     assert "Customer credit" in body
 
@@ -218,8 +220,8 @@ def test_new_order_shows_facility_used_and_available(client, app):
 
     body = client.get(f"/orders/new?customer_id={customer_id}").data.decode()
     assert 'id="account-credit-used"' in body
-    assert f'id="account-credit-used">R{facility["used"]:.2f}' in body
-    assert f'id="account-credit-available">R{facility["available"]:.2f}' in body
+    assert f'id="account-credit-used">{format_currency(facility["used"])}' in body
+    assert f'id="account-credit-available">{format_currency(facility["available"])}' in body
     # The prepaid Customer Credit card is preserved.
     assert 'id="customer-credit-card"' in body
 
@@ -239,5 +241,5 @@ def test_order_detail_shows_facility_used_and_available(client, app):
     assert response.status_code == 200
     body = response.data.decode()
     assert "Credit facility" in body
-    assert f"R{facility['used']:.2f} used" in body
-    assert f"R{facility['available']:.2f} available" in body
+    assert f"{format_currency(facility['used'])} used" in body
+    assert f"{format_currency(facility['available'])} available" in body
