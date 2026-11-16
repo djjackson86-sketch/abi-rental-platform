@@ -6,7 +6,7 @@
    block (the same one the Movement and Cash up cards use): it is the centred
    block for a card with no rows, so an empty Owing panel lines up with its
    neighbours instead of falling back to a bare left-aligned paragraph. #}
-<div class="panel owing-customers-panel">
+<div class="panel owing-customers-panel" id="owing-orders">
   <div class="panel-title">
     <h2>Outstanding orders</h2>
     {% if owing_orders %}
@@ -25,9 +25,9 @@
           <th class="owing-raised">Raised</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="owing-orders-rows">
         {% for order in owing_orders %}
-        <tr>
+        <tr{% if loop.index > 10 %} hidden data-owing-extra{% endif %}>
           <td>
             {% if order.customer_id %}
             <a class="table-primary-text" href="{{ url_for('customers.detail', customer_id=order.customer_id) }}">{{ order.customer_name or 'Unnamed customer' }}</a>
@@ -35,6 +35,7 @@
             <strong class="table-primary-text">No customer</strong>
             {% endif %}
             {% if order.collect_branch_name %}<small>{{ order.collect_branch_name }}</small>{% endif %}
+            <small class="owing-mobile-raised">Raised {{ order.created_at[:10] if order.created_at else '—' }}</small>
           </td>
           <td><a href="{{ url_for('orders.detail', order_id=order.id) }}">{{ order.order_number }}</a></td>
           <td class="owing-amount"><strong class="balance-owing">{{ (order.due_total)|currency }}</strong></td>
@@ -45,12 +46,15 @@
       </tbody>
     </table>
   </div>
+  {% if owing_orders|length > 10 %}
+  <div class="owing-controls"><button class="btn ghost" type="button" data-owing-toggle aria-expanded="false" aria-controls="owing-orders-rows">Show all ({{ owing_orders|length }})</button></div>
+  {% endif %}
   {% else %}
   <div class="empty-results"><strong>No results</strong><span>No outstanding orders right now.</span></div>
   {% endif %}
 </div>
 
-<div class="panel owing-customers-panel" id="owing-legacy-balances" style="margin-top:16px">
+<div class="panel owing-customers-panel" id="owing-legacy-balances">
   <div class="panel-title">
     <h2>Legacy balances</h2>
     {% if owing_legacy_balances %}
@@ -61,10 +65,10 @@
   <div class="table-wrap" style="margin-top:0">
     <table class="data-table owing-customers-table">
       <thead><tr><th>Customer</th><th>Legacy reference</th><th class="owing-amount">Balance due</th><th class="owing-raised">Raised</th></tr></thead>
-      <tbody>
+      <tbody id="owing-legacy-rows">
         {% for entry in owing_legacy_balances %}
-        <tr>
-          <td><a class="table-primary-text" href="{{ url_for('customers.detail', customer_id=entry.customer_id) }}#legacy-balance">{{ entry.customer_name or 'Unnamed customer' }}</a>{% if entry.branch_name %}<small>{{ entry.branch_name }}</small>{% endif %}</td>
+        <tr{% if loop.index > 10 %} hidden data-owing-extra{% endif %}>
+          <td><a class="table-primary-text" href="{{ url_for('customers.detail', customer_id=entry.customer_id) }}#legacy-balance">{{ entry.customer_name or 'Unnamed customer' }}</a>{% if entry.branch_name %}<small>{{ entry.branch_name }}</small>{% endif %}<small class="owing-mobile-raised">Raised {{ (entry.source_started_at or entry.source_created_at or '')[:10] or '—' }}</small></td>
           <td>{{ entry.source_order_number or '—' }}</td>
           <td class="owing-amount"><strong class="balance-owing">{{ (entry.outstanding)|currency }}</strong></td>
           <td class="owing-raised">{{ (entry.source_started_at or entry.source_created_at or '')[:10] or '—' }}</td>
@@ -73,6 +77,9 @@
       </tbody>
     </table>
   </div>
+  {% if owing_legacy_balances|length > 10 %}
+  <div class="owing-controls"><button class="btn ghost" type="button" data-owing-toggle aria-expanded="false" aria-controls="owing-legacy-rows">Show all ({{ owing_legacy_balances|length }})</button></div>
+  {% endif %}
   {% else %}
   <div class="empty-results"><strong>No results</strong><span>No outstanding legacy balances.</span></div>
   {% endif %}

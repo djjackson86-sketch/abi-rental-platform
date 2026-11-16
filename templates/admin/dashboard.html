@@ -102,7 +102,7 @@
    renders show the section title immediately and only the rows arrive later. #}
 <section class="dashboard-card-section" id="owing-customers">
   <div class="section-head"><h2 class="section-heading">Owing Customers</h2></div>
-  <div {% if dashboard_lazy %}data-dashboard-section="owing" data-src="{{ url_for('admin.dashboard_owing_partial', branch=filters.branch or None) }}"{% endif %}>
+  <div class="dashboard-grid owing-customers-grid" {% if dashboard_lazy %}data-dashboard-section="owing" data-src="{{ url_for('admin.dashboard_owing_partial', branch=filters.branch or None) }}"{% endif %}>
     {% if dashboard_lazy %}
     {# Same centred .empty-results block the loaded panel uses when it has no
        rows, so the loading and empty states sit on the same line. #}
@@ -168,6 +168,22 @@
   </div>
 </section>
 {% endif %}
+<script>
+(function () {
+  var section = document.getElementById('owing-customers');
+  // Delegation also handles buttons inserted by the lazy-loaded partial.
+  section.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-owing-toggle]');
+    if (!button || !section.contains(button)) return;
+    var rows = document.getElementById(button.getAttribute('aria-controls'));
+    if (!rows) return;
+    var expanded = button.getAttribute('aria-expanded') !== 'true';
+    rows.querySelectorAll('[data-owing-extra]').forEach(function (row) { row.hidden = !expanded; });
+    button.setAttribute('aria-expanded', String(expanded));
+    button.textContent = expanded ? 'Show fewer' : 'Show all (' + rows.children.length + ')';
+  });
+}());
+</script>
 {% if dashboard_lazy %}
 <script>
 (function () {

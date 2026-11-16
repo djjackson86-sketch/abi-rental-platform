@@ -493,6 +493,24 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .legacy-balance-money small{color:var(--muted);font-weight:700}
 .balance-owing{color:#b42318}
 .owing-customers-table .owing-amount{text-align:right;white-space:nowrap}
+/* Compact half-width cards, using the Movement grid without changing it. */
+.owing-customers-panel{min-width:0;padding:16px}
+.owing-customers-panel .panel-title{flex-wrap:wrap;gap:8px}
+.owing-customers-panel .panel-title h2{margin:0}
+.owing-customers-panel .pill{white-space:normal}
+.owing-customers-table{min-width:0;table-layout:fixed;font-size:12px}
+.owing-customers-table th,.owing-customers-table td{padding:10px 6px;overflow-wrap:anywhere}
+.owing-customers-table th:first-child{width:28%}
+.owing-customers-table th:nth-child(2){width:19%}
+.owing-customers-table .owing-amount{width:20%;white-space:normal}
+.owing-customers-table .owing-status{width:16%}
+.owing-customers-table .owing-raised{width:17%}
+.owing-customers-table .badge{max-width:100%;white-space:normal;overflow-wrap:anywhere;padding:4px 6px;font-size:11px}
+.owing-customers-table td small{display:block}
+.owing-customers-table .owing-mobile-raised{display:none}
+.owing-customers-table tr[hidden]{display:none}
+.owing-controls{margin-top:12px}
+@media(max-width:620px){.owing-customers-table .owing-mobile-raised{display:block;color:var(--muted);margin-top:4px}}
 @media(max-width:620px){.owing-customers-table{min-width:0;width:100%;table-layout:fixed}.owing-customers-table .owing-status,.owing-customers-table .owing-raised{display:none}.owing-customers-table th,.owing-customers-table td{padding:10px 6px;overflow-wrap:anywhere}.owing-customers-table th:first-child{width:43%}.owing-customers-table th:nth-child(2){width:29%}.owing-customers-table .owing-amount{width:28%;white-space:normal}.owing-customers-panel .panel-title{flex-wrap:wrap;gap:8px}}
 @media(max-width:720px){.legacy-balance-summary{display:grid}.legacy-balance-row{grid-template-columns:1fr}.legacy-balance-row>b{justify-self:start}}
 

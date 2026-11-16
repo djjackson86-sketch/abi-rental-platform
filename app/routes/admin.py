@@ -73,10 +73,16 @@ def _dashboard_owing_orders(branch_id=None):
     only narrow that view (ticket ABI-341953282).
     """
     rows = list_orders(payment_status="payment_due", branch_id=branch_id)
-    # Biggest debt first, then oldest, so the section opens on what matters.
+    # Match the displayed Raised date: newest first, undated rows last.
+    return sorted(rows, key=lambda row: (row["created_at"] or "", row["id"]), reverse=True)
+
+
+def _dashboard_owing_legacy_balances(branch_id=None):
+    """Dashboard-only ordering; leave shared legacy balance consumers unchanged."""
     return sorted(
-        rows,
-        key=lambda row: (-float(row["due_total"] or 0), row["created_at"] or "", row["id"]),
+        outstanding_legacy_balances(branch_id),
+        key=lambda row: (row["source_started_at"] or row["source_created_at"] or "", row["id"]),
+        reverse=True,
     )
 
 
@@ -163,7 +169,7 @@ def dashboard():
         schedule = dashboard_schedule(branch_id=branch_id)
         owing_orders = _dashboard_owing_orders(branch_id)
         owing_total = _dashboard_owing_total(owing_orders)
-        owing_legacy_balances = outstanding_legacy_balances(branch_id)
+        owing_legacy_balances = _dashboard_owing_legacy_balances(branch_id)
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
@@ -247,7 +253,7 @@ def dashboard_owing_partial():
         "admin/_dashboard_owing.html",
         owing_orders=owing_orders,
         owing_total=_dashboard_owing_total(owing_orders),
-        owing_legacy_balances=outstanding_legacy_balances(branch_id),
+        owing_legacy_balances=_dashboard_owing_legacy_balances(branch_id),
         status_label=status_label,
     )
 
