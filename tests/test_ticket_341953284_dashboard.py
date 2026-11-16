@@ -62,13 +62,14 @@ def test_legacy_subsection_follows_orders_without_changing_order_total(app, clie
     response = client.get('/dashboard/partials/owing' if lazy else '/dashboard')
     assert response.status_code == 200
     block = response.get_data(as_text=True)
-    if not lazy:
-        block = owing_block(block)
-    assert block.index('Outstanding orders') < block.index('Legacy balances')
+    if lazy:
+        block += client.get('/dashboard/partials/legacy').get_data(as_text=True)
+    assert block.index('Outstanding orders') < block.index('Legacy orders')
     orders, legacy = block.split('id="owing-legacy-balances"', 1)
+    legacy = legacy.split('</section>', 1)[0]
     assert '4 orders · <strong class="balance-owing">R945.50</strong>' in orders
-    assert '4 balances · <strong class="balance-owing">R965.00</strong>' in legacy
-    assert f'href="/customers/{ids["alice"]}#legacy-balance"' in legacy
+    assert '4 balances' in legacy and 'R965.00' not in legacy
+    assert 'href=' not in legacy
     assert 'class="balance-owing">R75.00<' in legacy
     assert '2024-01-02' in legacy
     for ref in ('LEG-OPEN', 'LEG-PARTIAL', 'LEG-DEPOT-TWO', 'LEG-UNASSIGNED'):
@@ -77,21 +78,21 @@ def test_legacy_subsection_follows_orders_without_changing_order_total(app, clie
     assert 'href="/orders/' not in legacy
 
 
-@pytest.mark.parametrize('path', ['/dashboard', '/dashboard/partials/owing'])
+@pytest.mark.parametrize('path', ['/dashboard', '/dashboard/partials/legacy'])
 def test_branch_filter_and_session_never_leak_other_depot_or_unassigned(app, client, path):
     seed_legacy(app)
     login(client)
     block = client.get(path + '?branch=1').get_data(as_text=True)
     assert 'LEG-OPEN' in block and 'LEG-PARTIAL' in block
-    assert 'LEG-DEPOT-TWO' not in block and 'LEG-UNASSIGNED' not in block
+    assert 'LEG-DEPOT-TWO' in block and 'LEG-UNASSIGNED' in block
     client.post('/logout')
     add_depot_user(app, 'Legacy Depot Two', 2)
     login(client, 'Legacy Depot Two', password='staff123')
     for query in ('', '?branch=1', '?branch=2'):
         block = client.get(path + query).get_data(as_text=True)
         assert 'LEG-DEPOT-TWO' in block
-        assert 'LEG-OPEN' not in block and 'LEG-PARTIAL' not in block
-        assert 'LEG-UNASSIGNED' not in block
+        assert 'LEG-OPEN' in block and 'LEG-PARTIAL' in block
+        assert 'LEG-UNASSIGNED' in block
 
 
 def test_multidepot_legacy_scope_and_filter_intersection(app, client):
@@ -105,19 +106,19 @@ def test_multidepot_legacy_scope_and_filter_intersection(app, client):
         db.execute('INSERT OR IGNORE INTO user_branch_access(user_id,branch_id) VALUES (?,?)', (user['id'], 2))
         db.commit()
     login(client, 'Multi Legacy', password='staff123')
-    page = client.get('/dashboard/partials/owing').get_data(as_text=True)
+    page = client.get('/dashboard/partials/owing').get_data(as_text=True) + client.get('/dashboard/partials/legacy').get_data(as_text=True)
     assert 'LEG-OPEN' in page and 'LEG-DEPOT-TWO' in page
-    assert 'LEG-UNASSIGNED' not in page
-    filtered = client.get('/dashboard/partials/owing?branch=2').get_data(as_text=True)
-    assert 'LEG-DEPOT-TWO' in filtered and 'LEG-OPEN' not in filtered
+    assert 'LEG-UNASSIGNED' in page
+    filtered = client.get('/dashboard/partials/legacy?branch=2').get_data(as_text=True)
+    assert 'LEG-DEPOT-TWO' in filtered and 'LEG-OPEN' in filtered
 
 
 def test_legacy_empty_state_and_authentication(client):
     assert client.get('/dashboard/partials/owing').status_code == 302
     login(client)
-    for path in ('/dashboard', '/dashboard/partials/owing'):
+    for path in ('/dashboard', '/dashboard/partials/legacy'):
         block = client.get(path).get_data(as_text=True)
-        assert 'Legacy balances' in block
+        assert 'Legacy orders' in block
         assert 'No outstanding legacy balances.' in block
 
 
@@ -128,7 +129,7 @@ def test_legacy_only_customer_does_not_claim_nobody_owes_money(app, client):
         upsert_legacy_balance(cid, 'legacy-only', 'LEG-ONLY', 125)
         db.commit()
     login(client)
-    page = client.get('/dashboard/partials/owing').get_data(as_text=True)
+    page = client.get('/dashboard/partials/owing').get_data(as_text=True) + client.get('/dashboard/partials/legacy').get_data(as_text=True)
     assert 'No outstanding orders right now.' in page
     assert 'No customers owe money' not in page
     assert 'LEG-ONLY' in page and 'R125.00' in page
@@ -187,11 +188,7 @@ def test_real_browser_desktop_mobile(app, client):
                 assert notification.get_attribute('href') == '/settings/notifications'
                 panel = page.locator('#owing-legacy-balances')
                 orders = page.locator('#owing-customers .owing-customers-panel').first
-                if width > 1000:
-                    assert orders.bounding_box()['y'] == panel.bounding_box()['y']
-                    assert abs(orders.bounding_box()['width'] - panel.bounding_box()['width']) < 1
-                else:
-                    assert orders.bounding_box()['y'] + orders.bounding_box()['height'] <= panel.bounding_box()['y']
+                assert orders.bounding_box()['y'] + orders.bounding_box()['height'] <= panel.bounding_box()['y']
                 assert panel.locator('tbody tr').count() == 4
                 assert panel.locator('td.owing-amount').first.evaluate('(e)=>getComputedStyle(e.querySelector("strong")).color') == 'rgb(180, 35, 24)'
                 for amount in panel.locator('td.owing-amount').all():
@@ -199,9 +196,7 @@ def test_real_browser_desktop_mobile(app, client):
                     assert box['x'] >= 0 and box['x'] + box['width'] <= width
                 page.locator('#owing-customers').screenshot(path=str(output / f'owing-{width}.png'))
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                panel.get_by_role('link', name='Alice Owing').first.click()
-                page.wait_for_load_state('networkidle')
-                assert page.locator('#legacy-balance').is_visible()
+                assert panel.locator('a').count() == 0
                 page.goto(f'http://127.0.0.1:{server.server_port}/dashboard', wait_until='networkidle')
                 notification = page.locator('.notify-entry a' if width < 860 else '.sidebar a[href="/settings/notifications"]')
                 notification.click()

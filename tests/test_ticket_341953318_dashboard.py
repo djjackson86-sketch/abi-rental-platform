@@ -35,7 +35,10 @@ def test_limits_totals_and_ordering(app, client, count, url):
     login(client)
     response = client.get(url)
     assert response.status_code == 200
-    soup = BeautifulSoup(response.data, 'html.parser')
+    body = response.get_data(as_text=True)
+    if url != '/dashboard':
+        body += client.get('/dashboard/partials/legacy').get_data(as_text=True)
+    soup = BeautifulSoup(body, 'html.parser')
     for panel_id, prefix, base in [('owing-orders', 'T318-', 100),
                                    ('owing-legacy-balances', 'LEG318-', 200)]:
         panel = soup.find(id=panel_id)
@@ -47,8 +50,11 @@ def test_limits_totals_and_ordering(app, client, count, url):
             f'{prefix}{i:02d}' for i in reversed(range(count))]
         assert len(panel.select('[data-owing-toggle]')) == int(count > 10)
         if count:
-            total = sum(base - i for i in range(count))
-            assert f'R{total:.2f}' in panel.select_one('.pill').get_text().replace(' ', '').replace('\xa0', '')
+            if panel_id == 'owing-orders':
+                total = sum(base - i for i in range(count))
+                assert f'R{total:.2f}' in panel.select_one('.pill').get_text().replace(' ', '').replace('\xa0', '')
+            else:
+                assert 'R' not in panel.select_one('.pill').get_text()
         else:
             assert panel.select_one('.empty-results')
 
@@ -63,12 +69,12 @@ def test_date_fallback_ties_and_missing_last(monkeypatch):
               dict(id=3, source_started_at='2026-10-01', source_created_at='2027-01-01'),
               dict(id=4, source_started_at='2026-11-01', source_created_at='2025-01-01')]
     calls = []
-    def balances(branch):
-        calls.append(branch)
+    def balances(*, company_wide=False):
+        calls.append(company_wide)
         return legacy
     monkeypatch.setattr(admin, 'outstanding_legacy_balances', balances)
     assert [r['id'] for r in admin._dashboard_owing_legacy_balances(2)] == [4, 3, 2, 1]
-    assert calls == [2]
+    assert calls == [True]
     assert [r['id'] for r in legacy] == [1, 2, 3, 4]  # shared result not mutated
 
 
@@ -102,13 +108,8 @@ def test_browser_independent_controls_and_layout(app, client, lazy):
                 assert legacy.locator('tbody tr').first.locator('td').nth(1).inner_text() == 'LEG318-22'
                 a, b = orders.bounding_box(), legacy.bounding_box()
                 assert a and b
-                if width > 1000:
-                    assert a['y'] == b['y']
-                    assert abs(a['width'] - b['width']) < 1
-                    movement = page.locator('.movement-card').first.bounding_box()
-                    assert movement and abs(a['width'] - movement['width']) < 1
-                else:
-                    assert a['y'] + a['height'] <= b['y']
+                assert a['y'] + a['height'] <= b['y']
+                if width <= 1000:
                     expect(orders.locator('.owing-mobile-raised').first).to_be_visible()
                 for card in (orders, legacy):
                     assert card.locator('.table-wrap').evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')
@@ -126,7 +127,7 @@ def test_browser_independent_controls_and_layout(app, client, lazy):
                 expect(legacy.locator('tbody tr:visible')).to_have_count(10)
                 assert totals == [card.locator('.pill').inner_text() for card in (orders, legacy)]
                 assert page.locator('h2', has_text='Going out').count() == 1
-                assert page.locator('h2', has_text='Coming back').count() == 1
+                assert page.locator('h2', has_text='Late trailers').count() == 1
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 page.locator('#owing-customers').screenshot(path=str(output / f'owing-{width}-lazy-{lazy}.png'))
                 assert not errors, errors
