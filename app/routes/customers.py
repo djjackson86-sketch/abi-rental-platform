@@ -8,7 +8,7 @@ from app.routes.auth import login_required
 from app.services import csrf, portal_registrations
 from app.services.access import main_required, user_can_module
 from app.services.customers import can_set_customer_credit, client_verified_label, create_customer, credit_fields_submitted, custom_field_label, custom_fields_for, customer_counts, customer_filter_counts, customer_filtered_total, customer_has_history, customer_orders, customer_outstanding_balances, customer_statement, delete_customer, get_customer, list_customers, normalise_customer_sort, update_customer
-from app.services.customers import customer_id_number_for, customer_is_suspect, customer_suspect_reason_for, suspect_matches
+from app.services.customers import customer_branch_id, customer_id_number_for, customer_is_suspect, customer_suspect_reason_for, suspect_matches
 from app.services.customers import retain_customer, customer_is_deleted, restore_customer, permanently_delete_customer
 from app.services.pdf_documents import customer_statement_pdf_bytes
 from app.services.payments import PAYMENT_METHODS, normalise_payment_date_filter
@@ -286,12 +286,26 @@ def new():
     if request.method == "POST":
         try:
             _enforce_owner_only_credit(request.form)
-            customer_id = create_customer(request.form)
+            waiting_id = request.form.get("waiting_id", "").strip()
+            if waiting_id:
+                if not user_can_module(session, "scan_vehicle"):
+                    abort(403)
+                csrf.validate("new_customer_vehicle")
+            from app.db import write_transaction
+            with write_transaction():
+                customer_id = create_customer(request.form, notify=False, defer_commit=True)
+                if waiting_id:
+                    allocate_waiting_vehicle(waiting_id, customer_id, "additional")
+            from app.services.telegram import send_new_customer_notification
+            try:
+                send_new_customer_notification(customer_id)
+            except Exception:
+                pass
             flash("Customer created", "success")
             return redirect(url_for("customers.detail", customer_id=customer_id))
         except ValueError as exc:
             flash(str(exc), "error")
-    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=None, custom_fields={}, custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit())
+    return render_template("admin/customers/form.html", settings=get_company_settings(), customer=None, custom_fields=request.form if request.method == "POST" else {}, custom_field_label=custom_field_label, can_set_credit=can_manage_customer_credit(), waiting_vehicles=_waiting_vehicles_for_customer({"branch_id": customer_branch_id()}) if user_can_module(session, "scan_vehicle") else [], new_vehicle_csrf_token=csrf.issue_token("new_customer_vehicle"))
 
 
 @bp.route("/<int:customer_id>")

@@ -1,12 +1,12 @@
 {% extends "admin/layout.html" %}
-{% set title=customer.name %}
+{% set title=customer.name or ('Suspect/Fraud #' ~ customer.id) %}
 {% block admin_body %}
 <header class="page-header customer-detail-header">
   <div class="customer-title-block">
     <span class="avatar large">{{ (customer.name[:2] or 'CU')|upper }}</span>
     <div>
       <p class="eyebrow">Customer</p>
-      <h1>{{ customer.name }}{% if customer.is_blocked %} <span class="badge blocked">{{ 'Suspect/Fraud' if customer_is_suspect(customer) else 'Blocked' }}</span>{% endif %}</h1>
+      <h1>{{ customer.name or ('Suspect/Fraud #' ~ customer.id) }}{% if customer.is_blocked %} <span class="badge blocked">{{ 'Suspect/Fraud' if customer_is_suspect(customer) else 'Blocked' }}</span>{% endif %}</h1>
       <p>{{ customer.email or 'No email' }}{% if customer.phone %} · {{ customer.phone }}{% endif %}</p>
     </div>
   </div>
@@ -70,7 +70,7 @@
     <div class="profile-card-head">
       <span class="avatar large">{{ (customer.name[:2] or 'CU')|upper }}</span>
       <div>
-        <h2>{{ customer.name }}</h2>
+        <h2>{{ customer.name or ('Suspect/Fraud #' ~ customer.id) }}</h2>
         <p>{{ customer.customer_type|title }} customer</p>
       </div>
     </div>

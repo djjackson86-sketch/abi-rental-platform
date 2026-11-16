@@ -15,6 +15,10 @@
       {% endif %}
     </div>
   {% endif %}
+  {% if not customer and user_can('scan_vehicle') %}
+    <button class="btn" type="button" id="allocate-new-vehicle" onclick="document.getElementById('allocate-new-dialog').showModal()">Allocate vehicle</button>
+    <p id="selected-vehicle-label" class="form-help">No vehicle selected from the list.</p>
+  {% endif %}
   {% set main_vehicle_fields = [
     ('vehicle_make', 'Vehicle Make', 'text'),
     ('vehicle_reg_no', 'Veh Reg No', 'text'),

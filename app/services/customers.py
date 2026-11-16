@@ -1176,7 +1176,7 @@ def suspect_matches(form_or_customer, exclude_id=None):
         if reasons:
             matches[row["id"]] = {
                 "id": row["id"],
-                "name": row["name"],
+                "name": row["name"] or f"Suspect/Fraud #{row['id']}",
                 "id_number": row["id_number"],
                 "reasons": reasons,
             }
@@ -1218,7 +1218,12 @@ def _form_has(form, key):
 
 def _clean(form, existing_custom_fields=None):
     name = form.get("name", "").strip()
-    if not name:
+    flagged = suspect_flag_submitted(form) or (
+        blocking_panel_present(form) and staff_request_active()
+        and _truthy((existing_custom_fields or {}).get(SUSPECT_FLAG_KEY))
+        and not suspect_panel_present(form)
+    )
+    if not name and not flagged:
         raise ValueError("Customer name is required")
     customer_type = form.get("customer_type", "individual")
     if customer_type not in VALID_TYPES:

@@ -1,0 +1,35 @@
+<input type="hidden" name="csrf_token" form="customer-form" value="{{ new_vehicle_csrf_token }}">
+<input type="hidden" name="waiting_id" form="customer-form" id="new-waiting-id" value="{{ posted.get('waiting_id', '') }}">
+<dialog id="allocate-new-dialog" aria-labelledby="allocate-new-title" style="width: min(34rem, calc(100% - 2rem)); max-width: calc(100% - 2rem); max-height:90dvh; overflow-y:auto; box-sizing:border-box; border:1px solid #ccc; border-radius:12px; padding:24px">
+  <h2 id="allocate-new-title">Allocate vehicle</h2>
+  <p>The selected waiting vehicle will be linked when you save this customer. If main vehicle details are entered, the selected vehicle is added as an additional vehicle.</p>
+  <label>Vehicle awaiting allocation
+    <select id="new-vehicle-choice" style="width:100%">
+      <option value="">No vehicle selected</option>
+      {% for vehicle in waiting_vehicles %}<option value="{{ vehicle.id }}">{{ vehicle.registration }} — {{ vehicle.make }}{% if vehicle.colour %} · {{ vehicle.colour }}{% endif %}{% if vehicle.branch_name %} · {{ vehicle.branch_name }} branch{% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  {% if not waiting_vehicles %}<p>No vehicles awaiting allocation at this branch. Scan a vehicle and place it on the waiting list first.</p>{% endif %}
+  <p id="new-vehicle-description" class="form-help" style="overflow-wrap:anywhere"></p>
+  <div class="form-actions" style="margin-top:16px">
+    <button class="btn ghost" type="button" id="cancel-new-allocation">Cancel</button>
+    <button class="btn primary" type="button" id="confirm-new-allocation">Use selection</button>
+  </div>
+</dialog>
+<script>
+(function(){
+  const dialog=document.getElementById('allocate-new-dialog');
+  const choice=document.getElementById('new-vehicle-choice');
+  const selected=document.getElementById('new-waiting-id');
+  function describe(){ document.getElementById('new-vehicle-description').textContent=choice.value ? choice.selectedOptions[0].textContent : ''; }
+  choice.addEventListener('change', describe);
+  function label(){
+    const option=Array.from(choice.options).find(o=>o.value===selected.value);
+    document.getElementById('selected-vehicle-label').textContent=selected.value ? 'Selected: '+(option ? option.textContent : 'Vehicle no longer available — choose again') : 'No vehicle selected from the list.';
+  }
+  document.getElementById('allocate-new-vehicle').addEventListener('click',()=>{ choice.value=selected.value; describe(); });
+  document.getElementById('cancel-new-allocation').addEventListener('click',()=>dialog.close());
+  document.getElementById('confirm-new-allocation').addEventListener('click',()=>{ selected.value=choice.value; label(); dialog.close(); });
+  label();
+})();
+</script>

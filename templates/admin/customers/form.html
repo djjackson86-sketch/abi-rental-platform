@@ -8,9 +8,9 @@
    customer form — the approval needs its own <form>, and HTML must never nest one inside another.
    Renders nothing for an ordinary client. #}
 {% include "admin/customers/_pending_registration_panel.html" %}
-<form method="post" class="settings-form panel customer-form">
+<form method="post" id="customer-form" class="settings-form panel customer-form">
   <section class="form-section"><h2>Customer type</h2><div class="option-grid two-options">{% for value,label in [('individual','Individual'),('company','Company')] %}<label class="choice-card"><input type="radio" name="customer_type" value="{{ value }}" {% if posted.get('customer_type', customer.customer_type if customer else 'individual') == value %}checked{% endif %}><strong>{{ label }}</strong></label>{% endfor %}</div></section>
-  <section class="form-section"><h2>Contact details</h2><div class="form-grid"><label class="span-2"><span class="field-label"><span data-customer-name-label>Name &amp; Surname</span> <span class="req-star" aria-hidden="true">*</span></span><input name="name" required value="{{ posted.get('name', customer.name if customer else '') }}" placeholder="Donovan Jackson or Sano Trailers Pty Ltd"></label><div><label>Email<input name="email" type="email" value="{{ posted.get('email', customer.email if customer else '') }}" placeholder="customer@example.com"></label><label data-other-emails {% if posted.get('customer_type', customer.customer_type if customer else 'individual') != 'company' %}hidden{% endif %}>Other email addresses<textarea name="other_email_addresses" placeholder="e.g. accounts@abc.com; cindy@abc.com"  rows="3">{{ posted.get('other_email_addresses', custom_fields.get('other_email_addresses','')) }}</textarea></label></div>{% include "admin/customers/_contact_numbers.html" %}</div></section>
+  <section class="form-section"><h2>Contact details</h2><div class="form-grid"><label class="span-2"><span class="field-label"><span data-customer-name-label>Name &amp; Surname</span> <span class="req-star" aria-hidden="true">*</span></span><input name="name" {% if not (customer and customer_is_suspect(customer)) %}required{% endif %} value="{{ posted.get('name', customer.name if customer else '') }}" placeholder="Donovan Jackson or Sano Trailers Pty Ltd"></label><div><label>Email<input name="email" type="email" value="{{ posted.get('email', customer.email if customer else '') }}" placeholder="customer@example.com"></label><label data-other-emails {% if posted.get('customer_type', customer.customer_type if customer else 'individual') != 'company' %}hidden{% endif %}>Other email addresses<textarea name="other_email_addresses" placeholder="e.g. accounts@abc.com; cindy@abc.com"  rows="3">{{ posted.get('other_email_addresses', custom_fields.get('other_email_addresses','')) }}</textarea></label></div>{% include "admin/customers/_contact_numbers.html" %}</div></section>
   <section class="form-section company-details-section" data-company-details {% if posted.get('customer_type', customer.customer_type if customer else 'individual') != 'company' %}hidden{% endif %}><h2>Company details</h2><div class="form-grid"><label>VAT No<input name="vat_number" value="{{ custom_fields.get('vat_number','') }}" placeholder="e.g. 4123456789"></label><label>Company Reg No<input name="company_reg_no" value="{{ custom_fields.get('company_reg_no','') }}" placeholder="e.g. 2024/123456/07"></label></div></section>
   <section class="form-section"><h2>Address</h2><div class="form-grid"><label class="span-2">Address line 1<input name="address_line1" value="{{ posted.get('address_line1', customer.address_line1 if customer else '') }}" placeholder="Street address"></label><label class="span-2">Address line 2<input name="address_line2" value="{{ posted.get('address_line2', customer.address_line2 if customer else '') }}" placeholder="Unit, complex or building"></label><label>Suburb<input name="suburb" value="{{ posted.get('suburb', customer.suburb if customer else '') }}"></label><label>City<input name="city" value="{{ posted.get('city', customer.city if customer else '') }}"></label><label>Province{{ province_select(request.form.get('province') if request.method == 'POST' else (customer.province if customer else none)) }}</label><label>Postal code<input name="postal_code" value="{{ posted.get('postal_code', customer.postal_code if customer else '') }}"></label><label class="span-2">Country<input name="country" value="{{ customer.country if customer else 'South Africa' }}"></label></div></section>
   <section class="form-section"><h2>Standard discount</h2><div class="form-grid"><label>Discount percentage<input type="number" name="standard_discount_percent" min="0" max="100" step="0.01" value="{{ '%.2f'|format(customer.standard_discount_percent or 0) if customer else '0.00' }}" placeholder="0.00"></label></div><p class="form-help">This percentage applies automatically to new orders for this customer.</p></section>
@@ -47,6 +47,7 @@
   <input type="hidden" name="suspect_reason" id="suspect-reason" value="">
   <p class="form-help">Suspect &amp; Fraud saves this customer and blocks rentals. An ID number is supplementary, if available.</p>
 </form>
+{% if not customer and user_can('scan_vehicle') %}{% include "admin/customers/_allocate_new_dialog.html" %}{% endif %}
 <dialog id="suspect-capture" class="cash-variance-dialog" aria-labelledby="suspect-capture-title" style="width:560px;max-width:calc(100vw - 32px);box-sizing:border-box">
   <form method="dialog" id="suspect-capture-form" class="settings-form">
     <h2 id="suspect-capture-title">Suspect/Fraud</h2>
@@ -159,7 +160,11 @@
   const form = document.querySelector('form.customer-form');
   document.getElementById('suspect-id').addEventListener('input', function(){ document.getElementById('suspect-capture-id').value=this.value; });
   document.getElementById('save-suspect').addEventListener('click', function(){
+    const name = form.elements.name;
+    const required = name.required;
+    name.required = false;
     if(form.reportValidity()) dialog.showModal();
+    name.required = required;
   });
   document.getElementById('suspect-capture-cancel').addEventListener('click', function(){ dialog.close(); });
   document.getElementById('suspect-capture-form').addEventListener('submit', function(ev){
@@ -169,6 +174,7 @@
     document.getElementById('suspect-id').value = document.getElementById('suspect-capture-id').value;
     document.getElementById('suspect-reason').value = document.getElementById('suspect-capture-reason').value;
     dialog.close();
+    form.elements.name.required = false;
     form.requestSubmit();
   });
 })();

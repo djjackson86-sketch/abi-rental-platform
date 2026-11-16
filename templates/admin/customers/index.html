@@ -158,13 +158,13 @@
             <tbody>
               {% for c in customers %}
                 <tr{% if previous_limit and loop.index == previous_limit + 1 %} id="new-items" tabindex="-1"{% endif %}>
-                  <td><input type="checkbox" disabled aria-label="Select {{ c.name }}"></td>
+                  <td><input type="checkbox" disabled aria-label="Select {{ c.name or ('Suspect/Fraud #' ~ c.id) }}"></td>
                   <td>#{{ c.id }}</td>
                   <td>
                     {% if filters.folder == 'retained' %}<span class="badge">{{ c.lifecycle_status|title if c.lifecycle_status != 'active' else 'Archived' }}</span>{% endif %}
                     <a class="customer-name-cell" href="{{ url_for('customers.detail', customer_id=c.id) }}">
                       <span class="avatar">{{ (c.name[:2] or 'CU')|upper }}</span>
-                      <span><strong>{{ c.name }}</strong>{% if c.is_blocked %}<span class="badge blocked customer-blocked-label">{{ 'Suspect/Fraud' if customer_is_suspect(c) else 'Blocked' }}</span>{% endif %}<small>{{ c.customer_type|title }}{% if c.phone %} · {{ c.phone }}{% endif %}</small></span>
+                      <span><strong>{{ c.name or ('Suspect/Fraud #' ~ c.id) }}</strong>{% if c.is_blocked %}<span class="badge blocked customer-blocked-label">{{ 'Suspect/Fraud' if customer_is_suspect(c) else 'Blocked' }}</span>{% endif %}<small>{{ c.customer_type|title }}{% if c.phone %} · {{ c.phone }}{% endif %}</small></span>
                     </a>
                   </td>
                   <td>{{ c.email or '—' }}</td>
