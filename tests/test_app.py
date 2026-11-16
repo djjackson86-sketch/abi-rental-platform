@@ -2513,7 +2513,7 @@ def test_order_page_applies_flat_amount_discount_clamps_and_clears(client, app):
     order_id = create_order_for_status(client, quantity='1')
 
     applied = client.post(f'/orders/{order_id}/discount', data={'discount_mode': 'amount', 'discount_value': '200'}, follow_redirects=True)
-    assert b'Discount applied: R200 = R200.00' in applied.data
+    assert b'Discount applied: R200.00 = R200.00' in applied.data
     with app.app_context():
         from app.db import get_db
         db = get_db()
@@ -3892,7 +3892,7 @@ def test_document_detail_has_back_to_order_and_discount_totals(client, app):
     assert f'href="/orders/{order_id}">Back to order'.encode() in detail.data
     assert b'Discount (10.00%)' in detail.data
     assert b'-R60.00' in detail.data
-    assert b'R1290.00' in detail.data
+    assert b'R1 290.00' in detail.data
 
     pdf = client.get('/documents/1/download.pdf')
     assert pdf.status_code == 200
