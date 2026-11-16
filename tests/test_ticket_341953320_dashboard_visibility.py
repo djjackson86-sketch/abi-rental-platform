@@ -60,15 +60,15 @@ def test_visibility_and_scope(app, client, kind, lazy):
         assert response.status_code == 200
         shell = response.get_data(as_text=True)
         assert '>Movement</h2>' in shell
-        assert 'legacy-company-summary' in shell
+        assert 'legacy-orders' in shell
         total = client.get('/dashboard/partials/legacy'+query)
         assert total.status_code == 200
         html = total.get_data(as_text=True)
-        assert 'R950.00' in html
+        assert 'LEG-OPEN' in html and 'LEG-DEPOT-TWO' in html
         assert 'All branches · read-only' in html
-        assert 'LEG-OPEN' not in html and 'Alice' not in html and 'href=' not in html
+        assert 'Alice' in html and 'href=' not in html and 'R950.00' not in html
         if not lazy:
-            assert 'R950.00' in shell
+            assert 'LEG-OPEN' in shell
         else:
             assert 'data-dashboard-section="movement"' in shell
             assert 'data-dashboard-section="legacy"' in shell
@@ -103,7 +103,7 @@ def test_visibility_and_scope(app, client, kind, lazy):
             sess['active_branch_id'] = 2
         body = client.get('/dashboard/partials/movement?branch=1').get_data(as_text=True)
         assert 'MOVEMENT-TWO' in body and 'MOVEMENT-ONE' not in body
-        assert 'R950.00' in client.get('/dashboard/partials/legacy?branch=1').get_data(as_text=True)
+        assert 'LEG-OPEN' in client.get('/dashboard/partials/legacy?branch=1').get_data(as_text=True)
 
 
 @pytest.mark.parametrize('path', ['/dashboard','/dashboard/partials/movement','/dashboard/partials/legacy'])
@@ -147,9 +147,9 @@ def test_browser_lazy_desktop_mobile(app,client,kind):
                 errors=[]
                 page.on('pageerror',lambda err:errors.append(str(err)))
                 page.goto(f'http://127.0.0.1:{server.server_port}/dashboard?branch=2',wait_until='networkidle')
-                page.locator('#legacy-company-summary b').filter(has_text='R950.00').wait_for()
+                page.locator('#owing-legacy-rows').wait_for()
                 page.locator('.movement-row').first.wait_for()
-                assert page.locator('.movement-row').filter(has_text='MOVEMENT-ONE').count() == 2
+                assert page.locator('.movement-row').filter(has_text='MOVEMENT-ONE').count() == 1
                 assert page.locator('.movement-row').filter(has_text='MOVEMENT-TWO').count() == 0
                 if kind == 'restricted':
                     assert page.locator('a.movement-row').count() == 0
@@ -157,8 +157,8 @@ def test_browser_lazy_desktop_mobile(app,client,kind):
                     page.locator('a.movement-row').first.click()
                     page.wait_for_url('**/orders/*')
                     page.go_back(wait_until='networkidle')
-                page.locator('#legacy-company-summary').scroll_into_view_if_needed()
-                assert page.locator('#legacy-company-summary').is_visible()
+                page.locator('#legacy-orders').scroll_into_view_if_needed()
+                assert page.locator('#legacy-orders').is_visible()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not errors
                 page.screenshot(path=str(output/f'{kind}-{width}.png'),full_page=True)

@@ -151,14 +151,15 @@ def company_outstanding_legacy_total():
     return round(sum(_outstanding(row) for row in rows), 2)
 
 
-def outstanding_legacy_balances(branch_id=None):
+def outstanding_legacy_balances(branch_id=None, *, company_wide=False):
     """Read-only dashboard rows, scoped by the owning customer's depot.
 
     Imported balances have no platform order/collection branch. Unassigned
     customers appear only in the unrestricted company-wide view, matching the
     shared customer scope rather than guessing an order's depot.
     """
-    clause, params = customer_branch_clause("c", branch_id=branch_id)
+    # Only the authenticated dashboard legacy list opts into company-wide rows.
+    clause, params = ("", []) if company_wide else customer_branch_clause("c", branch_id=branch_id)
     rows = get_db().execute(
         f"""SELECT l.*, c.name AS customer_name, b.name AS branch_name,
                    COALESCE(w.writeoff_amount, 0) AS writeoff_amount

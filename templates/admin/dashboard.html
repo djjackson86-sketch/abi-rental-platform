@@ -113,9 +113,9 @@
 </section>
 
 {% endif %}
-<section class="dashboard-card-section" id="legacy-company-summary">
-  <div class="metrics dashboard-metrics" {% if dashboard_lazy %}data-dashboard-section="legacy" data-src="{{ url_for('admin.dashboard_legacy_partial') }}"{% endif %}>
-    {% if dashboard_lazy %}<div class="metric-card"><small>Company-wide outstanding legacy balance</small><b>Loading…</b><span>All branches · read-only</span></div>{% else %}{% include "admin/_dashboard_legacy_total.html" %}{% endif %}
+<section class="dashboard-card-section" id="legacy-orders">
+  <div {% if dashboard_lazy %}data-dashboard-section="legacy" data-src="{{ url_for('admin.dashboard_legacy_partial') }}"{% endif %}>
+    {% if dashboard_lazy %}<div class="panel"><p>Loading legacy orders…</p></div>{% else %}{% include "admin/_dashboard_legacy_orders.html" %}{% endif %}
   </div>
 </section>
 <section class="dashboard-card-section">
@@ -128,7 +128,7 @@
 </section>
 <script>
 (function () {
-  var section = document.getElementById('owing-customers');
+  var section = document.querySelector('main') || document.body;
   if (!section) return;
   // Delegation also handles buttons inserted by the lazy-loaded partial.
   section.addEventListener('click', function (event) {

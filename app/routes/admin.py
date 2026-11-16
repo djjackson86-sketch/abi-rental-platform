@@ -7,7 +7,7 @@ from io import StringIO
 from app.routes.auth import login_required
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services import group_images
-from app.services.legacy_balances import outstanding_legacy_balances, company_outstanding_legacy_total
+from app.services.legacy_balances import outstanding_legacy_balances
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, list_orders, scheduled_events, status_label
 from app.services.reports import monthly_received_revenue, customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
@@ -80,7 +80,7 @@ def _dashboard_owing_orders(branch_id=None):
 def _dashboard_owing_legacy_balances(branch_id=None):
     """Dashboard-only ordering; leave shared legacy balance consumers unchanged."""
     return sorted(
-        outstanding_legacy_balances(branch_id),
+        outstanding_legacy_balances(company_wide=True),
         key=lambda row: (row["source_started_at"] or row["source_created_at"] or "", row["id"]),
         reverse=True,
     )
@@ -169,12 +169,11 @@ def dashboard():
         schedule = dashboard_schedule(branch_id=branch_id)
         owing_orders = _dashboard_owing_orders(branch_id) if user_can_module(session, "dashboard") else []
         owing_total = _dashboard_owing_total(owing_orders)
-        owing_legacy_balances = _dashboard_owing_legacy_balances(branch_id) if user_can_module(session, "dashboard") else []
+        owing_legacy_balances = _dashboard_owing_legacy_balances()
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
         dashboard_lazy=dashboard_lazy,
-        legacy_company_total=None if dashboard_lazy else company_outstanding_legacy_total(),
         metrics=metrics,
         last_month_metrics=None if dashboard_lazy else _dashboard_last_month_metrics(branch_id),
         day_metrics=day_metrics,
@@ -254,7 +253,6 @@ def dashboard_owing_partial():
         "admin/_dashboard_owing.html",
         owing_orders=owing_orders,
         owing_total=_dashboard_owing_total(owing_orders),
-        owing_legacy_balances=_dashboard_owing_legacy_balances(branch_id),
         status_label=status_label,
     )
 
@@ -319,10 +317,10 @@ def dashboard_movement_partial():
 @bp.get("/dashboard/partials/legacy")
 @login_required
 def dashboard_legacy_partial():
-    # Aggregate only: no customer identifiers and no branch/scope override.
+    # Approved dashboard-only read exception; ordinary access remains scoped.
     return render_template(
-        "admin/_dashboard_legacy_total.html",
-        legacy_company_total=company_outstanding_legacy_total(),
+        "admin/_dashboard_legacy_orders.html",
+        owing_legacy_balances=_dashboard_owing_legacy_balances(),
     )
 
 

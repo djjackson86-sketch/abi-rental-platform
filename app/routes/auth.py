@@ -1,9 +1,11 @@
+import sqlite3
 from functools import wraps
 from urllib.parse import urlsplit
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
-from app.db import get_db
+from app.db import get_db, now as db_now
+from app.services.timezone import local_now
 from app.services.access import (
     login_user_options,
     session_branch_choice_options,
@@ -25,17 +27,99 @@ from app.services.settings import get_company_settings
 bp = Blueprint("auth", __name__)
 
 
+def _south_african_day():
+    """The South African calendar day 'now' falls on, as ``YYYY-MM-DD``.
+
+    Deliberately the operator's wall clock rather than UTC: "once a day" has to
+    match the day the depot is working, and South Africa keeps a fixed +02:00
+    with no daylight saving, so this is the same day the rest of the app stamps.
+    """
+    return local_now().date().isoformat()
+
+
+def _is_unique_violation(exc):
+    """Whether *exc* is a database uniqueness refusal (the day is already claimed).
+
+    The two backends this app runs on raise different types (``sqlite3.IntegrityError``
+    locally, ``LibsqlError`` from the Turso adapter), so this checks by type where it can
+    and by the error text otherwise. Anything else is a real failure and is re-raised.
+    """
+    if isinstance(exc, sqlite3.IntegrityError):
+        return True
+    text = f"{getattr(exc, 'code', '')} {getattr(exc, 'message', '')} {exc}".upper()
+    return "UNIQUE" in text or "CONSTRAINT" in text
+
+
+def _claim_login_notification_day(user_id, day):
+    """Claim this account's single sign-in alert for *day*; True only for the winner.
+
+    Ticket ABI-341953323. The claim is one INSERT whose WHERE NOT EXISTS makes it a
+    single statement, so it is atomic on both backends: the local SQLite connection
+    commits it immediately, and the libSQL adapter autocommits every statement (its
+    ``commit()``/``rollback()`` are no-ops — see ``app/turso_db.py``), so a concurrent
+    second sign-in sees the row rather than writing a duplicate. The UNIQUE
+    ``(user_id, business_day)`` pair is the backstop for the narrow race where two
+    statements both pass the existence check: the loser gets the constraint refusal
+    and is simply not the winner.
+
+    Because the row is claimed *before* the message is attempted, a send that fails
+    (Telegram down, no network, provider error) leaves the claim in place: the person
+    is not announced twice for the same day. It is one row per account per day, and it
+    holds no name, branch, message text or provider credential.
+    """
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO login_notification_days (user_id, business_day, notified_at) "
+            "SELECT ?, ?, ? WHERE NOT EXISTS ("
+            "SELECT 1 FROM login_notification_days WHERE user_id = ? AND business_day = ?)",
+            (user_id, day, db_now(), user_id, day),
+        )
+        claimed = cursor.rowcount == 1
+    except Exception as exc:  # losing the unique-index race is expected, not an error
+        if not _is_unique_violation(exc):
+            raise
+        claimed = False
+    if claimed:
+        # Persist the claim now: the local SQLite connection would otherwise roll it
+        # back when the request's connection closes, and the next sign-in would alert
+        # again. On Turso this is a documented no-op because the INSERT already landed.
+        db.commit()
+    return claimed
+
+
 def _notify_sign_in():
-    """One best-effort alert, after the effective branch for this login is known."""
+    """One best-effort alert per account per South African day, once the effective
+    branch for this login is known.
+
+    Ticket ABI-341953323: the session flag alone only deduplicated *one* sign-in. A
+    logout/sign-in later the same day (or a second device, or a restarted process)
+    opened a fresh session and announced the same person again, so the day is now
+    recorded in the database, which is what makes the exclusion survive sessions,
+    restarts and two requests arriving together.
+    """
     if not session.pop("login_notification_pending", False):
         return
     # Ticket ABI-341953309: the head-office admin's own successful sign-in is no
     # longer announced. "Head-office admin" is decided by the existing main-profile
     # classification (role 'owner' — see access.is_main_session / recovery.main_profile),
     # never by a name or email, so a renamed account is still recognised and any
-    # additional account still gets its alert.
+    # additional account still gets its alert. Checked before the day is claimed, so
+    # the silent main profile never consumes a claim row.
     from app.services.access import is_main_session
     if is_main_session(session):
+        return
+    user_id = session.get("user_id")
+    if not user_id:
+        return
+    try:
+        if not _claim_login_notification_day(int(user_id), _south_african_day()):
+            return
+    except Exception:
+        # The claim could not be made, so the alert is skipped rather than risked as
+        # a duplicate. Sign-in itself is unaffected; the message text carries nothing
+        # sensitive, and DB error text (which may include SQL) is not logged.
+        current_app.logger.warning("Sign-in notification day claim unavailable")
         return
     try:
         from app.services.access import session_branch_scope_ids
@@ -56,6 +140,8 @@ def _notify_sign_in():
         send_login_notification(session.get("user_name", ""), branch)
     except Exception:
         # Do not log provider exception text: URLs may contain bot credentials.
+        # The day stays claimed on purpose — a failed send must not be retried into a
+        # second announcement later today.
         current_app.logger.warning("Sign-in Telegram notification unavailable")
 
 
@@ -66,7 +152,11 @@ def _notify_skipped_branch_choice():
     from app.services.access import module_for_endpoint
     if (session.get("user_id") and session.get("login_notification_pending")
             and (module_for_endpoint(request.endpoint) is not None
-                 or request.endpoint in {"admin.index", "settings.notifications"})):
+                 # The dashboard is no longer module-gated (ticket ABI-341953320 made
+                 # it always-allowed), so it is named explicitly: a sign-in that lands
+                 # there without passing the chooser still owes its one alert.
+                 or request.endpoint in {"admin.index", "admin.dashboard",
+                                         "settings.notifications"})):
         _notify_sign_in()
 
 

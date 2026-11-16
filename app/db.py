@@ -698,6 +698,23 @@ CREATE INDEX IF NOT EXISTS idx_legacy_balance_writeoffs_balance
 CREATE INDEX IF NOT EXISTS idx_legacy_balance_writeoffs_customer
     ON legacy_balance_writeoffs(customer_id);
 
+-- Ticket ABI-341953323: one row per account per South African day on which that
+-- account's sign-in alert was CLAIMED. The UNIQUE pair is the whole guard: the
+-- first sign-in of the day inserts the row, and every later one that day -- a
+-- second tab, another device, a restart, a concurrent request, a failed send
+-- being retried -- is refused by the database itself, so exactly one alert goes
+-- out per account per day. The claim is written BEFORE the Telegram call on
+-- purpose: a notification that fails must not be retried into a later duplicate.
+-- Only the account, the day and the claim time are stored: no name, no branch,
+-- no message text, no bot token and no chat id.
+CREATE TABLE IF NOT EXISTS login_notification_days (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    business_day TEXT NOT NULL,
+    notified_at TEXT NOT NULL,
+    UNIQUE(user_id, business_day)
+);
+
 -- Hot-path indexes (ABI-341953196). The order/payment/document screens join
 -- children back to their parent on every list and picker render. Without these
 -- the remote libSQL database bills a full child scan per parent: the new-order
@@ -1493,6 +1510,21 @@ def run_migrations(db):
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_notification_preferences_user "
         "ON notification_preferences(user_id)"
+    )
+
+    # --- One sign-in alert per account per South African day (ABI-341953323) ---
+    # Additive and idempotent: an existing database gains one empty table whose
+    # UNIQUE(user_id, business_day) pair is the concurrency-safe guard. Nothing
+    # existing reads it, and no row is written until an account signs in, so a
+    # deploy changes no behaviour until the next sign-in of the day.
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS login_notification_days (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            business_day TEXT NOT NULL,
+            notified_at TEXT NOT NULL,
+            UNIQUE(user_id, business_day)
+        )"""
     )
 
     # --- Hot-path indexes for the order/payment/document screens (ABI-341953196) ---

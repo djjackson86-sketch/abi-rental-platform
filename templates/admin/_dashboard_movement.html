@@ -25,7 +25,7 @@
 
     <article class="panel movement-card">
       <div class="movement-head">
-        <h2>Coming back</h2>
+        <h2>Late trailers</h2>
         <div class="header-actions">
           {% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}
         </div>
@@ -41,8 +41,8 @@
         {% endfor %}
         </div>
       {% else %}
-        <div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>
+        <div class="empty-results"><strong>No results</strong><span>No late trailers right now.</span></div>
       {% endif %}
       </div>
-      {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>{% endif %}
+      {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View all</a></div>{% endif %}
     </article>
