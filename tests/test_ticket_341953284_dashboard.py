@@ -142,7 +142,9 @@ def test_dashboard_module_gate_still_applies(app, client):
         db.execute('UPDATE users SET modules_json=? WHERE name=?', (json.dumps(['inventory']), 'No Dashboard'))
         db.commit()
     login(client, 'No Dashboard', password='staff123')
-    assert client.get('/dashboard').status_code == 403
+    # ABI-341953320: the shell and read-only movement/total are universal;
+    # the existing detailed owing panel still requires the dashboard grant.
+    assert client.get('/dashboard').status_code == 200
     assert client.get('/dashboard/partials/owing').status_code == 403
 
 

@@ -207,7 +207,9 @@ def test_an_account_with_nothing_ticked_can_open_no_module(client, app):
         assert user_module_keys(staff) == []
     client.post('/logout')
     login(client, 'No Modules', 'staff123')
-    for path in ['/dashboard', '/orders', '/inventory', '/calendar']:
+    # ABI-341953320 grants only the read-only dashboard shell/movement/total.
+    assert client.get('/dashboard').status_code == 200
+    for path in ['/dashboard/partials/cash', '/orders', '/inventory', '/calendar']:
         assert client.get(path).status_code == 403, path
 
 

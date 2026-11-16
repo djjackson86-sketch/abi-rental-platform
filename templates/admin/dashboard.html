@@ -80,6 +80,7 @@
 </section>
 {% endif %}
 
+{% if user_can('dashboard') %}
 <section class="dashboard-day dashboard-card-section">
   {# The heading names the business day the cards below are read for, so a past
      day is never mistaken for today (ticket ABI-341953042 ask 3). #}
@@ -111,66 +112,24 @@
   </div>
 </section>
 
-{% if current_user_is_main %}
+{% endif %}
+<section class="dashboard-card-section" id="legacy-company-summary">
+  <div class="metrics dashboard-metrics" {% if dashboard_lazy %}data-dashboard-section="legacy" data-src="{{ url_for('admin.dashboard_legacy_partial') }}"{% endif %}>
+    {% if dashboard_lazy %}<div class="metric-card"><small>Company-wide outstanding legacy balance</small><b>Loading…</b><span>All branches · read-only</span></div>{% else %}{% include "admin/_dashboard_legacy_total.html" %}{% endif %}
+  </div>
+</section>
 <section class="dashboard-card-section">
   <div class="section-head"><h2 class="section-heading">Movement</h2></div>
   <div class="dashboard-grid" {% if dashboard_lazy %}data-dashboard-section="movement" data-src="{{ url_for('admin.dashboard_movement_partial', branch=filters.branch or None, day=filters.day) }}"{% endif %}>
     {% if dashboard_lazy %}<article class="panel movement-card"><div class="movement-head"><h2>Going out</h2></div><div class="movement-body"><div class="empty-results"><strong>Loading…</strong><span>Fetching movement after the stats above.</span></div></div></article>{% else %}
-    <article class="panel movement-card">
-      <div class="movement-head">
-        <h2>Going out</h2>
-        <div class="header-actions">
-          {% if user_can('reports') %}<a class="btn ghost" href="{{ url_for('admin.reports') }}">Run report</a>{% endif %}
-          {% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}
-        </div>
-      </div>
-      <div class="movement-body">
-      {% if schedule.going_out %}
-        <div class="schedule-list">
-        {% for order in schedule.going_out %}
-          <a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
-            <span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span>
-            <span><small>Pickup</small><b>{{ display_local_datetime(order.start_at) }}</b></span>
-          </a>
-        {% endfor %}
-        </div>
-      {% else %}
-        <div class="empty-results"><strong>No results</strong><span>No reserved pickups scheduled yet.</span></div>
-      {% endif %}
-      </div>
-      {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='reserved') }}">View late</a><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>{% endif %}
-    </article>
-
-    <article class="panel movement-card">
-      <div class="movement-head">
-        <h2>Coming back</h2>
-        <div class="header-actions">
-          {% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}
-        </div>
-      </div>
-      <div class="movement-body">
-      {% if schedule.coming_back %}
-        <div class="schedule-list">
-        {% for order in schedule.coming_back %}
-          <a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}">
-            <span><b>{{ order.customer_name or 'No customer' }}</b><small>{{ order.order_number }} · {{ order.product_names or 'No items' }}</small></span>
-            <span><small>Return</small><b>{{ display_local_datetime(order.end_at) }}</b></span>
-          </a>
-        {% endfor %}
-        </div>
-      {% else %}
-        <div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>
-      {% endif %}
-      </div>
-      {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>{% endif %}
-    </article>
+    {% include "admin/_dashboard_movement.html" %}
     {% endif %}
   </div>
 </section>
-{% endif %}
 <script>
 (function () {
   var section = document.getElementById('owing-customers');
+  if (!section) return;
   // Delegation also handles buttons inserted by the lazy-loaded partial.
   section.addEventListener('click', function (event) {
     var button = event.target.closest('[data-owing-toggle]');

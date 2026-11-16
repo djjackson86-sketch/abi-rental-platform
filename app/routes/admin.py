@@ -7,11 +7,11 @@ from io import StringIO
 from app.routes.auth import login_required
 from app.services.settings import get_company_settings, update_online_store_settings
 from app.services import group_images
-from app.services.legacy_balances import outstanding_legacy_balances
+from app.services.legacy_balances import outstanding_legacy_balances, company_outstanding_legacy_total
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, list_orders, scheduled_events, status_label
 from app.services.reports import monthly_received_revenue, customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
-from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids
+from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids, user_can_module
 from app.services.branches import branch_options
 from app.services import spare_wheels
 from app.services.pdf_documents import simple_lines_pdf_bytes
@@ -167,13 +167,14 @@ def dashboard():
         )
         day_metrics = dashboard_day_metrics(day=selected_day, branch_id=branch_id)
         schedule = dashboard_schedule(branch_id=branch_id)
-        owing_orders = _dashboard_owing_orders(branch_id)
+        owing_orders = _dashboard_owing_orders(branch_id) if user_can_module(session, "dashboard") else []
         owing_total = _dashboard_owing_total(owing_orders)
-        owing_legacy_balances = _dashboard_owing_legacy_balances(branch_id)
+        owing_legacy_balances = _dashboard_owing_legacy_balances(branch_id) if user_can_module(session, "dashboard") else []
     return render_template(
         "admin/dashboard.html",
         settings=get_company_settings(),
         dashboard_lazy=dashboard_lazy,
+        legacy_company_total=None if dashboard_lazy else company_outstanding_legacy_total(),
         metrics=metrics,
         last_month_metrics=None if dashboard_lazy else _dashboard_last_month_metrics(branch_id),
         day_metrics=day_metrics,
@@ -312,20 +313,16 @@ def dashboard_cash_partial():
 def dashboard_movement_partial():
     selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
     schedule = dashboard_schedule(branch_id=branch_id)
-    return render_template_string(
-        """
-        <article class="panel movement-card">
-          <div class="movement-head"><h2>Going out</h2><div class="header-actions">{% if user_can('reports') %}<a class="btn ghost" href="{{ url_for('admin.reports') }}">Run report</a>{% endif %}{% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}</div></div>
-          <div class="movement-body">{% if schedule.going_out %}<div class="schedule-list">{% for order in schedule.going_out %}<a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span><span><small>Pickup</small><b>{{ display_local_datetime(order.start_at) }}</b></span></a>{% endfor %}</div>{% else %}<div class="empty-results"><strong>No results</strong><span>No reserved pickups scheduled yet.</span></div>{% endif %}</div>
-          {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='reserved') }}">View late</a><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>{% endif %}
-        </article>
-        <article class="panel movement-card">
-          <div class="movement-head"><h2>Coming back</h2><div class="header-actions">{% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}</div></div>
-          <div class="movement-body">{% if schedule.coming_back %}<div class="schedule-list">{% for order in schedule.coming_back %}<a class="schedule-row movement-row" href="{{ url_for('orders.detail', order_id=order.id) }}"><span><b>{{ order.customer_name or 'No customer' }}</b><small>{{ order.order_number }} · {{ order.product_names or 'No items' }}</small></span><span><small>Return</small><b>{{ display_local_datetime(order.end_at) }}</b></span></a>{% endfor %}</div>{% else %}<div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>{% endif %}</div>
-          {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>{% endif %}
-        </article>
-        """,
-        schedule=schedule,
+    return render_template("admin/_dashboard_movement.html", schedule=schedule)
+
+
+@bp.get("/dashboard/partials/legacy")
+@login_required
+def dashboard_legacy_partial():
+    # Aggregate only: no customer identifiers and no branch/scope override.
+    return render_template(
+        "admin/_dashboard_legacy_total.html",
+        legacy_company_total=company_outstanding_legacy_total(),
     )
 
 

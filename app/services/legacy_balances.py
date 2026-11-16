@@ -129,6 +129,28 @@ def legacy_balance_entries(customer_id):
     return entries
 
 
+def company_outstanding_legacy_total():
+    """Company-wide, read-only aggregate approved for every dashboard user.
+
+    Intentionally independent of branch filters. Select monetary fields only;
+    customer/reference details remain behind the existing scoped row helper.
+    Reuse the settlement/write-off calculation, rounding each balance first.
+    """
+    rows = get_db().execute(
+        """SELECT l.amount_due, l.settled_amount, l.status,
+                  COALESCE(w.writeoff_amount, 0) AS writeoff_amount
+        FROM legacy_customer_balances l
+        JOIN customers c ON c.id = l.customer_id
+        LEFT JOIN (
+            SELECT legacy_balance_id, SUM(amount) AS writeoff_amount
+            FROM legacy_balance_writeoffs GROUP BY legacy_balance_id
+        ) w ON w.legacy_balance_id = l.id
+        WHERE l.status = ?""",
+        (ACTIVE_STATUS,),
+    ).fetchall()
+    return round(sum(_outstanding(row) for row in rows), 2)
+
+
 def outstanding_legacy_balances(branch_id=None):
     """Read-only dashboard rows, scoped by the owning customer's depot.
 

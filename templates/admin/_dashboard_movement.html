@@ -1,0 +1,48 @@
+    <article class="panel movement-card">
+      <div class="movement-head">
+        <h2>Going out</h2>
+        <div class="header-actions">
+          {% if user_can('reports') %}<a class="btn ghost" href="{{ url_for('admin.reports') }}">Run report</a>{% endif %}
+          {% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}
+        </div>
+      </div>
+      <div class="movement-body">
+      {% if schedule.going_out %}
+        <div class="schedule-list">
+        {% for order in schedule.going_out %}
+          <{{ 'a' if user_can('orders') else 'div' }} class="schedule-row movement-row"{% if user_can('orders') %} href="{{ url_for('orders.detail', order_id=order.id) }}"{% endif %}>
+            <span><b>{{ order.order_number }}</b><small>{{ order.customer_name or 'No customer' }}</small></span>
+            <span><small>Pickup</small><b>{{ display_local_datetime(order.start_at) }}</b></span>
+          </{{ 'a' if user_can('orders') else 'div' }}>
+        {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-results"><strong>No results</strong><span>No reserved pickups scheduled yet.</span></div>
+      {% endif %}
+      </div>
+      {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='reserved') }}">View late</a><a href="{{ url_for('orders.index', status='reserved') }}">View all</a></div>{% endif %}
+    </article>
+
+    <article class="panel movement-card">
+      <div class="movement-head">
+        <h2>Coming back</h2>
+        <div class="header-actions">
+          {% if user_can('calendar') %}<a class="btn ghost" href="{{ url_for('admin.calendar') }}">Today</a>{% endif %}
+        </div>
+      </div>
+      <div class="movement-body">
+      {% if schedule.coming_back %}
+        <div class="schedule-list">
+        {% for order in schedule.coming_back %}
+          <{{ 'a' if user_can('orders') else 'div' }} class="schedule-row movement-row"{% if user_can('orders') %} href="{{ url_for('orders.detail', order_id=order.id) }}"{% endif %}>
+            <span><b>{{ order.customer_name or 'No customer' }}</b><small>{{ order.order_number }} · {{ order.product_names or 'No items' }}</small></span>
+            <span><small>Return</small><b>{{ display_local_datetime(order.end_at) }}</b></span>
+          </{{ 'a' if user_can('orders') else 'div' }}>
+        {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-results"><strong>No results</strong><span>No reserved returns scheduled yet.</span></div>
+      {% endif %}
+      </div>
+      {% if user_can('orders') %}<div class="movement-foot"><a href="{{ url_for('orders.index', status='started', return_status='late') }}">View late</a><a href="{{ url_for('orders.index') }}">View all</a></div>{% endif %}
+    </article>

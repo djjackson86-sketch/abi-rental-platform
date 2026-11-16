@@ -627,8 +627,8 @@ def test_a_depot_scoped_account_gets_a_fixed_branch_label(client, app):
     # R500 card payment).
     assert re.search(r'Reservations for the day</small><b>1</b>', body)
     assert re.search(r'Total card payments</small><b>R0\.00</b>', body)
-    # A staff dashboard keeps its historic shape: day cards and cash up only.
-    assert 'Total orders' not in body and 'Going out' not in body
+    # ABI-341953320: movement is now visible to staff; owner totals stay hidden.
+    assert 'Total orders' not in body and 'Going out' in body
 
 
 def test_the_dashboard_greets_the_signed_in_user_with_the_branded_hero(client, app):

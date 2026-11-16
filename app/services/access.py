@@ -123,6 +123,10 @@ _ENDPOINT_MODULE_RULES = [
 _ALWAYS_ALLOWED_ENDPOINTS = frozenset(
     {
         "settings.notifications",
+        # ABI-341953320: read-only dashboard visibility, NOT cash or other modules.
+        "admin.dashboard",
+        "admin.dashboard_movement_partial",
+        "admin.dashboard_legacy_partial",
         # The order form's bounded client picker is reachable from BOTH order-form
         # modules (new_order for a new order, orders for editing one), so a single
         # module rule would lock one of them out. The endpoints enforce that OR
