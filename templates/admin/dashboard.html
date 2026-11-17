@@ -97,7 +97,7 @@
   {% include "admin/_dashboard_revenue_cards.html" %}
   {% endif %}
 </section>
-<p class="muted">Revenue categories follow recorded order status. Other Revenue includes legacy receipts and unclassified orders. Rentals + Sales/Repairs + Other Revenue reconcile to Gross revenue for the same dates and branch, including signed adjustments.</p>
+<p class="muted">Revenue categories follow recorded order status. Other Revenue includes legacy receipts and unclassified orders. Refundable security deposits are excluded until applied to rental charges; deposit refunds and customer-credit transfers are not revenue adjustments. Rentals + Sales/Repairs + Other Revenue reconcile to Gross revenue for the same dates and branch, including signed adjustments.</p>
 {% endif %}
 
 {% if user_can('dashboard') %}

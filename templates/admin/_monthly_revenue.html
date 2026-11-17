@@ -1,7 +1,7 @@
 <section class="report-card monthly-revenue" aria-labelledby="monthly-revenue-title">
   <header class="report-card-header">
     <h2 id="monthly-revenue-title">Daily revenue by month</h2>
-    <p>{{ revenue_label }} — money actually received, less refunds, on the receipt/payout date. Same categories as the dashboard, not recognised/booked revenue. Branch: {{ branch_label or 'All branches' }}. Uses the report date filters within the chart year.</p>
+    <p>{{ revenue_label }} — earned receipts on the receipt/application date; refundable deposits are excluded until applied. Deposit payouts are not revenue adjustments. Same categories as the dashboard, not recognised/booked revenue. Branch: {{ branch_label or 'All branches' }}. Uses the report date filters within the chart year.</p>
   </header>
   <div class="report-card-body">
     <form method="get" class="monthly-revenue-year">
@@ -29,7 +29,7 @@
       {% for month in revenue_months %}<label><input type="checkbox" value="{{ month.month }}" {% if month.month == chart_month %}checked{% endif %}><svg width="28" height="8" aria-hidden="true"><line x1="0" y1="4" x2="28" y2="4" stroke-width="3"/></svg>{{ month.label }}</label>{% endfor %}
     </fieldset>
     <p class="monthly-revenue-status" aria-live="polite"></p>
-    <div class="monthly-revenue-scroll"><svg class="monthly-revenue-chart" viewBox="0 0 1040 380" role="img" aria-label="Daily net received revenue in rand, days 1 to 31"></svg></div>
+    <div class="monthly-revenue-scroll"><svg class="monthly-revenue-chart" viewBox="0 0 1040 380" role="img" aria-label="Daily earned receipt revenue in rand, days 1 to 31"></svg></div>
     <details><summary>View daily revenue values</summary><div class="monthly-revenue-scroll"><table class="monthly-revenue-table"></table></div></details>
     <noscript>Enable JavaScript to compare months on the revenue graph.</noscript>
   </div>

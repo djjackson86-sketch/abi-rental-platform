@@ -53,8 +53,8 @@ def test_reports_default_order_filters_and_other_card(app, client):
     options = re.search(r'<select name="revenue_type".*?</select>', body, re.S)[0]
     assert re.findall(r'<option value="(.*?)"', options) == ['trailer_rentals','sales_repairs','unattributed','gross']
     assert 'value="trailer_rentals" selected' in options
-    assert chart_data(body)[10]['values'][16] == 300
-    for key, expected in [('sales_repairs',190),('unattributed',80),('gross',570),('invalid',300)]:
+    assert chart_data(body)[10]['values'][16] == 330
+    for key, expected in [('sales_repairs',190),('unattributed',80),('gross',600),('invalid',330)]:
         response = client.get('/reports'+query+'&revenue_type='+key)
         assert response.status_code == 200
         assert chart_data(response.get_data(as_text=True))[10]['values'][16] == expected
@@ -98,7 +98,7 @@ def test_browser_filters_desktop_and_mobile(app, client):
                 page.goto(f'http://127.0.0.1:{server.server_port}/reports?chart_year=2026&start_date=2026-11-01&end_date=2026-11-17', wait_until='networkidle')
                 chart = page.locator('.monthly-revenue')
                 assert chart.locator('[name=revenue_type]').input_value() == 'trailer_rentals'
-                for key, label, value in [('sales_repairs','Sales/Repairs','R190.00'),('unattributed','Other Revenue','R80.00'),('gross','Gross Revenue','R570.00'),('trailer_rentals','Rentals','R300.00')]:
+                for key, label, value in [('sales_repairs','Sales/Repairs','R190.00'),('unattributed','Other Revenue','R80.00'),('gross','Gross Revenue','R600.00'),('trailer_rentals','Rentals','R330.00')]:
                     with page.expect_navigation(wait_until='networkidle'):
                         chart.locator('[name=revenue_type]').select_option(key)
                     assert f'{label} · November 17: {value}' in chart.locator('circle title').all_text_contents()

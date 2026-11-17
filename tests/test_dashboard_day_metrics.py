@@ -1025,12 +1025,11 @@ def test_eft_card_counts_both_same_order_refunds_once(app, payment_refund, depos
     assert day['cash_payments'] == 250
     assert day['card_payments'] == 500
     assert day['other_payments'] == 0
-    # Preserve the existing received/revenue convention (card is net too):
-    # separate deposit payouts affect their method card, not received revenue.
-    assert day['revenue'] == round(1450 - payment_refund - deposit_refund, 2)
+    # Deposit payouts affect cash/EFT/card balances, not earned revenue.
+    assert day['revenue'] == round(1450 - payment_refund, 2)
     assert day['revenue'] == round(sum(day[key] for key in (
         'eft_payments', 'cash_payments', 'card_payments', 'other_payments'
-    )), 2)
+    )) + deposit_refund, 2)
 
 
 def test_eft_deposit_payout_date_branch_method_and_reversal_isolation(app):

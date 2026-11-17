@@ -66,9 +66,9 @@ def test_revenue_excludes_refundable_deposit_but_includes_applied_deposit(app):
         _insert_order(db, 'PAID-DEPOSIT-APPLIED', 'returned', 'paid', 950, 0, deposit=750, applied=300)
         db.commit()
 
-        # First order recognizes only the rental/extras (200). Second recognizes
-        # rental/extras plus the R300 of deposit retained for settlement costs.
-        assert summary_metrics(DAY, DAY)['revenue'] == 700
+        # Both orders recognise their R200 rental charges. Applying funds is
+        # payment against those charges, not an additional R300 charge.
+        assert summary_metrics(DAY, DAY)['revenue'] == 400
         # Ticket ABI-341952993: the Orders page Revenue card no longer uses the
         # recognized/recognised basis — it reports money RECEIVED, so with no
         # payments captured against either order the card is genuinely R0.00.

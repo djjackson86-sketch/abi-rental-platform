@@ -337,13 +337,13 @@ def test_other_gathers_every_method_that_is_not_cash_eft_or_card(app):
     assert day['card_payments'] == 500.0
     assert day['cash_payments'] == 250.0
     assert day['eft_payments'] == 700.0
-    # 100 'other' + 40 legacy 'manual' + 60 applied deposit + 20 with no method
+    # 100 'other' + 40 legacy 'manual' + 20 with no method (not applied funds)
     # + 77 recorded at depot 2. Pending, archived and yesterday's rows are out.
-    assert day['other_payments'] == 100.0 + 40.0 + 60.0 + 20.0 + 77.0
+    assert day['other_payments'] == 100.0 + 40.0 + 20.0 + 77.0
     assert day['revenue'] == 500.0 + 250.0 + 700.0 + 100.0 + 40.0 + 60.0 + 20.0 + 77.0
-    # The invariant the plan called out: no money hides between the cards.
+    # Applied funds earn revenue but are not new other-method cash receipts.
     assert day['revenue'] == (day['card_payments'] + day['cash_payments']
-                              + day['eft_payments'] + day['other_payments'])
+                              + day['eft_payments'] + day['other_payments'] + 60.0)
 
 
 def test_the_other_line_follows_the_branch_and_day_scope(app):
@@ -352,7 +352,7 @@ def test_the_other_line_follows_the_branch_and_day_scope(app):
                         branch_id=1, branch_ids=[1])
     depot_two = metrics(app, user_id=2, user_role='staff', can_view_all_branches=False,
                         branch_id=2, branch_ids=[2])
-    assert depot_one['other_payments'] == 100.0 + 40.0 + 60.0 + 20.0
+    assert depot_one['other_payments'] == 100.0 + 40.0 + 20.0
     assert depot_two['other_payments'] == 77.0
     assert depot_one['other_payments'] + depot_two['other_payments'] == metrics(
         app, user_id=1, user_role='owner')['other_payments']
@@ -394,7 +394,7 @@ def test_the_dashboard_card_and_the_day_report_lines_carry_other(client, app):
     login(client)
 
     page = client.get('/dashboard').get_data(as_text=True)
-    assert re.search(r'Total other payments</small><b>R297\.00</b>', page), \
+    assert re.search(r'Total other payments</small><b>R237\.00</b>', page), \
         'the dashboard is missing the other-payments card'
 
     # The day report's one source of truth (PDF *and* CSV) carries the line too.
@@ -403,11 +403,11 @@ def test_the_dashboard_card_and_the_day_report_lines_carry_other(client, app):
         flask_session.update({'user_id': 1, 'user_role': 'owner'})
         report = cash.day_report(day=TODAY, branch_id=1)
     rows = {row[1]: row[2] for row in cash.day_report_rows(report) if row[0] == 'Dashboard'}
-    assert rows['Total other payments'] == 'R297.00'
-    assert rows['Revenue for the day'] == 'R1747.00'
+    assert rows['Total other payments'] == 'R237.00'
+    assert rows['Revenue for the day'] == 'R1 747.00'
 
     csv_body = client.get('/cash-up/export.csv?branch=1').get_data(as_text=True)
-    assert 'Total other payments,R297.00' in csv_body
+    assert 'Total other payments,R237.00' in csv_body
 
     pdf = client.get('/cash-up/report.pdf?branch=1')
     assert pdf.status_code == 200 and pdf.data.startswith(b'%PDF-')

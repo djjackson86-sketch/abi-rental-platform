@@ -48,7 +48,7 @@ def seed_revenue(app):
     return ids
 
 
-@pytest.mark.parametrize('branch,expected', [(None,{'trailer_rentals':300,'sales_repairs':190,'unattributed':80}), (1,{'trailer_rentals':300,'sales_repairs':0,'unattributed':80}), (2,{'trailer_rentals':0,'sales_repairs':190,'unattributed':0})])
+@pytest.mark.parametrize('branch,expected', [(None,{'trailer_rentals':330,'sales_repairs':190,'unattributed':80}), (1,{'trailer_rentals':330,'sales_repairs':0,'unattributed':80}), (2,{'trailer_rentals':0,'sales_repairs':190,'unattributed':0})])
 def test_received_rules_and_reconciliation(app,branch,expected):
     seed_revenue(app)
     with app.app_context():
@@ -71,7 +71,7 @@ def test_closed_order_receipts_keep_explicit_stored_category(app,closed,prior,co
         db.execute("INSERT INTO payments (order_id,amount,method,status,payment_date,created_at) VALUES (?,100,'cash','paid','2026-11-17','2026-11-17')",(oid,))
         db.commit()
         totals=received_revenue_by_category('2026-11-17','2026-11-17')
-        assert totals[category]==90 and totals['unattributed']==0
+        assert totals[category]==100 and totals['unattributed']==0
 
 
 def comparisons(body):
@@ -88,7 +88,7 @@ def test_cards_initial_and_lazy_with_elapsed_month(app,client,lazy):
     body=shell.get_data(as_text=True)
     partial=client.get('/dashboard/partials/revenue'+query).get_data(as_text=True)
     assert comparisons(partial)==['R120.00','R70.00','R0.00']
-    assert 'R300.00' in partial and 'R190.00' in partial
+    assert 'R330.00' in partial and 'R190.00' in partial
     assert 'Trailer rentals revenue' in partial and 'Sales/repairs revenue' in partial
     if lazy:
         assert 'data-dashboard-section="revenue"' in body

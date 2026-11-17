@@ -108,14 +108,13 @@ def recognized_revenue_expr(alias="o", column="total"):
     condition, params = revenue_recognized_condition(alias)
     prefix = f"{alias}." if alias else ""
     if column == "total":
-        # Refundable security deposits are held money, not earned revenue. Count
-        # only the part deliberately applied/retained for extra time, damages or
-        # other settlement costs. Damage-waiver/no-deposit orders are unaffected.
+        # Refundable deposits are liabilities. Application pays charges already
+        # included in total; adding it here would count those charges twice.
+        # Damage-waiver/no-deposit orders are unaffected.
         value = (
             f"MAX(COALESCE({prefix}total, 0) - "
             f"CASE WHEN COALESCE({prefix}deposit_option, 'security_deposit') = 'security_deposit' "
-            f"THEN COALESCE({prefix}deposit_total, 0) ELSE 0 END + "
-            f"COALESCE({prefix}deposit_applied_amount, 0), 0)"
+            f"THEN COALESCE({prefix}deposit_total, 0) ELSE 0 END, 0)"
         )
     else:
         value = f"COALESCE({prefix}{column}, 0)"
@@ -199,32 +198,10 @@ def summary_metrics(start_date=None, end_date=None, branch_id=None):
 
 
 def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
-    """The four headline dashboard cards, restricted to a period (and branch).
+    """Period cards, branch-scoped: earned receipts, orders and new master data.
 
-    Definitions, only windowed:
-
-    * ``orders``   — orders **created** in the period (``orders.created_at``)
-    * ``revenue``  — money **received** in the period (see below)
-    * ``products`` — catalogue rows **added** in the period (``products.created_at``);
-      like the pre-ticket card this counts every row, archived included
-    * ``customers``— customer records **added** in the period (``customers.created_at``)
-
-    Gross revenue is money RECEIVED, not booked (ticket ABI-341952993): the sum of
-    paid, non-archived payments whose date falls inside the window, branch-scoped
-    by the order they were taken on. That is exactly the query behind the
-    dashboard's "Revenue for the day" card run over a single day, so choosing the
-    ``Today`` range reproduces that card instead of showing the booked value of the
-    orders raised today — the three revenue figures the client compared can no
-    longer disagree. The booked/recognised basis still lives on Reports, which is
-    relabelled "recognised (booked)" so the two are visibly different numbers on
-    purpose.
-
-    With ``start_date``/``end_date`` of ``None`` the window is off and the four
-    numbers are the all-time figures the page showed before the quick ranges
-    existed, so the "All time" pill is a true baseline.
-
-    Rows come back as plain ints/float — production returns libsql tuple rows,
-    which is why nothing here builds a dict from a raw row without ``row_dict``.
+    Revenue uses the same deposit-safe receipt/application dates as the daily
+    cards and chart; booked/recognised revenue remains on Reports separately.
     """
     db = get_db()
 
@@ -238,35 +215,9 @@ def dashboard_period_metrics(start_date=None, end_date=None, branch_id=None):
     order_params.extend(scope_params)
     orders = row_dict(db.execute(order_sql, order_params).fetchone())
 
-    # Money received in the window. The payment date is the stored
-    # ``payment_date``, falling back to when the payment was captured — the same
-    # COALESCE/NULLIF the day card uses, compared as a YYYY-MM-DD prefix so a
-    # single-day range matches "Revenue for the day" by construction.
-    received_sql = f"""SELECT COALESCE(SUM(pay.amount), 0) AS revenue
-        FROM payments pay JOIN orders o ON o.id = pay.order_id
-        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'"""
-    received_params = []
-    if start_date:
-        received_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) >= ?"
-        received_params.append(start_date)
-    if end_date:
-        received_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) <= ?"
-        received_params.append(end_date)
-    received_sql += scope_sql
-    received_params.extend(scope_params)
-    received = row_dict(db.execute(received_sql, received_params).fetchone())
-    refund_sql = "SELECT COALESCE(SUM(o.deposit_refund_amount), 0) AS total FROM orders o WHERE COALESCE(o.deposit_refund_amount, 0) > 0"
-    refund_params = []
-    for bound, op in ((start_date, ">="), (end_date, "<=")):
-        if bound:
-            refund_sql += f" AND substr(o.deposit_processed_at, 1, 10) {op} ?"
-            refund_params.append(bound)
-    refund_sql += scope_sql
-    refund_params.extend(scope_params)
-    refunds = db.execute(refund_sql, refund_params).fetchone()["total"]
-    from app.services.payments import legacy_receipt_totals
-    legacy = sum(legacy_receipt_totals(branch_id, start_date or "", end_date or "").values())
-    received["revenue"] = money(float(received.get("revenue") or 0) + legacy - float(refunds or 0))
+    # Held deposits and liability payouts are not revenue.
+    received = {"revenue": sum(received_revenue_by_category(
+        start_date, end_date, branch_id).values())}
 
     product_sql = "SELECT COUNT(*) AS count FROM products p WHERE 1=1"
     product_params = []
@@ -306,41 +257,9 @@ _PICKED_UP_STATUSES = ("started", "returned")
 
 
 def received_revenue_by_day(start_date, end_date, branch_id=None):
-    """Dashboard receipt-date rules, grouped in three bounded queries.
-
-    Negative paid payments and separate deposit payouts reduce revenue; account
-    transfers, pending and archived payments are not receipts. Legacy receipts
-    use the ledger's existing eligibility and recorded-depot scope.
-    """
-    from app.services.payments import _legacy_payment_where
-    db = get_db()
-    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
-    payment_day = "substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10)"
-    rows = db.execute(f"""SELECT {payment_day} AS day, SUM(pay.amount) AS total
-        FROM payments pay JOIN orders o ON o.id = pay.order_id
-        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
-          AND LOWER(COALESCE(pay.method, '')) <> 'account'
-          AND {payment_day} >= ? AND {payment_day} <= ?{scope_sql}
-        GROUP BY {payment_day}""", [start_date, end_date, *scope_params]).fetchall()
-    totals = {row["day"]: money(row["total"]) for row in rows}
-    where, params = _legacy_payment_where(False, branch_id, start_date, end_date)
-    rows = db.execute(f"""SELECT date(COALESCE(NULLIF(lp.payment_date, ''), lp.created_at)) AS day,
-        LOWER(COALESCE(lp.method, '')) AS method, SUM(lp.amount) AS total
-        FROM legacy_balance_payments lp JOIN customers c ON c.id = lp.customer_id
-        WHERE {' AND '.join(where)} GROUP BY day, LOWER(COALESCE(lp.method, ''))""", params).fetchall()
-    for row in rows:
-        totals[row["day"]] = totals.get(row["day"], 0) + money(row["total"])
-    rows = db.execute(f"""SELECT substr(o.deposit_processed_at, 1, 10) AS day,
-        LOWER(o.deposit_process_method) AS method, SUM(o.deposit_refund_amount) AS total
-        FROM orders o WHERE COALESCE(o.deposit_refund_amount, 0) > 0
-          AND LOWER(COALESCE(o.deposit_process_method, '')) IN
-              ('cash', 'card', 'eft', 'customer_credit', 'other', 'manual')
-          AND substr(o.deposit_processed_at, 1, 10) >= ?
-          AND substr(o.deposit_processed_at, 1, 10) <= ?{scope_sql}
-        GROUP BY day, LOWER(o.deposit_process_method)""", [start_date, end_date, *scope_params]).fetchall()
-    for row in rows:
-        totals[row["day"]] = totals.get(row["day"], 0) - money(row["total"])
-    return {day: money(value) for day, value in totals.items()}
+    """Same earned-receipt basis as the cards and chart, grouped by business day."""
+    categories = received_revenue_by_category(start_date, end_date, branch_id, _by_day=True)
+    return {day: money(sum(values.values())) for day, values in categories.items()}
 
 
 def monthly_received_revenue(year, branch_id=None, revenue_type="gross", start_date=None, end_date=None):
@@ -366,78 +285,24 @@ REVENUE_CARD_CATEGORIES = ("trailer_rentals", "sales_repairs", "unattributed")
 
 
 def received_revenue_by_category(start_date=None, end_date=None, branch_id=None, *, _by_day=False):
-    """Money RECEIVED in the window, split by the order's stored category.
+    """Earned receipts by category: applications release held funds to rentals.
 
-    The receipt rules are exactly ``dashboard_period_metrics``': paid, not
-    deleted, not an ``account`` transfer, dated by stored payment date (falling
-    back to capture date); deposit payouts deducted on their processed date; and
-    legacy ledger receipts included through the shared eligibility/scope helper.
-    Using the same rules is what lets ``trailer_rentals + sales_repairs +
-    unattributed`` equal the Gross revenue card for the same window and branch.
-
-    ``unattributed`` is shown as Other Revenue. It carries draft receipts, closed
-    orders without a recorded previous category, and balance-only legacy receipts.
-    Assigning those to rentals or sales/repairs would invent missing source data.
-
-    Rows come back as plain floats, never raw libsql rows.
+    Refunds/credit transfers move liabilities, not revenue. Historical unallocated
+    receipts reserve the contractual deposit first. Legacy receipts stay Other.
     """
     from app.services.payments import legacy_receipt_totals
     db = get_db()
-    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
-    payment_day = "substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10)"
-    marks = ", ".join("?" for _ in REVENUE_CARD_RENTAL_STATUSES)
-    # Archive/cancel retains an explicit previous status; those receipts must not
-    # disappear from their category merely because the order was later closed.
-    stored_status = ("CASE WHEN o.status = 'archived' THEN o.status_before_archive "
-                     "WHEN o.status IN ('canceled', 'cancelled') THEN o.status_before_cancel "
-                     "ELSE o.status END")
-    category_sql = (
-        f"CASE WHEN ({stored_status}) = ? THEN 'sales_repairs' "
-        f"WHEN ({stored_status}) IN ({marks}) THEN 'trailer_rentals' "
-        "ELSE 'unattributed' END"
-    )
-    category_params = [REVENUE_CARD_SALES_REPAIRS_STATUS, *REVENUE_CARD_RENTAL_STATUSES]
-
-    day_select = f"{payment_day} AS day, " if _by_day else ""
-    sql = f"""SELECT {day_select}{category_sql} AS category, SUM(pay.amount) AS total
-        FROM payments pay JOIN orders o ON o.id = pay.order_id
-        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
-          AND LOWER(COALESCE(pay.method, '')) <> 'account'"""
-    params: list = [*category_params]
-    if start_date:
-        sql += f" AND {payment_day} >= ?"
-        params.append(start_date)
-    if end_date:
-        sql += f" AND {payment_day} <= ?"
-        params.append(end_date)
-    sql += f"{scope_sql} GROUP BY " + ("day, category" if _by_day else "category")
-    params.extend(scope_params)
+    from app.services.revenue import order_revenue_events
     totals = {} if _by_day else {category: 0.0 for category in REVENUE_CARD_CATEGORIES}
 
-    def add(data, sign=1):
+    def add(data):
         target = totals.setdefault(data["day"], {key: 0.0 for key in REVENUE_CARD_CATEGORIES}) if _by_day else totals
         key = data.get("category")
         if key in target:
-            target[key] += sign * money(data.get("total"))
+            target[key] += money(data.get("total"))
 
-    for row in db.execute(sql, params).fetchall():
+    for row in order_revenue_events(start_date, end_date, branch_id):
         add(row_dict(row))
-
-    refund_day = "substr(o.deposit_processed_at, 1, 10) AS day, " if _by_day else ""
-    refund_sql = (f"SELECT {refund_day}{category_sql} AS category, "
-                  "SUM(o.deposit_refund_amount) AS total FROM orders o "
-                  "WHERE COALESCE(o.deposit_refund_amount, 0) > 0")
-    refund_params: list = [*category_params]
-    if start_date:
-        refund_sql += " AND substr(o.deposit_processed_at, 1, 10) >= ?"
-        refund_params.append(start_date)
-    if end_date:
-        refund_sql += " AND substr(o.deposit_processed_at, 1, 10) <= ?"
-        refund_params.append(end_date)
-    refund_sql += f"{scope_sql} GROUP BY " + ("day, category" if _by_day else "category")
-    refund_params.extend(scope_params)
-    for row in db.execute(refund_sql, refund_params).fetchall():
-        add(row_dict(row), -1)
 
     if _by_day:
         from app.services.payments import _legacy_payment_where
@@ -498,13 +363,9 @@ def dashboard_day_metrics(day=None, branch_id=None):
     by the branch in view (ticket ABI-341952962); an unrestricted view still
     counts the whole company.
 
-    Revenue for the day is money RECEIVED today (paid payments, by payment date),
-    not the value of the orders raised today — the client asked for "actual
-    payments received, not just created orders". Payments (including negative
-    refund rows) by named method plus "Other" reconcile to received revenue.
-    Card and EFT totals additionally deduct separately recorded deposit payouts;
-    those payouts do not change the existing received-revenue convention.
-    Legacy/imported payment methods land on the "Other" line.
+    Revenue is earned receipts plus deposits actually applied to rental charges.
+    Method cards remain actual cash movements (including held money and payouts),
+    so they intentionally need not equal revenue.
 
     The two trailer cards are a snapshot, not a day figure: **out** is what is on
     hire (a ``started`` order), and **in** is the rest of the yard — the active
@@ -539,11 +400,8 @@ def dashboard_day_metrics(day=None, branch_id=None):
     def payment_total(method=None):
         """Money RECEIVED for the day: paid, not archived, by payment date.
 
-        With no ``method`` this is the day's revenue (ticket ABI-341952962:
-        "actual payments received, not just created orders"), so the revenue card
-        is exactly the method cards added up and the two can never disagree. One
-        depot's takings stay that depot's: the order join carries the same branch
-        scope as every other day card.
+        These method totals are cash movement, not earned revenue. Held deposits
+        and separate deposit payouts remain in their original method totals.
         """
         method_sql = " AND LOWER(pay.method) = ?" if method else ""
         method_params = [method] if method else []
@@ -557,20 +415,11 @@ def dashboard_day_metrics(day=None, branch_id=None):
         ) + (legacy_totals.get(method, 0) if method else sum(legacy_totals.values()))
 
     def other_payments():
-        """Money received for the day by any method other than the three cards.
-
-        Ticket ABI-341953066: "Other" is a selectable payment method, so it needs
-        its own line or that money would show in the revenue card and in no
-        method card. Everything that is not cash/EFT/card lands here — a
-        deliberate "Other" payment, a legacy "manual" row, an imported method or
-        an applied deposit — and a row with no method at all counts as Other
-        rather than being dropped. Same paid/not-archived/branch/day rules as
-        ``payment_total``, so the four cards sum to revenue exactly.
-        """
+        """Other-method cash receipts, not internal deposit applications."""
         return total(
             f"""SELECT COALESCE(SUM(pay.amount), 0) s
             FROM payments pay JOIN orders o ON o.id = pay.order_id
-            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'
+            WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) NOT IN ('account', 'deposit_applied')
               AND LOWER(COALESCE(pay.method, '')) NOT IN (?, ?, ?)
               AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) = ?{scope_sql}""",
             ["cash", "eft", "card", day, *scope_params],
@@ -594,7 +443,7 @@ def dashboard_day_metrics(day=None, branch_id=None):
     )
     from app.services.financial_receipts import receipt_totals
     held_prepaid = receipt_totals('prepaid_fundings',branch_id,day,day)
-    # Revenue for the day = money actually received today (paid payments, by
+    # Revenue uses the shared earned-receipt calculation (paid payments, by
     # payment date), not the value of the orders raised today.
     revenue = received_revenue_by_day(day, day, branch_id).get(day, 0.0)
     reservations = count(

@@ -306,7 +306,7 @@ def _order_filter_where(query="", status: object = "", payment_status: object = 
 def order_counts(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None):
     """Totals for the Orders page metric cards.
 
-    Revenue is money RECEIVED (ticket ABI-341952993) — paid, non-archived payments
+    Revenue is earned receipts (excluding held security deposits) — paid, non-archived payments
     dated inside the same window as the order list, taken on orders that survive
     the page's own filters — so the card agrees with the dashboard's "Revenue for
     the day" when the page is filtered to Today. The recognised (booked) value of
@@ -353,23 +353,10 @@ def order_counts(query="", status: object = "", payment_status: object = "", ret
     # status, payment-status and pickup-date filters, so the payment window below
     # is the only extra restriction: with no dates picked the card is everything
     # ever received against the orders on screen.
-    payment_window_sql = ""
-    payment_window_params = []
-    if start_date:
-        payment_window_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) >= ?"
-        payment_window_params.append(start_date)
-    if end_date:
-        payment_window_sql += " AND substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10) <= ?"
-        payment_window_params.append(end_date)
-    received_row = db.execute(
-        f"""SELECT COALESCE(SUM(pay.amount),0) revenue
-        FROM payments pay
-        JOIN orders o ON o.id = pay.order_id
-        LEFT JOIN customers c ON c.id = o.customer_id
-        WHERE {where} AND pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = '' AND LOWER(COALESCE(pay.method, '')) <> 'account'
-        {payment_window_sql}""",
-        [*params, *payment_window_params],
-    ).fetchone()
+    from app.services.revenue import order_revenue_events
+    received_row = {"revenue": sum(float(event["total"] or 0) for event in
+        order_revenue_events(start_date, end_date, branch_id,
+                             order_where=where, order_params=params))}
     # Ticket ABI-341953072(1): "Unsent Invoices" counts the FINALIZED invoices the
     # order page's own document list still marks with a red "Unsent" badge (ticket
     # ABI-341953065): no email prepared yet — ``email_status`` still 'not_sent'
@@ -2109,7 +2096,7 @@ def _upsert_deposit_applied_payment(order_id, amount):
     existing = _deposit_applied_payment(order_id)
     if amount > 0:
         if existing:
-            db.execute("UPDATE payments SET amount = ?, reference = ?, status = 'paid', deleted_at = '', created_at = ? WHERE id = ?", (amount, DEPOSIT_UTILISED_REFERENCE, now(), existing["id"]))
+            db.execute("UPDATE payments SET amount = ?, reference = ?, status = 'paid', deleted_at = '' WHERE id = ?", (amount, DEPOSIT_UTILISED_REFERENCE, existing["id"]))
         else:
             db.execute(
                 "INSERT INTO payments (order_id, amount, method, reference, status, created_at) VALUES (?, ?, 'deposit_applied', ?, 'paid', ?)",
