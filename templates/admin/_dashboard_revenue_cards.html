@@ -1,0 +1,20 @@
+{# Ticket ABI-341953326: money RECEIVED in the selected range, split by the
+   order's own STORED category. Trailer rentals are the stored hire stages
+   (reserved / started / returned); Sales/Repairs is the stored sales_repairs
+   status. Closed orders retain their explicit recorded previous status; missing
+   categories and balance-only legacy receipts are not guessed from line items.
+
+   The comparison span keeps the dashboard-last-month styling but adds its own
+   class so the headline-card regression contract (which matches the plain
+   dashboard-last-month class) still selects exactly its three cards. #}
+{% if revenue_cards %}{% for key, label in [('trailer_rentals', 'Trailer rentals revenue'), ('sales_repairs', 'Sales/repairs revenue')] %}
+<div class="metric-card">
+  <small>{{ label }}</small><b>{{ revenue_cards[key]|currency }}</b>
+  <span>Received · {{ range_label }}</span>
+  {% if previous_revenue_cards is not none %}
+  <span class="dashboard-last-month revenue-last-month">This time last month <strong>{{ previous_revenue_cards[key]|currency }}</strong></span>
+  {% else %}
+  <span class="dashboard-last-month revenue-last-month">This time last month <strong>Not applicable to open-ended ranges</strong></span>
+  {% endif %}
+</div>
+{% endfor %}{% endif %}

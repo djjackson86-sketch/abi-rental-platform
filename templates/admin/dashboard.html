@@ -51,7 +51,7 @@
 
 {% if current_user_is_main %}
 <div class="dashboard-ranges">
-  <div class="filter-group-head"><strong>Quick ranges</strong><span class="dashboard-ranges-note">applies to the three cards below</span></div>
+  <div class="filter-group-head"><strong>Quick ranges</strong><span class="dashboard-ranges-note">applies to the cards below</span></div>
   <div class="report-presets">
     {% for preset in range_presets %}<a class="report-preset{{ ' is-active' if filters.range == preset.key }}" href="{{ url_for('admin.dashboard', branch=filters.branch or None, range=preset.key, day=filters.day) }}">{{ preset.label }}</a>{% endfor %}
   </div>
@@ -78,6 +78,26 @@
   {% include "admin/_dashboard_period_metrics.html" %}
   {% endif %}
 </section>
+
+{# Ticket ABI-341953326: received revenue split by stored order category, with
+   the equivalent elapsed period one calendar month earlier. Main profile only,
+   like the headline cards above, and windowed by the same quick range / custom
+   dates and branch filter. Loaded on its own so the headline partial keeps its
+   three-card contract. #}
+<style>
+  /* The shared .metrics grid is four across on desktop; the two revenue cards
+     stay two across there and keep the existing tablet/phone fallbacks. */
+  @media(min-width:1101px){.dashboard-revenue-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+<section class="metrics dashboard-metrics dashboard-revenue-metrics" {% if dashboard_lazy %}data-dashboard-section="revenue" data-src="{{ url_for('admin.dashboard_revenue_partial', branch=filters.branch or None, range=filters.range, start_date=filters.start_date or None, end_date=filters.end_date or None) }}"{% endif %}>
+  {% if dashboard_lazy %}
+  <div class="metric-card"><small>Trailer rentals revenue</small><b>Loading…</b><span>Received · {{ range_label }}</span></div>
+  <div class="metric-card"><small>Sales/repairs revenue</small><b>Loading…</b><span>Received · {{ range_label }}</span></div>
+  {% else %}
+  {% include "admin/_dashboard_revenue_cards.html" %}
+  {% endif %}
+</section>
+<p class="muted">Revenue categories follow recorded order status. Legacy receipts and unclassified orders are excluded from these two cards.</p>
 {% endif %}
 
 {% if user_can('dashboard') %}

@@ -46,7 +46,9 @@ def test_limits_totals_and_ordering(app, client, count, url):
         assert len(rows) == count
         assert sum(not row.has_attr('hidden') for row in rows) == min(count, 10)
         assert all(row.has_attr('data-owing-extra') for row in rows[10:])
-        assert [row.select('td')[1].get_text(strip=True) for row in rows] == [
+        assert [row.select('td')[1].select_one('a, span').get_text(strip=True)
+                if row.select('td')[1].select_one('a, span')
+                else row.select('td')[1].get_text(strip=True) for row in rows] == [
             f'{prefix}{i:02d}' for i in reversed(range(count))]
         assert len(panel.select('[data-owing-toggle]')) == int(count > 10)
         if count:
@@ -105,7 +107,7 @@ def test_browser_independent_controls_and_layout(app, client, lazy):
                 expect(orders.locator('tbody tr:visible')).to_have_count(10)
                 expect(legacy.locator('tbody tr:visible')).to_have_count(10)
                 assert orders.locator('tbody tr').first.locator('td').nth(1).inner_text() == 'T318-22'
-                assert legacy.locator('tbody tr').first.locator('td').nth(1).inner_text() == 'LEG318-22'
+                assert legacy.locator('tbody tr').first.locator('td').nth(1).inner_text().split('\n')[0] == 'LEG318-22'
                 a, b = orders.bounding_box(), legacy.bounding_box()
                 assert a and b
                 assert a['y'] + a['height'] <= b['y']

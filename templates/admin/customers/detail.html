@@ -171,7 +171,8 @@
     <div class="customer-order-list legacy-balance-list">
       {% for entry in legacy_balance.entries %}
         <div class="customer-order-row legacy-balance-row">
-          <span><strong>Old order #{{ entry.source_order_number }}</strong><small>{% if entry.source_started_at %}{{ entry.source_started_at[:10] }} · {% endif %}{{ entry.source_payment_status|replace('_', ' ')|title }} · {{ entry.source_order_status }}</small>
+          <span>{% if entry.order_id %}<a href="{{ url_for('orders.detail', order_id=entry.order_id) }}"><strong>Old order #{{ entry.source_order_number }}</strong></a>{% else %}<strong>Old order #{{ entry.source_order_number }}</strong>{% endif %}<small>{% if entry.source_started_at %}{{ entry.source_started_at[:10] }} · {% endif %}{{ entry.source_payment_status|replace('_', ' ')|title }} · {{ entry.source_order_status }}</small>
+            {% if not entry.order_id %}<small class="legacy-source-note">Imported source only — no accessible matching order in this system</small>{% endif %}
             {% if entry.writeoff_amount > 0 %}<small class="legacy-writeoff-note">Noncash writeoff{% if entry.writeoff_date %} {{ entry.writeoff_date }}{% endif %}{% if entry.writeoff_ticket_id %} · {{ entry.writeoff_ticket_id }}{% endif %}{% if entry.writeoff_reason %} · {{ entry.writeoff_reason }}{% endif %}</small>{% endif %}</span>
           <span class="legacy-balance-money"><small>Total {{ (entry.source_total)|currency }} · Paid then {{ (entry.source_paid)|currency }}{% if entry.invoice_count %} · {{ entry.invoice_count }} invoice{{ '' if entry.invoice_count == 1 else 's' }}{% endif %}</small></span>
           <b class="{{ 'balance-owing' if entry.outstanding > 0 else 'balance-credit' }}">{% if entry.status == 'waived' %}{% if entry.writeoff_amount > 0 %}Waived — noncash writeoff{% else %}Waived{% endif %}{% elif entry.outstanding > 0 %}{{ (entry.outstanding)|currency }}{% else %}Settled{% endif %}</b>

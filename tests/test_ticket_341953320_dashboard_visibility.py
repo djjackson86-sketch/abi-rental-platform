@@ -66,7 +66,14 @@ def test_visibility_and_scope(app, client, kind, lazy):
         html = total.get_data(as_text=True)
         assert 'LEG-OPEN' in html and 'LEG-DEPOT-TWO' in html
         assert 'All branches · read-only' in html
-        assert 'Alice' in html and 'href=' not in html and 'R950.00' not in html
+        assert 'Alice' in html and 'R950.00' not in html
+        if kind == 'restricted':
+            # No customers module: the dashboard list stays readable but unlinked.
+            assert 'href=' not in html
+        else:
+            # ABI-341953326: customer names link to the existing client page.
+            assert 'href="/customers/' in html
+            assert 'href="/orders/' not in html
         if not lazy:
             assert 'LEG-OPEN' in shell
         else:

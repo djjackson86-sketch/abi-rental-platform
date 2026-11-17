@@ -90,6 +90,78 @@ def _decorate(row, writeoff_amount=None):
     return entry
 
 
+def can_open_customer_record():
+    """Whether this session may open a customer page at all.
+
+    Mirrors the module gate on ``customers.*`` server-side: the dashboard's
+    company-wide legacy list is visible to every signed-in account (ticket
+    ABI-341953323), but the customer page it links to is not. Callers render a
+    plain name instead of a dead link when this is False, and the customer
+    route still refuses the crafted URL itself.
+    """
+    from flask import has_request_context, session as flask_session
+
+    if not has_request_context() or not flask_session.get("user_id"):
+        return False
+    from app.services.access import user_can_module
+    return user_can_module(flask_session, "customers")
+
+
+def _can_open_order(order):
+    """Order links obey the orders module AND the session's existing branch scope.
+
+    ``user_can_access_order`` is the same predicate ``orders.detail`` enforces,
+    so a link is only rendered where the route would actually open.
+    """
+    from flask import has_request_context, session as flask_session
+
+    if not has_request_context() or not flask_session.get("user_id"):
+        return False
+    from app.services.access import user_can_access_order, user_can_module
+    return user_can_module(flask_session, "orders") and user_can_access_order(order)
+
+
+def _attach_order_references(entries):
+    """Point imported rows at the real platform order they correspond to, if any.
+
+    The only honest match is an exact (trimmed) ``orders.order_number`` that
+    belongs to the SAME customer. The previous system's number is a source
+    reference, not a promise that the order was re-created here: when nothing
+    matches, ``order_id`` stays None and the templates keep showing the
+    imported source fields instead of inventing an order. A number reused by a
+    different client's order is likewise not a match.
+
+    A match is only exposed as a link when this session could actually open that
+    order (orders module + branch scope). The route enforces the same rule, so
+    hiding the link is convenience, never the boundary.
+    """
+    entries = list(entries or [])
+    numbers = {str(entry.get("source_order_number") or "").strip() for entry in entries}
+    numbers.discard("")
+    by_number = {}
+    if numbers:
+        placeholders = ", ".join("?" for _ in numbers)
+        rows = get_db().execute(
+            f"""SELECT id, order_number, customer_id, collect_branch_id, return_branch_id
+            FROM orders WHERE TRIM(order_number) IN ({placeholders})""",
+            sorted(numbers),
+        ).fetchall()
+        by_number = {str(row["order_number"]).strip(): row for row in rows}
+    for entry in entries:
+        entry["order_id"] = None
+        entry["order_link_allowed"] = False
+        match = by_number.get(str(entry.get("source_order_number") or "").strip())
+        if match is None:
+            continue
+        if str(match["customer_id"]) != str(entry.get("customer_id")):
+            # Same reference text, different client: not this imported row's order.
+            continue
+        if _can_open_order(match):
+            entry["order_id"] = match["id"]
+            entry["order_link_allowed"] = True
+    return entries
+
+
 def legacy_balance_writeoffs(customer_id):
     """Noncash write-offs recorded against this customer, oldest first."""
     if not customer_id:
@@ -126,7 +198,7 @@ def legacy_balance_entries(customer_id):
             entry["writeoff_reason"] = latest["reason"]
             entry["writeoff_date"] = latest["writeoff_date"]
         entries.append(entry)
-    return entries
+    return _attach_order_references(entries)
 
 
 def company_outstanding_legacy_total():
@@ -178,7 +250,13 @@ def outstanding_legacy_balances(branch_id=None, *, company_wide=False):
                  COALESCE(NULLIF(l.source_started_at, ''), l.source_created_at), l.id""",
         [ACTIVE_STATUS, *params],
     ).fetchall()
-    return [_decorate(row) for row in rows]
+    entries = _attach_order_references([_decorate(row) for row in rows])
+    # The dashboard list is company-wide, but its customer link is not a grant:
+    # only a session that may use the customers module gets one at all.
+    customer_links = can_open_customer_record()
+    for entry in entries:
+        entry["customer_link_allowed"] = bool(entry.get("customer_id")) and customer_links
+    return entries
 
 
 def legacy_balance_payments(customer_id):

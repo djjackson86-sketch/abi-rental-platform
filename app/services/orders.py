@@ -229,7 +229,7 @@ def _return_filter_clause(return_status, alias="o"):
     return _or_clauses(parts)
 
 
-def list_orders(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None, limit=None, offset=0):
+def list_orders(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None, limit=None, offset=0, oldest_return_first=False):
     sql = """SELECT o.*, c.name AS customer_name, c.email AS customer_email, c.client_verified AS customer_client_verified, cb.name AS collect_branch_name, rb.name AS return_branch_name,
         cu.name AS created_by_name, cu.email AS created_by_email,
         (SELECT COALESCE(SUM(quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
@@ -263,7 +263,8 @@ def list_orders(query="", status: object = "", payment_status: object = "", retu
     if end_date:
         sql += " AND DATE(o.start_at) <= ?"
         params.append(end_date)
-    sql += " ORDER BY o.created_at DESC, o.id DESC"
+    # Sort in SQL before pagination, with a stable tie-breaker for equal due times.
+    sql += " ORDER BY o.end_at ASC, o.id ASC" if oldest_return_first else " ORDER BY o.created_at DESC, o.id DESC"
     if limit is not None:
         sql += " LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset or 0)])
@@ -2687,5 +2688,5 @@ def dashboard_schedule(branch_id=None):
     events = scheduled_events(limit=100, branch_id=branch_id)
     return {
         "going_out": [event for event in events if event["status"] == "reserved"][:5],
-        "coming_back": list_orders(status="started", return_status="late", branch_id=branch_id),
+        "coming_back": list_orders(status="started", return_status="late", branch_id=branch_id, oldest_return_first=True),
     }

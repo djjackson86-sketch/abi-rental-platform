@@ -1,6 +1,6 @@
 from app.services.currency import format_currency
 import calendar
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 from app.db import get_db
 from app.services.credit_limits import order_paid_sql
@@ -350,6 +350,118 @@ def monthly_received_revenue(year, branch_id=None):
         totals.get(f"{year:04d}-{month:02d}-{day:02d}", 0)
         if day <= calendar.monthrange(year, month)[1] else None
         for day in range(1, 32)]} for month in range(1, 13)]
+
+
+# Stored hire stages and the Sales/Repairs status classify received payments.
+# Closed orders use their explicit pre-archive/pre-cancel status, not line-item
+# guesses. Drafts, missing historical categories and balance-only legacy receipts
+# remain unattributed and are never silently assigned to either revenue card.
+REVENUE_CARD_SALES_REPAIRS_STATUS = "sales_repairs"
+REVENUE_CARD_RENTAL_STATUSES = ("reserved", "started", "returned")
+REVENUE_CARD_CATEGORIES = ("trailer_rentals", "sales_repairs", "unattributed")
+
+
+def received_revenue_by_category(start_date=None, end_date=None, branch_id=None):
+    """Money RECEIVED in the window, split by the order's stored category.
+
+    The receipt rules are exactly ``dashboard_period_metrics``': paid, not
+    deleted, not an ``account`` transfer, dated by stored payment date (falling
+    back to capture date); deposit payouts deducted on their processed date; and
+    legacy ledger receipts included through the shared eligibility/scope helper.
+    Using the same rules is what lets ``trailer_rentals + sales_repairs +
+    unattributed`` equal the Gross revenue card for the same window and branch.
+
+    ``unattributed`` is not shown on a card. It carries draft receipts, closed
+    orders without a recorded previous category, and balance-only legacy receipts.
+    Assigning those to rentals or sales/repairs would invent missing source data.
+
+    Rows come back as plain floats, never raw libsql rows.
+    """
+    from app.services.payments import legacy_receipt_totals
+    db = get_db()
+    scope_sql, scope_params = order_branch_clause("o", branch_id=branch_id)
+    payment_day = "substr(COALESCE(NULLIF(pay.payment_date, ''), pay.created_at), 1, 10)"
+    marks = ", ".join("?" for _ in REVENUE_CARD_RENTAL_STATUSES)
+    # Archive/cancel retains an explicit previous status; those receipts must not
+    # disappear from their category merely because the order was later closed.
+    stored_status = ("CASE WHEN o.status = 'archived' THEN o.status_before_archive "
+                     "WHEN o.status IN ('canceled', 'cancelled') THEN o.status_before_cancel "
+                     "ELSE o.status END")
+    category_sql = (
+        f"CASE WHEN ({stored_status}) = ? THEN 'sales_repairs' "
+        f"WHEN ({stored_status}) IN ({marks}) THEN 'trailer_rentals' "
+        "ELSE 'unattributed' END"
+    )
+    category_params = [REVENUE_CARD_SALES_REPAIRS_STATUS, *REVENUE_CARD_RENTAL_STATUSES]
+
+    sql = f"""SELECT {category_sql} AS category, SUM(pay.amount) AS total
+        FROM payments pay JOIN orders o ON o.id = pay.order_id
+        WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
+          AND LOWER(COALESCE(pay.method, '')) <> 'account'"""
+    params: list = [*category_params]
+    if start_date:
+        sql += f" AND {payment_day} >= ?"
+        params.append(start_date)
+    if end_date:
+        sql += f" AND {payment_day} <= ?"
+        params.append(end_date)
+    sql += f"{scope_sql} GROUP BY category"
+    params.extend(scope_params)
+    totals = {category: 0.0 for category in REVENUE_CARD_CATEGORIES}
+    for row in db.execute(sql, params).fetchall():
+        key = row_dict(row).get("category")
+        if key in totals:
+            totals[key] += money(row_dict(row).get("total"))
+
+    refund_sql = (f"SELECT {category_sql} AS category, "
+                  "SUM(o.deposit_refund_amount) AS total FROM orders o "
+                  "WHERE COALESCE(o.deposit_refund_amount, 0) > 0")
+    refund_params: list = [*category_params]
+    if start_date:
+        refund_sql += " AND substr(o.deposit_processed_at, 1, 10) >= ?"
+        refund_params.append(start_date)
+    if end_date:
+        refund_sql += " AND substr(o.deposit_processed_at, 1, 10) <= ?"
+        refund_params.append(end_date)
+    refund_sql += f"{scope_sql} GROUP BY category"
+    refund_params.extend(scope_params)
+    for row in db.execute(refund_sql, refund_params).fetchall():
+        data = row_dict(row)
+        if data.get("category") in totals:
+            totals[data["category"]] -= money(data.get("total"))
+
+    totals["unattributed"] += sum(
+        legacy_receipt_totals(branch_id, start_date or "", end_date or "").values()
+    )
+    return {key: money(value) for key, value in totals.items()}
+
+
+def previous_month_period(start_date, end_date):
+    """ISO bounds for the equivalent elapsed period one calendar month earlier.
+
+    Both bounds are shifted back one calendar month and clamped to that month's
+    last day (31 Mar -> 28/29 Feb, 31 May -> 30 Apr), so the comparison covers
+    the same elapsed days instead of a truncated slice. ``(None, None)`` is
+    returned when there is no closed, valid, ordered window — there is nothing
+    honest to label "this time last month" for an open-ended or reversed range.
+    """
+    if not start_date or not end_date:
+        return None, None
+    try:
+        start = date.fromisoformat(str(start_date))
+        end = date.fromisoformat(str(end_date))
+    except (TypeError, ValueError):
+        return None, None
+    if end < start:
+        return None, None
+
+    def shift_back_one_month(value):
+        index = value.year * 12 + value.month - 2  # 0-based index of the prior month
+        year, month = divmod(index, 12)
+        month += 1
+        return date(year, month, min(value.day, calendar.monthrange(year, month)[1]))
+
+    return shift_back_one_month(start).isoformat(), shift_back_one_month(end).isoformat()
 
 
 def dashboard_day_metrics(day=None, branch_id=None):

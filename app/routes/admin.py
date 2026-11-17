@@ -10,8 +10,8 @@ from app.services import group_images
 from app.services.legacy_balances import outstanding_legacy_balances
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, list_orders, scheduled_events, status_label
-from app.services.reports import monthly_received_revenue, customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics
-from app.services.access import is_main_session, resolve_branch_filter, session_branch_scope_ids, user_can_module
+from app.services.reports import monthly_received_revenue, customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics, received_revenue_by_category, previous_month_period
+from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, user_can_module
 from app.services.branches import branch_options
 from app.services import spare_wheels
 from app.services.pdf_documents import simple_lines_pdf_bytes
@@ -104,6 +104,31 @@ def _dashboard_last_month_metrics(branch_id):
     )
 
 
+def _dashboard_revenue_cards(start_date, end_date, branch_id):
+    """The main profile's two revenue-card figures and their last-month pair.
+
+    Ticket ABI-341953326: the cards window on the same quick range / custom
+    dates and branch filter as the headline cards, and the comparison is the
+    equivalent elapsed period one calendar month earlier, clamped at month ends
+    (``reports.previous_month_period``). A non-main sign-in gets ``(None, None)``
+    without a query — the cards are main-profile only, and the endpoint that
+    loads them is gated too, so hiding the markup is not the only boundary.
+
+    An all-time range (no bounds) still shows current totals; there is no
+    "last month" equivalent of "all time", so the comparison line is omitted.
+    """
+    if not is_main_session(session):
+        return None, None
+    cards = received_revenue_by_category(start_date or None, end_date or None, branch_id=branch_id)
+    previous_start, previous_end = previous_month_period(start_date, end_date)
+    previous = None
+    if previous_start and previous_end:
+        previous = received_revenue_by_category(
+            previous_start, previous_end, branch_id=branch_id
+        )
+    return cards, previous
+
+
 @bp.route("/dashboard")
 @login_required
 def dashboard():
@@ -120,11 +145,15 @@ def dashboard():
     if is_main_session(session) and request.args.get("day"):
         selected_day = cash_parse_business_day(request.args.get("day"))
     day_is_today = selected_day == cash_today_iso()
-    # Quick ranges for the three headline cards, defaulting to This month.
+    # Quick ranges for the headline cards and the two revenue cards below them,
+    # defaulting to This month.
     range_presets, range_key, range_start, range_end, range_label = _dashboard_range()
     dashboard_lazy = not current_app.config.get("TESTING")
     if dashboard_lazy:
         metrics = {"orders": 0, "products": 0, "customers": 0, "revenue": 0}
+        # Loaded by the revenue partial once the page is up; do not query them here.
+        revenue_cards = None
+        previous_revenue_cards = None
         day_metrics = {"day": selected_day}
         cash_panel = {"branches": branches, "branch_id": branch_id, "branch_name": branch_label or "All branches"}
         cash_day = {}
@@ -142,6 +171,9 @@ def dashboard():
     else:
         metrics = dashboard_period_metrics(
             start_date=range_start or None, end_date=range_end or None, branch_id=branch_id
+        )
+        revenue_cards, previous_revenue_cards = _dashboard_revenue_cards(
+            range_start, range_end, branch_id
         )
         cash_branch_id = branch_id or (branch_scope if isinstance(branch_scope, int) else None)
         if cash_branch_id:
@@ -176,6 +208,8 @@ def dashboard():
         dashboard_lazy=dashboard_lazy,
         metrics=metrics,
         last_month_metrics=None if dashboard_lazy else _dashboard_last_month_metrics(branch_id),
+        revenue_cards=revenue_cards,
+        previous_revenue_cards=previous_revenue_cards,
         day_metrics=day_metrics,
         owing_orders=owing_orders,
         owing_total=owing_total,
@@ -223,6 +257,30 @@ def dashboard_period_partial():
         "admin/_dashboard_period_metrics.html",
         metrics=metrics,
         last_month_metrics=_dashboard_last_month_metrics(branch_id),
+        range_label=range_label,
+    )
+
+
+@bp.get("/dashboard/partials/revenue")
+@login_required
+@main_required
+def dashboard_revenue_partial():
+    """Ticket ABI-341953326: the main profile's two revenue cards, on demand.
+
+    Same branch filter and quick range as the headline cards, and the same
+    accounting rules: money received, deposit payouts netted, legacy receipts
+    included. ``main_required`` is the permission boundary, not the hidden
+    markup, so a crafted request from a staff account is refused (403).
+    """
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    range_presets, range_key, range_start, range_end, range_label = _dashboard_range()
+    revenue_cards, previous_revenue_cards = _dashboard_revenue_cards(
+        range_start, range_end, branch_id
+    )
+    return render_template(
+        "admin/_dashboard_revenue_cards.html",
+        revenue_cards=revenue_cards,
+        previous_revenue_cards=previous_revenue_cards,
         range_label=range_label,
     )
 

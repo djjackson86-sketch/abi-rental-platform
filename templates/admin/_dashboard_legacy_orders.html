@@ -12,8 +12,25 @@
       <tbody id="owing-legacy-rows">
         {% for entry in owing_legacy_balances %}
         <tr{% if loop.index > 10 %} hidden data-owing-extra{% endif %}>
-          <td><strong class="table-primary-text">{{ entry.customer_name or 'Unnamed customer' }}</strong>{% if entry.branch_name %}<small>{{ entry.branch_name }}</small>{% endif %}<small class="owing-mobile-raised">Raised {{ (entry.source_started_at or entry.source_created_at or '')[:10] or '—' }}</small></td>
-          <td>{{ entry.source_order_number or '—' }}</td>
+          <td>
+            {% if entry.customer_link_allowed %}
+            <a class="table-primary-text" href="{{ url_for('customers.detail', customer_id=entry.customer_id) }}#legacy-balance">{{ entry.customer_name or 'Unnamed customer' }}</a>
+            {% else %}
+            <strong class="table-primary-text">{{ entry.customer_name or 'Unnamed customer' }}</strong>
+            {% endif %}
+            {% if entry.branch_name %}<small>{{ entry.branch_name }}</small>{% endif %}
+            <small class="owing-mobile-raised">Raised {{ (entry.source_started_at or entry.source_created_at or '')[:10] or '—' }}</small>
+          </td>
+          <td>
+            {% if entry.source_order_number %}
+              {% if entry.order_id %}
+              <a href="{{ url_for('orders.detail', order_id=entry.order_id) }}">{{ entry.source_order_number }}</a>
+              {% else %}
+              <span>{{ entry.source_order_number }}</span>
+              <small>{{ (entry.source_payment_status or 'imported source')|replace('_', ' ')|title }}{% if entry.source_order_status %} · {{ entry.source_order_status }}{% endif %}{% if entry.source_started_at %} · started {{ entry.source_started_at[:10] }}{% endif %}</small>
+              {% endif %}
+            {% else %}—{% endif %}
+          </td>
           <td class="owing-amount"><strong class="balance-owing">{{ (entry.outstanding)|currency }}</strong></td>
           <td class="owing-raised">{{ (entry.source_started_at or entry.source_created_at or '')[:10] or '—' }}</td>
         </tr>

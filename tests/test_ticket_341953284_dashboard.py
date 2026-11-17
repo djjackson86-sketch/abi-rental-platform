@@ -69,7 +69,10 @@ def test_legacy_subsection_follows_orders_without_changing_order_total(app, clie
     legacy = legacy.split('</section>', 1)[0]
     assert '4 orders · <strong class="balance-owing">R945.50</strong>' in orders
     assert '4 balances' in legacy and 'R965.00' not in legacy
-    assert 'href=' not in legacy
+    # ABI-341953326: the customer name now opens the client's legacy section;
+    # imported references with no matching platform order stay unlinked.
+    assert f'href="/customers/{ids["alice"]}#legacy-balance"' in legacy
+    assert 'href="/orders/' not in legacy
     assert 'class="balance-owing">R75.00<' in legacy
     assert '2024-01-02' in legacy
     for ref in ('LEG-OPEN', 'LEG-PARTIAL', 'LEG-DEPOT-TWO', 'LEG-UNASSIGNED'):
@@ -196,7 +199,9 @@ def test_real_browser_desktop_mobile(app, client):
                     assert box['x'] >= 0 and box['x'] + box['width'] <= width
                 page.locator('#owing-customers').screenshot(path=str(output / f'owing-{width}.png'))
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                assert panel.locator('a').count() == 0
+                # ABI-341953326: one customer link per row (no order matches here).
+                assert panel.locator('a').count() == panel.locator('tbody tr').count() == 4
+                assert panel.locator('a[href^="/orders/"]').count() == 0
                 page.goto(f'http://127.0.0.1:{server.server_port}/dashboard', wait_until='networkidle')
                 notification = page.locator('.notify-entry a' if width < 860 else '.sidebar a[href="/settings/notifications"]')
                 notification.click()

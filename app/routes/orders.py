@@ -441,7 +441,7 @@ def index():
     selected_branch, branch_id, branch_label, branches, branch_scope = resolve_branch_filter(request.args.get("branch", ""))
     display_limit = _display_limit()
     counts = order_counts(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id)
-    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id, limit=display_limit)
+    orders = list_orders(query=query, status=status, payment_status=payment_status, return_status=return_status, start_date=start_date, end_date=end_date, branch_id=branch_id, limit=display_limit, oldest_return_first=(return_status == ['late']))
     return render_template(
         "admin/orders/index.html",
         settings=get_company_settings(),

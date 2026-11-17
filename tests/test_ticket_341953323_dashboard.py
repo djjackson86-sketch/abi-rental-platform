@@ -27,7 +27,13 @@ def test_legacy_list_global_and_permissions_unchanged(app, client, kind, lazy):
         body = response.get_data(as_text=True)
         assert 'Legacy orders' in body
         assert 'LEG-OPEN' in body and 'LEG-PARTIAL' in body
-        assert 'R950.00' not in body and 'href=' not in body
+        assert 'R950.00' not in body
+        if kind == 'restricted':
+            # No customers module: readable rows, no links (ABI-341953326).
+            assert 'href=' not in body
+        else:
+            assert 'href="/customers/' in body
+            assert 'href="/orders/' not in body
         assert 'LEG-SETTLED' not in body
         if not lazy:
             assert 'LEG-OPEN' in shell.get_data(as_text=True)
