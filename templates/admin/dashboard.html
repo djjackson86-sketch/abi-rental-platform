@@ -85,19 +85,19 @@
    dates and branch filter. Loaded on its own so the headline partial keeps its
    three-card contract. #}
 <style>
-  /* The shared .metrics grid is four across on desktop; the two revenue cards
-     stay two across there and keep the existing tablet/phone fallbacks. */
+  /* Keep two columns, placing Other Revenue below the rentals/sales row. */
   @media(min-width:1101px){.dashboard-revenue-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <section class="metrics dashboard-metrics dashboard-revenue-metrics" {% if dashboard_lazy %}data-dashboard-section="revenue" data-src="{{ url_for('admin.dashboard_revenue_partial', branch=filters.branch or None, range=filters.range, start_date=filters.start_date or None, end_date=filters.end_date or None) }}"{% endif %}>
   {% if dashboard_lazy %}
   <div class="metric-card"><small>Trailer rentals revenue</small><b>Loading…</b><span>Received · {{ range_label }}</span></div>
   <div class="metric-card"><small>Sales/repairs revenue</small><b>Loading…</b><span>Received · {{ range_label }}</span></div>
+  <div class="metric-card"><small>OTHER REVENUE</small><b>Loading…</b><span>Received · {{ range_label }}</span></div>
   {% else %}
   {% include "admin/_dashboard_revenue_cards.html" %}
   {% endif %}
 </section>
-<p class="muted">Revenue categories follow recorded order status. Legacy receipts and unclassified orders are excluded from these two cards.</p>
+<p class="muted">Revenue categories follow recorded order status. Other Revenue includes legacy receipts and unclassified orders. Rentals + Sales/Repairs + Other Revenue reconcile to Gross revenue for the same dates and branch, including signed adjustments.</p>
 {% endif %}
 
 {% if user_can('dashboard') %}

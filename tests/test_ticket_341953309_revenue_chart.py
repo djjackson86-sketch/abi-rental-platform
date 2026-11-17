@@ -99,7 +99,7 @@ def test_real_browser_chart_controls(app, client, width):
             page.context.add_cookies([{'name':'session', 'value':cookie.value, 'domain':'127.0.0.1','path':'/'}])
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
-            page.goto(f'http://127.0.0.1:{server.server_port}/reports?chart_year=2024')
+            page.goto(f'http://127.0.0.1:{server.server_port}/reports?chart_year=2024&revenue_type=gross')
             checks = page.locator('.monthly-revenue-months input')
             assert page.locator('.monthly-revenue-chart polyline').count() == 1
             for check in checks.all():
@@ -115,8 +115,8 @@ def test_real_browser_chart_controls(app, client, width):
             assert 'Revenue (R)' in page.locator('.monthly-revenue-chart').text_content()
             assert '31' in page.locator('.monthly-revenue-chart').text_content()
             page.locator('summary').filter(has_text='View daily revenue values').click()
-            assert 'R1,337.00' in page.locator('.monthly-revenue-table').inner_text()
-            assert 'R-100.00' in page.locator('.monthly-revenue-table').inner_text()
+            assert 'R1 337.00' in page.locator('.monthly-revenue-table').inner_text()
+            assert '-R100.00' in page.locator('.monthly-revenue-table').inner_text()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             for control in page.locator('.monthly-revenue-months label, .monthly-revenue-year button').all():
                 bounds = control.bounding_box()
@@ -126,9 +126,9 @@ def test_real_browser_chart_controls(app, client, width):
             shots.mkdir(parents=True, exist_ok=True)
             page.locator('.monthly-revenue').scroll_into_view_if_needed()
             page.screenshot(path=str(shots/f'report-{width}.png'), full_page=True)
-            page.locator('[name=chart_year]').fill('2025')
+            page.locator('.monthly-revenue-year [name=chart_year]').fill('2025')
             page.get_by_role('button',name='Show year').click()
-            assert page.locator('[name=chart_year]').input_value() == '2025'
+            assert page.locator('.monthly-revenue-year [name=chart_year]').input_value() == '2025'
             assert not errors
             browser.close()
     finally:

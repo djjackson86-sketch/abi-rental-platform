@@ -8,6 +8,8 @@
   const colors = ['#2563eb','#b45309','#15803d','#b91c1c','#7e22ce','#0e7490','#be185d','#4d7c0f','#4338ca','#a16207','#0f766e','#9f1239'];
   const dashes = ['', '8 4', '3 4', '12 4 3 4'];
   const symbol = document.currentScript?.dataset.currencySymbol || 'R';
+  const revenueLabel = document.currentScript?.dataset.revenueLabel || 'Gross Revenue';
+  svg.setAttribute('aria-label', revenueLabel + ' received in rand, days 1 to 31');
   const rand = value => (value < 0 ? '-' : '') + symbol + Math.abs(value).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}).replace(/,/g, ' ');
   function element(tag, attrs, text) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -26,7 +28,7 @@
     svg.replaceChildren();
     const selected = months.filter((month, i) => checks[i].checked);
     root.querySelector('.monthly-revenue-status').textContent = selected.length ?
-      selected.map(m => m.label).join(' · ') + '. Hover a point for its value. Scroll sideways on small screens to see all 31 days.' :
+      revenueLabel + ': ' + selected.map(m => m.label).join(' · ') + '. Hover a point for its value. Scroll sideways on small screens to see all 31 days.' :
       'Select at least one month to show revenue.';
     const values = selected.flatMap(m => m.values.filter(v => v !== null));
     let low = Math.min(0, ...values), high = Math.max(0, ...values);
@@ -54,7 +56,7 @@
         if (value === null) return;
         const point = element('circle', {cx:x(day+1), cy:y(value), r:3, fill:colors[i]});
         const title = document.createElementNS(svg.namespaceURI, 'title');
-        title.textContent = `${month.label} ${day+1}: ${rand(value)}`;
+        title.textContent = `${revenueLabel} · ${month.label} ${day+1}: ${rand(value)}`;
         point.appendChild(title);
       });
     });

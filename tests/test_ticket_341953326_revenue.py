@@ -87,7 +87,7 @@ def test_cards_initial_and_lazy_with_elapsed_month(app,client,lazy):
     assert shell.status_code==200
     body=shell.get_data(as_text=True)
     partial=client.get('/dashboard/partials/revenue'+query).get_data(as_text=True)
-    assert comparisons(partial)==['R120.00','R70.00']
+    assert comparisons(partial)==['R120.00','R70.00','R0.00']
     assert 'R300.00' in partial and 'R190.00' in partial
     assert 'Trailer rentals revenue' in partial and 'Sales/repairs revenue' in partial
     if lazy:
@@ -95,9 +95,9 @@ def test_cards_initial_and_lazy_with_elapsed_month(app,client,lazy):
     else:
         assert comparisons(body)==comparisons(partial)
     branch=client.get('/dashboard/partials/revenue'+query+'&branch=1').get_data(as_text=True)
-    assert comparisons(branch)==['R120.00','R0.00']
+    assert comparisons(branch)==['R120.00','R0.00','R0.00']
     alltime=client.get('/dashboard/partials/revenue?range=all_time').get_data(as_text=True)
-    assert len(comparisons(alltime))==2 and 'Not applicable' in alltime
+    assert len(comparisons(alltime))==3 and 'Not applicable' in alltime
 
 
 def test_staff_and_anonymous_cannot_access_revenue(app,client):

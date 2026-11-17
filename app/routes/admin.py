@@ -265,7 +265,7 @@ def dashboard_period_partial():
 @login_required
 @main_required
 def dashboard_revenue_partial():
-    """Ticket ABI-341953326: the main profile's two revenue cards, on demand.
+    """The main profile's three received-revenue cards, on demand.
 
     Same branch filter and quick range as the headline cards, and the same
     accounting rules: money received, deposit payouts netted, legacy receipts
@@ -638,12 +638,20 @@ def reports():
         chart_year = today.year
     start_date = request.args.get('start_date', '').strip()
     end_date = request.args.get('end_date', '').strip()
+    revenue_options = [('trailer_rentals', 'Rentals'), ('sales_repairs', 'Sales/Repairs'),
+                       ('unattributed', 'Other Revenue'), ('gross', 'Gross Revenue')]
+    revenue_type = request.args.get('revenue_type', 'trailer_rentals')
+    if revenue_type not in dict(revenue_options):
+        revenue_type = 'trailer_rentals'
     selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
     return render_template(
         "admin/reports.html",
+        revenue_options=revenue_options,
+        revenue_type=revenue_type,
+        revenue_label=dict(revenue_options)[revenue_type],
         chart_year=chart_year,
         chart_month=today.month,
-        revenue_months=monthly_received_revenue(chart_year, branch_id),
+        revenue_months=monthly_received_revenue(chart_year, branch_id, revenue_type, start_date, end_date),
         settings=get_company_settings(),
         branches=branches,
         branch_scope=branch_scope,

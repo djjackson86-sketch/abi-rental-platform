@@ -343,9 +343,13 @@ def received_revenue_by_day(start_date, end_date, branch_id=None):
     return {day: money(value) for day, value in totals.items()}
 
 
-def monthly_received_revenue(year, branch_id=None):
+def monthly_received_revenue(year, branch_id=None, revenue_type="gross", start_date=None, end_date=None):
     """Twelve 31-day series; nonexistent calendar dates are gaps, not zeroes."""
-    totals = received_revenue_by_day(f"{year:04d}-01-01", f"{year:04d}-12-31", branch_id)
+    start = max(f"{year:04d}-01-01", start_date or f"{year:04d}-01-01")
+    end = min(f"{year:04d}-12-31", end_date or f"{year:04d}-12-31")
+    categories = received_revenue_by_category(start, end, branch_id, _by_day=True)
+    totals = {day: money(sum(values.values()) if revenue_type == "gross" else
+                        values.get(revenue_type, 0)) for day, values in categories.items()}
     return [{"month": month, "label": calendar.month_name[month], "values": [
         totals.get(f"{year:04d}-{month:02d}-{day:02d}", 0)
         if day <= calendar.monthrange(year, month)[1] else None
@@ -361,7 +365,7 @@ REVENUE_CARD_RENTAL_STATUSES = ("reserved", "started", "returned")
 REVENUE_CARD_CATEGORIES = ("trailer_rentals", "sales_repairs", "unattributed")
 
 
-def received_revenue_by_category(start_date=None, end_date=None, branch_id=None):
+def received_revenue_by_category(start_date=None, end_date=None, branch_id=None, *, _by_day=False):
     """Money RECEIVED in the window, split by the order's stored category.
 
     The receipt rules are exactly ``dashboard_period_metrics``': paid, not
@@ -371,7 +375,7 @@ def received_revenue_by_category(start_date=None, end_date=None, branch_id=None)
     Using the same rules is what lets ``trailer_rentals + sales_repairs +
     unattributed`` equal the Gross revenue card for the same window and branch.
 
-    ``unattributed`` is not shown on a card. It carries draft receipts, closed
+    ``unattributed`` is shown as Other Revenue. It carries draft receipts, closed
     orders without a recorded previous category, and balance-only legacy receipts.
     Assigning those to rentals or sales/repairs would invent missing source data.
 
@@ -394,7 +398,8 @@ def received_revenue_by_category(start_date=None, end_date=None, branch_id=None)
     )
     category_params = [REVENUE_CARD_SALES_REPAIRS_STATUS, *REVENUE_CARD_RENTAL_STATUSES]
 
-    sql = f"""SELECT {category_sql} AS category, SUM(pay.amount) AS total
+    day_select = f"{payment_day} AS day, " if _by_day else ""
+    sql = f"""SELECT {day_select}{category_sql} AS category, SUM(pay.amount) AS total
         FROM payments pay JOIN orders o ON o.id = pay.order_id
         WHERE pay.status = 'paid' AND COALESCE(pay.deleted_at, '') = ''
           AND LOWER(COALESCE(pay.method, '')) <> 'account'"""
@@ -405,15 +410,21 @@ def received_revenue_by_category(start_date=None, end_date=None, branch_id=None)
     if end_date:
         sql += f" AND {payment_day} <= ?"
         params.append(end_date)
-    sql += f"{scope_sql} GROUP BY category"
+    sql += f"{scope_sql} GROUP BY " + ("day, category" if _by_day else "category")
     params.extend(scope_params)
-    totals = {category: 0.0 for category in REVENUE_CARD_CATEGORIES}
-    for row in db.execute(sql, params).fetchall():
-        key = row_dict(row).get("category")
-        if key in totals:
-            totals[key] += money(row_dict(row).get("total"))
+    totals = {} if _by_day else {category: 0.0 for category in REVENUE_CARD_CATEGORIES}
 
-    refund_sql = (f"SELECT {category_sql} AS category, "
+    def add(data, sign=1):
+        target = totals.setdefault(data["day"], {key: 0.0 for key in REVENUE_CARD_CATEGORIES}) if _by_day else totals
+        key = data.get("category")
+        if key in target:
+            target[key] += sign * money(data.get("total"))
+
+    for row in db.execute(sql, params).fetchall():
+        add(row_dict(row))
+
+    refund_day = "substr(o.deposit_processed_at, 1, 10) AS day, " if _by_day else ""
+    refund_sql = (f"SELECT {refund_day}{category_sql} AS category, "
                   "SUM(o.deposit_refund_amount) AS total FROM orders o "
                   "WHERE COALESCE(o.deposit_refund_amount, 0) > 0")
     refund_params: list = [*category_params]
@@ -423,12 +434,21 @@ def received_revenue_by_category(start_date=None, end_date=None, branch_id=None)
     if end_date:
         refund_sql += " AND substr(o.deposit_processed_at, 1, 10) <= ?"
         refund_params.append(end_date)
-    refund_sql += f"{scope_sql} GROUP BY category"
+    refund_sql += f"{scope_sql} GROUP BY " + ("day, category" if _by_day else "category")
     refund_params.extend(scope_params)
     for row in db.execute(refund_sql, refund_params).fetchall():
-        data = row_dict(row)
-        if data.get("category") in totals:
-            totals[data["category"]] -= money(data.get("total"))
+        add(row_dict(row), -1)
+
+    if _by_day:
+        from app.services.payments import _legacy_payment_where
+        where, params = _legacy_payment_where(False, branch_id, start_date or "", end_date or "")
+        rows = db.execute(f"""SELECT date(COALESCE(NULLIF(lp.payment_date, ''), lp.created_at)) AS day,
+            SUM(lp.amount) AS total FROM legacy_balance_payments lp
+            JOIN customers c ON c.id = lp.customer_id
+            WHERE {' AND '.join(where)} GROUP BY day""", params).fetchall()
+        for row in rows:
+            add({**row_dict(row), "category": "unattributed"})
+        return {day: {key: money(value) for key, value in values.items()} for day, values in totals.items()}
 
     totals["unattributed"] += sum(
         legacy_receipt_totals(branch_id, start_date or "", end_date or "").values()

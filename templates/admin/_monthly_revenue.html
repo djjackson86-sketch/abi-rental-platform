@@ -1,11 +1,25 @@
 <section class="report-card monthly-revenue" aria-labelledby="monthly-revenue-title">
   <header class="report-card-header">
     <h2 id="monthly-revenue-title">Daily revenue by month</h2>
-    <p>Money actually received, less refunds, on the receipt/payout date — same as dashboard daily revenue. Branch: {{ branch_label or 'All branches' }}. Independent of the report date filters above.</p>
+    <p>{{ revenue_label }} — money actually received, less refunds, on the receipt/payout date. Same categories as the dashboard, not recognised/booked revenue. Branch: {{ branch_label or 'All branches' }}. Uses the report date filters within the chart year.</p>
   </header>
   <div class="report-card-body">
     <form method="get" class="monthly-revenue-year">
-      <input type="hidden" name="branch" value="{{ filters.branch }}">
+      <label>Revenue
+        <select name="revenue_type" onchange="this.form.requestSubmit()">
+          {% for key, label in revenue_options %}<option value="{{ key }}" {% if revenue_type == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Branch
+        {% if branch_scope %}
+        <select disabled aria-label="Chart branch (fixed to your branch)"><option>{{ branches[0].name if branches else 'Your branch' }}</option></select>
+        {% else %}
+        <select name="branch" aria-label="Chart branch" onchange="this.form.requestSubmit()">
+          <option value="">All branches</option>
+          {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+      </label>
       <input type="hidden" name="start_date" value="{{ filters.start_date }}">
       <input type="hidden" name="end_date" value="{{ filters.end_date }}">
       <label>Chart year <input type="number" min="1900" max="9999" name="chart_year" value="{{ chart_year }}" required></label>
@@ -24,4 +38,4 @@
 .monthly-revenue{margin-bottom:24px;min-width:0;grid-template-columns:minmax(0,1fr)}.monthly-revenue .report-card-body{min-width:0}.monthly-revenue-year{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:16px}.monthly-revenue-year label{display:grid;gap:5px}.monthly-revenue-year input{max-width:130px}.monthly-revenue-months{min-inline-size:0;display:flex;flex-wrap:wrap;gap:10px 18px;border:0;padding:0;margin:0 0 12px}.monthly-revenue-months legend{font-weight:600;margin-bottom:10px}.monthly-revenue-months label{display:flex;align-items:center;gap:6px;cursor:pointer}.monthly-revenue-months input{width:17px;height:17px;margin:0}.monthly-revenue-scroll{max-width:100%;overflow-x:auto}.monthly-revenue-chart{display:block;width:100%;min-width:760px;height:auto}.monthly-revenue-table th,.monthly-revenue-table td{padding:6px 10px;white-space:nowrap}.monthly-revenue-status{font-size:13px;color:#586577}
 </style>
 <script type="application/json" id="monthly-revenue-data">{{ revenue_months|tojson }}</script>
-<script src="{{ url_for('static', filename='js/monthly-revenue.js', v='2') }}" data-currency-symbol="{{ config.CURRENCY_SYMBOL }}" defer></script>
+<script src="{{ url_for('static', filename='js/monthly-revenue.js', v='3') }}" data-currency-symbol="{{ config.CURRENCY_SYMBOL }}" data-revenue-label="{{ revenue_label }}" defer></script>

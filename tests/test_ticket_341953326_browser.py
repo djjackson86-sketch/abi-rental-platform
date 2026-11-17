@@ -31,8 +31,8 @@ def test_browser_revenue_and_legacy_workflow(app,client):
                 page.goto(origin+'/dashboard?start_date=2026-11-01&end_date=2026-11-17',wait_until='networkidle')
                 cards=page.locator('.dashboard-revenue-metrics')
                 cards.locator('.revenue-last-month').first.wait_for()
-                assert cards.locator('.metric-card').count()==2
-                assert cards.locator('.revenue-last-month').count()==2
+                assert cards.locator('.metric-card').count()==3
+                assert cards.locator('.revenue-last-month').count()==3
                 assert 'R300.00' in cards.inner_text() and 'R190.00' in cards.inner_text()
                 cards.scroll_into_view_if_needed()
                 page.screenshot(path=str(output/f'dashboard-{width}.png'))

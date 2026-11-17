@@ -19,10 +19,12 @@
 <section class="reports-page-shell">
   <aside class="reports-filter-rail panel">
     <form method="get" class="reports-filter-form">
+      <input type="hidden" name="chart_year" value="{{ chart_year }}">
+      <input type="hidden" name="revenue_type" value="{{ revenue_type }}">
       <div class="filter-group">
         <div class="filter-group-head"><strong>Quick ranges</strong></div>
         <div class="report-presets">
-          {% for preset in presets %}<a class="report-preset{{ ' is-active' if filters.start_date == preset.start and filters.end_date == preset.end }}" href="{{ url_for('admin.reports', branch=filters.branch or None, start_date=preset.start, end_date=preset.end) }}">{{ preset.label }}</a>{% endfor %}
+          {% for preset in presets %}<a class="report-preset{{ ' is-active' if filters.start_date == preset.start and filters.end_date == preset.end }}" href="{{ url_for('admin.reports', branch=filters.branch or None, start_date=preset.start, end_date=preset.end, chart_year=chart_year, revenue_type=revenue_type) }}">{{ preset.label }}</a>{% endfor %}
         </div>
       </div>
       <div class="filter-group">
