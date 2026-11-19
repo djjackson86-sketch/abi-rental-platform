@@ -110,7 +110,12 @@ def test_browser_independent_controls_and_layout(app, client, lazy):
                 assert legacy.locator('tbody tr').first.locator('td').nth(1).inner_text().split('\n')[0] == 'LEG318-22'
                 a, b = orders.bounding_box(), legacy.bounding_box()
                 assert a and b
-                assert a['y'] + a['height'] <= b['y']
+                if width > 1000:
+                    assert abs(a['y'] - b['y']) < 1
+                    assert a['x'] + a['width'] <= b['x']
+                    assert abs(a['width'] - b['width']) < 1
+                else:
+                    assert a['y'] + a['height'] <= b['y']
                 if width <= 1000:
                     expect(orders.locator('.owing-mobile-raised').first).to_be_visible()
                 for card in (orders, legacy):

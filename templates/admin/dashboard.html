@@ -121,9 +121,12 @@
 {# Ticket ABI-341953282: every order still owing money, at any date, on the
    dashboard. The heading sits outside the lazy target (like Cash up), so both
    renders show the section title immediately and only the rows arrive later. #}
+<div class="section-head"><h2 class="section-heading">Owing Customers</h2></div>
+{% endif %}
+<div class="dashboard-debt-row{% if user_can('dashboard') %} dashboard-debt-row-paired{% endif %}">
+{% if user_can('dashboard') %}
 <section class="dashboard-card-section" id="owing-customers">
-  <div class="section-head"><h2 class="section-heading">Owing Customers</h2></div>
-  <div class="dashboard-grid owing-customers-grid" {% if dashboard_lazy %}data-dashboard-section="owing" data-src="{{ url_for('admin.dashboard_owing_partial', branch=filters.branch or None) }}"{% endif %}>
+  <div class="owing-customers-grid" {% if dashboard_lazy %}data-dashboard-section="owing" data-src="{{ url_for('admin.dashboard_owing_partial', branch=filters.branch or None) }}"{% endif %}>
     {% if dashboard_lazy %}
     {# Same centred .empty-results block the loaded panel uses when it has no
        rows, so the loading and empty states sit on the same line. #}
@@ -135,9 +138,10 @@
 {% endif %}
 <section class="dashboard-card-section" id="legacy-orders">
   <div {% if dashboard_lazy %}data-dashboard-section="legacy" data-src="{{ url_for('admin.dashboard_legacy_partial') }}"{% endif %}>
-    {% if dashboard_lazy %}<div class="panel"><p>Loading legacy orders…</p></div>{% else %}{% include "admin/_dashboard_legacy_orders.html" %}{% endif %}
+    {% if dashboard_lazy %}<div class="panel owing-customers-panel"><div class="panel-title"><h2>Legacy orders</h2><small>All branches · read-only</small></div><div class="empty-results"><strong>Loading…</strong><span>Fetching legacy orders…</span></div></div>{% else %}{% include "admin/_dashboard_legacy_orders.html" %}{% endif %}
   </div>
 </section>
+</div>
 <section class="dashboard-card-section">
   <div class="section-head"><h2 class="section-heading">Movement</h2></div>
   <div class="dashboard-grid" {% if dashboard_lazy %}data-dashboard-section="movement" data-src="{{ url_for('admin.dashboard_movement_partial', branch=filters.branch or None, day=filters.day) }}"{% endif %}>

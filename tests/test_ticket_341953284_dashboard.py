@@ -191,7 +191,13 @@ def test_real_browser_desktop_mobile(app, client):
                 assert notification.get_attribute('href') == '/settings/notifications'
                 panel = page.locator('#owing-legacy-balances')
                 orders = page.locator('#owing-customers .owing-customers-panel').first
-                assert orders.bounding_box()['y'] + orders.bounding_box()['height'] <= panel.bounding_box()['y']
+                order_box, legacy_box = orders.bounding_box(), panel.bounding_box()
+                if width > 1000:
+                    assert abs(order_box['y'] - legacy_box['y']) < 1
+                    assert order_box['x'] + order_box['width'] <= legacy_box['x']
+                    assert abs(order_box['width'] - legacy_box['width']) < 1
+                else:
+                    assert order_box['y'] + order_box['height'] <= legacy_box['y']
                 assert panel.locator('tbody tr').count() == 4
                 assert panel.locator('td.owing-amount').first.evaluate('(e)=>getComputedStyle(e.querySelector("strong")).color') == 'rgb(180, 35, 24)'
                 for amount in panel.locator('td.owing-amount').all():
