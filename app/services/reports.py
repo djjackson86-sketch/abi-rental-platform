@@ -262,6 +262,167 @@ def received_revenue_by_day(start_date, end_date, branch_id=None):
     return {day: money(sum(values.values())) for day, values in categories.items()}
 
 
+REVENUE_BREAKDOWN_LABELS = {
+    "trailer_rentals": "Trailer rentals",
+    "sales_repairs": "Sales & repairs",
+    "unattributed": "Other / unclassified",
+}
+
+REVENUE_BREAKDOWN_METHOD_LABELS = {
+    "cash": "Cash",
+    "card": "Card",
+    "eft": "EFT",
+    "other": "Other",
+    "manual": "Manual",
+    "customer_credit": "Customer credit",
+    "deposit_applied": "Deposit applied",
+    "account": "Account",
+}
+
+
+def _breakdown_method_label(method):
+    method = (method or "").lower()
+    return REVENUE_BREAKDOWN_METHOD_LABELS.get(method, method.title() if method else "Other")
+
+
+def daily_revenue_breakdown(day=None, branch_id=None):
+    """What the day's "Revenue for the day" card is made of (ABI-341953335).
+
+    The card is the day's share of the earned-receipt calculation, so the honest
+    explanation is the receipts that produced it, not the payment-method cards:
+    a security deposit received today is cash in hand but not income until it is
+    applied to charges, and a deposit refunded today moves a liability back out
+    without touching revenue.
+
+    Every figure below is read from the same engine as the card
+    (``order_revenue_events``): the lines carry the revenue each receipt
+    recognised *that day*, so ``total`` equals ``dashboard_day_metrics``' revenue
+    by construction and the panel cannot drift from the card. ``reconciles``
+    states that comparison for the template rather than hiding a disagreement.
+    """
+    db = get_db()
+    day = day or local_now_iso(timespec="seconds")[:10]
+    from app.services.revenue import order_revenue_events
+    from app.services.payments import _legacy_payment_where
+
+    lines = []
+    for row in order_revenue_events(day, day, branch_id, detail=True):
+        data = row_dict(row)
+        received = money(data.get("receipt"))
+        applied = money(data.get("applied"))
+        recognised = money(data.get("amount"))
+        method = (data.get("method") or "").lower()
+        lines.append({
+            "source": "payment",
+            "order_number": data.get("order_number") or "",
+            "customer": data.get("customer_name") or "",
+            "method": method or "manual",
+            "method_label": _breakdown_method_label(method),
+            "category": data.get("category") or "unattributed",
+            "received": received,
+            "applied": applied,
+            # What this receipt added to revenue on this day.
+            "recognised": recognised,
+            # Received but still held (a refundable security deposit, or money
+            # not yet earned), i.e. the part of the receipt that is not income.
+            "held": money(received + applied - recognised),
+            "reference": data.get("reference") or "",
+            "payment_date": data.get("payment_date") or "",
+        })
+
+    # Legacy (imported) receipts have no payment row; they are revenue in full
+    # and stay in the "Other / unclassified" category, exactly as the cards count
+    # them.
+    where, params = _legacy_payment_where(False, branch_id, day, day)
+    for row in db.execute(
+        f"""SELECT lp.amount, lp.method, lp.reference, lp.payment_date, lp.created_at,
+            c.name AS customer_name
+        FROM legacy_balance_payments lp JOIN customers c ON c.id = lp.customer_id
+        WHERE {' AND '.join(where)} ORDER BY lp.id""",
+        params,
+    ).fetchall():
+        data = row_dict(row)
+        amount = money(data.get("amount"))
+        method = (data.get("method") or "").lower()
+        lines.append({
+            "source": "legacy",
+            "order_number": "",
+            "customer": data.get("customer_name") or "",
+            "method": method or "manual",
+            "method_label": _breakdown_method_label(method),
+            "category": "unattributed",
+            "received": amount,
+            "applied": 0.0,
+            "recognised": amount,
+            "held": 0.0,
+            "reference": data.get("reference") or "",
+            "payment_date": data.get("created_at") or "",
+        })
+
+    recognised_total = money(sum(line["recognised"] for line in lines))
+    received_total = money(sum(line["received"] for line in lines))
+    applied_total = money(sum(line["applied"] for line in lines))
+    held_total = money(sum(line["held"] for line in lines))
+
+    categories = []
+    for key in REVENUE_CARD_CATEGORIES:
+        amount = money(sum(line["recognised"] for line in lines if line["category"] == key))
+        categories.append({
+            "key": key,
+            "label": REVENUE_BREAKDOWN_LABELS.get(key, key.replace("_", " ").title()),
+            "amount": amount,
+        })
+    # Anything outside the three cards' categories still belongs in the split.
+    for key in sorted({line["category"] for line in lines} - set(REVENUE_CARD_CATEGORIES)):
+        amount = money(sum(line["recognised"] for line in lines if line["category"] == key))
+        if amount:
+            categories.append({"key": key, "label": key.replace("_", " ").title(), "amount": amount})
+
+    refunds = []
+    refund_total = 0.0
+    for key in ("cash", "card", "eft", "customer_credit", "other", "manual"):
+        amount = money(deposit_refunds(day, branch_id, key))
+        if amount:
+            refunds.append({"key": key, "label": _breakdown_method_label(key), "amount": amount})
+            refund_total = money(refund_total + amount)
+
+    methods = {}
+    for line in lines:
+        bucket = methods.setdefault(line["method"], {
+            "key": line["method"],
+            "label": line["method_label"],
+            "received": 0.0,
+            "recognised": 0.0,
+        })
+        bucket["received"] = money(bucket["received"] + line["received"] + line["applied"])
+        bucket["recognised"] = money(bucket["recognised"] + line["recognised"])
+    for bucket in methods.values():
+        bucket["refunds"] = money(deposit_refunds(day, branch_id, bucket["key"]))
+
+    revenue_card = received_revenue_by_day(day, day, branch_id).get(day, 0.0)
+    return {
+        "day": day,
+        "branch_id": branch_id,
+        "total": money(revenue_card),
+        "lines": lines,
+        "line_count": len(lines),
+        "received_total": received_total,
+        "applied_total": applied_total,
+        # Receipts plus deposits applied to charges: the top line of the panel.
+        "money_in_total": money(received_total + applied_total),
+        "held_total": held_total,
+        "recognised_total": recognised_total,
+        # Received + applied - still held: the arithmetic the panel shows, done
+        # here so the template never does its own sums.
+        "reconciles_total": money(received_total + applied_total - held_total),
+        "refund_total": refund_total,
+        "refunds": refunds,
+        "categories": categories,
+        "methods": sorted(methods.values(), key=lambda item: (-item["received"], item["label"])),
+        "reconciles": money(revenue_card) == recognised_total,
+    }
+
+
 def monthly_received_revenue(year, branch_id=None, revenue_type="gross", start_date=None, end_date=None):
     """Twelve 31-day series; nonexistent calendar dates are gaps, not zeroes."""
     start = max(f"{year:04d}-01-01", start_date or f"{year:04d}-01-01")

@@ -165,6 +165,20 @@
     button.setAttribute('aria-expanded', String(expanded));
     button.textContent = expanded ? 'Show fewer' : 'Show all (' + rows.children.length + ')';
   });
+  // Ticket ABI-341953335: the Revenue breakdown loads the first time it is
+  // opened, through its own scoped partial. Delegated, so it also covers the
+  // days panel arriving from the lazy loader after this script ran.
+  section.addEventListener('click', function (event) {
+    var summary = event.target.closest('[data-revenue-disclosure] > summary');
+    if (!summary || !section.contains(summary)) return;
+    var box = summary.parentElement.querySelector('[data-revenue-source]');
+    if (!box || box.getAttribute('data-loaded') === '1') return;
+    box.setAttribute('data-loaded', '1');
+    fetch(box.getAttribute('data-src'), {headers: {'X-Requested-With': 'fetch'}})
+      .then(function (response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.text(); })
+      .then(function (html) { box.innerHTML = html; })
+      .catch(function () { box.innerHTML = '<div class="flash error">Could not load the revenue breakdown. Refresh to try again.</div>'; });
+  });
 }());
 </script>
 {% if dashboard_lazy %}

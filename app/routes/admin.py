@@ -10,7 +10,7 @@ from app.services import group_images
 from app.services.legacy_balances import outstanding_legacy_balances
 from app.services.products import list_product_groups, list_products, get_product_group, update_group_description
 from app.services.orders import calendar_group_availability, calendar_month_overview, dashboard_schedule, list_orders, scheduled_events, status_label
-from app.services.reports import monthly_received_revenue, customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics, received_revenue_by_category, previous_month_period
+from app.services.reports import monthly_received_revenue, customer_summary, dashboard_day_metrics, dashboard_period_metrics, orders_by_status, orders_export_rows, payments_by_method, product_performance, summary_metrics, received_revenue_by_category, previous_month_period, daily_revenue_breakdown
 from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, user_can_module
 from app.services.branches import branch_options
 from app.services import spare_wheels
@@ -293,6 +293,26 @@ def dashboard_day_partial():
     return render_template(
         "admin/_dashboard_day_metrics.html",
         day_metrics=dashboard_day_metrics(day=selected_day, branch_id=branch_id),
+    )
+
+
+@bp.get("/dashboard/partials/day/revenue")
+@login_required
+def dashboard_day_revenue_partial():
+    """What the day's Revenue card is made of, on demand (ABI-341953335).
+
+    Read-only and scoped exactly like the day cards beside it: the same
+    ``_branch_filter()`` and ``_dashboard_selected_day()``, so a staff account
+    asking for a past day is pinned to today and a crafted ``?branch=`` cannot
+    widen its session scope.
+    """
+    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+    selected_day = _dashboard_selected_day()
+    return render_template(
+        "admin/_dashboard_revenue_breakdown.html",
+        breakdown=daily_revenue_breakdown(day=selected_day, branch_id=branch_id),
+        branch_label=branch_label,
+        day=selected_day,
     )
 
 

@@ -1,0 +1,113 @@
+{% set branch_name = branch_label or 'All branches' %}
+<div class="revenue-breakdown-panel">
+  <p class="muted revenue-breakdown-intro">
+    <strong>Revenue for the day is money received today</strong>, not the value of the orders raised
+    today. It is the {branch_name} share of receipts dated {{ breakdown.day }}, less any security
+    deposit still being held and not yet applied to rental charges.
+  </p>
+
+  <div class="revenue-breakdown-check">
+    <span>Money received today <b>{{ breakdown.money_in_total|currency }}</b></span>
+    {% if breakdown.held_total %}
+    <span>Less held (security deposit not yet income) <b>-{{ breakdown.held_total|currency }}</b></span>
+    {% endif %}
+    <span class="revenue-breakdown-equals">= Revenue for the day <b>{{ breakdown.total|currency }}</b></span>
+  </div>
+
+  {% if not breakdown.reconciles %}
+  <div class="flash error">The lines below do not add up to the Revenue card ({{ breakdown.recognised_total|currency }} vs {{ breakdown.total|currency }}). Report this to the developer before relying on the split.</div>
+  {% endif %}
+
+  {% if breakdown.lines %}
+  <div class="table-wrap">
+    <table class="data-table revenue-breakdown-table">
+      <thead>
+        <tr>
+          <th>Order</th>
+          <th>Customer</th>
+          <th>Method</th>
+          <th class="owing-amount">Received today</th>
+          <th class="owing-amount">Counted as revenue</th>
+          <th class="owing-amount">Still held</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in breakdown.lines %}
+        <tr>
+          <td>
+            {% if line.order_number %}<strong class="table-primary-text">{{ line.order_number }}</strong>{% else %}<strong class="table-primary-text">Legacy receipt</strong>{% endif %}
+            {% if line.reference %}<small>{{ line.reference }}</small>{% endif %}
+          </td>
+          <td>
+            <span>{{ line.customer or 'Unnamed customer' }}</span>
+            <small>{{ line.payment_date[:16]|replace('T', ' ') }}</small>
+          </td>
+          <td>
+            <span>{{ line.method_label }}</span>
+            <small>{{ line.category|replace('_', ' ')|title }}</small>
+          </td>
+          <td class="owing-amount">{{ line.received|currency }}{% if line.applied %}<small>plus {{ line.applied|currency }} deposit applied</small>{% endif %}</td>
+          <td class="owing-amount"><strong>{{ line.recognised|currency }}</strong></td>
+          <td class="owing-amount">{% if line.held %}{{ line.held|currency }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th colspan="3">{{ breakdown.line_count }} receipt{% if breakdown.line_count != 1 %}s{% endif %}</th>
+          <th class="owing-amount">{{ breakdown.money_in_total|currency }}</th>
+          <th class="owing-amount">{{ breakdown.recognised_total|currency }}</th>
+          <th class="owing-amount">{{ breakdown.held_total|currency }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-results"><strong>Nothing received</strong><span>No payments or receipts are dated {{ breakdown.day }} for this branch.</span></div>
+  {% endif %}
+
+  <div class="revenue-breakdown-grid">
+    <div>
+      <h3>What kind of revenue</h3>
+      <table class="data-table revenue-breakdown-compact">
+        <tbody>
+          {% for category in breakdown.categories %}
+          <tr><td>{{ category.label }}</td><td class="owing-amount">{{ category.amount|currency }}</td></tr>
+          {% endfor %}
+          <tr class="revenue-breakdown-total"><td>Revenue for the day</td><td class="owing-amount"><strong>{{ breakdown.total|currency }}</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3>Received by method</h3>
+      <table class="data-table revenue-breakdown-compact">
+        <tbody>
+          {% for method in breakdown.methods %}
+          <tr>
+            <td>{{ method.label }}
+              {% if method.refunds %}<small>{{ method.refunds|currency }} deposit refunded</small>{% endif %}
+            </td>
+            <td class="owing-amount">{{ method.received|currency }}</td>
+          </tr>
+          {% else %}
+          <tr><td>No receipts</td><td class="owing-amount">{{ 0.0|currency }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if breakdown.refunds %}
+  <p class="muted revenue-breakdown-note">
+    <strong>Security deposits paid back today: {{ breakdown.refund_total|currency }}</strong>
+    ({% for refund in breakdown.refunds %}{{ refund.label }} {{ refund.amount|currency }}{% if not loop.last %}, {% endif %}{% endfor %}).
+    Returning a deposit refunds money the business was holding for the customer, so it reduces the
+    Cash/Card/EFT/Other payment cards but is not a revenue adjustment.
+  </p>
+  {% endif %}
+  <p class="muted revenue-breakdown-note">
+    The Cash, Card, EFT and Other cards above are cash movements for {{ breakdown.day }}: they include
+    deposits taken and exclude deposits refunded. Revenue here is the earned part of those receipts,
+    so the two can differ by exactly the held and refunded deposit amounts shown on this panel.
+  </p>
+</div>

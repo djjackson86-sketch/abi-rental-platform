@@ -12,3 +12,13 @@
   <div class="metric-card"><small>Total no. of trailers out</small><b>{{ day_metrics.trailers_out }}</b><span>{{ day_metrics.day }}</span></div>
   <div class="metric-card"><small>Total no. of trailers in</small><b>{{ day_metrics.trailers_in }}</b><span>Live stock</span></div>
 </section>
+{# Ticket ABI-341953335: the receipts behind "Revenue for the day", loaded only
+   when asked for, through the same branch/day scope as the cards above. #}
+<details class="panel revenue-breakdown-disclosure" data-revenue-disclosure>
+  <summary>What's the Revenue for the day ({{ day_metrics.revenue|currency }}) made of?</summary>
+  <div class="revenue-breakdown-body" data-revenue-source data-loaded="0"
+       data-src="{{ url_for('admin.dashboard_day_revenue_partial', branch=request.args.get('branch') or None, day=request.args.get('day') or None) }}">
+    <p class="muted">Loading the receipts behind this figure…</p>
+  </div>
+</details>
+

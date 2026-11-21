@@ -776,3 +776,23 @@ a.pending-check-link:active{background:#e7f0ff}
 .scan-review-panel .scan-disapprove-action .form-help { font-weight:600; color:var(--ink-2); }
 .badge.vehicle-unapproved-badge { background:#fee2e2; color:#a11212; font-weight:800; }
 .scan-review-panel .scan-vehicle-approved-state { display:flex; align-items:center; gap:10px; margin:0 0 14px; padding:12px 14px; border:1px solid #fecaca; border-radius:var(--radius,12px); background:var(--danger-soft,#fff0ee); color:var(--danger,#b42318); font-weight:650; }
+/* Ticket ABI-341953335: "What's the Revenue for the day made of?" panel. */
+.revenue-breakdown-disclosure{margin-top:12px;padding:0}
+.revenue-breakdown-disclosure>summary{cursor:pointer;padding:14px 18px;font-weight:750;color:var(--brand)}
+.revenue-breakdown-disclosure[open]>summary{border-bottom:1px solid var(--line-soft)}
+.revenue-breakdown-body{padding:16px 18px 18px}
+.revenue-breakdown-intro{margin:0 0 12px}
+.revenue-breakdown-check{display:flex;gap:18px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line-soft);border-radius:12px;background:var(--surface-soft);margin-bottom:14px}
+.revenue-breakdown-check span{display:grid;gap:2px;color:var(--muted);font-weight:650}
+.revenue-breakdown-check b{color:var(--ink);font-size:16px}
+.revenue-breakdown-equals{border-left:1px solid var(--line);padding-left:18px}
+.revenue-breakdown-equals b{color:var(--brand)}
+.revenue-breakdown-table{min-width:760px}
+.revenue-breakdown-table small,.revenue-breakdown-compact small{display:block;color:var(--muted)}
+.revenue-breakdown-table tfoot th{background:var(--surface-soft)}
+.revenue-breakdown-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:16px}
+.revenue-breakdown-grid h3{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+.revenue-breakdown-compact{min-width:0}
+.revenue-breakdown-total td{border-top:2px solid var(--line);font-weight:800}
+.revenue-breakdown-note{margin:12px 0 0;font-size:13px}
+@media(max-width:860px){.revenue-breakdown-grid{grid-template-columns:1fr}}
