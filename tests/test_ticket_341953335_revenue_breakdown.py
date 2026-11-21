@@ -244,6 +244,9 @@ def test_the_partial_renders_the_receipts_for_a_main_session(client, app):
     assert 'ORD-2001' not in page          # Pretoria never leaks in
     assert 'held' in page.lower()
     assert 'Revenue for the day' in page
+    # The heading names the depot, and no placeholder ever reaches the page.
+    assert 'Midrand' in page
+    assert '{branch_name}' not in page
 
 
 def test_a_staff_session_cannot_ask_for_a_past_day(client, app):
