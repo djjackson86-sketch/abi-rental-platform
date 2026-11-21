@@ -145,6 +145,22 @@
     {% endif %}
   </article>
 </section>
+{# Ticket ABI-341953333: internal notes live on the order page (staff only) so they
+   are visible as soon as the order is opened, and editable without opening Edit order. #}
+<section class="panel settings-form order-notes-panel">
+  <h2>Internal notes</h2>
+  <style>.order-notes-panel .order-notes-text{white-space:pre-wrap;word-break:break-word;margin:0 0 12px}</style>
+  {% if order.notes %}
+    <p class="order-notes-text">{{ order.notes }}</p>
+  {% else %}
+    <p class="empty">No internal notes yet.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('orders.update_notes', order_id=order.id) }}" class="payment-form">
+    <label>Internal notes (staff only)<textarea name="notes" rows="3" placeholder="Optional internal notes for this order">{{ order.notes or '' }}</textarea></label>
+    <p class="form-help">Staff only — never printed on quotes, invoices or customer statements. Clear the box and save to remove the note.</p>
+    <button class="btn primary" type="submit">Save notes</button>
+  </form>
+</section>
 <section class="panel settings-form">
   <h2>Items</h2>
   <div class="table-wrap">

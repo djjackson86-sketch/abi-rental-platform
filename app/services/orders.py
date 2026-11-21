@@ -1230,6 +1230,13 @@ def update_draft_order(order_id, form):
         allow_lifecycle_customer_id=order["customer_id"],
     )
     db = get_db()
+    # Data-safety net (update path only): internal notes moved off the edit form
+    # onto the order page (ticket ABI-341953333), so an ordinary Edit-save now
+    # submits NO "notes" field at all. Absent means "leave the stored note
+    # alone"; a field that IS submitted (the order page's own Save notes) is
+    # still respected, blank included, so the note can be cleared from there.
+    if form.get("notes") is None:
+        payload["notes"] = order["notes"] or ""
     # Data-safety net (update path only): the order form no longer exposes an
     # editable "Damage waiver amount" box, so a re-save of an existing
     # damage-waiver order may submit no amount (or an empty one). Preserve the

@@ -268,7 +268,11 @@
       <div class="estimate-grand-total"><span id="estimate-order-total-label">Estimated order total{% if order_form.get('deposit_option', 'security_deposit') == 'security_deposit' %} incl. refundable deposit{% elif order_form.get('deposit_option') == 'damage_waiver' %} incl. damage waiver{% endif %}</span><strong id="estimate-order-total">{{ 0|currency }}</strong></div>
     </div>
   </section>
-  <section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional internal notes for this order">{{ order_form.get('notes', '') }}</textarea></label></section>
+  {# Ticket ABI-341953333: internal notes moved to the order page. Keep the box on
+     the NEW order form (a note can still be seeded at creation) but drop it from
+     Edit order — update_draft_order carries the stored note forward when the
+     field is absent, so an ordinary edit-save can no longer blank it. #}
+  {% if not editing %}<section class="form-section"><h2>Notes</h2><label>Internal notes<textarea name="notes" rows="3" placeholder="Optional internal notes for this order">{{ order_form.get('notes', '') }}</textarea></label></section>{% endif %}
   <div class="form-actions"><button class="btn primary" type="submit" id="save-order-button" onclick="if(this.form.order_action){this.form.order_action.value=''}">{{ 'Save order changes' if editing else 'Save as draft' }}</button>{% if sales_repairs_available %}<button class="btn ghost" type="submit" onclick="if(this.form.order_action){this.form.order_action.value='sales_repairs'}">Save as {{ sales_repairs_label }}</button>{% endif %}</div>
 </form>
 <script src="{{ url_for('static', filename='js/order-customer-picker.js') }}" defer></script>

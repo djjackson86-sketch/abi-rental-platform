@@ -823,6 +823,25 @@ def detail(order_id):
     )
 
 
+@bp.post("/<int:order_id>/notes")
+@login_required
+def update_notes(order_id):
+    """Ticket ABI-341953333: edit the order's internal notes from the order page.
+
+    Deliberately narrow. ``update_draft_order`` rebuilds the whole payload
+    (customer, dates, items, totals, discount, waiver) from a full edit form, so
+    a notes-only POST must not go through it. Nothing but ``orders.notes`` is
+    written here — no totals, payments or status.
+    """
+    _ensure_order_access(order_id)
+    notes = (request.form.get("notes") or "").strip()
+    db = get_db()
+    db.execute("UPDATE orders SET notes = ? WHERE id = ?", (notes, order_id))
+    db.commit()
+    flash("Internal notes saved", "success")
+    return redirect(url_for("orders.detail", order_id=order_id))
+
+
 @bp.post("/<int:order_id>/revise-return")
 @login_required
 def revise_return(order_id):
