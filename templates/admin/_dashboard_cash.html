@@ -96,12 +96,19 @@
             {% endfor %}
           </select>
         </label>
-        <label>Service / maintenance type
-          <select name="service_type" required data-trailer-service-type>
-            <option value="">Choose type</option>
-            {% for service_type in trailer_service_types %}<option value="{{ service_type }}">{{ service_type }}</option>{% endfor %}
-          </select>
-        </label>
+        {# Ticket ABI-341953342: several jobs are usually done in one visit, so the
+           type is a tick-any-that-apply chip group instead of a one-value select
+           (a native multiple select is unusable on the iPhone home-screen app).
+           Every ticked value posts as its own ``service_type`` form field. #}
+        <fieldset class="trailer-service-types span-2">
+          <legend>Service / maintenance type <small>Tick every job done</small></legend>
+          <div class="service-type-options" data-trailer-service-types>
+            {% for service_type in trailer_service_types %}
+            <label class="service-type-option"><input type="checkbox" name="service_type" value="{{ service_type }}" data-trailer-service-type-option> {{ service_type }}</label>
+            {% endfor %}
+          </div>
+          <p class="cash-note trailer-service-error" data-trailer-service-error hidden>Tick at least one service or maintenance type.</p>
+        </fieldset>
         <label data-trailer-custom-field hidden>Custom service done<input name="custom_description" maxlength="500" placeholder="Describe the service or maintenance"></label>
       </div>
       <div class="form-actions"><button class="btn primary" type="submit">Add trailer</button></div>
@@ -356,17 +363,40 @@
 {% endif %}
 <script>
 (function(){
-  const typeSelect=document.querySelector('[data-trailer-service-type]');
+  const typeGroup=document.querySelector('[data-trailer-service-types]');
+  const typeBoxes=typeGroup?[...typeGroup.querySelectorAll('input[name="service_type"]')]:[];
+  const typeForm=typeGroup?typeGroup.closest('form'):null;
+  const typeError=typeForm?typeForm.querySelector('[data-trailer-service-error]'):null;
   const customField=document.querySelector('[data-trailer-custom-field]');
   const customInput=customField?customField.querySelector('input[name="custom_description"]'):null;
   const productSearch=document.querySelector('[data-trailer-product-search]');
   const productSelect=document.querySelector('[data-trailer-product-select]');
   function syncCustom(){
-    const isCustom=typeSelect&&typeSelect.value==='Custom';
+    const isCustom=typeBoxes.some(box=>box.checked&&box.value==='Custom');
     if(customField) customField.hidden=!isCustom;
     if(customInput) customInput.required=!!isCustom;
   }
-  if(typeSelect){typeSelect.addEventListener('change',syncCustom);syncCustom();}
+  function syncChips(){
+    typeBoxes.forEach(box=>{
+      const chip=box.closest('.service-type-option');
+      if(chip) chip.classList.toggle('is-checked', box.checked);
+    });
+    syncCustom();
+  }
+  if(typeBoxes.length){
+    typeBoxes.forEach(box=>box.addEventListener('change',syncChips));
+    syncChips();
+  }
+  if(typeForm){
+    typeForm.addEventListener('submit',event=>{
+      if(typeBoxes.some(box=>box.checked)){
+        if(typeError) typeError.hidden=true;
+        return;
+      }
+      event.preventDefault();
+      if(typeError) typeError.hidden=false;
+    });
+  }
   if(productSearch&&productSelect){
     const products=[...document.querySelectorAll('#trailer-service-products option')];
     productSearch.addEventListener('change',()=>{

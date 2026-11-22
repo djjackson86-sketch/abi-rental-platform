@@ -121,11 +121,13 @@ def test_dashboard_offers_new_labels_in_order_without_mechanism_repairs(client, 
     # Ticket ABI-341953339 moved the day-end panels onto /day-report.
     body = client.get('/day-report?branch=1').get_data(as_text=True)
     assert 'Service / maintenance type' in body
-    select = body[body.index('name="service_type"'):]
-    select = select[:select.index('</select>')]
-    offered = [html.unescape(value) for value in re.findall(r'<option value="([^"]*)"', select)]
-    # One blank "Choose type" prompt, then the owner's list in order.
-    assert offered == [''] + EXPECTED_LIST
+    # Ticket ABI-341953342 replaced the single-value select with a tick-any group
+    # of checkboxes that post the same ``service_type`` field, one per tick.
+    assert '<select name="service_type"' not in body
+    group = body[body.index('data-trailer-service-types'):]
+    group = group[:group.index('</fieldset>')]
+    offered = [html.unescape(value) for value in re.findall(r'name="service_type" value="([^"]*)"', group)]
+    assert offered == EXPECTED_LIST
     assert 'Mechanism repairs' not in body
 
 

@@ -60,27 +60,96 @@ def clean_service_type(service_type):
     return service_type
 
 
-def create_service_history(product_id, service_type, custom_description="", branch_id=None, user_id=None, service_date=None):
+def clean_service_types(values):
+    """Validate a multi-select submission of service / maintenance types.
+
+    Ticket ABI-341953342: one visit to the workshop often covers several jobs, so
+    the dashboard form now sends ``service_type`` more than once.  Blank values
+    are ignored (an empty ``getlist`` entry), duplicates collapse, and the result
+    is returned in ``TRAILER_SERVICE_TYPES`` order so the day panel, the report
+    and the product history always read the jobs in the order the list offers
+    them rather than the order the boxes happened to be ticked.
+
+    One off-list label rejects the whole submission: the caller writes nothing.
+    """
+    if isinstance(values, str):
+        values = [values]
+    chosen = []
+    for value in values or []:
+        service_type = (value or "").strip()
+        if not service_type:
+            continue
+        if service_type not in TRAILER_SERVICE_TYPES:
+            raise ValueError("Choose the service or maintenance type")
+        if service_type not in chosen:
+            chosen.append(service_type)
+    if not chosen:
+        raise ValueError("Choose the service or maintenance type")
+    return [service_type for service_type in TRAILER_SERVICE_TYPES if service_type in chosen]
+
+
+def _prepare_service_entry(product_id, service_types, custom_description, branch_id, service_date):
+    """Everything ``create_service_history_many`` validates before writing."""
     product = get_eligible_trailer_product(product_id, branch_id=branch_id)
     if not product:
         raise ValueError("Choose an active rental trailer from inventory")
-    service_type = clean_service_type(service_type)
+    service_types = clean_service_types(service_types)
     custom_description = (custom_description or "").strip()
-    if service_type == "Custom" and not custom_description:
+    if "Custom" in service_types and not custom_description:
         raise ValueError("Enter the custom service or maintenance done")
-    if service_type != "Custom":
-        custom_description = ""
     timestamp = now()
     service_date = (service_date or timestamp[:10]).strip()[:10]
-    db = get_db()
-    cur = db.execute(
-        """INSERT INTO trailer_service_history
-        (product_id, service_type, custom_description, service_date, branch_id, created_by_user_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (int(product["id"]), service_type, custom_description, service_date, branch_id, user_id, timestamp),
+    return int(product["id"]), service_types, custom_description, service_date, timestamp
+
+
+def create_service_history_many(product_id, service_types, custom_description="", branch_id=None, user_id=None, service_date=None):
+    """Record one trailer service entry per selected type - one row each.
+
+    One row per type (no schema change) keeps every existing reader working: the
+    dashboard day panel, the day report PDF and CSV, and the product's own
+    service history all loop the ``trailer_service_history`` rows, so several
+    jobs ticked in one submission appear as several lines for the same trailer
+    on the same date and depot.
+
+    Every type is validated first; nothing is written if any of them is refused.
+    Returns the inserted row ids.
+    """
+    product_id, service_types, custom_description, service_date, timestamp = _prepare_service_entry(
+        product_id, service_types, custom_description, branch_id, service_date
     )
+    db = get_db()
+    row_ids = []
+    for service_type in service_types:
+        cur = db.execute(
+            """INSERT INTO trailer_service_history
+            (product_id, service_type, custom_description, service_date, branch_id, created_by_user_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                product_id,
+                service_type,
+                custom_description if service_type == "Custom" else "",
+                service_date,
+                branch_id,
+                user_id,
+                timestamp,
+            ),
+        )
+        row_ids.append(cur.lastrowid)
     db.commit()
-    return cur.lastrowid
+    return row_ids
+
+
+def create_service_history(product_id, service_type, custom_description="", branch_id=None, user_id=None, service_date=None):
+    """Single-type entry; kept for the callers and tests that still pass one type."""
+    row_ids = create_service_history_many(
+        product_id,
+        [service_type],
+        custom_description,
+        branch_id=branch_id,
+        user_id=user_id,
+        service_date=service_date,
+    )
+    return row_ids[0]
 
 
 def list_service_history(product_id, limit=100):

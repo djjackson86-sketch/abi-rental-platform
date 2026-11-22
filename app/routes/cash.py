@@ -205,14 +205,18 @@ def save_interactions():
 @bp.post("/trailer-service")
 @login_required
 def add_trailer_service():
-    """Capture trailer service/maintenance against a rental inventory item."""
+    """Capture trailer service/maintenance against a rental inventory item.
+
+    Ticket ABI-341953342: more than one service / maintenance type can be ticked
+    for the same trailer, and each one is stored as its own history line.
+    """
     day = _day_from_request()
     branch_id = _target_branch()
     try:
         cash.guard_writable_day(day)
-        trailer_service.create_service_history(
+        saved = trailer_service.create_service_history_many(
             request.form.get("product_id", ""),
-            request.form.get("service_type", ""),
+            request.form.getlist("service_type"),
             request.form.get("custom_description", ""),
             branch_id=branch_id,
             user_id=_user_id(),
@@ -221,7 +225,9 @@ def add_trailer_service():
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(return_url(branch_id))
-    return _done(f"Trailer service and maintenance saved for {day}", branch_id)
+    if len(saved) == 1:
+        return _done(f"Trailer service and maintenance saved for {day}", branch_id)
+    return _done(f"{len(saved)} trailer service lines saved for {day}", branch_id)
 
 
 @bp.post("/used")
