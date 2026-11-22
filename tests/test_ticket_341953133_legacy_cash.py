@@ -106,7 +106,7 @@ def test_recorded_notes_labeled_escaped_and_exported(app, client, day, branch):
         cash.save_pos_cash_up(day, '0', branch_id=1, pos_cash_up_notes='Terminal <b>\nSecond POS line')
         cash.save_notes(day, 'End of day kept', branch_id=1)
     login(client)
-    body = client.get('/dashboard?branch=' + branch + '&day=' + day).get_data(as_text=True)
+    body = client.get('/day-report?branch=' + branch + '&day=' + day).get_data(as_text=True)
     assert body.count('recorded-cashup-note') == 2
     assert '<strong>Cash up notes</strong>' in body and '<strong>POS Cashup notes</strong>' in body
     assert 'Drawer &lt;script&gt;\nSecond cash line' in body
@@ -130,6 +130,6 @@ def test_blank_notes_do_not_create_summary_or_export_sections(app, client):
         cash.save_cash_up(TODAY, '0', branch_id=1, cash_up_notes='  ')
         cash.save_pos_cash_up(TODAY, '0', branch_id=1, pos_cash_up_notes='\n')
     login(client)
-    assert 'recorded-cashup-note' not in client.get('/dashboard?branch=1').get_data(as_text=True)
+    assert 'recorded-cashup-note' not in client.get('/day-report?branch=1').get_data(as_text=True)
     text = client.get('/cash-up/export.csv?branch=1&day=' + TODAY).get_data(as_text=True)
     assert 'Cash up notes,Notes,' not in text and 'POS Cashup notes,Notes,' not in text

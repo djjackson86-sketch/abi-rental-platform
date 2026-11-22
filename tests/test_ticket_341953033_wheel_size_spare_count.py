@@ -316,9 +316,9 @@ def test_a_branch_limited_account_only_ever_sees_its_own_depot(client, app):
     login(client, app, "Depot Two Staff", "staff123")
     # The panel is read through a real request, because the branch scope comes
     # from the session (and a crafted ?branch= can only ever narrow it).
-    own = client.get("/dashboard").data.decode()
+    own = client.get("/day-report").data.decode()
     assert re.findall(r'data-expected="(\d+)"', own)[0] == "4"
-    forced = client.get("/dashboard?branch=1").data.decode()
+    forced = client.get("/day-report?branch=1").data.decode()
     assert re.findall(r'data-expected="(\d+)"', forced)[0] == "4"
 
 
@@ -330,7 +330,7 @@ def test_the_dashboard_panel_lists_the_sizes_in_order_with_their_expected(client
     make_product(app, "Trailer A", 3, SIZES[0])
     make_product(app, "Trailer B", 2, SIZES[4])
     login(client, app)
-    html = client.get("/dashboard?branch=1").data.decode()
+    html = client.get("/day-report?branch=1").data.decode()
     # Superseded wording (ABI-341953036): the panel heading now reads
     # "Spare wheel count" instead of the old "Spare wheels by wheel size".
     assert "Spare wheel count" in html
@@ -342,7 +342,7 @@ def test_the_dashboard_panel_lists_the_sizes_in_order_with_their_expected(client
 def test_the_panel_sits_on_the_dashboard_and_is_editable_for_one_depot(client, app):
     make_product(app, "Trailer A", 3, SIZES[0])
     login(client, app)
-    html = client.get("/dashboard?branch=1").data.decode()
+    html = client.get("/day-report?branch=1").data.decode()
     assert 'action="/dashboard/spare-wheels"' in html
     assert 'name="branch" value="1"' in html
     assert f'name="day" value="{DAY}"' in html
@@ -352,9 +352,8 @@ def test_the_panel_sits_on_the_dashboard_and_is_editable_for_one_depot(client, a
 def test_the_all_branches_panel_is_read_only(app, client):
     make_product(app, "Depot One Trailer", 2, SIZES[0], branch_id=1)
     login(client, app)
-    html = client.get("/dashboard").data.decode()
+    html = client.get("/day-report").data.decode()
     assert 'action="/dashboard/spare-wheels"' not in html
-    assert "Select a branch in the top Branch filter to type in the actual counts." in html
     assert re.search(r'name="actual_0"', html) is None
 
 
@@ -366,7 +365,7 @@ def test_the_variance_readings_mark_zero_shortage_and_over(client, app):
     client.post("/dashboard/spare-wheels", data={
         "day": DAY, "branch": "1", "actual_0": "4", "actual_1": "1", "actual_2": "5",
     }, follow_redirects=True)
-    html = client.get("/dashboard?branch=1").data.decode()
+    html = client.get("/day-report?branch=1").data.decode()
     assert variance_kinds(html) == ["ok", "short", "over", "none", "none"]
     assert variance_texts(html)[:3] == ["&#10004; 0", "-2 (shortage)", "+4 (over)"]
     assert variance_texts(html)[3] == "Not counted yet"
@@ -403,7 +402,7 @@ def test_a_saved_count_comes_back_in_the_boxes(client, app):
     login(client, app)
     client.post("/dashboard/spare-wheels", data={"day": DAY, "branch": "1", "actual_3": "6"},
                 follow_redirects=True)
-    html = client.get("/dashboard?branch=1").data.decode()
+    html = client.get("/day-report?branch=1").data.decode()
     assert re.search(r'name="actual_3" value="6"', html)
     assert variance_kinds(html)[3] == "over"
     assert "+6 (over)" in html
@@ -451,8 +450,8 @@ def test_counts_are_kept_per_depot_and_never_leak_between_them(client, app):
                 follow_redirects=True)
     client.post("/dashboard/spare-wheels", data={"day": DAY, "branch": "2", "actual_0": "7"},
                 follow_redirects=True)
-    one = client.get("/dashboard?branch=1").data.decode()
-    two = client.get("/dashboard?branch=2").data.decode()
+    one = client.get("/day-report?branch=1").data.decode()
+    two = client.get("/day-report?branch=2").data.decode()
     assert re.search(r'name="actual_0" value="2"', one)
     assert re.search(r'name="actual_0" value="7"', two)
 
@@ -483,7 +482,7 @@ def test_the_all_branches_panel_sums_the_depots(client, app):
                 follow_redirects=True)
     client.post("/dashboard/spare-wheels", data={"day": DAY, "branch": "2", "actual_0": "3"},
                 follow_redirects=True)
-    html = client.get("/dashboard").data.decode()
+    html = client.get("/day-report").data.decode()
     assert variance_kinds(html)[0] == "over"
     assert "+5 (over)" in html
 
@@ -492,7 +491,7 @@ def test_a_count_for_another_day_does_not_show_today(client, app):
     login(client, app)
     client.post("/dashboard/spare-wheels", data={"day": "2026-01-01", "branch": "1", "actual_0": "9"},
                 follow_redirects=True)
-    html = client.get("/dashboard?branch=1").data.decode()
+    html = client.get("/day-report?branch=1").data.decode()
     assert variance_kinds(html)[0] == "none"
 
 
@@ -536,6 +535,9 @@ def test_a_staff_account_without_the_dashboard_module_cannot_reach_the_panel(cli
         get_db().execute("UPDATE users SET modules_json = ? WHERE id = ?", ('["orders"]', user_id))
         get_db().commit()
     login(client, app, "Orders Only", "staff123")
-    assert client.get("/dashboard").status_code == 403
+    # Read-only dashboard stays visible (ticket ABI-341953320); the day-end panels
+    # it no longer carries live behind the dashboard module on /day-report.
+    assert client.get("/dashboard").status_code == 200
+    assert client.get("/day-report").status_code == 403
     assert client.post("/dashboard/spare-wheels",
                        data={"day": DAY, "branch": "1", "actual_0": "1"}).status_code == 403

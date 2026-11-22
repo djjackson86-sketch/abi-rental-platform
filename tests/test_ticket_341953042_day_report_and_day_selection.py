@@ -137,14 +137,22 @@ def seed_day(app, day, branch_id=1, counted='840.00', notes='', used=None, drops
             cash.save_notes(day, notes, branch_id=branch_id)
 
 
-def dashboard(client, app, query='', staff=None):
+def day_report(client, app, query='', staff=None):
+    """The page the day-scoped panels moved to (ticket ABI-341953339)."""
     if staff:
         login(client, app, staff, 'staff123')
     else:
         login(client, app)
-    response = client.get(f'/dashboard{query}')
+    response = client.get(f'/day-report{query}')
     assert response.status_code == 200
     return response.get_data(as_text=True)
+
+
+def hero_day(html):
+    """The business day the page says it is reporting, from its hero heading."""
+    match = re.search(r'<h1>([^<]*)</h1>', html)
+    assert match, 'no hero heading on the page'
+    return match.group(1)
 
 
 def sections(html):
@@ -293,11 +301,11 @@ def test_previous_day_notes_can_come_from_the_interaction_notes(app):
     assert previous['interaction_notes'] == INTERACTION_NOTE
 
 
-def test_the_dashboard_shows_the_previous_days_notes_to_staff(client, app):
+def test_the_day_report_shows_the_previous_days_notes_to_staff(client, app):
     """A new day: nothing written yet, so the last recorded notes are shown."""
     seed_day(app, PAST, notes=NOTE, interactions=(1, 2, 3, 4, INTERACTION_NOTE))
     add_staff(client, app, 'Depot One Staff', 1)
-    html = dashboard(client, app, staff='Depot One Staff')
+    html = day_report(client, app, staff='Depot One Staff')
 
     assert f'Previous day’s notes ({PAST})' in html
     block = previous_notes_block(html)
@@ -315,11 +323,11 @@ def test_the_dashboard_shows_the_previous_days_notes_to_staff(client, app):
 def test_the_previous_day_notes_panel_goes_away_once_today_has_notes(client, app):
     seed_day(app, PAST, notes=NOTE)
     add_staff(client, app, 'Depot One Staff', 1)
-    html = dashboard(client, app, staff='Depot One Staff')
+    html = day_report(client, app, staff='Depot One Staff')
     assert 'Previous day’s notes' in html
 
     seed_day(app, TODAY, notes='Today is written up')
-    html = dashboard(client, app, staff='Depot One Staff')
+    html = day_report(client, app, staff='Depot One Staff')
     assert 'Previous day’s notes' not in html
     assert 'Today is written up' in html
 
@@ -327,14 +335,14 @@ def test_the_previous_day_notes_panel_goes_away_once_today_has_notes(client, app
 def test_another_depots_notes_are_never_shown_as_previous_day_notes(client, app):
     seed_day(app, PAST, notes='Depot one note', branch_id=1)
     add_staff(client, app, 'Depot Two Staff', 2)
-    html = dashboard(client, app, staff='Depot Two Staff')
+    html = day_report(client, app, staff='Depot Two Staff')
     assert 'Previous day’s notes' not in html
     assert 'Depot one note' not in html
 
 
 def test_the_all_branches_view_does_not_guess_at_previous_day_notes(client, app):
     seed_day(app, PAST, notes=NOTE)
-    html = dashboard(client, app)
+    html = day_report(client, app)
     assert 'Previous day’s notes' not in html
 
 
@@ -359,8 +367,8 @@ def test_the_main_profile_sees_the_selected_days_panels(client, app):
     client.post('/cash-up/used', data={'day': '', 'branch': '1', 'amount': '9.99',
                                        'description': 'Today spend'}, follow_redirects=True)
 
-    html = dashboard(client, app, query=f'?branch=1&day={PAST}')
-    assert sections(html)[0] == f'Business day {PAST}'
+    html = day_report(client, app, query=f'?branch=1&day={PAST}')
+    assert hero_day(html).startswith(f'{PAST} ·')
     # Cash up / cash used / bank drop off / notes for the selected day.
     assert 'Diesel for the bakkie' in html
     assert 'R120.50' in html
@@ -382,7 +390,7 @@ def test_the_main_profile_sees_the_selected_days_panels(client, app):
 def test_a_selected_past_day_is_read_only(client, app):
     seed_day(app, PAST, notes=NOTE, used=[('120.50', 'Diesel')], drops=['300.00'])
     login(client, app)
-    html = dashboard(client, app, query=f'?branch=1&day={PAST}')
+    html = day_report(client, app, query=f'?branch=1&day={PAST}')
     # No write path is offered for a day that is not today.
     for action in ('action="/cash-up"', 'action="/cash-up/notes"', 'action="/cash-up/used"',
                    'action="/cash-up/bank"', 'action="/cash-up/interactions"',
@@ -399,8 +407,8 @@ def test_a_selected_past_day_is_read_only(client, app):
 def test_today_still_renders_its_write_forms(client, app):
     """The read-only rule is scoped to other days: today is untouched."""
     login(client, app)
-    html = dashboard(client, app, query='?branch=1')
-    assert sections(html)[0] == 'Today'
+    html = day_report(client, app, query='?branch=1')
+    assert hero_day(html).startswith('Today ·')
     for action in ('action="/cash-up"', 'action="/cash-up/notes"', 'action="/cash-up/used"',
                    'action="/cash-up/bank"', 'action="/cash-up/interactions"',
                    'action="/cash-up/trailer-service"', 'action="/dashboard/spare-wheels"'):
@@ -411,23 +419,23 @@ def test_today_still_renders_its_write_forms(client, app):
 def test_a_junk_or_missing_day_falls_back_to_today(client, app):
     login(client, app)
     for query in ('?branch=1', '?branch=1&day=', '?branch=1&day=junk', '?branch=1&day=2026-13-45'):
-        html = dashboard(client, app, query=query)
-        assert sections(html)[0] == 'Today', query
+        html = day_report(client, app, query=query)
+        assert hero_day(html).startswith('Today ·'), query
         assert 'action="/cash-up"' in html, query
 
 
 def test_a_future_day_is_read_only_and_never_offered_as_editable(client, app):
     login(client, app)
-    html = dashboard(client, app, query=f'?branch=1&day={FUTURE}')
-    assert sections(html)[0] == f'Business day {FUTURE}'
+    html = day_report(client, app, query=f'?branch=1&day={FUTURE}')
+    assert hero_day(html).startswith(f'{FUTURE} ·')
     assert 'action="/cash-up"' not in html
     assert 'action="/dashboard/spare-wheels"' not in html
 
 
 def test_only_the_main_profile_gets_the_business_day_picker(client, app):
     add_staff(client, app, 'Depot One Staff', 1)
-    main_html = dashboard(client, app, query='?branch=1')
-    staff_html = dashboard(client, app, staff='Depot One Staff')
+    main_html = day_report(client, app, query='?branch=1')
+    staff_html = day_report(client, app, staff='Depot One Staff')
     assert '<input type="date" name="day"' in main_html and 'Business day' in main_html
     assert '<input type="date" name="day"' not in staff_html
     assert 'Business day' not in staff_html
@@ -438,8 +446,8 @@ def test_only_the_main_profile_gets_the_business_day_picker(client, app):
 def test_a_staff_sign_in_stays_pinned_to_today(client, app):
     seed_day(app, PAST, notes=NOTE, used=[('120.50', 'Diesel for the bakkie')])
     add_staff(client, app, 'Depot One Staff', 1)
-    html = dashboard(client, app, query=f'?day={PAST}', staff='Depot One Staff')
-    assert sections(html)[0] == 'Today'
+    html = day_report(client, app, query=f'?day={PAST}', staff='Depot One Staff')
+    assert hero_day(html).startswith('Today ·')
     assert 'Diesel for the bakkie' not in html
     assert 'Previous day’s notes' in html
     # Their own depot's day still writes normally.
@@ -461,9 +469,9 @@ def test_the_selected_days_report_download_is_named_for_that_day(client, app):
     assert 'Diesel for the bakkie,R120.50' in csv_body
 
 
-def test_the_download_links_on_the_dashboard_point_at_the_selected_day(client, app):
+def test_the_download_links_on_the_day_report_point_at_the_selected_day(client, app):
     login(client, app)
-    html = dashboard(client, app, query=f'?branch=1&day={PAST}')
+    html = day_report(client, app, query=f'?branch=1&day={PAST}')
     assert f'/cash-up/report.pdf?day={PAST}&amp;branch=1' in html
     assert f'/cash-up/export.csv?day={PAST}&amp;branch=1' in html
 
@@ -481,7 +489,7 @@ def test_a_past_day_spare_wheel_panel_is_that_depots_own_read_only_view(client, 
         spare_wheels.save_actual_counts(PAST, 1, {SIZE_A: 4})
         spare_wheels.save_actual_counts(PAST, 2, {SIZE_B: 9})
     login(client, app)
-    html = dashboard(client, app, query=f'?branch=1&day={PAST}')
+    html = day_report(client, app, query=f'?branch=1&day={PAST}')
     start = html.index('spare-wheel-panel')
     panel = html[start:html.index('</section>', start)]
     assert 'data-expected="3"' in panel, "the depot's own yard is in the view"
