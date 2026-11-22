@@ -90,6 +90,13 @@ _ENDPOINT_MODULE_RULES = [
     # It is already covered by the prefix above; listed here so the gate is
     # explicit rather than implied.
     ("admin.dashboard_spare_wheels", "dashboard"),
+    # Ticket ABI-341953339: the Day report page holds the day-end panels that
+    # used to sit on the dashboard (cash up, cash used, bank drops, notes, client
+    # interactions, spare wheels, trailer service, day report actions), so it
+    # carries the same module gate as the dashboard and its cash POSTs. Without
+    # this explicit rule the endpoint name matches no prefix and the page would
+    # be reachable by any signed-in account.
+    ("admin.day_report", "dashboard"),
     ("admin.calendar", "calendar"),
     ("admin.online_store", "online_store"),
     ("admin.reports", "reports"),

@@ -1,0 +1,58 @@
+{% extends "admin/layout.html" %}
+{% set title='Day report' %}
+{% block admin_body %}
+{# Ticket ABI-341953339: the day-end panels now have their own page at
+   Dashboard's level. The hero is the dashboard's own business-day + branch
+   filter, so ?branch= and ?day= behave exactly as they did there; the body is
+   the same partial the dashboard rendered, so the figures, the past-day
+   read-only rule and the branch scope are unchanged. #}
+<header class="dashboard-hero">
+  <div class="dashboard-hero-brand">
+    <div class="dashboard-hero-copy">
+      <p class="eyebrow">Day report</p>
+      <h1>{{ 'Today' if day_is_today else selected_day }} · {% if branch_label %}{{ branch_label }}{% elif branch_scope %}{{ branches[0].name if branches else 'Your branch' }}{% else %}All branches{% endif %}</h1>
+      <p class="dashboard-hero-note">{{ selected_day }} — client interactions, trailer service, cash used, bank drops, cash up, POS cashup, spare wheels, end of day notes and the day report downloads.</p>
+    </div>
+  </div>
+  <div class="dashboard-hero-side">
+    <form class="dashboard-branch-filter" id="day-report-branch-filter" method="get" action="{{ url_for('admin.day_report') }}">
+      {% if current_user_is_main %}
+      <div class="filter-group dashboard-day-filter">
+        <div class="filter-group-head"><strong>Business day</strong></div>
+        <input type="date" name="day" value="{{ selected_day }}" max="{{ today }}" onchange="this.form.submit()" aria-label="Business day">
+      </div>
+      <style>
+        /* Same shape as the dashboard hero filter: the Business day picker sits
+           beside the Branch picker with a 12px uppercase label. */
+        .dashboard-branch-filter .dashboard-day-filter{display:grid;gap:8px}
+        .dashboard-branch-filter .dashboard-day-filter input[type=date]{min-width:160px;max-width:210px}
+      </style>
+      {% endif %}
+      <div class="filter-group">
+        <div class="filter-group-head"><strong>Branch</strong></div>
+        {% if branch_scope %}
+        <label class="filter-fixed" title="Your account only sees this branch">{{ branches[0].name if branches else 'Your branch' }}</label>
+        {% else %}
+        <select name="branch" aria-label="Branch" onchange="this.form.submit()">
+          <option value="">All branches</option>
+          {% for branch in branches %}<option value="{{ branch.id }}" {% if filters.branch == branch.id|string %}selected{% endif %}>{{ branch.name }}</option>{% endfor %}
+        </select>
+        {% endif %}
+      </div>
+      {% if filters.branch %}<a class="filter-clear" href="{{ url_for('admin.day_report', day=filters.day) }}">Clear branch</a>{% endif %}
+      {% if current_user_is_main and not day_is_today %}<a class="filter-clear" href="{{ url_for('admin.day_report', branch=filters.branch or None, day=today) }}">Back to today</a>{% endif %}
+    </form>
+    <div class="dashboard-hero-actions">
+      <a class="btn ghost" href="{{ url_for('admin.dashboard', branch=filters.branch or None, day=filters.day) }}">← Dashboard</a>
+    </div>
+  </div>
+</header>
+
+{% include "admin/_dashboard_cash.html" %}
+
+{# Ticket ABI-341953300: a confirmed day-report send asks, once, whether to log
+   out. A submit from this page lands back here, so the flag is popped here as
+   the page renders (the dashboard does the same on its own renders). #}
+{% set day_report_logout_prompt = session.pop('day_report_logout_prompt', None) %}
+{% if day_report_logout_prompt %}{% include "admin/_day_report_logout_prompt.html" %}{% endif %}
+{% endblock %}

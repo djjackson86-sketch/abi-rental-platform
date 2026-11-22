@@ -335,8 +335,8 @@ def dashboard_owing_partial():
     )
 
 
-def _dashboard_cash_context():
-    selected_branch, branch_id, branch_label, branches, branch_scope = _branch_filter()
+def _dashboard_cash_context(branch_filter=None):
+    selected_branch, branch_id, branch_label, branches, branch_scope = branch_filter or _branch_filter()
     selected_day = _dashboard_selected_day()
     day_is_today = selected_day == cash_today_iso()
     cash_branch_id = branch_id or (branch_scope if isinstance(branch_scope, int) else None)
@@ -382,6 +382,35 @@ def _dashboard_cash_context():
 @login_required
 def dashboard_cash_partial():
     return render_template("admin/_dashboard_cash.html", **_dashboard_cash_context())
+
+
+@bp.get("/day-report")
+@login_required
+def day_report():
+    """The end-of-day page: the same panels that used to sit on the dashboard.
+
+    Ticket ABI-341953339 moved New client interactions, Trailer service and
+    maintenance, Cash used, Cash drop off (to bank), Cash up, POS Cashup, Spare
+    wheel count, End of day notes and Day report actions onto their own page at
+    Dashboard's level. Nothing here is new business logic: it renders the very
+    same ``admin/_dashboard_cash.html`` block from the same context builder, with
+    the same ``?branch=`` / ``?day=`` handling (``_branch_filter`` and
+    ``_dashboard_selected_day``), so the figures, the read-only past-day rule and
+    the branch scope are identical to what the dashboard used to show.
+
+    The page is gated by the ``dashboard`` module through the endpoint rule in
+    ``app.services.access`` — the same module as the cash POSTs it posts to.
+    """
+    branch_filter = _branch_filter()
+    selected_branch, branch_id, branch_label, branches, branch_scope = branch_filter
+    context = _dashboard_cash_context(branch_filter)
+    context.update(
+        branches=branches,
+        branch_label=branch_label,
+        branch_scope=branch_scope,
+        filters={"branch": selected_branch, "day": context["selected_day"]},
+    )
+    return render_template("admin/day_report.html", **context)
 
 
 @bp.get("/dashboard/partials/movement")
@@ -430,9 +459,10 @@ def dashboard_spare_wheels():
         flash(str(exc), "error")
     else:
         flash(f"Spare wheel count saved for {day}", "success")
-    if branch_id:
-        return redirect(url_for("admin.dashboard", branch=branch_id, day=day))
-    return redirect(url_for("admin.dashboard", day=day))
+    # Ticket ABI-341953339: the panel now lives on /day-report as well, so go back
+    # to whichever page posted the form instead of always to the dashboard.
+    from app.routes.cash import return_url
+    return redirect(return_url(branch_id))
 
 @bp.route("/coupons", methods=["GET", "POST"])
 @bp.route("/coupons/<int:coupon_id>/edit", methods=["GET", "POST"])

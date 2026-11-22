@@ -171,12 +171,13 @@ def seed_two_depots(app):
              notes='Depot two handed over.')
 
 
-def dashboard(client, app, query='', staff=None, password='staff123'):
+def day_report(client, app, query='', staff=None, password='staff123'):
+    """The page the combined Day report panel lives on (ticket ABI-341953339)."""
     if staff:
         login(client, app, staff, password)
     else:
         login(client, app)
-    response = client.get(f'/dashboard{query}')
+    response = client.get(f'/day-report{query}')
     assert response.status_code == 200
     return response.get_data(as_text=True)
 
@@ -185,8 +186,8 @@ def dashboard(client, app, query='', staff=None, password='staff123'):
 # The dashboard offers the downloads on All branches (main profile)
 # --------------------------------------------------------------------------- #
 
-def test_the_all_branches_dashboard_offers_the_combined_report_downloads(client, app):
-    html = dashboard(client, app)
+def test_the_all_branches_day_report_offers_the_combined_report_downloads(client, app):
+    html = day_report(client, app)
     assert 'Cash up · All branches' in html, 'the default main-profile view is All branches'
     assert 'Day report actions' in html
     assert f'/cash-up/report.pdf?day={TODAY}&amp;branch=all' in html
@@ -200,7 +201,7 @@ def test_the_all_branches_dashboard_offers_the_combined_report_downloads(client,
 
 def test_the_all_branches_report_panel_stays_read_only(client, app):
     """A combined view must never grow a write or submit action."""
-    html = dashboard(client, app)
+    html = day_report(client, app)
     panel = html[html.index('Day report actions'):html.index('</section>', html.index('Day report actions'))]
     assert '<form' not in panel, 'no form on the combined report actions'
     assert 'Submit day report' not in panel
@@ -209,8 +210,8 @@ def test_the_all_branches_report_panel_stays_read_only(client, app):
     assert 'name="cash_branch"' not in html
 
 
-def test_the_all_branches_dashboard_picks_up_a_past_day_too(client, app):
-    html = dashboard(client, app, query=f'?day={PAST}')
+def test_the_all_branches_day_report_picks_up_a_past_day_too(client, app):
+    html = day_report(client, app, query=f'?day={PAST}')
     assert f'/cash-up/report.pdf?day={PAST}&amp;branch=all' in html
     assert f'/cash-up/export.csv?day={PAST}&amp;branch=all' in html
     assert f'Combined figures for all' in html and PAST in html
@@ -219,7 +220,7 @@ def test_the_all_branches_dashboard_picks_up_a_past_day_too(client, app):
 def test_the_downloads_stay_hidden_from_a_multi_depot_staff_sign_in(client, app):
     """The combined report is a main-profile action (the ticket's wording)."""
     add_multi_branch_staff(client, app, 'Two Depot Staff', [1, 2])
-    html = dashboard(client, app, staff='Two Depot Staff')
+    html = day_report(client, app, staff='Two Depot Staff')
     assert 'Cash up · All branches' in html, 'their own depots, still a combined panel'
     assert 'Download day report (PDF)' not in html
     assert 'Download CSV' not in html
@@ -366,10 +367,10 @@ def test_a_pinned_account_bare_download_is_still_its_own_depot(client, app):
     assert 'Depot two toll' not in drawn
 
 
-def test_the_dashboard_links_match_what_the_routes_return(client, app):
+def test_the_day_report_links_match_what_the_routes_return(client, app):
     """The link the panel renders is the report it promises (no drift)."""
     seed_two_depots(app)
-    html = dashboard(client, app)
+    html = day_report(client, app)
     href = re.search(r'href="(/cash-up/report\.pdf[^"]*)"', html).group(1).replace('&amp;', '&')
     response = client.get(href)
     assert response.status_code == 200

@@ -22,7 +22,7 @@ field.
 import csv
 import re
 from io import StringIO
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from flask import Blueprint, Response, current_app, flash, redirect, request, session, url_for
 
@@ -60,6 +60,31 @@ def _dashboard_url(branch_id=None):
     return url_for("admin.dashboard")
 
 
+def return_url(branch_id=None):
+    """Where a cash/day form post goes back to.
+
+    Ticket ABI-341953339 moved the panels onto /day-report, so a form submitted
+    there must not bounce staff to the dashboard. The posting page is taken from
+    an explicit hidden ``next`` field when a form sends one, otherwise from the
+    same-origin ``Referer`` the browser already sends for a same-page POST.
+
+    Only a local path is honoured (``/...``), and never a protocol-relative
+    ``//host`` or a backslash path, so this can never become an open redirect.
+    Anything else falls back to the dashboard exactly as before, which keeps
+    every existing caller and its tests unchanged.
+    """
+    target = (request.form.get("next") or "").strip()
+    if not target:
+        referrer = request.referrer or ""
+        if referrer:
+            parts = urlsplit(referrer)
+            if not parts.netloc or parts.netloc == request.host:
+                target = parts.path + (f"?{parts.query}" if parts.query else "")
+    if target.startswith("/") and not target.startswith("//") and "\\" not in target:
+        return target
+    return _dashboard_url(branch_id)
+
+
 # Ticket ABI-341953300: a *confirmed* day-report send leaves this one-time flag in
 # the session. The dashboard template renders the "You have submitted your day
 # report, LOGOUT?" modal from it and pops it while rendering, so a refresh, a back
@@ -75,7 +100,7 @@ def _mark_day_report_logout_prompt(day):
 
 def _done(message, branch_id=None):
     flash(message, "success")
-    return redirect(_dashboard_url(branch_id))
+    return redirect(return_url(branch_id))
 
 
 @bp.post("")
@@ -105,7 +130,7 @@ def save():
         )
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"Cash up saved for {day}", branch_id)
 
 
@@ -134,7 +159,7 @@ def save_pos():
         )
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"POS cashup saved for {day}", branch_id)
 
 
@@ -149,7 +174,7 @@ def save_notes():
         cash.save_notes(day, request.form.get("notes", ""), branch_id=branch_id, user_id=_user_id())
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"End of day notes saved for {day}", branch_id)
 
 
@@ -173,7 +198,7 @@ def save_interactions():
         )
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"New client interactions saved for {day}", branch_id)
 
 
@@ -195,7 +220,7 @@ def add_trailer_service():
         )
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"Trailer service and maintenance saved for {day}", branch_id)
 
 
@@ -216,7 +241,7 @@ def add_used():
         )
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"Cash used added for {day}", branch_id)
 
 
@@ -231,7 +256,7 @@ def delete_used(entry_id):
         cash.delete_cash_used(entry_id, branch_id=branch_id)
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"Cash used line removed for {day}", branch_id)
 
 
@@ -255,7 +280,7 @@ def add_bank_drop():
         )
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"Bank drop off added for {day}", branch_id)
 
 
@@ -270,7 +295,7 @@ def delete_bank_drop(entry_id):
         cash.delete_bank_drop(entry_id, branch_id=branch_id)
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     return _done(f"Bank drop off line removed for {day}", branch_id)
 
 
@@ -415,7 +440,7 @@ def submit_report_telegram():
         others = [item for item in missing if item != cash.VARIANCE_NOTE_GATE]
         if others:
             flash(f"Complete these sections before submitting the day report: {', '.join(others)}", "error")
-        return redirect(_dashboard_url(branch_id))
+        return redirect(return_url(branch_id))
     filename = _report_filename(branch_name, day, cash_summary.get("branch_id"))
     caption = f"Day report — {branch_name} — {day}"
     result = _send_document(_report_pdf_bytes(report), filename, caption=caption)
@@ -433,7 +458,7 @@ def submit_report_telegram():
         flash("Telegram is not configured; day report was not sent", "error")
     else:
         flash("Day report could not be sent on Telegram", "error")
-    return redirect(_dashboard_url(branch_id))
+    return redirect(return_url(branch_id))
 
 
 @bp.get("/export.csv")

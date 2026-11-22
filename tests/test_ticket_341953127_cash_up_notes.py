@@ -100,7 +100,7 @@ def panel(body, heading, next_heading=None):
 
 def test_the_two_panels_have_their_own_notes_box(client):
     login(client)
-    body = client.get('/dashboard?branch=1').get_data(as_text=True)
+    body = client.get('/day-report?branch=1').get_data(as_text=True)
 
     cash_panel = panel(body, '<h2>Cash up · Branch 1</h2>', '<h2>POS Cashup')
     assert '<textarea name="cash_up_notes" rows="3"></textarea>' in cash_panel
@@ -125,6 +125,7 @@ def test_a_cash_up_note_saves_reloads_and_does_not_touch_the_end_of_day_notes(cl
     body = client.post('/cash-up', data={
         'day': TODAY, 'branch': '1', 'counted_cash': '350.00',
         'cash_up_notes': 'Drawer short by R50, safe key replaced.',
+        'next': '/day-report?branch=1',
     }, follow_redirects=True).get_data(as_text=True)
     assert 'Cash up saved' in body
 
@@ -141,7 +142,7 @@ def test_a_cash_up_note_saves_reloads_and_does_not_touch_the_end_of_day_notes(cl
     assert stored['notes'] == '' and stored['pos_cash_up_notes'] == ''
 
     # Re-opening the panel prefills the box with what was saved.
-    body = client.get('/dashboard?branch=1').get_data(as_text=True)
+    body = client.get('/day-report?branch=1').get_data(as_text=True)
     cash_panel = panel(body, '<h2>Cash up · Branch 1</h2>', '<h2>POS Cashup')
     assert ('<textarea name="cash_up_notes" rows="3">Drawer short by R50, safe key replaced.'
             '</textarea>') in cash_panel
@@ -159,6 +160,7 @@ def test_a_pos_note_saves_without_touching_the_counts_or_the_other_notes(client,
     body = client.post('/cash-up/pos', data={
         'day': TODAY, 'branch': '1', 'counted_card': '390.50',
         'pos_cash_up_notes': 'Two card slips not yet settled at the bank.',
+        'next': '/day-report?branch=1',
     }, follow_redirects=True).get_data(as_text=True)
     assert 'POS cashup saved' in body
 
@@ -175,7 +177,7 @@ def test_a_pos_note_saves_without_touching_the_counts_or_the_other_notes(client,
     assert stored['counted_cash'] is None
     assert stored['cash_up_notes'] == '' and stored['notes'] == ''
 
-    body = client.get('/dashboard?branch=1').get_data(as_text=True)
+    body = client.get('/day-report?branch=1').get_data(as_text=True)
     pos_panel = panel(body, '<h2>POS Cashup · Branch 1</h2>', '<h2>Spare wheel count</h2>')
     assert ('<textarea name="pos_cash_up_notes" rows="3">Two card slips not yet settled at the '
             'bank.</textarea>') in pos_panel
@@ -226,7 +228,7 @@ def test_the_notes_are_read_only_on_a_past_day(client, app):
     with app.app_context():
         cash.save_cash_up(YESTERDAY, '500.00', branch_id=1, cash_up_notes='Past day cash note.')
         cash.save_pos_cash_up(YESTERDAY, '250.00', branch_id=1, pos_cash_up_notes='Past day POS note.')
-    body = client.get(f'/dashboard?branch=1&day={YESTERDAY}').get_data(as_text=True)
+    body = client.get(f'/day-report?branch=1&day={YESTERDAY}').get_data(as_text=True)
 
     assert 'Past day cash note.' in body
     assert 'Past day POS note.' in body
@@ -244,7 +246,7 @@ def test_the_all_branches_view_shows_each_depots_notes(client, app):
         cash.save_cash_up(TODAY, '100.00', branch_id=1, cash_up_notes='Depot one cash note.')
         cash.save_pos_cash_up(TODAY, '60.00', branch_id=1, pos_cash_up_notes='Depot one POS note.')
         cash.save_cash_up(TODAY, '200.00', branch_id=2, cash_up_notes='Depot two cash note.')
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/day-report').get_data(as_text=True)
 
     assert 'Branch 1: Depot one cash note.' in body
     assert 'Branch 2: Depot two cash note.' in body

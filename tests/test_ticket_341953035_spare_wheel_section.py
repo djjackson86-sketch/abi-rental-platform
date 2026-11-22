@@ -28,7 +28,13 @@ What survives from ABI-341953035 and is still pinned here:
    plain wrapper around Movement, and no spare-wheel include left behind.
 
 Display-only: no route, service, DB, permission or JS change, and ``app.css``
-is not touched.  ``GET /dashboard`` (``admin.dashboard``) only.
+is not touched.
+
+**Moved again by ticket ABI-341953339**: the whole day-end block - spare wheels
+included - now renders on ``GET /day-report`` (``admin.day_report``), at
+Dashboard's level, and the dashboard keeps only its day metrics, Owing
+Customers, Legacy orders and Movement.  The dashboard assertions below therefore
+pin what is left there; the panel assertions read the Day report page.
 """
 
 import os
@@ -49,6 +55,7 @@ from app.services.access import MODULE_KEYS  # noqa: E402
 
 CSS_PATH = ROOT / "static" / "css" / "app.css"
 DASHBOARD_TEMPLATE = ROOT / "templates" / "admin" / "dashboard.html"
+DAY_REPORT_TEMPLATE = ROOT / "templates" / "admin" / "day_report.html"
 SPARE_TEMPLATE = ROOT / "templates" / "admin" / "_dashboard_spare_wheels.html"
 
 CASH_UP_HEADING = "Cash up \u00b7 end of day"
@@ -152,16 +159,31 @@ def dashboard_html(client, app, staff=None):
     return response.data.decode()
 
 
+def day_report_html(client, app, staff=None, query="?branch=1"):
+    if staff:
+        login(client, app, staff, "staff123")
+    else:
+        login(client, app)
+    response = client.get(f"/day-report{query}")
+    assert response.status_code == 200
+    return response.data.decode()
+
+
 # --------------------------------------------------------------------------- #
 # 1. The heading treatment this ticket bought is still in force
 # --------------------------------------------------------------------------- #
 
-def test_the_day_sections_still_wear_the_one_shared_wrapper(client, app):
-    """Today and Cash up · end of day still share the cash-up wrapper, class for class."""
+def test_the_remaining_day_section_still_wears_the_shared_wrapper(client, app):
+    """Today keeps the wrapper; the moved block keeps the same day-card treatment."""
     html = dashboard_html(client, app)
     today = section_for(html, "Today")
-    cash = section_for(html, CASH_UP_HEADING)
-    assert today == cash == ("dashboard-day", "dashboard-card-section")
+    assert today == ("dashboard-day", "dashboard-card-section")
+    # The same class vocabulary now rides on the Day report page: its day metrics
+    # bar keeps .dashboard-day-metrics and the panels keep .panel, so the type
+    # treatment this ticket bought did not change with the move.
+    day = day_report_html(client, app)
+    assert '<section class="metrics dashboard-metrics dashboard-day-metrics">' in day
+    assert '<section class="panel">' in day
 
 
 def test_the_heading_style_the_cash_up_section_uses_is_still_15px_uppercase():
@@ -193,10 +215,10 @@ def test_the_heading_style_the_cash_up_section_uses_is_still_15px_uppercase():
 # 2. The heading order, with the spare-wheel block no longer a named section
 # --------------------------------------------------------------------------- #
 
-def test_the_spare_wheel_block_is_no_longer_a_named_dashboard_section(client, app):
+def test_the_spare_wheel_block_is_not_a_named_dashboard_section(client, app):
     html = dashboard_html(client, app)
     headings = [heading for _, heading in named_sections(html)]
-    assert headings == ["Today", CASH_UP_HEADING, "Movement"]
+    assert headings == ["Today", "Movement"]
     assert not [heading for heading in headings if re.search(r"spare", heading, re.I)]
 
 
@@ -204,28 +226,29 @@ def test_the_branch_limited_staff_order_drops_the_spare_wheel_section(client, ap
     add_staff(client, app, "Depot Two Staff", 2)
     html = dashboard_html(client, app, staff="Depot Two Staff")
     headings = [heading for _, heading in named_sections(html)]
-    # No "Movement" block for a non-main account.
-    assert headings == ["Today", CASH_UP_HEADING]
+    # The dashboard's cash/day-end section is gone for every account; Movement
+    # is the only other named section it still carries.
+    assert headings == ["Today", "Movement"]
 
 
 # --------------------------------------------------------------------------- #
 # 3. The panel itself is still there, now riding inside the cash-up section
 # --------------------------------------------------------------------------- #
 
-def test_the_panel_still_renders_inside_the_cash_up_section(client, app):
-    html = dashboard_html(client, app)
-    cash = html.index(f'<h2 class="section-heading">{CASH_UP_HEADING}</h2>')
-    movement = html.index('<h2 class="section-heading">Movement</h2>')
+def test_the_panel_still_renders_after_the_cash_up_panel(client, app):
+    html = day_report_html(client, app)
+    cash = html.index('<h2>Cash up · Branch 1</h2>')
+    notes = html.index('<h2>End of day notes</h2>')
     panel = html.index('<section class="panel spare-wheel-panel">')
-    assert cash < panel < movement, (
-        "the spare-wheel panel should render inside the Cash up · end of day section"
+    assert cash < panel < notes, (
+        "the spare-wheel panel should render after the Cash up panel and before the notes"
     )
     assert 'action="/dashboard/spare-wheels"' in html
 
 
 def test_a_branch_limited_staff_account_still_gets_the_panel(client, app):
     add_staff(client, app, "Depot Three Staff", 3)
-    html = dashboard_html(client, app, staff="Depot Three Staff")
+    html = day_report_html(client, app, staff="Depot Three Staff")
     assert '<section class="panel spare-wheel-panel">' in html
     assert 'action="/dashboard/spare-wheels"' in html
 
@@ -234,19 +257,24 @@ def test_a_branch_limited_staff_account_still_gets_the_panel(client, app):
 # 4. Source guard
 # --------------------------------------------------------------------------- #
 
-def test_the_dashboard_template_now_carries_two_day_wrappers():
+def test_the_dashboard_template_keeps_only_the_day_metrics_wrapper():
     """A cheap source-level guard beside the rendered assertions above."""
     template = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
     section_lines = [line for line in template.splitlines()
                      if "dashboard-card-section" in line]
     assert section_lines == [
-        f'<section class="{DAY_WRAPPER}">',   # Today
-        f'<section class="{DAY_WRAPPER}">',   # Cash up · end of day
-        f'<section class="{PLAIN_WRAPPER}">',  # Movement keeps its plain wrapper
+        f'<section class="{DAY_WRAPPER}">',           # Today (day metrics)
+        f'<section class="{PLAIN_WRAPPER}" id="owing-customers">',
+        f'<section class="{PLAIN_WRAPPER}" id="legacy-orders">',
+        f'<section class="{PLAIN_WRAPPER}">',         # Movement
     ]
-    # The spare-wheel block is no longer a section of its own here.
+    # The day-end block, spare wheels included, is not rendered here any more:
+    # the Day report page includes it (ticket ABI-341953339).
     assert "_dashboard_spare_wheels.html" not in template
+    assert "_dashboard_cash.html" not in template
     assert not re.search(r"spare[- ]wheel", template, re.I)
+    day_report = DAY_REPORT_TEMPLATE.read_text(encoding="utf-8")
+    assert '{% include "admin/_dashboard_cash.html" %}' in day_report
 
 
 def test_the_panel_heading_is_the_only_wording_this_include_owns():

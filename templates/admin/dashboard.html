@@ -43,6 +43,7 @@
       {% if current_user_is_main and not day_is_today %}<a class="filter-clear" href="{{ url_for('admin.dashboard', branch=filters.branch or None, day=today) }}">Back to today</a>{% endif %}
     </form>
     <div class="dashboard-hero-actions">
+      {% if user_can('dashboard') %}<a class="btn ghost" href="{{ url_for('admin.day_report', branch=filters.branch or None, day=filters.day) }}">▤ Day report</a>{% endif %}
       {% if user_can('new_order') %}<a class="btn primary" href="{{ url_for('orders.new') }}">Create order</a>{% endif %}
       {% if user_can('reports') %}<a class="btn ghost" href="{{ url_for('admin.reports') }}">▤ Reports</a>{% endif %}
     </div>
@@ -111,12 +112,11 @@
   </div>
 </section>
 
-<section class="dashboard-day dashboard-card-section">
-  <div class="section-head"><h2 class="section-heading">Cash up · end of day</h2></div>
-  <div {% if dashboard_lazy %}data-dashboard-section="cash" data-src="{{ url_for('admin.dashboard_cash_partial', branch=filters.branch or None, day=filters.day) }}"{% endif %}>
-    {% if dashboard_lazy %}<section class="panel"><p class="muted">Loading end-of-day panels…</p></section>{% else %}{% include "admin/_dashboard_cash.html" %}{% endif %}
-  </div>
-</section>
+{# Ticket ABI-341953339: the day-end panels (New client interactions, Trailer
+   service and maintenance, Cash used, Cash drop off, Cash up, POS Cashup, Spare
+   wheel count, End of day notes and Day report actions) moved to their own
+   Day report page at the same level as the dashboard. The day's metrics and the
+   Movement cards above/below stay here. #}
 
 {# Ticket ABI-341953282: every order still owing money, at any date, on the
    dashboard. The heading sits outside the lazy target (like Cash up), so both

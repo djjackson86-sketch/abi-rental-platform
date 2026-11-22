@@ -30,6 +30,7 @@
   <form method="post" action="{{ url_for('admin.dashboard_spare_wheels') }}" class="settings-form spare-wheel-form">
     <input type="hidden" name="day" value="{{ spare_wheel_day }}">
     <input type="hidden" name="branch" value="{{ spare_wheel_branch_id }}">
+    <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
   {% endif %}
     <div class="table-wrap">
       <table class="spare-wheel-table">

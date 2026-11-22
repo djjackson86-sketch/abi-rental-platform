@@ -118,10 +118,10 @@ def test_pos_cashup_saves_counted_card_and_variance_without_touching_cash_count(
     assert cash_rows(app)[0]['counted_cash'] is None
 
 
-def test_dashboard_places_pos_cashup_after_cash_up_and_before_spare_wheel_count(client, app):
+def test_day_report_places_pos_cashup_after_cash_up_and_before_spare_wheel_count(client, app):
     seed_payment(app, 275, 'card')
     login(client, app)
-    body = client.get('/dashboard?branch=1').get_data(as_text=True)
+    body = client.get('/day-report?branch=1').get_data(as_text=True)
 
     cash_up = body.index('<h2>Cash up · Branch 1</h2>')
     pos = body.index('<h2>POS Cashup · Branch 1</h2>')
@@ -141,7 +141,7 @@ def test_all_branches_pos_cashup_is_read_only_aggregate(client, app):
     with app.app_context():
         cash.save_pos_cash_up(TODAY, '90', branch_id=1)
     login(client, app)
-    body = client.get('/dashboard').get_data(as_text=True)
+    body = client.get('/day-report').get_data(as_text=True)
 
     assert '<h2>POS Cashup · All branches</h2>' in body
     panel = body[body.index('<h2>POS Cashup · All branches</h2>'):body.index('</section>', body.index('<h2>POS Cashup · All branches</h2>'))]

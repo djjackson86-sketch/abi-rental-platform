@@ -3,6 +3,10 @@
    captured then, so every write form below is hidden; the figures and the
    downloads stay. "All branches" keeps its own wording. #}
 {% set cash_readonly = cash_day.aggregate or not day_is_today %}
+{# Ticket ABI-341953339: these panels render on the Day report page as well as
+   the dashboard, so every form says which page posted it. The cash routes send
+   staff back there instead of always to the dashboard. #}
+{% set cash_return = request.full_path if request.query_string else request.path %}
 {% set cash_past_note = 'This business day is in the past, so it is a read-only view. Choose today in the top Business day filter to capture data.' %}
 <section class="metrics dashboard-metrics dashboard-day-metrics">
   <div class="metric-card">
@@ -42,6 +46,7 @@
     <form method="post" action="{{ url_for('cash.save_interactions') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <div class="form-grid compact">
         <label>Calls<input type="number" min="0" step="1" name="interaction_calls" value="" placeholder="0"></label>
         <label>WhatsApp<input type="number" min="0" step="1" name="interaction_whatsapp" value="" placeholder="0"></label>
@@ -77,6 +82,7 @@
     <form method="post" action="{{ url_for('cash.add_trailer_service') }}" class="settings-form trailer-service-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <div class="form-grid compact">
         <label class="span-2">Search and select trailer
           <input list="trailer-service-products" name="product_search" placeholder="Search trailers by name or SKU" autocomplete="off" data-trailer-product-search>
@@ -113,6 +119,7 @@
         {% if not cash_readonly %}<form method="post" action="{{ url_for('cash.delete_used', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
           <button class="btn ghost" type="submit">Delete</button>
         </form>{% endif %}
       </div>
@@ -130,6 +137,7 @@
     <form method="post" action="{{ url_for('cash.add_used') }}" class="payment-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <div class="form-grid compact">
         <label>Amount<input type="number" step="0.01" min="0.01" name="amount" placeholder="0.00" required></label>
         <label>What the cash was used for<input name="description" maxlength="200" placeholder="e.g. diesel, tolls, cleaning" required></label>
@@ -149,6 +157,7 @@
         {% if not cash_readonly %}<form method="post" action="{{ url_for('cash.delete_bank_drop', entry_id=line.id) }}">
           <input type="hidden" name="day" value="{{ cash_day.day }}">
           <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
           <button class="btn ghost" type="submit">Delete</button>
         </form>{% endif %}
       </div>
@@ -166,6 +175,7 @@
     <form method="post" action="{{ url_for('cash.add_bank_drop') }}" class="payment-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <div class="form-grid compact">
         <label>Amount<input type="number" step="0.01" min="0.01" name="amount" placeholder="0.00" required></label>
       </div>
@@ -202,6 +212,7 @@
     <form method="post" action="{{ url_for('cash.save') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <div class="form-grid compact">
         <label>Cash counted (closing)<input type="number" step="0.01" min="0" name="counted_cash" value="{% if cash_day.cashed_up %}{{ '%.2f'|format(cash_day.counted) }}{% endif %}" placeholder="0.00" required></label>
         <label>Expected in the drawer<input value="{{ (cash_day.expected)|currency }}" disabled></label>
@@ -246,6 +257,7 @@
     <form method="post" action="{{ url_for('cash.save_pos') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <div class="form-grid compact">
         <label>POS/card counted<input type="number" step="0.01" min="0" name="counted_card" value="{% if cash_day.pos_cashed_up %}{{ '%.2f'|format(cash_day.counted_card) }}{% endif %}" placeholder="0.00" required></label>
         <label>Expected card total<input value="{{ (cash_day.expected_card)|currency }}" disabled></label>
@@ -275,6 +287,7 @@
     <form method="post" action="{{ url_for('cash.save_notes') }}" class="settings-form">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <label>Notes<textarea name="notes" rows="3">{{ cash_day.notes }}</textarea></label>
       <div class="form-actions"><button class="btn primary" type="submit">Save notes</button></div>
     </form>
@@ -313,6 +326,7 @@
     <form id="submit-day-report-form" method="post" action="{{ url_for('cash.submit_report_telegram') }}">
       <input type="hidden" name="day" value="{{ cash_day.day }}">
       <input type="hidden" name="branch" value="{{ cash_day.branch_id }}">
+      <input type="hidden" name="next" value="{{ cash_return }}">
       <button class="btn warning dashboard-report-action" type="submit">Submit day report</button>
     </form>
     {% else %}
