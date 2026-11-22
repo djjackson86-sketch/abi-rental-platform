@@ -11,7 +11,12 @@ TRAILER_SERVICE_TYPES = [
     "Minor body repairs",
     "Major body repairs",
     "Trailer repaint",
-    "Mechanism repairs",
+    "Brake lining change",
+    "Damper change",
+    "Brake adjustment",
+    "Brake drum change",
+    "Front axle change",
+    "Back axle change",
     "Custom",
 ]
 
