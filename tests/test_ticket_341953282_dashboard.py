@@ -5,9 +5,10 @@ not just the orders raised today or inside the quick-range window. This file
 pins the four things that make the list trustworthy:
 
 * **all dates** - a balance from months ago is still listed;
-* **current orders only** - positive collectable due, drafts/cancelled/archived
-  and Sales/Repairs without an accepted quote are out (the Orders page's own
-  "Payment due" definition, reused rather than re-invented);
+* **returned and unpaid only** - positive collectable due on a ``returned``
+  order (ticket ABI-341953340); drafts/cancelled/archived, Sales/Repairs
+  without an accepted quote, and hires that are still reserved/out are out
+  (the Orders page's own "Payment due" definition, narrowed by status);
 * **branch scope** - the top Branch filter narrows the list and a depot-limited
   sign-in can only see its own depots;
 * **both renders** - the full dashboard and the lazy
@@ -110,15 +111,17 @@ def seed_owing_book(app):
         ids['bob'] = bob
 
         # Three real debts: old, recent, and a deposit/return branch overlap.
-        ids['old'] = add_order(db, 'OWE-OLD', alice, 'started', 450.50, branch_id=1,
+        # ABI-341953340: "outstanding" means back on the yard and still unpaid,
+        # so the owing rows are returned orders.
+        ids['old'] = add_order(db, 'OWE-OLD', alice, 'returned', 450.50, branch_id=1,
                                created_at=OLD_DAY)
-        ids['recent'] = add_order(db, 'OWE-RECENT', bob, 'reserved', 120.00, branch_id=2,
+        ids['recent'] = add_order(db, 'OWE-RECENT', bob, 'returned', 120.00, branch_id=2,
                                   created_at=RECENT_DAY)
         # Collected at depot 1, returning to depot 2: either depot's view may see it.
         ids['shared'] = add_order(db, 'OWE-SHARED', alice, 'returned', 300.00, branch_id=1,
                                   return_branch_id=2, created_at=RECENT_DAY)
         # Partially paid is still an outstanding balance.
-        ids['partial'] = add_order(db, 'OWE-PARTIAL', bob, 'started', 75.00, branch_id=2,
+        ids['partial'] = add_order(db, 'OWE-PARTIAL', bob, 'returned', 75.00, branch_id=2,
                                    payment_status='partially_paid', created_at=RECENT_DAY)
 
         # Rows that look like money but are not current debts.
@@ -127,7 +130,11 @@ def seed_owing_book(app):
                                     created_at=RECENT_DAY)
         ids['canceled'] = add_order(db, 'SKIP-CANCELED', alice, 'canceled', 777.00,
                                     created_at=RECENT_DAY)
-        ids['zero'] = add_order(db, 'SKIP-ZERO', alice, 'started', 0.00, created_at=RECENT_DAY)
+        ids['zero'] = add_order(db, 'SKIP-ZERO', alice, 'returned', 0.00, created_at=RECENT_DAY)
+        # ABI-341953340: a hire that is still out (or only booked) is not an
+        # outstanding return, however much of its balance is owed.
+        ids['out'] = add_order(db, 'SKIP-STARTED', alice, 'started', 610.00, created_at=RECENT_DAY)
+        ids['booked'] = add_order(db, 'SKIP-RESERVED', bob, 'reserved', 620.00, created_at=RECENT_DAY)
         # Sales/Repairs without an accepted quote is still a quote, not a debt.
         ids['sales'] = add_order(db, 'SKIP-SALES', alice, 'sales_repairs', 500.00,
                                  created_at=RECENT_DAY)
@@ -143,7 +150,7 @@ def owing_block(page):
     return page[start:end]
 
 
-def test_every_positive_outstanding_order_is_listed_whatever_its_date(client, app):
+def test_every_returned_unpaid_order_is_listed_whatever_its_date(client, app):
     ids = seed_owing_book(app)
     login(client)
     page = client.get('/dashboard').get_data(as_text=True)
@@ -154,8 +161,9 @@ def test_every_positive_outstanding_order_is_listed_whatever_its_date(client, ap
     # "This month" dashboard.
     for number in ('OWE-OLD', 'OWE-RECENT', 'OWE-SHARED', 'OWE-PARTIAL'):
         assert number in block, number
-    # Current = positive collectible due on a live order.
-    for number in ('SKIP-DRAFT', 'SKIP-ARCHIVED', 'SKIP-CANCELED', 'SKIP-ZERO', 'SKIP-SALES'):
+    # Current = positive collectible due on a returned order.
+    for number in ('SKIP-DRAFT', 'SKIP-ARCHIVED', 'SKIP-CANCELED', 'SKIP-ZERO', 'SKIP-SALES',
+                   'SKIP-STARTED', 'SKIP-RESERVED'):
         assert number not in block, number
 
     # The amount is red, and both the customer and the order are links.
@@ -164,7 +172,8 @@ def test_every_positive_outstanding_order_is_listed_whatever_its_date(client, ap
     assert f'href="/customers/{ids["alice"]}"' in block
     assert f'href="/orders/{ids["recent"]}"' in block
     assert f'href="/customers/{ids["bob"]}"' in block
-    # The running total is red too, and counts every owing order.
+    # The running total is red too, and counts only the returned debts (the
+    # parked started/reserved balances must not inflate it).
     assert '4 orders · <strong class="balance-owing">R945.50</strong>' in block
     assert 'No outstanding orders right now.' not in block
 

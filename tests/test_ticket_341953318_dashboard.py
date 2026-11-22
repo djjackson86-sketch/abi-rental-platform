@@ -21,7 +21,7 @@ def seed(app, count):
         for i in range(count):
             # Increasing dates but decreasing debt: amount must not drive ordering.
             day = f'2026-10-{i + 1:02d}T09:00:00'
-            add_order(db, f'T318-{i:02d}', customer, 'started', 100 - i, created_at=day)
+            add_order(db, f'T318-{i:02d}', customer, 'returned', 100 - i, created_at=day)
             upsert_legacy_balance(customer, 'synthetic', f'LEG318-{i:02d}', 200 - i,
                                   source_started_at=day if i % 2 else '',
                                   source_created_at=day)

@@ -7,18 +7,24 @@
    straight to the client's edit screen, where the approval checklist lives — staff select the
    pending customer directly, with no separate search.
 
+   Ticket ABI-341953340: the queue shows the newest 3 submissions and hides the rest behind a
+   "Show all (N)" button (the same toggle the dashboard's Outstanding orders panel uses). The
+   "N pending" badge still reports the real total, and every row stays in the HTML so staff can
+   open it. The button only exists when there are more than three.
+
    The list is branch-scoped server-side (``portal_registrations.list_pending_registrations``), so
    a depot sees only its own submissions. Nothing here approves anyone: it is a pointer only. #}
 {% if pending_registrations %}
+{% set pending_visible_limit = 3 %}
 <article class="panel movement-card pending-queue-card">
   <div class="movement-head">
     <h2>Awaiting verification</h2>
     <span class="badge status-payment_due">{{ pending_registrations|length }} pending</span>
   </div>
   <div class="movement-body">
-    <div class="schedule-list">
+    <div class="schedule-list" id="pending-registrations-rows">
       {% for pending in pending_registrations %}
-      <a class="schedule-row movement-row pending-queue-row" href="{{ url_for('customers.edit', customer_id=pending.customer_id) }}">
+      <a class="schedule-row movement-row pending-queue-row"{% if loop.index > pending_visible_limit %} hidden data-pending-extra{% endif %} href="{{ url_for('customers.edit', customer_id=pending.customer_id) }}">
         <span>
           <b>{{ pending.name or 'No name recorded' }}</b>
           <small>{{ pending.reference or 'No reference' }}{% if pending.branch_name %} · {{ pending.branch_name }}{% endif %}</small>
@@ -31,8 +37,27 @@
       {% endfor %}
     </div>
   </div>
+  {% if pending_registrations|length > pending_visible_limit %}
+  <div class="owing-controls"><button class="btn ghost" type="button" data-pending-toggle aria-expanded="false" aria-controls="pending-registrations-rows">Show all ({{ pending_registrations|length }})</button></div>
+  {% endif %}
   <div class="movement-foot">
     <span>Self-registered through the customer portal. Review, verify the ID and capture the main vehicle, then approve.</span>
   </div>
 </article>
+<script>
+(function () {
+  // Scoped to this card: the Customers page also carries the dashboard-style
+  // toggles elsewhere, so this listens on its own button only.
+  var button = document.querySelector('[data-pending-toggle]');
+  if (!button) return;
+  var rows = document.getElementById(button.getAttribute('aria-controls'));
+  if (!rows) return;
+  button.addEventListener('click', function () {
+    var expanded = button.getAttribute('aria-expanded') !== 'true';
+    rows.querySelectorAll('[data-pending-extra]').forEach(function (row) { row.hidden = !expanded; });
+    button.setAttribute('aria-expanded', String(expanded));
+    button.textContent = expanded ? 'Show fewer' : 'Show all (' + rows.children.length + ')';
+  });
+}());
+</script>
 {% endif %}

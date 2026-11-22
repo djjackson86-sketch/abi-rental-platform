@@ -61,18 +61,23 @@ def index():
     return redirect(url_for("admin.dashboard"))
 
 def _dashboard_owing_orders(branch_id=None):
-    """Every live order that still carries a positive collectable balance.
+    """Every RETURNED order that still carries a positive collectable balance.
+
+    Ticket ABI-341953340: the client wants the dashboard's "Outstanding orders"
+    panel to hold only orders that have come back and are still unpaid, so
+    reservation/started hires (money not yet due to be settled) no longer pad
+    the list. ``status=["returned"]`` is added on top of
+    ``payment_status="payment_due"`` — the shared Orders-page definition
+    (``orders._truly_due_condition``): positive collectable due with
+    drafts/cancelled/archived excluded — and the Orders page keeps listing the
+    reserved/started debts under its own Payment due filter, so nothing is lost.
 
     Deliberately NOT windowed by the dashboard's business day or quick range:
-    a balance raised three months ago is still owed today, so "Owing Customers"
-    lists all of them. ``payment_status="payment_due"`` is the shared
-    Orders-page definition (``orders._truly_due_condition``): positive
-    collectable due, drafts/cancelled/archived excluded, and Sales/Repairs only
-    once a quote has been accepted. Branch scoping is the shared orders clause,
-    so a depot's sign-in can only ever see its own depots and ``?branch=`` can
-    only narrow that view (ticket ABI-341953282).
+    a balance raised three months ago is still owed today. Branch scoping is
+    the shared orders clause, so a depot's sign-in can only ever see its own
+    depots and ``?branch=`` can only narrow that view (ticket ABI-341953282).
     """
-    rows = list_orders(payment_status="payment_due", branch_id=branch_id)
+    rows = list_orders(payment_status="payment_due", status=["returned"], branch_id=branch_id)
     # Match the displayed Raised date: newest first, undated rows last.
     return sorted(rows, key=lambda row: (row["created_at"] or "", row["id"]), reverse=True)
 

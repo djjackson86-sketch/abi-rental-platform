@@ -21,7 +21,7 @@ def test_debt_panels_browser(app, client, kind, lazy, populated):
         db = get_db()
         if populated:
             for i in range(11):
-                add_order(db, f'LAYOUT-{i}', ids['alice'], 'started', 25)
+                add_order(db, f'LAYOUT-{i}', ids['alice'], 'returned', 25)
                 upsert_legacy_balance(ids['alice'], str(ids['alice']), f'LEG-LAYOUT-{i}', 15)
         else:
             db.execute("UPDATE orders SET due_total=0,total=0,status='cancelled'")
