@@ -507,7 +507,7 @@ input[type="number"],input[type="date"],input[type="datetime-local"],input[type=
 .owing-customers-table th:first-child{width:28%}
 .owing-customers-table th:nth-child(2){width:19%}
 .owing-customers-table .owing-amount{width:20%;white-space:normal}
-.owing-customers-table .owing-status{width:16%}
+.owing-customers-table .owing-status{width:16%}.owing-customers-table .owing-status .badge{white-space:nowrap;overflow-wrap:normal}
 .owing-customers-table .owing-raised{width:17%}
 .owing-customers-table .badge{max-width:100%;white-space:normal;overflow-wrap:anywhere;padding:4px 6px;font-size:11px}
 .owing-customers-table td small{display:block}
