@@ -1211,6 +1211,13 @@ def _restore_custom_line_prices(form, order_id):
     return patched_form
 
 
+# Stable imported catalogue identities, not display names or database-local IDs.
+DAMAGE_WAIVER_PRODUCT_SOURCE_IDS = frozenset({
+    "e94848d5-1278-40cd-8905-af5f50813f05",  # Double Axle Damage Waiver
+    "99a2066b-17fe-43d8-8ce5-d87980ed4539",  # Single Axle Damage Waiver
+})
+
+
 def update_draft_order(order_id, form):
     order = get_order(order_id)
     if not order:
@@ -1237,6 +1244,13 @@ def update_draft_order(order_id, form):
     # still respected, blank included, so the note can be cleared from there.
     if form.get("notes") is None:
         payload["notes"] = order["notes"] or ""
+    # Catalogue waivers carry their normal line charge; do not add another fee.
+    if any(entry["product"] is not None and
+           entry["product"]["source_id"] in DAMAGE_WAIVER_PRODUCT_SOURCE_IDS
+           for entry in payload["lines"]):
+        payload["deposit_option"] = "damage_waiver"
+        payload["deposit_total"] = 0
+        payload["total"] = order_total_from_payload(payload)
     # Data-safety net (update path only): the order form no longer exposes an
     # editable "Damage waiver amount" box, so a re-save of an existing
     # damage-waiver order may submit no amount (or an empty one). Preserve the

@@ -6,7 +6,7 @@ from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
 from app.db import get_db
-from app.services.orders import ReservationConfirmationRequired, SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, active_customer_clause, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
+from app.services.orders import DAMAGE_WAIVER_PRODUCT_SOURCE_IDS, ReservationConfirmationRequired, SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, active_customer_clause, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund, refundable_amount
 from app.services.customer_credits import customer_credit_balance
@@ -300,7 +300,7 @@ def _products():
                      f"OR EXISTS (SELECT 1 FROM product_branch_stock ps WHERE ps.product_id=p.id AND ps.branch_id IN ({marks}) AND COALESCE(ps.quantity,0)>0))")
         params = list(scope_ids) + list(scope_ids)
     return get_db().execute(f"""
-        SELECT p.id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
+        SELECT p.id, p.source_id, p.name, p.sku, p.price_amount, p.price_unit, p.quantity, p.branch_id,
                p.description, p.security_deposit, p.hourly_extra_rate, p.product_type, COALESCE(t.rate, 0) AS tax_rate, b.name AS branch_name
         FROM products p
         LEFT JOIN branches b ON b.id = p.branch_id
@@ -751,6 +751,7 @@ def edit(order_id):
         default_branch_id=_scoped_default_branch_id(form_data.get("collect_branch_id")),
         branch_hours=branch_hours_summaries(),
         form_mode="edit",
+        damage_waiver_source_ids=DAMAGE_WAIVER_PRODUCT_SOURCE_IDS,
         form_action=url_for("orders.edit", order_id=order_id),
         custom_field_label=custom_field_label,
         order_form=form_data,
