@@ -85,10 +85,7 @@
    like the headline cards above, and windowed by the same quick range / custom
    dates and branch filter. Loaded on its own so the headline partial keeps its
    three-card contract. #}
-<style>
-  /* Keep two columns, placing Other Revenue below the rentals/sales row. */
-  @media(min-width:1101px){.dashboard-revenue-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-</style>
+
 <section class="metrics dashboard-metrics dashboard-revenue-metrics" {% if dashboard_lazy %}data-dashboard-section="revenue" data-src="{{ url_for('admin.dashboard_revenue_partial', branch=filters.branch or None, range=filters.range, start_date=filters.start_date or None, end_date=filters.end_date or None) }}"{% endif %}>
   {% if dashboard_lazy %}
   <div class="metric-card"><small>Trailer rentals revenue</small><b>Loading…</b><span>Received · {{ range_label }}</span></div>

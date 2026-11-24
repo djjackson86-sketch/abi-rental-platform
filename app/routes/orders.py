@@ -8,6 +8,7 @@ from app.routes.auth import login_required
 from app.db import get_db
 from app.services.orders import DAMAGE_WAIVER_PRODUCT_SOURCE_IDS, ReservationConfirmationRequired, SALES_REPAIRS_LABEL, SALES_REPAIRS_STATUS, _build_order_payload, active_customer_clause, add_return_charges, apply_order_discount, billed_rental_days, can_process_return_deposit, create_order, delete_deposit_refund, delete_order, deposit_to_process_amount, draft_order_form, get_order, has_finalized_invoice, list_orders, missing_pickup_critical_customer_fields, order_counts, order_filter_counts, order_items, order_has_rental_items, next_time_slot, rental_days, return_charge_defaults, return_damage_total, revise_started_return, settle_return_deposit, status_actions, status_label, transition_order, update_deposit_refund, update_draft_order, update_return_checklist, use_return_deposit
 from app.services.documents import create_document, documents_for_order, document_type_options, label_for
+from app.services.orders import order_trailer_prefixes
 from app.services.payments import display_payment_date, label_for as payment_label_for, payment_summary, payments_for_order, record_payment, record_refund, refundable_amount
 from app.services.customer_credits import customer_credit_balance
 from app.services.credit_limits import debt_sql, facility_summary
@@ -446,6 +447,7 @@ def index():
         "admin/orders/index.html",
         settings=get_company_settings(),
         orders=orders,
+        trailer_prefixes=order_trailer_prefixes(orders),
         counts=counts,
         total_orders=counts["total"],
         display_limit=display_limit,

@@ -119,6 +119,12 @@ strong,b{font-weight:750}.muted,.hint,.empty{color:var(--muted)}
    across on a desktop instead of leaving an empty fourth column. The existing
    .metrics breakpoints still give two columns below 1101px and one on a phone. */
 @media(min-width:1101px){.dashboard-period-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(min-width:1101px){.dashboard-revenue-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* Headline and revenue cards share the same label/comparison space, including
+   wrapped revenue labels and the lazy-loading shell. Other metrics are untouched. */
+:is(.dashboard-period-metrics,.dashboard-revenue-metrics) .metric-card{min-height:210px}
+:is(.dashboard-period-metrics,.dashboard-revenue-metrics) .metric-card small{display:block;min-height:2.6em}
+:is(.dashboard-period-metrics,.dashboard-revenue-metrics) .dashboard-last-month{min-height:58px}
 
 
 /* Orders index page pass */

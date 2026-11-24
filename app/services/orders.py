@@ -271,6 +271,29 @@ def list_orders(query="", status: object = "", payment_status: object = "", retu
     return get_db().execute(sql, params).fetchall()
 
 
+def order_trailer_prefixes(orders):
+    """Display-only SKU digits for the visible orders, fetched in bounded batches."""
+    order_ids = [order["id"] for order in orders]
+    prefixes = {}
+    seen = set()
+    for chunk in _chunked(order_ids, 400):
+        marks = ",".join("?" for _ in chunk)
+        rows = get_db().execute(
+            f"""SELECT oi.order_id, p.id AS product_id, p.sku
+            FROM order_items oi JOIN products p ON p.id = oi.product_id
+            WHERE oi.order_id IN ({marks}) AND p.product_type = 'rental'
+            ORDER BY oi.order_id, oi.id""", chunk,
+        ).fetchall()
+        for row in rows:
+            key = (row["order_id"], row["product_id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            digits = "".join(char for char in (row["sku"] or "") if char in "0123456789")
+            prefixes.setdefault(row["order_id"], []).append(digits[:3] or "—")
+    return {order_id: ", ".join(values) for order_id, values in prefixes.items()}
+
+
 def _order_filter_where(query="", status: object = "", payment_status: object = "", return_status: object = "", start_date="", end_date="", branch_id=None):
     clauses = ["1=1"]
     params = []

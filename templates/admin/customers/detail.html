@@ -26,45 +26,6 @@
    page for a self-registered client who is still awaiting approval (hidden for everyone else). #}
 {% if customer.lifecycle_status == 'active' %}{% include "admin/customers/_pending_registration_panel.html" %}{% endif %}
 
-<section class="panel">
-  <div class="panel-title"><h2>Customer actions</h2></div>
-  {% if customer_is_deleted %}
-    <p>This customer is deleted. Restore returns previously verified/approved customers to Active; others return to Awaiting Verification. Existing rental blocks are preserved.</p>
-    <form method="post" action="{{ url_for('customers.restore', customer_id=customer.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ customer_restore_csrf_token }}">
-      <button class="btn primary" type="submit">Restore customer</button>
-    </form>
-    <form method="post" action="{{ url_for('customers.permanently_delete', customer_id=customer.id) }}" onsubmit="return confirm('Permanently delete this customer and their registration and vehicles? This cannot be undone.');">
-      <input type="hidden" name="csrf_token" value="{{ customer_permanent_delete_csrf_token }}">
-      <p>Permanent deletion cannot be undone and is blocked if business or protected audit history exists.</p>
-      <label>Type DELETE {{ customer.id }} to confirm <input name="confirmation" required autocomplete="off" placeholder="DELETE {{ customer.id }}"></label>
-      <button class="btn danger" type="submit">Permanently delete</button>
-    </form>
-  {% endif %}
-  {% if customer.lifecycle_status != 'active' %}
-    <p><strong>{{ customer.lifecycle_status|title }}</strong> — {{ customer.lifecycle_changed_at or 'Date not recorded' }}</p>
-    <p>{{ customer.lifecycle_reason or 'No reason recorded' }}</p>
-    <a href="{{ url_for('customers.index', folder='retained') }}">Deleted &amp; Archived</a>
-  {% elif customer_is_deleted %}
-    <a href="{{ url_for('customers.index', folder='retained') }}">Deleted &amp; Archived</a>
-  {% elif customer_has_history %}
-    <p class="form-help">This customer has existing orders/history, so deletion is blocked.</p>
-  {% else %}
-    <form method="post" action="{{ url_for('customers.delete', customer_id=customer.id) }}" onsubmit="return confirm('Move this customer to Deleted & Archived? Their record will be retained.');">
-      <button class="btn danger" type="submit">Delete customer</button>
-    </form>
-    <p class="form-help">Only customers with no orders/history can be deleted. Their records are retained.</p>
-  {% endif %}
-  {% if customer.lifecycle_status == 'active' and not archived_registration %}
-    <form method="post" action="{{ url_for('customers.archive', customer_id=customer.id) }}">
-      <input type="hidden" name="csrf_token" value="{{ customer_archive_csrf_token }}">
-      <label>Archive reason <input name="reason" maxlength="2000"></label>
-      <button class="btn ghost" type="submit">Archive customer</button>
-    </form>
-    <p class="form-help">Archiving retains all history and excludes this customer from new bookings.</p>
-  {% endif %}
-</section>
-
 <section class="customer-profile-grid">
   <article class="panel customer-summary-card">
     <div class="profile-card-head">
@@ -234,5 +195,43 @@
       </div>
     {% endif %}
   </article>
+</section>
+<section class="panel">
+  <div class="panel-title"><h2>Customer actions</h2></div>
+  {% if customer_is_deleted %}
+    <p>This customer is deleted. Restore returns previously verified/approved customers to Active; others return to Awaiting Verification. Existing rental blocks are preserved.</p>
+    <form method="post" action="{{ url_for('customers.restore', customer_id=customer.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ customer_restore_csrf_token }}">
+      <button class="btn primary" type="submit">Restore customer</button>
+    </form>
+    <form method="post" action="{{ url_for('customers.permanently_delete', customer_id=customer.id) }}" onsubmit="return confirm('Permanently delete this customer and their registration and vehicles? This cannot be undone.');">
+      <input type="hidden" name="csrf_token" value="{{ customer_permanent_delete_csrf_token }}">
+      <p>Permanent deletion cannot be undone and is blocked if business or protected audit history exists.</p>
+      <label>Type DELETE {{ customer.id }} to confirm <input name="confirmation" required autocomplete="off" placeholder="DELETE {{ customer.id }}"></label>
+      <button class="btn danger" type="submit">Permanently delete</button>
+    </form>
+  {% endif %}
+  {% if customer.lifecycle_status != 'active' %}
+    <p><strong>{{ customer.lifecycle_status|title }}</strong> — {{ customer.lifecycle_changed_at or 'Date not recorded' }}</p>
+    <p>{{ customer.lifecycle_reason or 'No reason recorded' }}</p>
+    <a href="{{ url_for('customers.index', folder='retained') }}">Deleted &amp; Archived</a>
+  {% elif customer_is_deleted %}
+    <a href="{{ url_for('customers.index', folder='retained') }}">Deleted &amp; Archived</a>
+  {% elif customer_has_history %}
+    <p class="form-help">This customer has existing orders/history, so deletion is blocked.</p>
+  {% else %}
+    <form method="post" action="{{ url_for('customers.delete', customer_id=customer.id) }}" onsubmit="return confirm('Move this customer to Deleted & Archived? Their record will be retained.');">
+      <button class="btn danger" type="submit">Delete customer</button>
+    </form>
+    <p class="form-help">Only customers with no orders/history can be deleted. Their records are retained.</p>
+  {% endif %}
+  {% if customer.lifecycle_status == 'active' and not archived_registration %}
+    <form method="post" action="{{ url_for('customers.archive', customer_id=customer.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ customer_archive_csrf_token }}">
+      <label>Archive reason <input name="reason" maxlength="2000"></label>
+      <button class="btn ghost" type="submit">Archive customer</button>
+    </form>
+    <p class="form-help">Archiving retains all history and excludes this customer from new bookings.</p>
+  {% endif %}
 </section>
 {% endblock %}
