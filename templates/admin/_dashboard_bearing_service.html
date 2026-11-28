@@ -1,0 +1,22 @@
+<div class="panel">
+  {% if bearing_service.due %}
+  <div class="cash-used-lines">
+    {% for trailer in bearing_service.due %}
+    <div class="cash-used-line">
+      <span>{% if user_can('inventory') %}<a href="{{ url_for('inventory.edit', product_id=trailer.id, _anchor='bearing-service') }}">{{ trailer.name }}</a>{% else %}{{ trailer.name }}{% endif %}
+        <small>{{ trailer.registration or trailer.sku or ('Inventory #' ~ trailer.id) }}{% if trailer.branch_name %} · {{ trailer.branch_name }}{% endif %}</small></span>
+      <span><strong>Due for service</strong><small>{{ trailer.over_days }} days over · {{ trailer.used_days }} / {{ trailer.interval_days }} rental days</small></span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty-results">No trailers with a configured interval are due for bearing service.</div>{% endif %}
+  {% if bearing_service.unconfigured %}<p class="form-help">{{ bearing_service.unconfigured }} trailer(s) have no interval configured.</p>{% endif %}
+  {% if bearing_service.unverified %}
+  <details>
+    <summary>Rental history needs review ({{ bearing_service.unverified|length }} trailer(s))</summary>
+    <ul>{% for trailer in bearing_service.unverified %}
+      <li>{{ trailer.name }} · {{ trailer.registration or trailer.sku or ('Inventory #' ~ trailer.id) }}: {{ trailer.unverified_hires }} hire(s) excluded</li>
+    {% endfor %}</ul>
+  </details>
+  {% endif %}
+</div>

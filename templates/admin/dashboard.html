@@ -118,6 +118,12 @@
 {# Ticket ABI-341953282: every order still owing money, at any date, on the
    dashboard. The heading sits outside the lazy target (like Cash up), so both
    renders show the section title immediately and only the rows arrive later. #}
+<section class="dashboard-card-section" id="trailers-due-for-service">
+  <div class="section-head"><h2 class="section-heading">Trailers due for service</h2></div>
+  <div {% if dashboard_lazy %}data-dashboard-section="bearing-service" data-src="{{ url_for('admin.dashboard_bearing_partial', branch=filters.branch or None) }}"{% endif %}>
+    {% if dashboard_lazy %}<div class="panel"><div class="empty-results">Loading bearing service status…</div></div>{% else %}{% include "admin/_dashboard_bearing_service.html" %}{% endif %}
+  </div>
+</section>
 <div class="section-head"><h2 class="section-heading">Owing Customers</h2></div>
 {% endif %}
 <div class="dashboard-debt-row{% if user_can('dashboard') %} dashboard-debt-row-paired{% endif %}">

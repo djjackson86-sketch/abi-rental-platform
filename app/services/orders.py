@@ -1742,7 +1742,7 @@ def transition_order(order_id, action, reservation_confirm=""):
     if action == "start":
         # Record the real collection moment: "reservation pick ups for the day"
         # is a day figure, and the scheduled pickup is only a proxy for it.
-        db.execute("UPDATE orders SET status = ?, picked_up_at = ? WHERE id = ?",
+        db.execute("UPDATE orders SET status = ?, picked_up_at = ?, hire_returned_at = '' WHERE id = ?",
                    (target_status, now(), order_id))
     elif action == "archive":
         # Ticket ABI-341953038(1): remember where the order was so the main
@@ -1755,6 +1755,9 @@ def transition_order(order_id, action, reservation_confirm=""):
     elif action == "unarchive":
         db.execute("UPDATE orders SET status = ?, status_before_archive = '' WHERE id = ?",
                    (target_status, order_id))
+    elif action == "return":
+        db.execute("UPDATE orders SET status = ?, hire_returned_at = ? WHERE id = ?",
+                   (target_status, now(), order_id))
     else:
         db.execute("UPDATE orders SET status = ? WHERE id = ?", (target_status, order_id))
     if action == "return" and order["booking_type"] == "oneway" and order["return_branch_id"]:

@@ -443,6 +443,7 @@ CREATE TABLE IF NOT EXISTS orders (
     notes TEXT NOT NULL DEFAULT '',
     created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     picked_up_at TEXT,
+    hire_returned_at TEXT NOT NULL DEFAULT '',
     new_order_notified_at TEXT,
     -- Ticket ABI-341953038(1): the status an archived order held immediately
     -- before it was archived, so the main profile can unarchive it back to where
@@ -723,6 +724,7 @@ CREATE TABLE IF NOT EXISTS login_notification_days (
 -- makes them additive and idempotent, so a fresh install and an existing
 -- database (including the live Turso book) end up identical.
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_product ON order_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_documents_order ON documents(order_id);
 """
@@ -1174,6 +1176,10 @@ def run_migrations(db):
     )""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_trailer_service_history_product ON trailer_service_history(product_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_trailer_service_history_date ON trailer_service_history(service_date)")
+    from app.services.trailer_service import init_bearing_intervals
+    init_bearing_intervals(db)
+    ensure_column(db, "orders", "hire_returned_at", "TEXT NOT NULL DEFAULT ''")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_order_items_product ON order_items(product_id)")
 
     # --- Spare wheel counts (additive, ABI-341953033) -------------------------
     # One count per depot per business day per wheel size, typed in from the

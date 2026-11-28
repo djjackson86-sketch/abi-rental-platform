@@ -27,6 +27,7 @@ from app.services.cash import (
 )
 from app.services.trailer_service import (
     TRAILER_SERVICE_TYPES,
+    bearing_dashboard,
     eligible_trailer_products,
     services_for_day as trailer_service_services_for_day,
 )
@@ -226,6 +227,7 @@ def dashboard():
         trailer_service_products=trailer_products,
         trailer_service_day=trailer_service_day,
         trailer_service_types=TRAILER_SERVICE_TYPES,
+        bearing_service=bearing_dashboard(branch_id) if not dashboard_lazy and user_can_module(session, "dashboard") else None,
         spare_wheel_rows=spare_wheel_rows,
         spare_wheel_day=selected_day,
         spare_wheel_branch_id=spare_wheel_branch_id,
@@ -319,6 +321,15 @@ def dashboard_day_revenue_partial():
         branch_label=branch_label,
         day=selected_day,
     )
+
+
+@bp.get("/dashboard/partials/bearing-service")
+@login_required
+def dashboard_bearing_partial():
+    if not user_can_module(session, "dashboard"):
+        abort(403)
+    _, branch_id, _, _, _ = _branch_filter()
+    return render_template("admin/_dashboard_bearing_service.html", bearing_service=bearing_dashboard(branch_id))
 
 
 @bp.get("/dashboard/partials/owing")

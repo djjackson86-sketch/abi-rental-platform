@@ -1,5 +1,6 @@
 from app.db import get_db, now
 from app.services.access import product_branch_clause
+from app.services.timezone import local_now, parse_iso_datetime
 
 TRAILER_SERVICE_TYPES = [
     "Bearing service",
@@ -21,6 +22,158 @@ TRAILER_SERVICE_TYPES = [
 ]
 
 OTHER_RENTAL_PRODUCTS_GROUP = "other rental products"
+
+# Exact production Inventory group names, not individual product titles. The
+# requested "3m Utility Trailer - 12 ton" has no exact group; do not infer ½ ton.
+BEARING_INTERVAL_DEFAULTS = {
+    "1.5m Luggage Trailer": 50,
+    "1.8m Closed Box Trailer": 50,
+    "1.8m Luggage Trailer": 50,
+    "1.8m Utility Trailer - ½ ton": 40,
+    "2.2m Closed Box Trailer": 40,
+    "2.4m Utility Trailer - ½ ton": 40,
+    "2.4m Utility Trailer - ½ ton (MINI)": 40,
+    "2.5m Livestock Trailer": 40,
+    "2m Luggage Trailer": 50,
+    "2m Utility Trailer - ½ ton": 40,
+    "3.2m Utility Trailer - 1 ton": 40,
+    "3.7m Utility Trailer - 2.5 ton": 30,
+    "3m Flat Bed Trailer - 1ton": 40,
+    "3m Utility Trailer - 1 ton": 40,
+    "3m Utility Trailer - 2.5 ton": 30,
+    "4.5m Car Trailer - 1.3 ton - Electric Winch": 30,
+    "4m Flat Bed Trailer - 2.5ton": 30,
+    "4m Utility Trailer - 2.5 ton": 30,
+    "5m Car/Flatbed Trailer - 2.6 ton - Electric Winch": 30,
+    "Piggyback Trailer": 30,
+    "Quad Bike/Golf Cart Trailer": 40,
+    "2.6m Utility Trailer - ½ ton": 40,
+}
+
+
+def init_bearing_intervals(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS bearing_service_intervals (
+        product_group_id INTEGER PRIMARY KEY REFERENCES product_groups(id) ON DELETE CASCADE,
+        interval_days INTEGER NOT NULL CHECK (typeof(interval_days) = 'integer' AND interval_days > 0)
+    )""")
+    values = ",".join("(?, ?)" for _ in BEARING_INTERVAL_DEFAULTS)
+    db.execute(f"""WITH defaults(name, days) AS (VALUES {values})
+        INSERT OR IGNORE INTO bearing_service_intervals(product_group_id, interval_days)
+        SELECT g.id, d.days FROM defaults d JOIN product_groups g ON g.name = d.name""",
+        [value for pair in BEARING_INTERVAL_DEFAULTS.items() for value in pair])
+
+
+def save_bearing_interval(group_id, value):
+    text = (value or "").strip()
+    if not (text.isascii() and text.isdecimal() and len(text) <= 9 and int(text) > 0):
+        raise ValueError("Enter a positive whole number of days (up to 9 digits).")
+    db = get_db()
+    db.execute("""INSERT INTO bearing_service_intervals (product_group_id, interval_days)
+        VALUES (?, ?) ON CONFLICT(product_group_id) DO UPDATE SET interval_days = excluded.interval_days""",
+        (group_id, int(text)))
+    db.commit()
+
+
+def _hire_window(row, as_of):
+    # Older hires may not store actual handover/return times. Prefer actual
+    # times, then use scheduled times only when the actual value is absent.
+    start = parse_iso_datetime(row["picked_up_at"] or row["start_at"])
+    if row["status"] == "started":
+        end = as_of
+    else:
+        end = parse_iso_datetime(
+            (row["end_at"] if row["return_revised_at"] else None)
+            or row["hire_returned_at"] or row["return_scan_at"] or row["end_at"]
+        )
+    return start, end
+
+
+def bearing_usage(branch_id=None, product_id=None, as_of=None):
+    """Rental-day allowance by physical Inventory ID, across all its depots.
+
+    Include partial days using the regular rental-day rounding, not charges.
+    Only started/returned hires and archived hires contribute. Malformed dates
+    or bulk quantities cannot be attributed and are surfaced for review.
+    """
+    from app.services.orders import rental_days
+
+    as_of = as_of or local_now()
+    # Dashboard scope follows the picker; historical order branches do not
+    # restrict usage because a physical unit can move between depots.
+    clause, params = product_branch_clause("p", branch_id=branch_id)
+    if product_id is not None:
+        clause += " AND p.id = ?"
+        params.append(product_id)
+    else:
+        clause += " AND p.active = 1"
+    # Same-day service uses its capture time. For a backdated service there is
+    # no time of day, so resume from the next midnight rather than guessing.
+    sql = f"""WITH units AS (
+        SELECT p.id, p.name, p.sku, p.registration, b.name AS branch_name, i.interval_days,
+            (SELECT CASE WHEN substr(h.created_at, 1, 10) = h.service_date THEN h.created_at
+                         ELSE date(h.service_date, '+1 day') END
+             FROM trailer_service_history h
+             WHERE h.product_id = p.id AND h.service_type = 'Bearing service'
+               AND h.service_date <= ?
+             ORDER BY h.service_date DESC, h.created_at DESC, h.id DESC LIMIT 1) AS reset_at
+        FROM products p
+        LEFT JOIN branches b ON b.id = p.branch_id
+        LEFT JOIN product_groups g ON g.id = p.product_group_id
+        LEFT JOIN bearing_service_intervals i ON i.product_group_id = g.id
+        WHERE p.product_type = 'rental' AND p.tracking_method = 'individual'
+          AND p.quantity = 1 AND LOWER(COALESCE(g.name, '')) <> ?{clause}
+    ), hires AS (
+        SELECT u.id AS unit_id, o.id, o.status, o.picked_up_at, o.start_at, o.end_at,
+               o.return_revised_at, o.hire_returned_at, o.return_scan_at, MAX(ABS(oi.quantity - 1)) AS invalid_quantity
+        FROM units u
+        JOIN order_items oi ON oi.product_id = u.id
+        JOIN orders o ON o.id = oi.order_id
+        WHERE o.status IN ('started', 'returned')
+           OR (o.status = 'archived' AND o.status_before_archive IN ('', 'returned'))
+        GROUP BY u.id, o.id
+    )
+    SELECT u.*, h.id AS order_id, h.status, h.picked_up_at, h.start_at, h.end_at,
+           h.return_revised_at, h.hire_returned_at, h.return_scan_at, h.invalid_quantity
+    FROM units u LEFT JOIN hires h ON h.unit_id = u.id"""
+    rows = get_db().execute(sql, [as_of.date().isoformat(), OTHER_RENTAL_PRODUCTS_GROUP, *params]).fetchall()
+    units = {}
+    for row in rows:
+        unit = units.setdefault(row["id"], {
+            **{key: row[key] for key in ("id", "name", "sku", "registration", "branch_name", "interval_days")},
+            "used_days": 0, "unverified_hires": 0,
+        })
+        if row["order_id"] is None:
+            continue
+        try:
+            start, end = _hire_window(row, as_of)
+            reset = parse_iso_datetime(row["reset_at"])
+            if not start or not end or end < start or start > as_of or row["invalid_quantity"]:
+                raise ValueError("Unverifiable hire")
+        except (ValueError, OverflowError):
+            unit["unverified_hires"] += 1
+            continue
+        end = min(end, as_of)
+        if reset is not None:
+            if end <= reset:
+                continue
+            start = max(start, reset)
+        unit["used_days"] += rental_days(start, end)
+    for unit in units.values():
+        interval = unit["interval_days"]
+        balance = interval - unit["used_days"] if interval else None
+        unit["due"] = balance is not None and balance <= 0
+        unit["remaining_days"] = None if balance is None else max(0, balance)
+        unit["over_days"] = max(0, -balance) if balance is not None else 0
+    return units
+
+
+def bearing_dashboard(branch_id):
+    units = bearing_usage(branch_id=branch_id).values()
+    return {
+        "due": sorted((u for u in units if u["due"]), key=lambda u: (-u["over_days"], u["name"], u["sku"])),
+        "unverified": [u for u in units if u["unverified_hires"]],
+        "unconfigured": sum(u["interval_days"] is None for u in units),
+    }
 
 
 def eligible_trailer_products(branch_id=None, query=""):

@@ -2,7 +2,7 @@ import csv
 from datetime import date, timedelta
 from io import StringIO
 
-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.datastructures import MultiDict
 
 from app.routes.auth import login_required
@@ -30,11 +30,12 @@ from app.services.products import (
     update_product,
     update_product_group,
 )
-from app.services.trailer_service import list_service_history, service_history_label
+from app.services.csrf import issue_token, validate
+from app.services.trailer_service import bearing_usage, list_service_history, save_bearing_interval, service_history_label
 from app.services.settings import get_company_settings, global_vat_rate, list_tax_profiles
 from app.services.branches import branch_options
 from app.services.reports import product_revenue as _product_revenue
-from app.services.access import main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id
+from app.services.access import is_main_session, main_required, resolve_branch_filter, session_branch_scope_ids, session_primary_branch_id
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -278,6 +279,7 @@ def edit(product_id):
         except ValueError as exc:
             flash(str(exc), "error")
     product = get_product(product_id)
+    bearing = bearing_usage(product_id=product_id).get(product_id)
     return render_template(
         "admin/inventory/form.html",
         settings=get_company_settings(),
@@ -292,7 +294,28 @@ def edit(product_id):
         wheel_sizes=WHEEL_SIZES,
         service_history=list_service_history(product_id),
         service_history_label=service_history_label,
+        bearing=bearing,
+        bearing_csrf=issue_token("bearing_interval") if product and bearing and product["product_group_id"] and is_main_session(session) else None,
     )
+
+
+@bp.post("/<int:product_id>/bearing-interval")
+@login_required
+@main_required
+def update_bearing_interval(product_id):
+    # Intervals are shared across branches, so only the existing main profile
+    # may change them. Branch staff see the countdown for their own trailers.
+    validate("bearing_interval")
+    product = get_product(product_id)
+    if not product or not product["product_group_id"] or product_id not in bearing_usage(product_id=product_id):
+        abort(404)
+    _ensure_product_access(product)
+    try:
+        save_bearing_interval(product["product_group_id"], request.form.get("interval_days"))
+        flash("Bearing service interval saved for this trailer model", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("inventory.edit", product_id=product_id, _anchor="bearing-service"))
 
 
 @bp.route("/<int:product_id>/archive", methods=["POST"])
